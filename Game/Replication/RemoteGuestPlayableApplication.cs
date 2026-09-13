@@ -646,7 +646,7 @@ public sealed class RemoteGuestPlayableApplication :
         _publicWorldTiming.Configure(level);
         _ownerStateTiming.Configure(level);
         _worldDelivery?.ConfigureTelemetry(level);
-        _publicationWork?.ResetTelemetryWindow();
+        _publicationWork?.ConfigureTelemetry(level);
         _publicationDrivePasses = 0;
         _publicationCleanPasses = 0;
         _publicationDeliveryDebtRequeues = 0;
@@ -699,6 +699,55 @@ public sealed class RemoteGuestPlayableApplication :
     }
 
     internal void ResetTelemetryWindow() => ConfigureTelemetry(_telemetryLevel);
+
+    internal bool IsSubscribedTo(SpatialChunkKey key)
+    {
+        if (_recipient is null) return false;
+        OfflineDirectChunkSubscriptionView values = _recipient.Subscriptions;
+        int low = 0;
+        int high = values.Length - 1;
+        while (low <= high)
+        {
+            int middle = low + ((high - low) >> 1);
+            int comparison = values[middle].Interest.Key.CompareTo(key);
+            if (comparison == 0) return true;
+            if (comparison < 0) low = middle + 1;
+            else high = middle - 1;
+        }
+        return false;
+    }
+
+    internal void GetSubscriptionTopology(
+        out int total, out int immediate, out int near, out int far)
+    {
+        total = immediate = near = far = 0;
+        if (_recipient is null) return;
+        OfflineDirectChunkSubscriptionView values = _recipient.Subscriptions;
+        total = values.Length;
+        for (int index = 0; index < values.Length; index++)
+        {
+            switch (values[index].Interest.Tier)
+            {
+                case ChunkInterestTier.Immediate: immediate++; break;
+                case ChunkInterestTier.Near: near++; break;
+                case ChunkInterestTier.Far: far++; break;
+            }
+        }
+    }
+
+    internal void AccumulateSubscriptionCounts(Dictionary<SpatialChunkKey, int> destination)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        if (_recipient is null) return;
+        OfflineDirectChunkSubscriptionView values = _recipient.Subscriptions;
+        for (int index = 0; index < values.Length; index++)
+        {
+            SpatialChunkKey key = values[index].Interest.Key;
+            destination[key] = destination.TryGetValue(key, out int count)
+                ? checked(count + 1)
+                : 1;
+        }
+    }
 
     public void Dispose()
     {
@@ -989,6 +1038,7 @@ public sealed class RemoteGuestPlayableApplication :
             return;
         }
         _guestAdmitted = true;
+        _worldDelivery?.SetControlledPublicEntity(_playerPublicId);
         _guestIdentity = result.GuestIdentity;
         _admissionResult = new RemoteGuestAdmissionResultHeader
         {
@@ -2257,7 +2307,7 @@ public sealed class RemoteGuestPlayableApplication :
         if (!_publicationWork.TryRegister(_recipient!, out _publicationRecipient))
             throw new InvalidOperationException(
                 "The remote publication work recipient could not be registered.");
-        _publicationWork.ResetTelemetryWindow();
+        _publicationWork.ConfigureTelemetry(_telemetryLevel);
         _publicationPendingHighWater = 0;
     }
 

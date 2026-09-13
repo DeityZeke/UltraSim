@@ -292,6 +292,227 @@ internal static class N1OfflineDirectChunkTests
         Equal((ulong)1, observed.DirtyCommitsObserved);
     }
 
+    internal static void DirtyFanoutAndTopologyCensusAreExactAndBounded()
+    {
+        const int recipientCount = 64;
+        using var fixture = new Fixture(historyCapacity: 256);
+        fixture.Store.ConfigureChangeCensus(enabled: true);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        var scheduler = new ChunkPublicationWorkScheduler(
+            fixture.Store,
+            new ChunkPublicationWorkSchedulerLimits(recipientCount, recipientCount * 64));
+        scheduler.ConfigureTelemetry(GameTelemetryLevel.Detailed);
+        var recipients = new OfflineDirectChunkRecipient[recipientCount];
+        var ids = new ChunkReplicationRecipientId[recipientCount];
+        var changes = new OfflineDirectChunkSubscriptionChange[64];
+        WorldPosition anchor = Position(0, 0, 8_000, 8_000);
+        for (int index = 0; index < recipientCount; index++)
+        {
+            recipients[index] = NewScheduledRecipient();
+            True(scheduler.TryRegister(recipients[index], out ids[index]));
+            ApplyScheduledReconcile(
+                scheduler, ids[index], recipients[index], fixture.Store, anchor, changes);
+        }
+        DrainScheduledWorkOnly(scheduler, 0);
+        scheduler.ResetTelemetryWindow();
+
+        fixture.Present(0, Position(0, 0, 2_001, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        Equal(ChunkPublicationCommitObservationStatus.Observed,
+            scheduler.ObserveCommit(fixture.Store, 1));
+        ChunkPublicationWorkSchedulerSnapshot snapshot = scheduler.GetSnapshot();
+        Equal((ulong)recipientCount, snapshot.DirtyRecipientFanout);
+        Equal((ulong)1, snapshot.Fanout.RecipientsPerDirtyChunk.Count);
+        Equal((ulong)recipientCount, snapshot.Fanout.RecipientsPerDirtyChunk.Maximum);
+        Equal((ulong)1, snapshot.Fanout.FanoutThirtyThreeToSixtyFour);
+        Equal(checked((ulong)(recipientCount * recipients[0].Subscriptions.Length)),
+            snapshot.Topology.SubscriptionsPerRecipient.Total);
+        Equal((ulong)recipientCount,
+            snapshot.Topology.RecipientsPerChunk.Maximum);
+
+        ChunkPublicationStoreSnapshot source = fixture.Store.GetSnapshot();
+        Equal((ulong)2, source.PresentChanges);
+        Equal((ulong)1, source.CompleteRecords);
+        Equal((ulong)1, source.PartialRecords);
+        Equal((ulong)2, source.TransformChanges);
+
+        scheduler.ConfigureTelemetry(GameTelemetryLevel.Off);
+        fixture.Present(0, Position(0, 0, 2_002, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        Equal(ChunkPublicationCommitObservationStatus.Observed,
+            scheduler.ObserveCommit(fixture.Store, 2));
+        Equal(0L, GC.GetAllocatedBytesForCurrentThread() - allocatedBefore);
+        Equal(GameTelemetryLevel.Off, scheduler.GetSnapshot().Fanout.Level);
+    }
+
+    internal static void ControlledFanoutSweepVisitsOnlyActualSubscribers()
+    {
+        const int samples = 64;
+        int[] fanouts = [1, 4, 16, 32, 64, 128, 256, 384, 512, 640, 768];
+        foreach (int fanout in fanouts)
+        {
+            using var fixture = new Fixture(historyCapacity: 64);
+            fixture.Present(0, Position(0, 0, 2_000, 2_000),
+                GameWorldPublicPrefabIds.Character);
+            var scheduler = new ChunkPublicationWorkScheduler(
+                fixture.Store,
+                new ChunkPublicationWorkSchedulerLimits(fanout, checked(fanout * 64)));
+            scheduler.ConfigureTelemetry(GameTelemetryLevel.Detailed);
+            var recipients = new OfflineDirectChunkRecipient[fanout];
+            var changes = new OfflineDirectChunkSubscriptionChange[64];
+            WorldPosition anchor = Position(0, 0, 8_000, 8_000);
+            for (int index = 0; index < fanout; index++)
+            {
+                recipients[index] = NewScheduledRecipient();
+                True(scheduler.TryRegister(recipients[index], out var id));
+                ApplyScheduledReconcile(
+                    scheduler, id, recipients[index], fixture.Store, anchor, changes);
+            }
+            DrainScheduledWorkOnly(scheduler, 0);
+            scheduler.ResetTelemetryWindow();
+            var observeTicks = new long[samples];
+            var drainTicks = new long[samples];
+            int due = 0;
+            for (int sample = 0; sample < samples; sample++)
+            {
+                fixture.Present(0, Position(0, 0, 2_001 + sample, 2_000),
+                    GameWorldPublicPrefabIds.Character);
+                long started = System.Diagnostics.Stopwatch.GetTimestamp();
+                Equal(ChunkPublicationCommitObservationStatus.Observed,
+                    scheduler.ObserveCommit(fixture.Store, checked((ulong)sample + 1)));
+                observeTicks[sample] = System.Diagnostics.Stopwatch.GetTimestamp() - started;
+                started = System.Diagnostics.Stopwatch.GetTimestamp();
+                int sampleDue = 0;
+                while (scheduler.TryDequeueDue(checked((ulong)sample + 1), out _)) sampleDue++;
+                drainTicks[sample] = System.Diagnostics.Stopwatch.GetTimestamp() - started;
+                Equal(fanout, sampleDue);
+                due += sampleDue;
+            }
+            ChunkPublicationWorkSchedulerSnapshot snapshot = scheduler.GetSnapshot();
+            Equal(checked(fanout * samples), due);
+            Equal(checked((ulong)fanout * samples), snapshot.DirtyRecipientFanout);
+            Equal((ulong)fanout, snapshot.Fanout.RecipientsPerDirtyChunk.Maximum);
+            Array.Sort(observeTicks);
+            Array.Sort(drainTicks);
+            Console.WriteLine(
+                $"EVIDENCE PF4E fanout={fanout} samples={samples} " +
+                $"observe_ns={TimingEvidence(observeTicks)} " +
+                $"drain_ns={TimingEvidence(drainTicks)} " +
+                $"due={due} memberships={snapshot.MembershipCount} " +
+                $"reserved={snapshot.ReservedBytes}");
+        }
+    }
+
+    internal static void FixedSemanticWorkSeparatesTopologyShape()
+    {
+        const int recipients = 512;
+        const int sourceRecords = 512;
+        foreach (int hotChunks in new[] { 1, 8, 64, 512 })
+        {
+            using var fixture = new Fixture(historyCapacity: 2_048, entityCount: sourceRecords);
+            fixture.Store.ConfigureChangeCensus(enabled: true);
+            fixture.PresentAllAcrossChunks(localX: 2_000, chunkStride: 8);
+            var scheduler = new ChunkPublicationWorkScheduler(
+                fixture.Store,
+                new ChunkPublicationWorkSchedulerLimits(recipients, recipients * 64));
+            scheduler.ConfigureTelemetry(GameTelemetryLevel.Detailed);
+            var subscriptions = new OfflineDirectChunkRecipient[recipients];
+            var changes = new OfflineDirectChunkSubscriptionChange[64];
+            for (int index = 0; index < recipients; index++)
+            {
+                subscriptions[index] = NewScheduledRecipient();
+                True(scheduler.TryRegister(subscriptions[index], out var id));
+                int target = index % hotChunks;
+                ApplyScheduledReconcile(scheduler, id, subscriptions[index], fixture.Store,
+                    Position(target * 8, 0, 8_000, 8_000), changes);
+            }
+            DrainScheduledWorkOnly(scheduler, 0);
+            scheduler.ResetTelemetryWindow();
+
+            fixture.PresentAllAcrossChunks(localX: 2_001, chunkStride: 8);
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
+            Equal(ChunkPublicationCommitObservationStatus.Observed,
+                scheduler.ObserveCommit(fixture.Store, 1));
+            long observe = System.Diagnostics.Stopwatch.GetTimestamp() - started;
+            int due = 0;
+            started = System.Diagnostics.Stopwatch.GetTimestamp();
+            while (scheduler.TryDequeueDue(1, out _)) due++;
+            long drain = System.Diagnostics.Stopwatch.GetTimestamp() - started;
+            ChunkPublicationWorkSchedulerSnapshot result = scheduler.GetSnapshot();
+            ChunkPublicationStoreSnapshot source = fixture.Store.GetSnapshot();
+            Equal(sourceRecords, fixture.Store.LastCommittedDirtyChunks.Length);
+            Equal(recipients, due);
+            Equal((ulong)recipients, result.DirtyRecipientFanout);
+            Equal((ulong)(sourceRecords - hotChunks), result.DirtyChunksWithoutSubscribers);
+            Equal((ulong)(recipients / hotChunks), result.Fanout.RecipientsPerDirtyChunk.Maximum);
+            Equal((ulong)(sourceRecords * 2), source.PresentChanges);
+            Console.WriteLine(
+                $"EVIDENCE PF4E topology_hot_chunks={hotChunks} source_records={sourceRecords} " +
+                $"dirty_chunks={result.DirtyChunksObserved} recipient_scopes={due} " +
+                $"max_fanout={result.Fanout.RecipientsPerDirtyChunk.Maximum} " +
+                $"observe_ns={ToNanoseconds(observe)} drain_ns={ToNanoseconds(drain)}");
+        }
+    }
+
+    internal static void TopologyChurnIsIndependentFromSourceDirtyWork()
+    {
+        const int iterations = 128;
+        using var fixture = new Fixture(historyCapacity: 64);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        (OfflineDirectChunkRecipientSnapshot Snapshot, long Ticks) stable =
+            RunTopologyControl(fixture.Store, iterations, churn: false);
+        (OfflineDirectChunkRecipientSnapshot Snapshot, long Ticks) churn =
+            RunTopologyControl(fixture.Store, iterations, churn: true);
+        Equal((ulong)1, fixture.Store.GetSnapshot().CommitCount);
+        True(stable.Snapshot.StableInterestFastPaths > 0);
+        True(churn.Snapshot.EnteredSubscriptions > stable.Snapshot.EnteredSubscriptions);
+        True(churn.Snapshot.LeftSubscriptions > stable.Snapshot.LeftSubscriptions);
+        True(churn.Snapshot.TierChanges > 0);
+        Equal(churn.Snapshot.TierChanges,
+            churn.Snapshot.ImmediateToNear + churn.Snapshot.NearToFar +
+            churn.Snapshot.FarToNear + churn.Snapshot.NearToImmediate +
+            churn.Snapshot.OtherTierChanges);
+        Console.WriteLine(
+            $"EVIDENCE PF4E topology_stable_ns={ToNanoseconds(stable.Ticks)} " +
+            $"stable_fast={stable.Snapshot.StableInterestFastPaths} " +
+            $"topology_churn_ns={ToNanoseconds(churn.Ticks)} " +
+            $"enters={churn.Snapshot.EnteredSubscriptions} leaves={churn.Snapshot.LeftSubscriptions} " +
+            $"tier_changes={churn.Snapshot.TierChanges} full_queries={churn.Snapshot.FullInterestQueries}");
+    }
+
+    private static (OfflineDirectChunkRecipientSnapshot Snapshot, long Ticks) RunTopologyControl(
+        ChunkPublicationStore store,
+        int iterations,
+        bool churn)
+    {
+        var recipient = NewScheduledRecipient();
+        var scheduler = new ChunkPublicationWorkScheduler(
+            store, new ChunkPublicationWorkSchedulerLimits(1, 64));
+        True(scheduler.TryRegister(recipient, out var id));
+        var changes = new OfflineDirectChunkSubscriptionChange[64];
+        recipient.ResetReconcileAttribution(enabled: true);
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        for (int iteration = 0; iteration < iterations; iteration++)
+        {
+            WorldPosition anchor = churn
+                ? Position((iteration & 1) == 0 ? 0 : 1, 0, 8_000, 8_000)
+                : Position(0, 0, 8_000, 8_000);
+            ApplyScheduledReconcile(scheduler, id, recipient, store, anchor, changes);
+            DrainScheduledWorkOnly(scheduler, checked((ulong)iteration));
+        }
+        return (recipient.GetSnapshot(), System.Diagnostics.Stopwatch.GetTimestamp() - started);
+    }
+
+    private static string TimingEvidence(long[] orderedTicks) =>
+        $"p50={ToNanoseconds(orderedTicks[31])},p95={ToNanoseconds(orderedTicks[60])}," +
+        $"p99={ToNanoseconds(orderedTicks[63])},max={ToNanoseconds(orderedTicks[^1])}";
+
+    private static long ToNanoseconds(long ticks) =>
+        ticks * 1_000_000_000L / System.Diagnostics.Stopwatch.Frequency;
+
     internal static void DirtySchedulerRetryWaitsAndTelemetryResetPreservesDebt()
     {
         using var fixture = new Fixture(historyCapacity: 16);
@@ -2995,6 +3216,19 @@ internal static class N1OfflineDirectChunkTests
             for (int index = 0; index < changes.Length; index++)
                 changes[index] = WorldPublicChange.Present(
                     _entities[index], Position(0, 0, localX + index, 2_000), descriptor);
+            True(Store.TryCommit(changes, out _));
+        }
+
+        internal void PresentAllAcrossChunks(int localX, int chunkStride)
+        {
+            var descriptor = new WorldPublicDescriptor(
+                GameWorldPublicPrefabIds.Character, WorldYaw.Zero,
+                WorldPublicStateFlags.Visible);
+            var changes = new WorldPublicChange[_entities.Length];
+            for (int index = 0; index < changes.Length; index++)
+                changes[index] = WorldPublicChange.Present(
+                    _entities[index], Position(index * chunkStride, 0, localX, 2_000),
+                    descriptor);
             True(Store.TryCommit(changes, out _));
         }
 

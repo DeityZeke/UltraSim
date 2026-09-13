@@ -195,7 +195,12 @@ public readonly record struct OfflineDirectChunkRecipientSnapshot(
     ulong FullInterestQueries,
     ulong StableInterestFastPaths,
     int StableInterestMovementBudgetMillimeters,
-    long ReservedBytes);
+    long ReservedBytes,
+    ulong ImmediateToNear,
+    ulong NearToFar,
+    ulong FarToNear,
+    ulong NearToImmediate,
+    ulong OtherTierChanges);
 
 /// <summary>Cold fixed-capacity payload attribution; excludes CLR object/array headers.</summary>
 public readonly record struct OfflineDirectChunkRecipientStorageSnapshot(
@@ -253,6 +258,11 @@ public sealed class OfflineDirectChunkRecipient
     private ulong _enteredSubscriptions;
     private ulong _leftSubscriptions;
     private ulong _tierChanges;
+    private ulong _immediateToNear;
+    private ulong _nearToFar;
+    private ulong _farToNear;
+    private ulong _nearToImmediate;
+    private ulong _otherTierChanges;
     private ulong _snapshotReads;
     private ulong _chunkAbsentReads;
     private ulong _deltaReads;
@@ -461,6 +471,7 @@ public sealed class OfflineDirectChunkRecipient
                     break;
                 case OfflineDirectChunkSubscriptionChangeKind.TierChanged:
                     _tierChanges++;
+                    CountTierTransition(changes[index].PreviousTier, changes[index].CurrentTier);
                     break;
             }
         }
@@ -721,7 +732,12 @@ public sealed class OfflineDirectChunkRecipient
             _fullInterestQueries,
             _stableInterestFastPaths,
             _stableInterestMovementBudgetMillimeters,
-            CalculateReservedBytes());
+            CalculateReservedBytes(),
+            _immediateToNear,
+            _nearToFar,
+            _farToNear,
+            _nearToImmediate,
+            _otherTierChanges);
     }
 
     public OfflineDirectChunkRecipientStorageSnapshot GetStorageSnapshot()
@@ -769,6 +785,8 @@ public sealed class OfflineDirectChunkRecipient
         _enteredSubscriptions = 0;
         _leftSubscriptions = 0;
         _tierChanges = 0;
+        _immediateToNear = _nearToFar = _farToNear = _nearToImmediate =
+            _otherTierChanges = 0;
         _snapshotReads = 0;
         _chunkAbsentReads = 0;
         _deltaReads = 0;
@@ -782,6 +800,20 @@ public sealed class OfflineDirectChunkRecipient
         _fullInterestQueries = 0;
         _stableInterestFastPaths = 0;
         ResetReconcileAttribution(enabled: false);
+    }
+
+    private void CountTierTransition(ChunkInterestTier previous, ChunkInterestTier current)
+    {
+        ref ulong counter = ref _otherTierChanges;
+        if (previous == ChunkInterestTier.Immediate && current == ChunkInterestTier.Near)
+            counter = ref _immediateToNear;
+        else if (previous == ChunkInterestTier.Near && current == ChunkInterestTier.Far)
+            counter = ref _nearToFar;
+        else if (previous == ChunkInterestTier.Far && current == ChunkInterestTier.Near)
+            counter = ref _farToNear;
+        else if (previous == ChunkInterestTier.Near && current == ChunkInterestTier.Immediate)
+            counter = ref _nearToImmediate;
+        SaturatingIncrement(ref counter);
     }
 
     /// <summary>

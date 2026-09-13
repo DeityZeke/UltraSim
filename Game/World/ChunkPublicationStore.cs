@@ -213,7 +213,15 @@ public readonly record struct ChunkPublicationStoreSnapshot(
     ulong SnapshotReads,
     ulong DeltaReads,
     ulong SnapshotFallbacks,
-    long ReservedBytes);
+    long ReservedBytes,
+    ulong PresentChanges,
+    ulong RemoveChanges,
+    ulong TransformChanges,
+    ulong PrefabChanges,
+    ulong OrientationChanges,
+    ulong StateFlagsChanges,
+    ulong CompleteRecords,
+    ulong PartialRecords);
 
 /// <summary>
 /// Generation-owned packed current public state plus observer-independent bounded dirty history.
@@ -278,6 +286,15 @@ public sealed class ChunkPublicationStore
     private ulong _snapshotReads;
     private ulong _deltaReads;
     private ulong _snapshotFallbacks;
+    private ulong _presentChanges;
+    private ulong _removeChanges;
+    private ulong _transformChanges;
+    private ulong _prefabChanges;
+    private ulong _orientationChanges;
+    private ulong _stateFlagsChanges;
+    private ulong _completeRecords;
+    private ulong _partialRecords;
+    private bool _changeCensusEnabled;
     private int _activeAffectedCount;
 
     public ChunkPublicationStore(PublicationEpoch epoch, ChunkPublicationLimits limits)
@@ -328,6 +345,20 @@ public sealed class ChunkPublicationStore
         _queryStamps = new uint[entities];
         _queryLatest = new HistoryEntry[entities];
         ResetFreeStorage();
+    }
+
+    /// <summary>
+    /// Enables the bounded PF4E source-record census. It is deliberately independent from
+    /// publication behavior so ordinary production commits pay no per-record diagnostic cost.
+    /// </summary>
+    public void ConfigureChangeCensus(bool enabled)
+    {
+        EnsureOwner();
+        _changeCensusEnabled = enabled;
+        _presentChanges = _removeChanges = 0;
+        _transformChanges = _prefabChanges = 0;
+        _orientationChanges = _stateFlagsChanges = 0;
+        _completeRecords = _partialRecords = 0;
     }
 
     public PublicationEpoch Epoch { get; }
@@ -456,6 +487,25 @@ public sealed class ChunkPublicationStore
         }
 
         CommitHistory(pendingCount);
+        if (_changeCensusEnabled)
+        for (int index = 0; index < pendingCount; index++)
+        {
+            ref readonly PendingDirty pending = ref _pendingDirty[index];
+            SaturatingIncrement(ref (pending.Operation == WorldPublicOperation.Present
+                ? ref _presentChanges
+                : ref _removeChanges));
+            if ((pending.Fields & WorldPublicFieldMask.Transform) != 0)
+                SaturatingIncrement(ref _transformChanges);
+            if ((pending.Fields & WorldPublicFieldMask.Prefab) != 0)
+                SaturatingIncrement(ref _prefabChanges);
+            if ((pending.Fields & WorldPublicFieldMask.Orientation) != 0)
+                SaturatingIncrement(ref _orientationChanges);
+            if ((pending.Fields & WorldPublicFieldMask.StateFlags) != 0)
+                SaturatingIncrement(ref _stateFlagsChanges);
+            SaturatingIncrement(ref (pending.Fields == WorldPublicFieldMask.Complete
+                ? ref _completeRecords
+                : ref _partialRecords));
+        }
         _commitSequence = nextCommit;
         error = ChunkPublicationCommitError.None;
         return true;
@@ -628,7 +678,20 @@ public sealed class ChunkPublicationStore
             _snapshotReads,
             _deltaReads,
             _snapshotFallbacks,
-            CalculateReservedBytes());
+            CalculateReservedBytes(),
+            _presentChanges,
+            _removeChanges,
+            _transformChanges,
+            _prefabChanges,
+            _orientationChanges,
+            _stateFlagsChanges,
+            _completeRecords,
+            _partialRecords);
+    }
+
+    private static void SaturatingIncrement(ref ulong value)
+    {
+        if (value != ulong.MaxValue) value++;
     }
 
     private bool TryPlan(

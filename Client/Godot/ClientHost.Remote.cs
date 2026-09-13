@@ -841,9 +841,9 @@ public partial class ClientHost
             throw new InvalidOperationException(
                 "The active remote session omitted its Network protocol snapshot.");
         string checkpoint = ReadArgument("--telemetry-checkpoint=") ?? "PF2.5";
-        if (checkpoint is not ("PF2.5" or "PF3" or "PF4A" or "PF4B" or "PF4C" or "PF4D"))
+        if (checkpoint is not ("PF2.5" or "PF3" or "PF4A" or "PF4B" or "PF4C" or "PF4D" or "PF4E"))
             throw new InvalidOperationException(
-                "--telemetry-checkpoint must be PF2.5, PF3, PF4A, PF4B, PF4C, or PF4D.");
+                "--telemetry-checkpoint must be PF2.5, PF3, PF4A, PF4B, PF4C, PF4D, or PF4E.");
         var summary = new
         {
             SchemaVersion = checkpoint switch
@@ -853,6 +853,7 @@ public partial class ClientHost
                 "PF4B" => 4,
                 "PF4C" => 5,
                 "PF4D" => 6,
+                "PF4E" => 7,
                 _ => 1,
             },
             Checkpoint = checkpoint,

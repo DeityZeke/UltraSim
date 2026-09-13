@@ -119,11 +119,124 @@ public readonly record struct NetworkLogicalTrafficSnapshot(
         ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
 }
 
+/// <summary>
+/// Bounded sent application-payload size distribution for one manifest message.
+/// Bucket counts are exclusive. The derived less-than-or-equal counts are
+/// cumulative and therefore must not be added to one another.
+/// </summary>
+public readonly record struct NetworkMessagePayloadSizeSnapshot(
+    ulong Count,
+    ulong PayloadBytes,
+    ulong Bytes0To128,
+    ulong Bytes129To256,
+    ulong Bytes257To512,
+    ulong Bytes513To1024,
+    ulong BytesOver1024,
+    int MaximumPayloadBytes,
+    bool MaximumIsExact)
+{
+    public ulong CountLessThanOrEqual128 => Bytes0To128;
+    public ulong CountLessThanOrEqual256 => Add(Bytes0To128, Bytes129To256);
+    public ulong CountLessThanOrEqual512 => Add(CountLessThanOrEqual256, Bytes257To512);
+    public ulong CountLessThanOrEqual1024 => Add(CountLessThanOrEqual512, Bytes513To1024);
+    public double AveragePayloadBytes => Count == 0 ? 0d : PayloadBytes / (double)Count;
+    public int P50PayloadBytesUpperBound => PercentileUpperBound(50);
+    public int P95PayloadBytesUpperBound => PercentileUpperBound(95);
+    public int P99PayloadBytesUpperBound => PercentileUpperBound(99);
+
+    internal static NetworkMessagePayloadSizeSnapshot Delta(
+        in NetworkMessagePayloadSizeSnapshot start,
+        in NetworkMessagePayloadSizeSnapshot end)
+    {
+        ulong count = Difference(start.Count, end.Count);
+        ulong zeroTo128 = Difference(start.Bytes0To128, end.Bytes0To128);
+        ulong oneTwentyNineTo256 = Difference(start.Bytes129To256, end.Bytes129To256);
+        ulong twoFiftySevenTo512 = Difference(start.Bytes257To512, end.Bytes257To512);
+        ulong fiveThirteenTo1024 = Difference(start.Bytes513To1024, end.Bytes513To1024);
+        ulong over1024 = Difference(start.BytesOver1024, end.BytesOver1024);
+        if (count != Add(Add(zeroTo128, oneTwentyNineTo256),
+                Add(Add(twoFiftySevenTo512, fiveThirteenTo1024), over1024)))
+            throw new InvalidOperationException("Network message payload-size buckets do not reconcile.");
+
+        int maximum;
+        bool maximumIsExact;
+        if (count == 0)
+        {
+            maximum = 0;
+            maximumIsExact = true;
+        }
+        else if (start.Count == 0 || end.MaximumPayloadBytes > start.MaximumPayloadBytes)
+        {
+            maximum = end.MaximumPayloadBytes;
+            maximumIsExact = end.MaximumIsExact;
+        }
+        else
+        {
+            maximum = HighestNonEmptyBucketUpperBound(
+                zeroTo128, oneTwentyNineTo256, twoFiftySevenTo512,
+                fiveThirteenTo1024, over1024, end.MaximumPayloadBytes);
+            maximumIsExact = false;
+        }
+
+        return new(count,
+            Difference(start.PayloadBytes, end.PayloadBytes),
+            zeroTo128, oneTwentyNineTo256, twoFiftySevenTo512,
+            fiveThirteenTo1024, over1024, maximum, maximumIsExact);
+    }
+
+    public NetworkMessagePayloadSizeSnapshot Add(
+        in NetworkMessagePayloadSizeSnapshot other) => new(
+        Add(Count, other.Count),
+        Add(PayloadBytes, other.PayloadBytes),
+        Add(Bytes0To128, other.Bytes0To128),
+        Add(Bytes129To256, other.Bytes129To256),
+        Add(Bytes257To512, other.Bytes257To512),
+        Add(Bytes513To1024, other.Bytes513To1024),
+        Add(BytesOver1024, other.BytesOver1024),
+        Math.Max(MaximumPayloadBytes, other.MaximumPayloadBytes),
+        MaximumIsExact && other.MaximumIsExact);
+
+    private int PercentileUpperBound(int percentile)
+    {
+        if (Count == 0) return 0;
+        ulong rank = checked((Count * (ulong)percentile + 99UL) / 100UL);
+        ulong cumulative = Bytes0To128;
+        if (rank <= cumulative) return 128;
+        cumulative = Add(cumulative, Bytes129To256);
+        if (rank <= cumulative) return 256;
+        cumulative = Add(cumulative, Bytes257To512);
+        if (rank <= cumulative) return 512;
+        cumulative = Add(cumulative, Bytes513To1024);
+        if (rank <= cumulative) return 1024;
+        return MaximumPayloadBytes;
+    }
+
+    private static int HighestNonEmptyBucketUpperBound(
+        ulong zeroTo128,
+        ulong oneTwentyNineTo256,
+        ulong twoFiftySevenTo512,
+        ulong fiveThirteenTo1024,
+        ulong over1024,
+        int cumulativeMaximum) =>
+        over1024 != 0 ? cumulativeMaximum :
+        fiveThirteenTo1024 != 0 ? 1024 :
+        twoFiftySevenTo512 != 0 ? 512 :
+        oneTwentyNineTo256 != 0 ? 256 :
+        zeroTo128 != 0 ? 128 : 0;
+
+    private static ulong Difference(ulong start, ulong end) => end >= start
+        ? end - start
+        : throw new InvalidOperationException("A cumulative Network payload-size counter moved backwards.");
+    private static ulong Add(ulong left, ulong right) =>
+        ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
+}
+
 /// <summary>One manifest message and its immutable cumulative counters.</summary>
 public readonly record struct NetworkMessageTrafficSnapshot(
     NetworkMessageId MessageId,
     NetworkLane Lane,
-    NetworkLogicalTrafficSnapshot Traffic);
+    NetworkLogicalTrafficSnapshot Traffic,
+    NetworkMessagePayloadSizeSnapshot SentPayloadSizes = default);
 
 /// <summary>
 /// Cold immutable traffic snapshot for one secure peer lifetime. Snapshot creation
@@ -228,6 +341,8 @@ public sealed class NetworkTrafficSnapshot
             messages[index] = after with
             {
                 Traffic = NetworkLogicalTrafficSnapshot.Delta(before.Traffic, after.Traffic),
+                SentPayloadSizes = NetworkMessagePayloadSizeSnapshot.Delta(
+                    before.SentPayloadSizes, after.SentPayloadSizes),
             };
         }
         return new(end.ProtocolVersion, end.ProtocolFingerprint,
@@ -261,7 +376,11 @@ public sealed class NetworkTrafficSnapshot
             NetworkMessageTrafficSnapshot b = right._messages[index];
             if (a.MessageId != b.MessageId || a.Lane != b.Lane)
                 throw new ArgumentException("Traffic snapshots contain different message catalogs.");
-            messages[index] = a with { Traffic = a.Traffic.Add(b.Traffic) };
+            messages[index] = a with
+            {
+                Traffic = a.Traffic.Add(b.Traffic),
+                SentPayloadSizes = a.SentPayloadSizes.Add(b.SentPayloadSizes),
+            };
         }
         return new(left.ProtocolVersion, left.ProtocolFingerprint,
             left.Transport.Add(right.Transport), lanes, messages,
@@ -286,4 +405,38 @@ internal struct NetworkLogicalTrafficCounter
         MessagesSent, ApplicationPayloadBytesSent, DataFrameBytesSent,
         MessagesReceived, ApplicationPayloadBytesReceived, DataFrameBytesReceived,
         RetransmittedDatagrams, RetransmittedUdpPayloadBytes);
+}
+
+internal struct NetworkMessagePayloadSizeCounter
+{
+    internal ulong Count;
+    internal ulong PayloadBytes;
+    internal ulong Bytes0To128;
+    internal ulong Bytes129To256;
+    internal ulong Bytes257To512;
+    internal ulong Bytes513To1024;
+    internal ulong BytesOver1024;
+    internal int MaximumPayloadBytes;
+
+    internal void Record(int payloadBytes)
+    {
+        Count = SaturatingIncrement(Count);
+        PayloadBytes = SaturatingAdd(PayloadBytes, checked((ulong)payloadBytes));
+        if (payloadBytes <= 128) Bytes0To128 = SaturatingIncrement(Bytes0To128);
+        else if (payloadBytes <= 256) Bytes129To256 = SaturatingIncrement(Bytes129To256);
+        else if (payloadBytes <= 512) Bytes257To512 = SaturatingIncrement(Bytes257To512);
+        else if (payloadBytes <= 1024) Bytes513To1024 = SaturatingIncrement(Bytes513To1024);
+        else BytesOver1024 = SaturatingIncrement(BytesOver1024);
+        MaximumPayloadBytes = Math.Max(MaximumPayloadBytes, payloadBytes);
+    }
+
+    internal readonly NetworkMessagePayloadSizeSnapshot Snapshot() => new(
+        Count, PayloadBytes, Bytes0To128, Bytes129To256, Bytes257To512,
+        Bytes513To1024, BytesOver1024, MaximumPayloadBytes,
+        MaximumIsExact: true);
+
+    private static ulong SaturatingIncrement(ulong value) =>
+        value == ulong.MaxValue ? value : value + 1;
+    private static ulong SaturatingAdd(ulong left, ulong right) =>
+        ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
 }

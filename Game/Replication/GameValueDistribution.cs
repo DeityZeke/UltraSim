@@ -20,10 +20,10 @@ public readonly record struct GameValueDistribution(
     ulong WholeWindowP99UpperBound);
 
 /// <summary>Owner-local, fixed-storage value census used only by cold detailed diagnostics.</summary>
-internal sealed class GameValueDistributionWindow
+public sealed class GameValueDistributionWindow
 {
     private const int MaximumSamples = 256;
-    internal const int ReservedPayloadBytes = (MaximumSamples + 65) * sizeof(ulong);
+    public const int ReservedPayloadBytes = (MaximumSamples + 65) * sizeof(ulong);
     private readonly ulong[] _samples = new ulong[MaximumSamples];
     private readonly ulong[] _wholeBuckets = new ulong[65];
     private int _next;
@@ -32,7 +32,7 @@ internal sealed class GameValueDistributionWindow
     private ulong _total;
     private ulong _maximum;
 
-    internal void Record(ulong value)
+    public void Record(ulong value)
     {
         _samples[_next] = value;
         _next = (_next + 1) % _samples.Length;
@@ -44,7 +44,7 @@ internal sealed class GameValueDistributionWindow
         if (_wholeBuckets[bucket] != ulong.MaxValue) _wholeBuckets[bucket]++;
     }
 
-    internal GameValueDistribution Capture()
+    public GameValueDistribution Capture()
     {
         if (_count == 0) return default;
         Span<ulong> ordered = stackalloc ulong[MaximumSamples];
@@ -58,7 +58,7 @@ internal sealed class GameValueDistributionWindow
             WholePercentile(50), WholePercentile(95), WholePercentile(99));
     }
 
-    internal void Clear()
+    public void Clear()
     {
         Array.Clear(_samples);
         Array.Clear(_wholeBuckets);

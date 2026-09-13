@@ -96,6 +96,7 @@ internal static class N03ProtocolTests
             MinimumRetransmissionSteps = 2,
         };
         using RawPeerPair pair = new(s_manifest, limits, s_datagrams);
+        pair.Sender.ConfigureTelemetry(NetworkTelemetryLevel.Detailed);
         NetworkTrafficSnapshot start = pair.Sender.GetTrafficSnapshot();
         byte[] payload = [1, 2, 3, 4, 5];
         Equal(NetworkQueueStatus.Accepted,
@@ -118,6 +119,13 @@ internal static class N03ProtocolTests
             delta.Transport.KeepAliveUdpPayloadBytesSent);
         True(delta.TryGetMessage(Id(NetworkLane.Control), out NetworkMessageTrafficSnapshot message));
         Equal(1UL, message.Traffic.MessagesSent);
+        Equal(1UL, message.SentPayloadSizes.Count);
+        Equal(5UL, message.SentPayloadSizes.PayloadBytes);
+        Equal(1UL, message.SentPayloadSizes.CountLessThanOrEqual128);
+        Equal(1UL, message.SentPayloadSizes.CountLessThanOrEqual256);
+        Equal(128, message.SentPayloadSizes.P50PayloadBytesUpperBound);
+        Equal(5, message.SentPayloadSizes.MaximumPayloadBytes);
+        True(message.SentPayloadSizes.MaximumIsExact);
         Equal(delta.SumMessages(), delta.GetLane(NetworkLane.Control));
     }
 

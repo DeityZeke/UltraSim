@@ -29,6 +29,7 @@ var tests = new (string Name, Action Body)[]
     ("PF4BCheckpointAndHotChunkScenariosAreExplicit", PF4BCheckpointAndHotChunkScenariosAreExplicit),
     ("PF4CCheckpointRetainsMeasurementScenarios", PF4CCheckpointRetainsMeasurementScenarios),
     ("PF4DCheckpointSelectsExplicitAggregationPolicy", PF4DCheckpointSelectsExplicitAggregationPolicy),
+    ("PF4ECheckpointRetainsSelectedProductionPolicy", PF4ECheckpointRetainsSelectedProductionPolicy),
 };
 
 foreach ((string name, Action body) in tests)
@@ -265,6 +266,27 @@ static void PF4DCheckpointSelectsExplicitAggregationPolicy()
         "--cache=/tmp/ultrasim-bot-pf4d-options",
         "--unreliable-frame-cap=3",
     ]));
+}
+
+static void PF4ECheckpointRetainsSelectedProductionPolicy()
+{
+    BotOptions options = BotOptions.Parse(
+    [
+        "--endpoint=127.0.0.1:7777",
+        $"--fingerprint={new string('1', 64)}",
+        "--bots=50",
+        "--seed=400513",
+        "--duration=600s",
+        "--scenario=moving",
+        "--cache=/tmp/ultrasim-bot-pf4e-options",
+        "--checkpoint=PF4E",
+        "--unreliable-frame-cap=2",
+        "--unreliable-aggregation-scope=cross-lane",
+    ]);
+    Equal("PF4E", options.Checkpoint);
+    Equal(2, options.UnreliableFrameCap);
+    Equal(NetworkUnreliableAggregationScope.CrossLane,
+        options.UnreliableAggregationScope);
 }
 
 static void FinalRetirementCoversEveryLifecycleState()

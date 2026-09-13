@@ -389,7 +389,7 @@ internal sealed class BotHarness : IDisposable
         if (_wireSummary is null || !_wireSummary.PhysicalTransportReconciled ||
             !_wireSummary.LogicalMessageReconciled)
             return "PF2 physical/logical traffic accounting did not reconcile.";
-        if (_options.Checkpoint is "PF4A" or "PF4B" or "PF4C" or "PF4D")
+        if (_options.Checkpoint is "PF4A" or "PF4B" or "PF4C" or "PF4D" or "PF4E")
         {
             BotActionOutcomeReport[] outcomes =
                 BotRunSummary.CreateActionOutcomes(_bots, _clientTelemetry);
@@ -2611,7 +2611,8 @@ internal sealed record BotRunSummary
             "PF4A" => 6,
             "PF4B" => 7,
             "PF4C" => 8,
-            _ => 9,
+            "PF4D" => 9,
+            _ => 10,
         },
         Checkpoint = options.Checkpoint,
         Passed = passed,
@@ -3105,7 +3106,7 @@ internal readonly record struct BotOptions(
                         "--unreliable-aggregation-scope must be same-lane or cross-lane."),
                 };
             else if (TryValue(argument, "--checkpoint=", out value) &&
-                value is "PF2" or "PF2.5" or "PF3" or "PF4A" or "PF4B" or "PF4C" or "PF4D")
+                value is "PF2" or "PF2.5" or "PF3" or "PF4A" or "PF4B" or "PF4C" or "PF4D" or "PF4E")
                 checkpointOverride = value;
             else throw new ArgumentException($"Unknown or malformed option '{argument}'.");
         }

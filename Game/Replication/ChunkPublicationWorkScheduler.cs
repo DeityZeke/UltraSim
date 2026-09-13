@@ -61,7 +61,31 @@ public readonly record struct ChunkPublicationWorkSchedulerSnapshot(
     ulong DueWorkDequeued,
     ulong CadenceDeferrals,
     ulong SourceRefreshes,
-    long ReservedBytes);
+    long ReservedBytes,
+    ChunkPublicationFanoutCensusSnapshot Fanout,
+    ChunkPublicationTopologyCensusSnapshot Topology);
+
+/// <summary>Detailed-only bounded distribution of actual subscribers reached per dirty key.</summary>
+public readonly record struct ChunkPublicationFanoutCensusSnapshot(
+    GameTelemetryLevel Level,
+    GameValueDistribution RecipientsPerDirtyChunk,
+    ulong FanoutZero,
+    ulong FanoutOne,
+    ulong FanoutTwoToFour,
+    ulong FanoutFiveToEight,
+    ulong FanoutNineToSixteen,
+    ulong FanoutSeventeenToThirtyTwo,
+    ulong FanoutThirtyThreeToSixtyFour,
+    ulong FanoutSixtyFiveOrMore);
+
+/// <summary>Cold current-topology census; it retains no per-recipient or per-chunk history.</summary>
+public readonly record struct ChunkPublicationTopologyCensusSnapshot(
+    GameTelemetryLevel Level,
+    GameValueDistribution SubscriptionsPerRecipient,
+    GameValueDistribution ImmediateSubscriptionsPerRecipient,
+    GameValueDistribution NearSubscriptionsPerRecipient,
+    GameValueDistribution FarSubscriptionsPerRecipient,
+    GameValueDistribution RecipientsPerChunk);
 
 /// <summary>Cold fixed-capacity payload attribution; excludes CLR object/array headers.</summary>
 public readonly record struct ChunkPublicationWorkSchedulerStorageSnapshot(
@@ -136,6 +160,9 @@ public sealed class ChunkPublicationWorkScheduler
     private ulong _dueWorkDequeued;
     private ulong _cadenceDeferrals;
     private ulong _sourceRefreshes;
+    private GameTelemetryLevel _telemetryLevel;
+    private GameValueDistributionWindow? _fanoutDistribution;
+    private readonly ulong[] _fanoutBuckets = new ulong[8];
 
     public ChunkPublicationWorkScheduler(
         ChunkPublicationStore source,
@@ -464,6 +491,19 @@ public sealed class ChunkPublicationWorkScheduler
         _dueWorkDequeued = 0;
         _cadenceDeferrals = 0;
         _sourceRefreshes = 0;
+        _fanoutDistribution?.Clear();
+        Array.Clear(_fanoutBuckets);
+    }
+
+    /// <summary>Selects cold attribution only; this never changes publication eligibility.</summary>
+    public void ConfigureTelemetry(GameTelemetryLevel level)
+    {
+        EnsureOwner();
+        if (!Enum.IsDefined(level)) throw new ArgumentOutOfRangeException(nameof(level));
+        _telemetryLevel = level;
+        if (level == GameTelemetryLevel.Detailed)
+            _fanoutDistribution ??= new GameValueDistributionWindow();
+        ResetTelemetryWindow();
     }
 
     public ChunkPublicationWorkSchedulerSnapshot GetSnapshot()
@@ -489,7 +529,9 @@ public sealed class ChunkPublicationWorkScheduler
             _dueWorkDequeued,
             _cadenceDeferrals,
             _sourceRefreshes,
-            CalculateReservedBytes());
+            CalculateReservedBytes(),
+            CaptureFanout(),
+            CaptureTopology());
     }
 
     public ChunkPublicationWorkSchedulerStorageSnapshot GetStorageSnapshot()
@@ -537,16 +579,80 @@ public sealed class ChunkPublicationWorkScheduler
         if (!TryFindChunk(key, out int chunkIndex))
         {
             SaturatingIncrement(ref _dirtyChunksWithoutSubscribers);
+            RecordFanout(0);
             return;
         }
+        int fanout = 0;
         int membership = _chunks[chunkIndex].MembershipHead;
         while (membership >= 0)
         {
             int next = _memberships[membership].ChunkNext;
             SaturatingIncrement(ref _dirtyRecipientFanout);
+            fanout++;
             Queue(membership, ChunkPublicationWorkKind.Dirty, sourceStep);
             membership = next;
         }
+        RecordFanout(fanout);
+    }
+
+    private void RecordFanout(int fanout)
+    {
+        if (_telemetryLevel != GameTelemetryLevel.Detailed) return;
+        _fanoutDistribution!.Record(checked((ulong)fanout));
+        int bucket = fanout switch
+        {
+            0 => 0,
+            1 => 1,
+            <= 4 => 2,
+            <= 8 => 3,
+            <= 16 => 4,
+            <= 32 => 5,
+            <= 64 => 6,
+            _ => 7,
+        };
+        SaturatingIncrement(ref _fanoutBuckets[bucket]);
+    }
+
+    private ChunkPublicationFanoutCensusSnapshot CaptureFanout() => new(
+        _telemetryLevel,
+        _fanoutDistribution?.Capture() ?? default,
+        _fanoutBuckets[0], _fanoutBuckets[1], _fanoutBuckets[2], _fanoutBuckets[3],
+        _fanoutBuckets[4], _fanoutBuckets[5], _fanoutBuckets[6], _fanoutBuckets[7]);
+
+    private ChunkPublicationTopologyCensusSnapshot CaptureTopology()
+    {
+        if (_telemetryLevel != GameTelemetryLevel.Detailed) return default;
+        var subscriptions = new GameValueDistributionWindow();
+        var immediate = new GameValueDistributionWindow();
+        var near = new GameValueDistributionWindow();
+        var far = new GameValueDistributionWindow();
+        var recipientsPerChunk = new GameValueDistributionWindow();
+        for (int recipient = 0; recipient < _recipients.Length; recipient++)
+        {
+            if (_recipients[recipient].Recipient is null) continue;
+            int total = 0, immediateCount = 0, nearCount = 0, farCount = 0;
+            for (int membership = _recipients[recipient].MembershipHead;
+                 membership >= 0; membership = _memberships[membership].RecipientNext)
+            {
+                total++;
+                switch (_memberships[membership].Tier)
+                {
+                    case ChunkInterestTier.Immediate: immediateCount++; break;
+                    case ChunkInterestTier.Near: nearCount++; break;
+                    case ChunkInterestTier.Far: farCount++; break;
+                }
+            }
+            subscriptions.Record(checked((ulong)total));
+            immediate.Record(checked((ulong)immediateCount));
+            near.Record(checked((ulong)nearCount));
+            far.Record(checked((ulong)farCount));
+        }
+        for (int chunk = 0; chunk < _chunks.Length; chunk++)
+            if (_chunks[chunk].MembershipHead >= 0)
+                recipientsPerChunk.Record(checked((ulong)_chunks[chunk].MembershipCount));
+        return new ChunkPublicationTopologyCensusSnapshot(
+            _telemetryLevel, subscriptions.Capture(), immediate.Capture(), near.Capture(),
+            far.Capture(), recipientsPerChunk.Capture());
     }
 
     private void AddMembership(

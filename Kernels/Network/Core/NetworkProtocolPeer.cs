@@ -78,6 +78,7 @@ public sealed class NetworkProtocolPeer : IDisposable
     private readonly int[] _receivedQueue;
     private readonly NetworkLogicalTrafficCounter[] _trafficByLane;
     private readonly NetworkLogicalTrafficCounter[] _trafficByMessage;
+    private NetworkMessagePayloadSizeCounter[]? _sentPayloadSizesByMessage;
     private int _reliableFreeCount;
     private int _reliableCount;
     private int _reliableQueuedHighWater;
@@ -733,6 +734,16 @@ public sealed class NetworkProtocolPeer : IDisposable
         _independentQueuedHighWater = _independentCount;
         _receivedQueuedHighWater = _receivedCount;
         _inFlightHighWater = _inFlight;
+        if (level == NetworkTelemetryLevel.Detailed)
+        {
+            _sentPayloadSizesByMessage ??=
+                new NetworkMessagePayloadSizeCounter[_trafficByMessage.Length];
+            Array.Clear(_sentPayloadSizesByMessage);
+        }
+        else
+        {
+            _sentPayloadSizesByMessage = null;
+        }
         _telemetryLevel = level;
         _stageTimingEnabled = level == NetworkTelemetryLevel.Detailed;
     }
@@ -1034,7 +1045,8 @@ public sealed class NetworkProtocolPeer : IDisposable
         ReadOnlySpan<NetworkMessageDescriptor> descriptors = _manifest.Messages;
         for (int index = 0; index < messages.Length; index++)
             messages[index] = new(descriptors[index].Id, descriptors[index].Lane,
-                _trafficByMessage[index].Snapshot());
+                _trafficByMessage[index].Snapshot(),
+                _sentPayloadSizesByMessage?[index].Snapshot() ?? default);
         return new NetworkTrafficSnapshot(
             _manifest.Version,
             _manifest.Fingerprint,
@@ -2108,6 +2120,8 @@ public sealed class NetworkProtocolPeer : IDisposable
             lane.ApplicationPayloadBytesSent, checked((ulong)message.Length));
         item.ApplicationPayloadBytesSent = SaturatingAdd(
             item.ApplicationPayloadBytesSent, checked((ulong)message.Length));
+        if (_sentPayloadSizesByMessage is not null)
+            _sentPayloadSizesByMessage[message.MessageSlot].Record(message.Length);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -2523,6 +2537,8 @@ public sealed class NetworkProtocolPeer : IDisposable
         _unreliablePayloads.Length +
         (long)(_trafficByLane.Length + _trafficByMessage.Length) *
             Unsafe.SizeOf<NetworkLogicalTrafficCounter>() +
+        (long)(_sentPayloadSizesByMessage?.Length ?? 0) *
+            Unsafe.SizeOf<NetworkMessagePayloadSizeCounter>() +
         (long)_nextReliableSendSequences.Length * sizeof(ulong) +
         (long)_nextReliableReceiveSequences.Length * sizeof(ulong) +
         (long)_reassembly.Length * Unsafe.SizeOf<ReassemblyState>() +

@@ -232,11 +232,28 @@ public sealed class SharedUdpProtocolHost : IDisposable
     }
 
     /// <summary>Runs one bounded receive, protocol, emit, and lifetime pass.</summary>
-    public void Pump()
+    public void Pump() => PumpCore(measureRoles: false, out _, out _);
+
+    /// <summary>
+    /// Runs the identical controlled loopback pump while attributing disjoint server-side and
+    /// client-side wall-time regions. This is benchmark instrumentation, not production traffic
+    /// accounting; Stopwatch overhead remains in the measured role which requested each sample.
+    /// </summary>
+    public void PumpMeasured(out long serverStopwatchTicks, out long clientStopwatchTicks) =>
+        PumpCore(measureRoles: true, out serverStopwatchTicks, out clientStopwatchTicks);
+
+    private void PumpCore(
+        bool measureRoles,
+        out long serverStopwatchTicks,
+        out long clientStopwatchTicks)
     {
         EnsureOperational();
+        serverStopwatchTicks = 0;
+        clientStopwatchTicks = 0;
         ulong now = ElapsedMilliseconds;
+        long started = measureRoles ? Stopwatch.GetTimestamp() : 0;
         _listener.PumpInbound();
+        if (measureRoles) serverStopwatchTicks += Stopwatch.GetTimestamp() - started;
 
         for (int index = 0; index < _sessions.Length; index++)
         {
@@ -244,8 +261,12 @@ public sealed class SharedUdpProtocolHost : IDisposable
             if (current.RawState == UdpProtocolSessionState.Closed) continue;
             ulong clientReceived = current.Client.ReceivedPacketCount;
             ulong serverReceived = current.Server.ReceivedPacketCount;
+            started = measureRoles ? Stopwatch.GetTimestamp() : 0;
             _ = current.Client.ProcessInbound(now);
+            if (measureRoles) clientStopwatchTicks += Stopwatch.GetTimestamp() - started;
+            started = measureRoles ? Stopwatch.GetTimestamp() : 0;
             _ = current.Server.ProcessInbound(now);
+            if (measureRoles) serverStopwatchTicks += Stopwatch.GetTimestamp() - started;
             if (current.Client.ReceivedPacketCount != clientReceived ||
                 current.Server.ReceivedPacketCount != serverReceived)
                 current.LastActivityMilliseconds = now;
@@ -259,17 +280,33 @@ public sealed class SharedUdpProtocolHost : IDisposable
                 now - current.LastKeepAliveMilliseconds >=
                     (ulong)_udpLimits.KeepAliveIntervalMilliseconds)
             {
-                if (current.Client.TryEmitKeepAlive() || current.Server.TryEmitKeepAlive())
+                started = measureRoles ? Stopwatch.GetTimestamp() : 0;
+                bool emitted = current.Client.TryEmitKeepAlive();
+                if (measureRoles) clientStopwatchTicks += Stopwatch.GetTimestamp() - started;
+                if (!emitted)
+                {
+                    started = measureRoles ? Stopwatch.GetTimestamp() : 0;
+                    emitted = current.Server.TryEmitKeepAlive();
+                    if (measureRoles) serverStopwatchTicks += Stopwatch.GetTimestamp() - started;
+                }
+                if (emitted)
                     current.LastKeepAliveMilliseconds = now;
             }
+            started = measureRoles ? Stopwatch.GetTimestamp() : 0;
             current.Client.Emit(now);
+            if (measureRoles) clientStopwatchTicks += Stopwatch.GetTimestamp() - started;
+            started = measureRoles ? Stopwatch.GetTimestamp() : 0;
             current.Server.Emit(now);
+            if (measureRoles) serverStopwatchTicks += Stopwatch.GetTimestamp() - started;
         }
 
         // Submit only datagrams already admitted during this pump. The listener
         // never waits for more work merely to form a larger native batch.
+        started = measureRoles ? Stopwatch.GetTimestamp() : 0;
         _listener.PumpOutbound();
+        if (measureRoles) serverStopwatchTicks += Stopwatch.GetTimestamp() - started;
 
+        started = measureRoles ? Stopwatch.GetTimestamp() : 0;
         for (int index = 0; index < _sessions.Length; index++)
         {
             if (_sessions[index] is not SharedUdpProtocolSession current) continue;
@@ -282,6 +319,7 @@ public sealed class SharedUdpProtocolHost : IDisposable
                  now >= current.DrainDeadlineMilliseconds))
                 CloseTransport(current);
         }
+        if (measureRoles) serverStopwatchTicks += Stopwatch.GetTimestamp() - started;
     }
 
     public SharedUdpProtocolHostSnapshot GetSnapshot()

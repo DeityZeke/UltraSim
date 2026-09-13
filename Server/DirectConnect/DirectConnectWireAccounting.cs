@@ -39,7 +39,8 @@ internal sealed record DirectConnectMessageTrafficReport(
     string Lane,
     string Delivery,
     string Retention,
-    NetworkLogicalTrafficSnapshot Traffic);
+    NetworkLogicalTrafficSnapshot Traffic,
+    NetworkMessagePayloadSizeSnapshot SentPayloadSizes);
 
 internal sealed record DirectConnectHttpBodyTrafficReport(
     ulong Requests,
@@ -53,7 +54,15 @@ internal sealed record DirectConnectPublicationTrafficReport(
     ulong HistoryInvalidations,
     ulong SnapshotReads,
     ulong DeltaReads,
-    ulong SnapshotFallbacks);
+    ulong SnapshotFallbacks,
+    ulong PresentChanges,
+    ulong RemoveChanges,
+    ulong TransformChanges,
+    ulong PrefabChanges,
+    ulong OrientationChanges,
+    ulong StateFlagsChanges,
+    ulong CompleteRecords,
+    ulong PartialRecords);
 
 internal sealed record DirectConnectWireAccountingSummary(
     string PhysicalMetric,
@@ -80,6 +89,7 @@ internal sealed record DirectConnectWireAccountingSummary(
     DirectConnectHttpBodyTrafficReport HttpBody,
     HostedUdpHostTelemetrySnapshot NetworkTiming,
     GameTickTimingSnapshot AuthorityTiming,
+    SharedRemoteReplicationCensusSnapshot RemoteReplication,
     DirectConnectPublicationTrafficReport AuthoritativePublications,
     RemoteGuestPlayableServerSnapshot[] RemoteApplications,
     double ProcessCpuMilliseconds,
@@ -268,6 +278,8 @@ internal sealed class DirectConnectWireAccounting
         {
             NetworkMessageDescriptor descriptor = descriptors[index];
             NetworkLaneContract lane = NetworkLaneContracts.Get(descriptor.Lane);
+            NetworkMessageTrafficSnapshot message =
+                secureAggregate?.GetMessage(index) ?? default;
             messages[index] = new DirectConnectMessageTrafficReport(
                 descriptor.Id.Value,
                 descriptor.CanonicalKey,
@@ -275,7 +287,8 @@ internal sealed class DirectConnectWireAccounting
                 descriptor.Lane.ToString(),
                 lane.Delivery.ToString(),
                 lane.Retention.ToString(),
-                secureAggregate?.GetMessage(index).Traffic ?? default);
+                message.Traffic,
+                message.SentPayloadSizes);
         }
 
         StaticContentHttpHostSnapshot httpEnd = content.GetHttpSnapshot();
@@ -318,6 +331,7 @@ internal sealed class DirectConnectWireAccounting
                 Difference(_httpStart.BytesServed, httpEnd.BytesServed)),
             host.GetTelemetrySnapshot(),
             authorityEnd.Timing,
+            authorityEnd.RemoteReplication,
             new DirectConnectPublicationTrafficReport(
                 Difference(_publicationStart.CommitCount, publicationEnd.CommitCount),
                 Difference(_publicationStart.PublishedChunkRevisions,
@@ -327,7 +341,17 @@ internal sealed class DirectConnectWireAccounting
                 Difference(_publicationStart.SnapshotReads, publicationEnd.SnapshotReads),
                 Difference(_publicationStart.DeltaReads, publicationEnd.DeltaReads),
                 Difference(_publicationStart.SnapshotFallbacks,
-                    publicationEnd.SnapshotFallbacks)),
+                    publicationEnd.SnapshotFallbacks),
+                Difference(_publicationStart.PresentChanges, publicationEnd.PresentChanges),
+                Difference(_publicationStart.RemoveChanges, publicationEnd.RemoveChanges),
+                Difference(_publicationStart.TransformChanges, publicationEnd.TransformChanges),
+                Difference(_publicationStart.PrefabChanges, publicationEnd.PrefabChanges),
+                Difference(_publicationStart.OrientationChanges,
+                    publicationEnd.OrientationChanges),
+                Difference(_publicationStart.StateFlagsChanges,
+                    publicationEnd.StateFlagsChanges),
+                Difference(_publicationStart.CompleteRecords, publicationEnd.CompleteRecords),
+                Difference(_publicationStart.PartialRecords, publicationEnd.PartialRecords)),
             applicationSnapshots,
             cpuMilliseconds,
             cpuMilliseconds / durationMilliseconds,

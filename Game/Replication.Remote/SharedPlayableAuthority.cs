@@ -109,7 +109,36 @@ public readonly record struct SharedPlayableAuthoritySnapshot(
     ulong Leaves,
     ulong Ticks,
     bool OwnsRuntime,
-    GameTickTimingSnapshot Timing);
+    GameTickTimingSnapshot Timing,
+    SharedRemoteReplicationCensusSnapshot RemoteReplication);
+
+public readonly record struct SharedDirtyFanoutBuckets(
+    ulong Zero,
+    ulong One,
+    ulong TwoToFour,
+    ulong FiveToEight,
+    ulong NineToSixteen,
+    ulong SeventeenToThirtyTwo,
+    ulong ThirtyThreeToSixtyFour,
+    ulong SixtyFiveOrMore);
+
+/// <summary>Detailed-only authority-wide attribution; it never participates in disclosure.</summary>
+public readonly record struct SharedRemoteReplicationCensusSnapshot(
+    GameTelemetryLevel Level,
+    ulong SourceCommitsObserved,
+    ulong SourceCommitGaps,
+    ulong DirtyChunksObserved,
+    ulong DirtyRecipientFanout,
+    GameValueDistribution RecipientsPerDirtyChunk,
+    SharedDirtyFanoutBuckets FanoutBuckets,
+    int CurrentRemoteRecipients,
+    int CurrentUniqueSharedChunks,
+    int CurrentMemberships,
+    GameValueDistribution SubscriptionsPerRecipient,
+    GameValueDistribution ImmediateSubscriptionsPerRecipient,
+    GameValueDistribution NearSubscriptionsPerRecipient,
+    GameValueDistribution FarSubscriptionsPerRecipient,
+    GameValueDistribution RecipientsPerChunk);
 
 public enum GameTestMarkerPhase : byte
 {
@@ -140,6 +169,7 @@ public sealed class SharedPlayableAuthority : IDisposable
     private readonly GamePublicActorPresentation[] _actorPresentations;
     private readonly bool _ownsRuntime;
     private readonly GameTickTimingWindow _tickTimings;
+    private readonly ChunkPublicationStore _publicationSource;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private readonly long _generationStartedTimestamp;
     private readonly long _tickInterval;
@@ -152,6 +182,13 @@ public sealed class SharedPlayableAuthority : IDisposable
     private ulong _testMarkerSequence;
     private string? _activeTestMarker;
     private string? _lastTestMarker;
+    private GameValueDistributionWindow? _remoteDirtyFanout;
+    private readonly ulong[] _remoteDirtyFanoutBuckets = new ulong[8];
+    private ulong _remoteObservedCommit;
+    private ulong _remoteSourceCommitsObserved;
+    private ulong _remoteSourceCommitGaps;
+    private ulong _remoteDirtyChunksObserved;
+    private ulong _remoteDirtyRecipientFanout;
     private bool _disposed;
 
     private SharedPlayableAuthority(
@@ -187,8 +224,15 @@ public sealed class SharedPlayableAuthority : IDisposable
         _desiredPresentationActions = new GamePublicActorActionKind[limits.MaximumParticipants];
         _desiredPresentationActionSequences = new ulong[limits.MaximumParticipants];
         _actorPresentations = new GamePublicActorPresentation[limits.MaximumParticipants];
+        if (!runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider,
+                ChunkPublicationStore>(
+                static (world, _, game) => game.WorldState.Publications,
+                out _publicationSource))
+            throw new InvalidOperationException(
+                "The shared authority requires an active public-state source.");
         _tickInterval = Math.Max(1, Stopwatch.Frequency / runtime.SimulationFrequencyHz);
         _nextTickTimestamp = checked(Stopwatch.GetTimestamp() + _tickInterval);
+        _remoteObservedCommit = _publicationSource.CommitSequence;
     }
 
     /// <summary>Creates and owns a fresh shared Concept Demo server on the calling thread.</summary>
@@ -338,6 +382,10 @@ public sealed class SharedPlayableAuthority : IDisposable
             throw new InvalidOperationException(
                 "Authority telemetry must be selected before remote applications exist.");
         _tickTimings.Configure(level);
+        _publicationSource.ConfigureChangeCensus(level == GameTelemetryLevel.Detailed);
+        if (level == GameTelemetryLevel.Detailed)
+            _remoteDirtyFanout ??= new GameValueDistributionWindow();
+        ResetRemoteReplicationTelemetry();
     }
 
     /// <summary>Resets only bounded diagnostics at an explicit measurement barrier.</summary>
@@ -345,6 +393,7 @@ public sealed class SharedPlayableAuthority : IDisposable
     {
         EnsureOperational();
         _tickTimings.Configure(_tickTimings.Level);
+        ResetRemoteReplicationTelemetry();
         for (int index = 0; index < _remoteApplications.Length; index++)
             _remoteApplications[index]?.ResetTelemetryWindow();
     }
@@ -478,6 +527,7 @@ public sealed class SharedPlayableAuthority : IDisposable
             _tickTimings.RecordScheduledStart(
                 _nextTickTimestamp, actual, _tickInterval, catchUp: steps != 0);
             Runtime.Tick();
+            ObserveRemotePublicationFanout();
             _tickTimings.RecordElapsed(started);
             _ticks++;
             _nextTickTimestamp = checked(_nextTickTimestamp + _tickInterval);
@@ -535,6 +585,7 @@ public sealed class SharedPlayableAuthority : IDisposable
                 throw new InvalidOperationException("The shared participant had no active generation.");
             long started = Stopwatch.GetTimestamp();
             Runtime.Tick();
+            ObserveRemotePublicationFanout();
             _tickTimings.RecordElapsed(started);
             _ticks++;
             if (!capture.PublicEntity.IsValid)
@@ -608,6 +659,7 @@ public sealed class SharedPlayableAuthority : IDisposable
         _leaves++;
         long started = Stopwatch.GetTimestamp();
         Runtime.Tick();
+        ObserveRemotePublicationFanout();
         _tickTimings.RecordElapsed(started);
         _ticks++;
         if (!Chat.RefreshEnteredParticipants())
@@ -757,8 +809,108 @@ public sealed class SharedPlayableAuthority : IDisposable
             _leaves,
             _ticks,
             _ownsRuntime,
-            _tickTimings.Capture());
+            _tickTimings.Capture(),
+            CaptureRemoteReplicationCensus());
     }
+
+    private void ResetRemoteReplicationTelemetry()
+    {
+        _remoteDirtyFanout?.Clear();
+        _publicationSource.ConfigureChangeCensus(
+            _tickTimings.Level == GameTelemetryLevel.Detailed);
+        Array.Clear(_remoteDirtyFanoutBuckets);
+        _remoteSourceCommitsObserved = _remoteSourceCommitGaps = 0;
+        _remoteDirtyChunksObserved = _remoteDirtyRecipientFanout = 0;
+        _remoteObservedCommit = _publicationSource.CommitSequence;
+    }
+
+    private void ObserveRemotePublicationFanout()
+    {
+        if (_tickTimings.Level != GameTelemetryLevel.Detailed) return;
+        ChunkPublicationStore source = _publicationSource;
+        ulong commit = source.CommitSequence;
+        if (commit == _remoteObservedCommit) return;
+        if (_remoteObservedCommit == ulong.MaxValue || commit != _remoteObservedCommit + 1)
+        {
+            SaturatingIncrement(ref _remoteSourceCommitGaps);
+            _remoteObservedCommit = commit;
+            return;
+        }
+        SaturatingIncrement(ref _remoteSourceCommitsObserved);
+        ReadOnlySpan<SpatialChunkKey> dirty = source.LastCommittedDirtyChunks;
+        for (int dirtyIndex = 0; dirtyIndex < dirty.Length; dirtyIndex++)
+        {
+            int fanout = 0;
+            for (int applicationIndex = 0;
+                 applicationIndex < _remoteApplications.Length; applicationIndex++)
+                if (_remoteApplications[applicationIndex]?.IsSubscribedTo(dirty[dirtyIndex]) == true)
+                    fanout++;
+            SaturatingIncrement(ref _remoteDirtyChunksObserved);
+            SaturatingAdd(ref _remoteDirtyRecipientFanout, checked((ulong)fanout));
+            _remoteDirtyFanout!.Record(checked((ulong)fanout));
+            int bucket = fanout switch
+            {
+                0 => 0, 1 => 1, <= 4 => 2, <= 8 => 3, <= 16 => 4,
+                <= 32 => 5, <= 64 => 6, _ => 7,
+            };
+            SaturatingIncrement(ref _remoteDirtyFanoutBuckets[bucket]);
+        }
+        _remoteObservedCommit = commit;
+    }
+
+    private SharedRemoteReplicationCensusSnapshot CaptureRemoteReplicationCensus()
+    {
+        if (_tickTimings.Level != GameTelemetryLevel.Detailed) return default;
+        var subscriptions = new GameValueDistributionWindow();
+        var immediate = new GameValueDistributionWindow();
+        var near = new GameValueDistributionWindow();
+        var far = new GameValueDistributionWindow();
+        var perChunk = new Dictionary<SpatialChunkKey, int>();
+        int recipients = 0;
+        int memberships = 0;
+        for (int index = 0; index < _remoteApplications.Length; index++)
+        {
+            RemoteGuestPlayableApplication? application = _remoteApplications[index];
+            if (application is null) continue;
+            application.GetSubscriptionTopology(
+                out int total, out int immediateCount, out int nearCount, out int farCount);
+            recipients++;
+            memberships = checked(memberships + total);
+            subscriptions.Record(checked((ulong)total));
+            immediate.Record(checked((ulong)immediateCount));
+            near.Record(checked((ulong)nearCount));
+            far.Record(checked((ulong)farCount));
+            application.AccumulateSubscriptionCounts(perChunk);
+        }
+        var recipientsPerChunk = new GameValueDistributionWindow();
+        foreach (int count in perChunk.Values)
+            recipientsPerChunk.Record(checked((ulong)count));
+        return new SharedRemoteReplicationCensusSnapshot(
+            _tickTimings.Level,
+            _remoteSourceCommitsObserved,
+            _remoteSourceCommitGaps,
+            _remoteDirtyChunksObserved,
+            _remoteDirtyRecipientFanout,
+            _remoteDirtyFanout?.Capture() ?? default,
+            new SharedDirtyFanoutBuckets(
+                _remoteDirtyFanoutBuckets[0], _remoteDirtyFanoutBuckets[1],
+                _remoteDirtyFanoutBuckets[2], _remoteDirtyFanoutBuckets[3],
+                _remoteDirtyFanoutBuckets[4], _remoteDirtyFanoutBuckets[5],
+                _remoteDirtyFanoutBuckets[6], _remoteDirtyFanoutBuckets[7]),
+            recipients,
+            perChunk.Count,
+            memberships,
+            subscriptions.Capture(), immediate.Capture(), near.Capture(), far.Capture(),
+            recipientsPerChunk.Capture());
+    }
+
+    private static void SaturatingIncrement(ref ulong value)
+    {
+        if (value != ulong.MaxValue) value++;
+    }
+
+    private static void SaturatingAdd(ref ulong value, ulong amount) =>
+        value = ulong.MaxValue - value < amount ? ulong.MaxValue : value + amount;
 
     /// <summary>Captures the one authoritative public-chunk source for cold diagnostics.</summary>
     public ChunkPublicationStoreSnapshot GetPublicationSnapshot()

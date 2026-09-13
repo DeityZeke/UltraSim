@@ -149,11 +149,19 @@ internal static class P03WholeFlowNetworkSuite
         P03AoICadencePolicy? aoiCadence = ParseAoICadence(ReadText(args, "--aoi-cadence"));
         double stopMilliseconds = ReadDouble(args, "--server-role-stop-p95", 4d);
         string stopMetric = ReadText(args, "--stop-metric") ?? "server-role";
+        P03NetworkProfile ratedProfile = Enum.Parse<P03NetworkProfile>(
+            ReadText(args, "--rated-profile") ?? nameof(P03NetworkProfile.DirtyEntitySpatialFanout),
+            ignoreCase: true);
         int maximumPopulation = ReadInt(args, "--maximum-population", 4_096);
         int denseStart = ReadInt(args, "--dense-start", 256);
         int denseStep = ReadInt(args, "--dense-step", 64);
         int sparseStart = ReadInt(args, "--sparse-start", 256);
         int sparseStep = ReadInt(args, "--sparse-step", 128);
+        int[]? densePopulations = ParseOptionalPositiveIntegers(
+            ReadText(args, "--dense-populations"));
+        int[]? sparsePopulations = ParseOptionalPositiveIntegers(
+            ReadText(args, "--sparse-populations"));
+        int ratedFrameCap = ReadInt(args, "--rated-frame-cap", 1);
         bool stageTimingEnabled = !args.Contains("--probes-off", StringComparer.Ordinal);
         string output = ReadText(args, "--output") ??
             "_Benchmarks/Baselines/network-p0.3h-rated-server-role-sweep.json";
@@ -161,24 +169,30 @@ internal static class P03WholeFlowNetworkSuite
             stopMilliseconds <= 0 || denseStart <= 0 ||
             sparseStart <= 0 || denseStep <= 0 || sparseStep <= 0 ||
             maximumPopulation < Math.Max(denseStart, sparseStart) ||
-            stopMetric is not ("server-role" or "tick"))
+            ratedFrameCap is not (1 or 2 or 4 or 8) ||
+            stopMetric is not ("server-role" or "network-replication" or "tick"))
             throw new ArgumentOutOfRangeException(nameof(args));
 
         var rows = new List<P03WholeFlowRow>();
         int executionOrder = 0;
         RunSeries(
-            Enumerable.Range(0, checked((maximumPopulation - denseStart) / denseStep + 1))
-                .Select(index => denseStart + index * denseStep),
+            densePopulations ??
+                Enumerable.Range(0, checked((maximumPopulation - denseStart) / denseStep + 1))
+                    .Select(index => denseStart + index * denseStep).ToArray(),
             population => Configure(P03NetworkWorkload.Dense(population, 1_000)),
-            P03NetworkProfile.DirtyEntitySpatialFanout);
+            ratedProfile);
         RunSeries(
-            Enumerable.Range(0, checked((maximumPopulation - sparseStart) / sparseStep + 1))
-                .Select(index => sparseStart + index * sparseStep),
+            sparsePopulations ??
+                Enumerable.Range(0, checked((maximumPopulation - sparseStart) / sparseStep + 1))
+                    .Select(index => sparseStart + index * sparseStep).ToArray(),
             population => Configure(P03NetworkWorkload.Sparse(population)),
-            P03NetworkProfile.MaintainedEntityRelation);
+            ratedProfile);
 
         var report = new P03WholeFlowReport(
-            "ultrasim-network-p03h-rated-server-role-sweep-v4",
+            ratedProfile == P03NetworkProfile.ChunkPublication && ratedFrameCap == 2 &&
+                stopMetric == "network-replication"
+                ? "ultrasim-network-pf4e-selected-profile-rated-recipient-sweep-v1"
+                : "ultrasim-network-p03h-rated-server-role-sweep-v4",
             DateTimeOffset.UtcNow,
             ReadGitSha(),
             Environment.Version.ToString(),
@@ -186,19 +200,21 @@ internal static class P03WholeFlowNetworkSuite
             Environment.ProcessorCount,
             Stopwatch.Frequency,
             new P03WholeFlowScope(
-                "Production-shaped cap-one whole flow. Dense uses DirtyEntitySpatialFanout with " +
-                "1,000 public entities and two-percent spatial dirt; sparse uses " +
-                "MaintainedEntityRelation with one moving public entity per recipient and " +
-                "thirty-five-percent spatial dirt.",
-                "Each series stops after retaining its first completed population with server-role " +
+                $"Comparison whole flow using {ratedProfile} and unreliable frame cap " +
+                $"{ratedFrameCap}. Dense has 1,000 public entities and two-percent spatial " +
+                "dirt; sparse has one moving public entity per recipient and thirty-five-percent " +
+                "spatial dirt. The two shapes therefore expose normalized quantities and are not " +
+                "an equal-semantic-work causal pair.",
+                "Each series stops after retaining its first completed population with " +
                 $"{stopMetric} p95 greater than {stopMilliseconds:F3} ms. " +
                 "Cold construction/bootstrap and " +
                 "semantic verification remain outside timed ticks.",
                 "This is a localhost server-role rating observation, not a public-WAN CCU or " +
                 "latency SLA. p99/max are retained as tail context; p95 is the stop criterion. " +
                 $"Protocol/listener stage probes were {(stageTimingEnabled ? "enabled" : "disabled")}. " +
-                $"Dense starts at {denseStart} by {denseStep}; sparse starts at {sparseStart} by " +
-                $"{sparseStep}. The server semantic tick duration was {tickMilliseconds} ms. " +
+                $"Dense populations: {DescribePopulations(densePopulations, denseStart, denseStep)}; " +
+                $"sparse populations: {DescribePopulations(sparsePopulations, sparseStart, sparseStep)}. " +
+                $"The server semantic tick duration was {tickMilliseconds} ms. " +
                 $"AOI cadence was {(aoiCadence?.ToString() ?? "the workload default")}."),
             ExecutionSeed, warmup, ticks, rows.ToArray());
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
@@ -222,12 +238,12 @@ internal static class P03WholeFlowNetworkSuite
             {
                 if (population > maximumPopulation) break;
                 P03NetworkWorkload workload = createWorkload(population);
-                Console.WriteLine($"RATED {workload.Id} {profile} frames=1: constructing...");
+                Console.WriteLine($"RATED {workload.Id} {profile} frames={ratedFrameCap}: constructing...");
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
                 GC.Collect();
                 using var harness = new P03WholeFlowHarness(
-                    workload, profile, 1, stageTimingEnabled);
+                    workload, profile, ratedFrameCap, stageTimingEnabled);
                 P03WholeFlowRow row = harness.Run(warmup, ticks) with
                 {
                     ExecutionOrder = executionOrder++,
@@ -237,10 +253,14 @@ internal static class P03WholeFlowNetworkSuite
                     $"{row.Timing.Tick.P95:F3} ms, server p95 " +
                     $"{row.Timing.ServerRole.P95:F3} ms, p99 " +
                     $"{row.Timing.ServerRole.P99:F3} ms, max " +
-                    $"{row.Timing.ServerRole.Maximum:F3} ms");
-                double observed = stopMetric == "tick"
-                    ? row.Timing.Tick.P95
-                    : row.Timing.ServerRole.P95;
+                    $"{row.Timing.ServerRole.Maximum:F3} ms, Network+replication p95 " +
+                    $"{row.Timing.NetworkAndRemoteReplication.P95:F3} ms");
+                double observed = stopMetric switch
+                {
+                    "tick" => row.Timing.Tick.P95,
+                    "network-replication" => row.Timing.NetworkAndRemoteReplication.P95,
+                    _ => row.Timing.ServerRole.P95,
+                };
                 if (observed > stopMilliseconds) break;
             }
         }
@@ -252,6 +272,7 @@ internal static class P03WholeFlowNetworkSuite
             null or "" => null,
             "0/1/2" or "012" or "default" => P03AoICadencePolicy.Default012,
             "1/1/2" or "112" or "slower" => P03AoICadencePolicy.Slower112,
+            "1/2/4" or "124" or "selected" => P03AoICadencePolicy.Selected124,
             _ => throw new ArgumentException($"Unknown AOI cadence '{text}'."),
         };
 
@@ -267,6 +288,23 @@ internal static class P03WholeFlowNetworkSuite
         ? [1, 2, 4, 8]
         : text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(value => int.Parse(value, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+
+    private static int[]? ParseOptionalPositiveIntegers(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        int[] values = text.Split(',',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(value => int.Parse(value,
+                System.Globalization.CultureInfo.InvariantCulture))
+            .ToArray();
+        if (values.Length == 0 || values.Any(value => value <= 0) ||
+            values.Zip(values.Skip(1), (left, right) => right <= left).Any(invalid => invalid))
+            throw new ArgumentOutOfRangeException(nameof(text));
+        return values;
+    }
+
+    private static string DescribePopulations(int[]? values, int start, int step) =>
+        values is null ? $"start {start} by {step}" : string.Join(',', values);
 
     private static int ReadInt(string[] args, string name, int fallback)
     {
@@ -324,6 +362,7 @@ internal enum P03AoICadencePolicy : byte
 {
     Default012 = 1,
     Slower112 = 2,
+    Selected124 = 3,
 }
 
 internal readonly record struct P03NetworkWorkload(
@@ -370,7 +409,12 @@ internal readonly record struct P03NetworkWorkload(
         if (tickMilliseconds <= 0) throw new ArgumentOutOfRangeException(nameof(tickMilliseconds));
         long immediateInterval = cadence == P03AoICadencePolicy.Slower112
             ? checked(2L * tickMilliseconds)
-            : 0;
+            : cadence == P03AoICadencePolicy.Selected124
+                ? tickMilliseconds
+                : 0;
+        long farInterval = cadence == P03AoICadencePolicy.Selected124
+            ? checked(4L * tickMilliseconds)
+            : checked(3L * tickMilliseconds);
         return this with
         {
             TickDurationMilliseconds = tickMilliseconds,
@@ -378,12 +422,12 @@ internal readonly record struct P03NetworkWorkload(
             {
                 ImmediateIntervalMilliseconds = immediateInterval,
                 NearIntervalMilliseconds = checked(2L * tickMilliseconds),
-                FarIntervalMilliseconds = checked(3L * tickMilliseconds),
+                FarIntervalMilliseconds = farInterval,
             },
             ChunkCadence = new OfflineDirectChunkCadence(
                 cadence == P03AoICadencePolicy.Slower112 ? 2u : 1u,
                 2,
-                3),
+                cadence == P03AoICadencePolicy.Selected124 ? 4u : 3u),
         };
     }
 
@@ -416,11 +460,13 @@ internal sealed class P03WholeFlowHarness : IDisposable
     private readonly List<double> _pump = new();
     private readonly List<double> _serverApplication = new();
     private readonly List<double> _clientApplication = new();
+    private readonly List<double> _networkAndRemoteReplication = new();
     private readonly List<double> _serverRole = new();
     private readonly List<double> _clientRole = new();
     private bool _disposed;
     private long _tickServerApplication;
     private long _tickClientApplication;
+    private long _tickClientNetwork;
 
     internal P03WholeFlowHarness(
         P03NetworkWorkload workload,
@@ -522,7 +568,8 @@ internal sealed class P03WholeFlowHarness : IDisposable
             new P03WholeFlowTiming(
                 P03Metric.From(_tick), P03Metric.From(_authority), P03Metric.From(_schedule),
                 P03Metric.From(_pump), P03Metric.From(_serverApplication),
-                P03Metric.From(_clientApplication), P03Metric.From(_serverRole),
+                P03Metric.From(_clientApplication),
+                P03Metric.From(_networkAndRemoteReplication), P03Metric.From(_serverRole),
                 P03Metric.From(_clientRole), protocol),
             transport, profile, _adapter.SemanticDigest(), allocated,
             checked(profileServerReserved + profileClientReserved),
@@ -543,14 +590,16 @@ internal sealed class P03WholeFlowHarness : IDisposable
 
         started = measure ? Stopwatch.GetTimestamp() : 0;
         _adapter.Schedule(checked((ulong)tick));
+        long networkReplicationTicks = measure ? Stopwatch.GetTimestamp() - started : 0;
         double schedule = measure ? Elapsed(started) : 0;
         _tickServerApplication = 0;
         _tickClientApplication = 0;
+        _tickClientNetwork = 0;
         long pumpTicks = 0;
         for (int pass = 0; pass < 4; pass++)
         {
             long pumpStarted = measure ? Stopwatch.GetTimestamp() : 0;
-            PumpAndDispatch();
+            networkReplicationTicks += PumpAndDispatch(measure);
             if (measure) pumpTicks += Stopwatch.GetTimestamp() - pumpStarted;
         }
         if (!measure) return;
@@ -563,10 +612,11 @@ internal sealed class P03WholeFlowHarness : IDisposable
         _pump.Add(pump);
         _serverApplication.Add(serverApp);
         _clientApplication.Add(clientApp);
+        _networkAndRemoteReplication.Add(ToMilliseconds(networkReplicationTicks));
         P03ProtocolTiming current = CaptureProtocolTiming();
         _serverRole.Add(authority + schedule + serverApp +
             Math.Max(0, current.ServerMilliseconds - protocolBefore.ServerMilliseconds));
-        _clientRole.Add(clientApp +
+        _clientRole.Add(clientApp + ToMilliseconds(_tickClientNetwork) +
             Math.Max(0, current.ClientMilliseconds - protocolBefore.ClientMilliseconds));
     }
 
@@ -588,10 +638,21 @@ internal sealed class P03WholeFlowHarness : IDisposable
         }
     }
 
-    private void PumpAndDispatch()
+    private long PumpAndDispatch(bool measure = false)
     {
+        long serverStarted = measure ? Stopwatch.GetTimestamp() : 0;
         _adapter.ProgressServers();
-        _host.Pump();
+        long serverTicks = measure ? Stopwatch.GetTimestamp() - serverStarted : 0;
+        if (measure)
+        {
+            _host.PumpMeasured(out long hostServerTicks, out long hostClientTicks);
+            serverTicks += hostServerTicks;
+            _tickClientNetwork += hostClientTicks;
+        }
+        else
+        {
+            _host.Pump();
+        }
         for (int index = 0; index < _sessions.Length; index++)
         {
             long started = Stopwatch.GetTimestamp();
@@ -603,7 +664,9 @@ internal sealed class P03WholeFlowHarness : IDisposable
                         $"Server adapter rejected message {message.MessageId.Value}.");
                 Require(_sessions[index].Server.TryConsumeReceived(), "Server receive consume failed.");
             }
-            _tickServerApplication += Stopwatch.GetTimestamp() - started;
+            long serverApplicationTicks = Stopwatch.GetTimestamp() - started;
+            _tickServerApplication += serverApplicationTicks;
+            if (measure) serverTicks += serverApplicationTicks;
             started = Stopwatch.GetTimestamp();
             while (_sessions[index].Client.TryPeekReceived(
                        out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
@@ -616,6 +679,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
             _adapter.ProgressClient(index);
             _tickClientApplication += Stopwatch.GetTimestamp() - started;
         }
+        return serverTicks;
     }
 
     private void DrainToConvergence(ulong step, int guard)
@@ -623,7 +687,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
         for (int round = 0; round < guard; round++)
         {
             _adapter.Schedule(step + checked((ulong)round));
-            for (int pass = 0; pass < 4; pass++) PumpAndDispatch();
+            for (int pass = 0; pass < 4; pass++) _ = PumpAndDispatch();
             if (_adapter.IsConverged) return;
             if ((round & 31) == 31) Thread.Yield();
         }
@@ -635,10 +699,11 @@ internal sealed class P03WholeFlowHarness : IDisposable
     {
         _tick.Clear(); _authority.Clear(); _schedule.Clear(); _pump.Clear();
         _serverApplication.Clear(); _clientApplication.Clear();
-        _serverRole.Clear(); _clientRole.Clear();
+        _networkAndRemoteReplication.Clear(); _serverRole.Clear(); _clientRole.Clear();
         _tick.EnsureCapacity(ticks); _authority.EnsureCapacity(ticks);
         _schedule.EnsureCapacity(ticks); _pump.EnsureCapacity(ticks);
         _serverApplication.EnsureCapacity(ticks); _clientApplication.EnsureCapacity(ticks);
+        _networkAndRemoteReplication.EnsureCapacity(ticks);
         _serverRole.EnsureCapacity(ticks); _clientRole.EnsureCapacity(ticks);
         for (int index = 0; index < _sessions.Length; index++)
         {
@@ -1502,6 +1567,10 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
     private readonly RemoteChunkWorldStateServer[] _servers;
     private readonly RemoteChunkWorldStateClient[] _clients;
     private readonly OfflineDirectChunkSubscriptionChange[] _changes;
+    private readonly ChunkPublicationWork[] _dueWorks;
+    private readonly RemoteChunkWorldStateScheduleStatus[] _dueStatuses;
+    private readonly int[] _dueCounts;
+    private const int MaximumDuePerRecipient = 64;
 
     internal P03ChunkPublicationRemoteAdapter(P03NetworkWorkload workload,
         SharedUdpProtocolSession[] sessions, long[] x, long[] z, ulong[] versions,
@@ -1517,6 +1586,9 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
         _servers = new RemoteChunkWorldStateServer[workload.Recipients];
         _clients = new RemoteChunkWorldStateClient[workload.Recipients];
         _changes = new OfflineDirectChunkSubscriptionChange[subscriptions * 2];
+        _dueWorks = new ChunkPublicationWork[checked(workload.Recipients * MaximumDuePerRecipient)];
+        _dueStatuses = new RemoteChunkWorldStateScheduleStatus[_dueWorks.Length];
+        _dueCounts = new int[workload.Recipients];
         for (int index = 0; index < workload.Recipients; index++)
         {
             var recipient = new OfflineDirectChunkRecipient(
@@ -1588,25 +1660,65 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
 
     internal override void Schedule(ulong step)
     {
-        int guard = Workload.Recipients * 16;
+        Array.Clear(_dueCounts);
+        int guard = checked(Workload.Recipients * MaximumDuePerRecipient);
         while (guard-- > 0 && _scheduler.TryDequeueDue(step, out ChunkPublicationWork work))
         {
-            ScheduleCalls++;
-            RemoteChunkWorldStateScheduleStatus status =
-                _servers[work.Recipient.Index].TrySchedule(work.Key, step);
-            if (status is RemoteChunkWorldStateScheduleStatus.QueuedDelta or
-                RemoteChunkWorldStateScheduleStatus.QueuedAbsence or
-                RemoteChunkWorldStateScheduleStatus.SnapshotTransferStarted)
-                ScheduleSuccesses++;
-            else if (status is RemoteChunkWorldStateScheduleStatus.TransportNotAccepting or
-                     RemoteChunkWorldStateScheduleStatus.CapacityExceeded or
-                     RemoteChunkWorldStateScheduleStatus.SnapshotTransferBusy)
+            int recipient = work.Recipient.Index;
+            int count = _dueCounts[recipient];
+            if (count == MaximumDuePerRecipient)
+            {
                 P03WholeFlowHarness.Require(_scheduler.Requeue(work),
-                    "Chunk scheduler could not retain backpressured work.");
-            else if (status is not (RemoteChunkWorldStateScheduleStatus.NoPayload or
-                         RemoteChunkWorldStateScheduleStatus.NotDue))
-                throw new InvalidOperationException($"Chunk remote schedule returned {status}.");
+                    "Chunk scheduler could not retain a bounded bundle overflow.");
+                continue;
+            }
+            _dueWorks[recipient * MaximumDuePerRecipient + count] = work;
+            _dueCounts[recipient] = count + 1;
         }
+        for (int recipient = 0; recipient < _servers.Length; recipient++)
+        {
+            int count = _dueCounts[recipient];
+            int baseIndex = recipient * MaximumDuePerRecipient;
+            int offset = 0;
+            bool blocked = false;
+            while (offset < count && !blocked)
+            {
+                int consumed = _servers[recipient].TryScheduleDueBundle(
+                    _dueWorks.AsSpan(baseIndex + offset, count - offset), step,
+                    _dueStatuses.AsSpan(baseIndex + offset, count - offset), out _);
+                P03WholeFlowHarness.Require(consumed > 0,
+                    "Chunk selected-profile bundle pass made no progress.");
+                ScheduleCalls += checked((ulong)consumed);
+                for (int index = 0; index < consumed; index++)
+                {
+                    int position = baseIndex + offset + index;
+                    RemoteChunkWorldStateScheduleStatus status = _dueStatuses[position];
+                    if (status is RemoteChunkWorldStateScheduleStatus.QueuedDelta or
+                        RemoteChunkWorldStateScheduleStatus.QueuedAbsence or
+                        RemoteChunkWorldStateScheduleStatus.SnapshotTransferStarted)
+                        ScheduleSuccesses++;
+                    else if (status is RemoteChunkWorldStateScheduleStatus.TransportNotAccepting or
+                             RemoteChunkWorldStateScheduleStatus.CapacityExceeded or
+                             RemoteChunkWorldStateScheduleStatus.SnapshotTransferBusy)
+                    {
+                        P03WholeFlowHarness.Require(_scheduler.Requeue(_dueWorks[position]),
+                            "Chunk scheduler could not retain backpressured work.");
+                        blocked = true;
+                    }
+                    else if (status is not (RemoteChunkWorldStateScheduleStatus.NoPayload or
+                                 RemoteChunkWorldStateScheduleStatus.NotDue))
+                        throw new InvalidOperationException(
+                            $"Chunk remote schedule returned {status}.");
+                }
+                offset += consumed;
+            }
+            for (int index = offset; index < count; index++)
+                P03WholeFlowHarness.Require(
+                    _scheduler.Requeue(_dueWorks[baseIndex + index]),
+                    "Chunk scheduler could not retain deferred grouped work.");
+        }
+        Array.Clear(_dueWorks);
+        Array.Clear(_dueStatuses);
     }
 
     internal override void ProgressServers()
@@ -2013,6 +2125,7 @@ internal readonly record struct P03WholeFlowTiming(
     P03Metric CombinedProtocolPumpWall,
     P03Metric ServerGameProofApply,
     P03Metric ClientGameDecodeApplyAndProofQueue,
+    P03Metric NetworkAndRemoteReplication,
     P03Metric ServerRole,
     P03Metric ClientRole,
     P03ProtocolTiming Protocol);

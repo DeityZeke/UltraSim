@@ -30,6 +30,7 @@ case "$checkpoint" in
     PF4B) summary_schema=7 ;;
     PF4C) summary_schema=8 ;;
     PF4D) summary_schema=9 ;;
+    PF4E) summary_schema=10 ;;
     *) echo "unsupported bot evidence checkpoint: $checkpoint" >&2; exit 2 ;;
 esac
 
@@ -147,7 +148,7 @@ server_pid=
 
 jq -e --arg checkpoint "$checkpoint" --argjson schema "$summary_schema" \
     '.passed and .cleanRetirement and .checkpoint == $checkpoint and .schemaVersion == $schema and
-     (($checkpoint != "PF4A" and $checkpoint != "PF4B" and $checkpoint != "PF4C" and $checkpoint != "PF4D") or
+     (($checkpoint != "PF4A" and $checkpoint != "PF4B" and $checkpoint != "PF4C" and $checkpoint != "PF4D" and $checkpoint != "PF4E") or
       ([.actionOutcomes[] | select((.conserved | not) or (.terminal | not))] | length) == 0)' \
     "$bot_summary" >/dev/null
 jq -e '.PhysicalTransportReconciled and .LogicalMessageReconciled and .ParticipantsAtEnd == .ParticipantsAtStart' \
