@@ -10,7 +10,7 @@
     "botLatestStateEvidenceRepair": "a1cc23187320103716d46c1204d9a71dc79c33ce",
     "diagnosticMemoryGate": "c005dac9e6a8b411adb7675ee182297a3c4c2286",
     "measurementWindowRepair": "12580b049ff6d639665ce0ccd396803c55e3e990",
-    "acceptedPf4e": "the commit containing this artifact"
+    "acceptedPf4e": "254bd60a05639f2c069cd6445032a5c2eda0fabb"
   },
   "environment": {
     "configuration": "Release",
