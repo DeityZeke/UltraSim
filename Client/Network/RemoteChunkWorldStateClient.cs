@@ -72,6 +72,12 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
     private readonly ClientTimingWindow _proofDrainTiming = new();
     private readonly ClientTimingWindow _proofQueueLatency = new();
     private readonly ClientValueWindow _proofEnvelopeOccupancy = new();
+    private readonly ClientValueWindow _bundleEnvelopeOccupancy = new();
+    private readonly ClientTimingWindow _semanticApplyIntervals = new();
+    private long _lastSemanticApplyTimestamp;
+    private ulong _timedBundleEnvelopes;
+    private ulong _timedBundleEntries;
+    private ulong _timedBundleBytes;
     private ulong _timedProofsGenerated;
     private ulong _timedProofsQueued;
     private ulong _timedProofEnvelopesQueued;
@@ -312,6 +318,10 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         _proofDrainTiming.Clear();
         _proofQueueLatency.Clear();
         _proofEnvelopeOccupancy.Clear();
+        _bundleEnvelopeOccupancy.Clear();
+        _semanticApplyIntervals.Clear();
+        _lastSemanticApplyTimestamp = 0;
+        _timedBundleEnvelopes = _timedBundleEntries = _timedBundleBytes = 0;
         _timedProofsGenerated = _timedProofsQueued = 0;
         _timedProofEnvelopesQueued = _timedProofEnvelopeBytes = 0;
         _timedProofQueueDeferrals = 0;
@@ -364,7 +374,13 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
                 Difference(_timedDeliveryStart.CapacityFailures, current.CapacityFailures),
                 Difference(_timedDeliveryStart.ContradictoryDeliveries,
                     current.ContradictoryDeliveries),
-                Difference(_timedDeliveryStart.MalformedDeliveries, current.MalformedDeliveries)));
+                Difference(_timedDeliveryStart.MalformedDeliveries, current.MalformedDeliveries)),
+            new RemoteChunkBundleReceiveCensusSnapshot(
+                _timedBundleEnvelopes,
+                _timedBundleEntries,
+                _timedBundleBytes,
+                _bundleEnvelopeOccupancy.Capture()),
+            _semanticApplyIntervals.Capture());
     }
 
     private RemoteChunkWorldStateClientSnapshot GetSnapshotWithoutTiming() => new(
@@ -406,6 +422,13 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
             SaturatingIncrement(ref _rejectedDeliveries);
             ClearBundleScratch(entryCount, snapshotCount, deltaCount);
             return;
+        }
+        if (_telemetryLevel == NetworkTelemetryLevel.Detailed)
+        {
+            SaturatingIncrement(ref _timedBundleEnvelopes);
+            SaturatingAdd(ref _timedBundleEntries, checked((ulong)entryCount));
+            SaturatingAdd(ref _timedBundleBytes, checked((ulong)payload.Length));
+            _bundleEnvelopeOccupancy.Record(checked((ulong)entryCount));
         }
         for (int index = 0; index < entryCount; index++)
         {
@@ -491,7 +514,11 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         if (status == RemoteChunkPublicationApplyStatus.Applied)
         {
             if (duplicate) SaturatingIncrement(ref _duplicateDeliveries);
-            else SaturatingIncrement(ref _appliedDeltas);
+            else
+            {
+                SaturatingIncrement(ref _appliedDeltas);
+                RecordSemanticApply();
+            }
         }
         else RecordFailure(status);
         _semanticDeltas.AsSpan(0, records.Length).Clear();
@@ -541,6 +568,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
             CommitLineage(handle, key, epoch, entry.DeliveryId,
                 RemoteChunkPublicationKind.Snapshot, entry.CurrentRevision, entry.ContentHash);
             SaturatingIncrement(ref _appliedSnapshots);
+            RecordSemanticApply();
         }
         else if (status != RemoteChunkPublicationApplyStatus.Applied)
         {
@@ -584,8 +612,11 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         }
         if (status == RemoteChunkPublicationApplyStatus.Applied &&
             lineage == DeliveryLineageDecision.New)
+        {
             CommitLineage(handle, key, epoch, entry.DeliveryId,
                 RemoteChunkPublicationKind.Absence, 0, 0);
+            RecordSemanticApply();
+        }
         QueueProof(header.ApplicationSessionEpoch, header.PublicationEpoch, entry.DeliveryId,
             entry.SpatialSpaceId, entry.ChunkX, entry.ChunkZ, 0,
             RemoteChunkPublicationKind.Absence, status, handle);
@@ -680,7 +711,11 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         if (status == RemoteChunkPublicationApplyStatus.Applied)
         {
             if (duplicate) SaturatingIncrement(ref _duplicateDeliveries);
-            else SaturatingIncrement(ref _appliedDeltas);
+            else
+            {
+                SaturatingIncrement(ref _appliedDeltas);
+                RecordSemanticApply();
+            }
         }
         else RecordFailure(status);
         _wireDeltas.AsSpan(0, count).Clear();
@@ -730,8 +765,11 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         }
         if (status == RemoteChunkPublicationApplyStatus.Applied &&
             lineage == DeliveryLineageDecision.New)
+        {
             CommitLineage(handle, key, epoch, message.DeliveryId,
                 RemoteChunkPublicationKind.Absence, 0, 0);
+            RecordSemanticApply();
+        }
         QueueProof(message.ApplicationSessionEpoch, message.PublicationEpoch, message.DeliveryId,
             message.SpatialSpaceId, message.ChunkX, message.ChunkZ, 0,
             RemoteChunkPublicationKind.Absence, status, handle);
@@ -957,6 +995,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
             CommitLineage(_snapshotHandle, key, epoch, begin.DeliveryId,
                 RemoteChunkPublicationKind.Snapshot, begin.Revision, begin.ContentHash);
             SaturatingIncrement(ref _appliedSnapshots);
+            RecordSemanticApply();
         }
         else if (status != RemoteChunkPublicationApplyStatus.Applied)
         {
@@ -1129,6 +1168,15 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
             id,
             record.EntityPublicVersion,
             current);
+    }
+
+    private void RecordSemanticApply()
+    {
+        if (_telemetryLevel != NetworkTelemetryLevel.Detailed) return;
+        long now = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (_lastSemanticApplyTimestamp != 0)
+            _semanticApplyIntervals.RecordElapsedAt(_lastSemanticApplyTimestamp, now);
+        _lastSemanticApplyTimestamp = now;
     }
 
     private static WorldPublicRecord ToSemantic(

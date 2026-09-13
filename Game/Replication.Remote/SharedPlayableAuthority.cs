@@ -873,6 +873,7 @@ public sealed class SharedRemoteGuestPlayableApplicationFactory : IHostedUdpSess
     private readonly UiDefinitionIdentity[] _standardUiDefinitions;
     private readonly RemoteClientProfileAdvertisement? _clientProfile;
     private readonly RemoteServerPerformanceProfile? _serverPerformanceProfile;
+    private readonly RemoteChunkPublicationPolicy _publicationPolicy;
     private long _nextParticipant;
 
     public SharedRemoteGuestPlayableApplicationFactory(
@@ -883,6 +884,7 @@ public sealed class SharedRemoteGuestPlayableApplicationFactory : IHostedUdpSess
         RemoteClientProfileAdvertisement? clientProfile = null,
         IEnumerable<UiDefinitionIdentity>? standardUiDefinitions = null,
         RemoteServerPerformanceProfile? serverPerformanceProfile = null,
+        RemoteChunkPublicationPolicy publicationPolicy = default,
         ulong firstParticipantId = 1)
     {
         _authority = authority ?? throw new ArgumentNullException(nameof(authority));
@@ -914,6 +916,10 @@ public sealed class SharedRemoteGuestPlayableApplicationFactory : IHostedUdpSess
                 nameof(standardUiDefinitions));
         _clientProfile = clientProfile;
         _serverPerformanceProfile = serverPerformanceProfile;
+        if (publicationPolicy == default)
+            publicationPolicy = RemoteChunkPublicationPolicy.CurrentBundled;
+        publicationPolicy.Validate();
+        _publicationPolicy = publicationPolicy;
         _nextParticipant = checked((long)firstParticipantId - 1);
     }
 
@@ -933,7 +939,8 @@ public sealed class SharedRemoteGuestPlayableApplicationFactory : IHostedUdpSess
             _clientProfile,
             _standardUiDefinitions,
             _authority,
-            _serverPerformanceProfile);
+            _serverPerformanceProfile,
+            _publicationPolicy);
         try
         {
             _authority.RegisterRemoteApplication(application);

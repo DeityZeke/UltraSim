@@ -26,6 +26,7 @@ var tests = new (string Name, Action Body)[]
     ("PF4AActionStagesRetainNoEdgeAndAuthorityOutcomes", ActionStagesRetainNoEdgeAndAuthorityOutcomes),
     ("PF4ACheckpointSelectsConservationSchema", PF4ACheckpointSelectsConservationSchema),
     ("PF4BCheckpointAndHotChunkScenariosAreExplicit", PF4BCheckpointAndHotChunkScenariosAreExplicit),
+    ("PF4CCheckpointRetainsMeasurementScenarios", PF4CCheckpointRetainsMeasurementScenarios),
 };
 
 foreach ((string name, Action body) in tests)
@@ -208,6 +209,29 @@ static void PF4BCheckpointAndHotChunkScenariosAreExplicit()
             "--checkpoint=PF4B",
         ]);
         Equal("PF4B", options.Checkpoint);
+        Equal(scenario, options.Scenario);
+    }
+}
+
+static void PF4CCheckpointRetainsMeasurementScenarios()
+{
+    foreach (string scenario in new[]
+             {
+                 "moving", "crowd", "mixed-chaos", "single-hot", "multi-hot",
+             })
+    {
+        BotOptions options = BotOptions.Parse(
+        [
+            "--endpoint=127.0.0.1:7777",
+            $"--fingerprint={new string('1', 64)}",
+            "--bots=50",
+            "--seed=500501",
+            "--duration=600s",
+            $"--scenario={scenario}",
+            "--cache=/tmp/ultrasim-bot-pf4c-options",
+            "--checkpoint=PF4C",
+        ]);
+        Equal("PF4C", options.Checkpoint);
         Equal(scenario, options.Scenario);
     }
 }

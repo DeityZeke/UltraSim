@@ -27,6 +27,7 @@ case "$checkpoint" in
     PF3) summary_schema=5 ;;
     PF4A) summary_schema=6 ;;
     PF4B) summary_schema=7 ;;
+    PF4C) summary_schema=8 ;;
     *) echo "unsupported bot evidence checkpoint: $checkpoint" >&2; exit 2 ;;
 esac
 
@@ -95,6 +96,8 @@ dotnet run --project Server/DirectConnect/UltraSim.Server.DirectConnect.csproj \
     --recommended-input-hz="$recommended_input_hz" \
     --input-burst="$input_burst" --input-burst-window-ms="$input_burst_window_ms" \
     --network-service-delay-ms="$network_service_delay_ms" \
+    --public-representation="${ULTRASIM_PUBLIC_REPRESENTATION:-message129}" \
+    --public-cadence="${ULTRASIM_PUBLIC_CADENCE:-1/2/4}" \
     --telemetry=Detailed >"$output_dir/server.log" 2>&1 &
 server_pid=$!
 wait_file "$server_ready" 60
@@ -138,7 +141,7 @@ server_pid=
 
 jq -e --arg checkpoint "$checkpoint" --argjson schema "$summary_schema" \
     '.passed and .cleanRetirement and .checkpoint == $checkpoint and .schemaVersion == $schema and
-     (($checkpoint != "PF4A" and $checkpoint != "PF4B") or
+     (($checkpoint != "PF4A" and $checkpoint != "PF4B" and $checkpoint != "PF4C") or
       ([.actionOutcomes[] | select((.conserved | not) or (.terminal | not))] | length) == 0)' \
     "$bot_summary" >/dev/null
 jq -e '.PhysicalTransportReconciled and .LogicalMessageReconciled and .ParticipantsAtEnd == .ParticipantsAtStart' \

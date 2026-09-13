@@ -42,6 +42,7 @@ public readonly record struct GodotNativeTelemetrySnapshot(
     ulong ContinuousCommandsConsidered,
     ulong ActionEdgesConsidered,
     GodotNativeTimingDistribution PresentationUpdates,
+    GodotNativeTimingDistribution PresentationIntervals,
     int ActorRootsCurrent,
     int ActorRootsHighWater,
     int NameplatesCurrent,
@@ -71,9 +72,11 @@ internal sealed class GodotNativeTelemetry : IDisposable
     private readonly NativeTimingWindow _frameIntervals = new();
     private readonly NativeTimingWindow _frameDurations = new();
     private readonly NativeTimingWindow _presentationUpdates = new();
+    private readonly NativeTimingWindow _presentationIntervals = new();
     private readonly Process _process = Process.GetCurrentProcess();
     private NetworkTelemetryLevel _level;
     private long _lastFrame;
+    private long _lastPresentation;
     private ulong _frames;
     private ulong _inputEvents;
     private ulong _inputSamples;
@@ -101,6 +104,7 @@ internal sealed class GodotNativeTelemetry : IDisposable
         if (!Enum.IsDefined(level)) throw new ArgumentOutOfRangeException(nameof(level));
         _level = level;
         _lastFrame = 0;
+        _lastPresentation = 0;
         _frames = _inputEvents = _inputSamples = _semanticResolutions = 0;
         _commandsConsidered = _commandsSubmitted = 0;
         _continuousCommands = _actionEdges = 0;
@@ -108,6 +112,7 @@ internal sealed class GodotNativeTelemetry : IDisposable
         _frameIntervals.Clear();
         _frameDurations.Clear();
         _presentationUpdates.Clear();
+        _presentationIntervals.Clear();
         _process.Refresh();
         _nextResourceSample = Stopwatch.GetTimestamp();
         _allocatedStart = GC.GetTotalAllocatedBytes(precise: false);
@@ -143,7 +148,13 @@ internal sealed class GodotNativeTelemetry : IDisposable
     internal void EndPresentation(long started)
     {
         if (_level == NetworkTelemetryLevel.Detailed)
-            _presentationUpdates.Record(started, Stopwatch.GetTimestamp());
+        {
+            long completed = Stopwatch.GetTimestamp();
+            if (_lastPresentation != 0)
+                _presentationIntervals.Record(_lastPresentation, completed);
+            _lastPresentation = completed;
+            _presentationUpdates.Record(started, completed);
+        }
     }
 
     internal void RecordInputEvent()
@@ -195,6 +206,7 @@ internal sealed class GodotNativeTelemetry : IDisposable
                 ? _commandsConsidered - _commandsSubmitted
                 : 0,
             _continuousCommands, _actionEdges, _presentationUpdates.Capture(),
+            _presentationIntervals.Capture(),
             actors.ActiveActors, _actorHighWater,
             actors.VisibleNameplates, _nameplateHighWater,
             actors.VisibleOverheadLabels, _overheadHighWater,

@@ -838,9 +838,9 @@ public partial class ClientHost
         if (path is null) return;
         _remoteSession!.TryGetTelemetrySnapshot(out NetworkServiceTimingSnapshot network);
         string checkpoint = ReadArgument("--telemetry-checkpoint=") ?? "PF2.5";
-        if (checkpoint is not ("PF2.5" or "PF3" or "PF4A" or "PF4B"))
+        if (checkpoint is not ("PF2.5" or "PF3" or "PF4A" or "PF4B" or "PF4C"))
             throw new InvalidOperationException(
-                "--telemetry-checkpoint must be PF2.5, PF3, PF4A, or PF4B.");
+                "--telemetry-checkpoint must be PF2.5, PF3, PF4A, PF4B, or PF4C.");
         var summary = new
         {
             SchemaVersion = checkpoint switch
@@ -848,6 +848,7 @@ public partial class ClientHost
                 "PF3" => 2,
                 "PF4A" => 3,
                 "PF4B" => 4,
+                "PF4C" => 5,
                 _ => 1,
             },
             Checkpoint = checkpoint,

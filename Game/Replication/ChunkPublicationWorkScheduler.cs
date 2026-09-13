@@ -29,7 +29,9 @@ public readonly record struct ChunkPublicationWork(
     ChunkReplicationRecipientId Recipient,
     SpatialChunkKey Key,
     ChunkInterestTier Tier,
-    ChunkPublicationWorkKind Kind);
+    ChunkPublicationWorkKind Kind,
+    ulong LatestSourceStep = 0,
+    ulong FirstDueStep = 0);
 
 public enum ChunkPublicationCommitObservationStatus : byte
 {
@@ -249,6 +251,13 @@ public sealed class ChunkPublicationWorkScheduler
         ChunkReplicationRecipientId id,
         ReadOnlySpan<OfflineDirectChunkSubscriptionChange> changes,
         in OfflineDirectChunkReconcileResult result)
+        => TryApplyReconciliation(id, changes, in result, 0);
+
+    public bool TryApplyReconciliation(
+        ChunkReplicationRecipientId id,
+        ReadOnlySpan<OfflineDirectChunkSubscriptionChange> changes,
+        in OfflineDirectChunkReconcileResult result,
+        ulong sourceStep)
     {
         EnsureOwner();
         if (!TryResolve(id, out int recipientIndex) ||
@@ -298,7 +307,7 @@ public sealed class ChunkPublicationWorkScheduler
                     RemoveMembership(leaving);
                     break;
                 case OfflineDirectChunkSubscriptionChangeKind.Entered:
-                    AddMembership(recipientIndex, id, change.Key);
+                    AddMembership(recipientIndex, id, change.Key, sourceStep);
                     break;
                 case OfflineDirectChunkSubscriptionChangeKind.TierChanged:
                     if (!TryFindMembership(mapKey, out int retained))
@@ -307,7 +316,7 @@ public sealed class ChunkPublicationWorkScheduler
                     break;
             }
         }
-        if (result.SourceReset) QueueRecipientIncoming(recipientIndex);
+        if (result.SourceReset) QueueRecipientIncoming(recipientIndex, sourceStep);
         return CountRecipientMemberships(recipientIndex) == result.SubscriptionCount;
     }
 
@@ -317,6 +326,14 @@ public sealed class ChunkPublicationWorkScheduler
     /// current truth rather than silently losing shared dirty discovery.
     /// </summary>
     public ChunkPublicationCommitObservationStatus ObserveCommit(ChunkPublicationStore source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        return ObserveCommit(source, source.CommitSequence);
+    }
+
+    public ChunkPublicationCommitObservationStatus ObserveCommit(
+        ChunkPublicationStore source,
+        ulong sourceStep)
     {
         ArgumentNullException.ThrowIfNull(source);
         EnsureOwner();
@@ -329,7 +346,7 @@ public sealed class ChunkPublicationWorkScheduler
             return ChunkPublicationCommitObservationStatus.CommitGapRequiresRefresh;
 
         ReadOnlySpan<SpatialChunkKey> dirty = source.LastCommittedDirtyChunks;
-        for (int index = 0; index < dirty.Length; index++) MarkDirty(dirty[index]);
+        for (int index = 0; index < dirty.Length; index++) MarkDirty(dirty[index], sourceStep);
         _observedCommitSequence = current;
         SaturatingIncrement(ref _commitsObserved);
         if (dirty.Length == 0)
@@ -344,7 +361,7 @@ public sealed class ChunkPublicationWorkScheduler
     /// Rebinds a publication generation and makes every retained scope eligible to establish
     /// current truth. Recipient cursor reset remains owned by its accepted reconciliation path.
     /// </summary>
-    public void ReplaceSource(ChunkPublicationStore source)
+    public void ReplaceSource(ChunkPublicationStore source, ulong sourceStep = 0)
     {
         ArgumentNullException.ThrowIfNull(source);
         EnsureOwner();
@@ -353,16 +370,16 @@ public sealed class ChunkPublicationWorkScheduler
             throw new ArgumentException("A replacement source must own a distinct epoch.", nameof(source));
         _source = source;
         _observedCommitSequence = source.CommitSequence;
-        QueueAllIncoming();
+        QueueAllIncoming(sourceStep);
         SaturatingIncrement(ref _sourceRefreshes);
     }
 
     /// <summary>Recovers a missed commit observation without inventing per-recipient history.</summary>
-    public void RefreshAllFromCurrentSource()
+    public void RefreshAllFromCurrentSource(ulong sourceStep = 0)
     {
         EnsureOwner();
         _observedCommitSequence = _source.CommitSequence;
-        QueueAllIncoming();
+        QueueAllIncoming(sourceStep);
         SaturatingIncrement(ref _sourceRefreshes);
     }
 
@@ -404,7 +421,10 @@ public sealed class ChunkPublicationWorkScheduler
                 RecipientId(membership.RecipientIndex),
                 _chunks[membership.ChunkIndex].Key,
                 membership.Tier,
-                membership.PendingKind);
+                membership.PendingKind,
+                membership.LatestSourceStep,
+                membership.FirstDueStep == 0 ? cadenceStep : membership.FirstDueStep);
+            if (membership.FirstDueStep == 0) membership.FirstDueStep = cadenceStep;
             RemovePending(membershipIndex);
             SaturatingIncrement(ref _dueWorkDequeued);
             return true;
@@ -421,7 +441,7 @@ public sealed class ChunkPublicationWorkScheduler
         if (!work.Recipient.IsValid || !work.Key.Space.IsValid ||
             !TryFindMembership(new RecipientChunkKey(work.Recipient, work.Key), out int membership))
             return false;
-        Queue(membership, work.Kind);
+        Queue(membership, work.Kind, work.LatestSourceStep, work.FirstDueStep, isRetry: true);
         // A retry depends on a later cadence step, transport/proof progress, or source change.
         // Do not let a just-requeued membership circulate again in the current bounded pass.
         _memberships[membership].LastExaminedPendingPass = _pendingPassId;
@@ -512,7 +532,7 @@ public sealed class ChunkPublicationWorkScheduler
                 freeMemberships + chunks + freeChunks + pending + membershipIndex + chunkIndex));
     }
 
-    private void MarkDirty(SpatialChunkKey key)
+    private void MarkDirty(SpatialChunkKey key, ulong sourceStep)
     {
         if (!TryFindChunk(key, out int chunkIndex))
         {
@@ -524,7 +544,7 @@ public sealed class ChunkPublicationWorkScheduler
         {
             int next = _memberships[membership].ChunkNext;
             SaturatingIncrement(ref _dirtyRecipientFanout);
-            Queue(membership, ChunkPublicationWorkKind.Dirty);
+            Queue(membership, ChunkPublicationWorkKind.Dirty, sourceStep);
             membership = next;
         }
     }
@@ -532,7 +552,8 @@ public sealed class ChunkPublicationWorkScheduler
     private void AddMembership(
         int recipientIndex,
         ChunkReplicationRecipientId recipient,
-        SpatialChunkKey key)
+        SpatialChunkKey key,
+        ulong sourceStep)
     {
         if (_freeMembershipCount == 0)
             throw new InvalidOperationException("Preflighted publication membership capacity disappeared.");
@@ -559,7 +580,7 @@ public sealed class ChunkPublicationWorkScheduler
         AddMembershipIndex(new RecipientChunkKey(recipient, key), index);
         _membershipCount++;
         RefreshMembershipCadence(index);
-        Queue(index, ChunkPublicationWorkKind.Incoming);
+        Queue(index, ChunkPublicationWorkKind.Incoming, sourceStep);
     }
 
     private void RemoveMembership(int index)
@@ -638,25 +659,38 @@ public sealed class ChunkPublicationWorkScheduler
         }
     }
 
-    private void QueueAllIncoming()
+    private void QueueAllIncoming(ulong sourceStep)
     {
         for (int index = 0; index < _memberships.Length; index++)
-            if (_memberships[index].RecipientIndex >= 0) Queue(index, ChunkPublicationWorkKind.Incoming);
+            if (_memberships[index].RecipientIndex >= 0)
+                Queue(index, ChunkPublicationWorkKind.Incoming, sourceStep);
     }
 
-    private void QueueRecipientIncoming(int recipientIndex)
+    private void QueueRecipientIncoming(int recipientIndex, ulong sourceStep)
     {
         for (int membership = _recipients[recipientIndex].MembershipHead;
              membership >= 0;
              membership = _memberships[membership].RecipientNext)
-            Queue(membership, ChunkPublicationWorkKind.Incoming);
+            Queue(membership, ChunkPublicationWorkKind.Incoming, sourceStep);
     }
 
-    private void Queue(int membershipIndex, ChunkPublicationWorkKind kind)
+    private void Queue(
+        int membershipIndex,
+        ChunkPublicationWorkKind kind,
+        ulong latestSourceStep,
+        ulong firstDueStep = 0,
+        bool isRetry = false)
     {
         ref MembershipState membership = ref _memberships[membershipIndex];
         if (membership.PendingPosition >= 0)
         {
+            if (!isRetry && latestSourceStep > membership.LatestSourceStep)
+            {
+                membership.LatestSourceStep = latestSourceStep;
+                // A newer revision earns its own cadence-freshness origin. Delivery debt remains
+                // pending, but the latest truth has not yet reached a due opportunity.
+                membership.FirstDueStep = 0;
+            }
             if (membership.PendingKind == ChunkPublicationWorkKind.Incoming ||
                 membership.PendingKind == kind)
             {
@@ -665,6 +699,11 @@ public sealed class ChunkPublicationWorkScheduler
                 return;
             }
             membership.PendingKind = ChunkPublicationWorkKind.Incoming;
+            if (isRetry)
+            {
+                membership.LatestSourceStep = latestSourceStep;
+                membership.FirstDueStep = firstDueStep;
+            }
             membership.LastExaminedPendingPass = 0;
             _pendingPassExhausted = false;
             _pendingScanPosition = membership.PendingPosition;
@@ -672,6 +711,8 @@ public sealed class ChunkPublicationWorkScheduler
             return;
         }
         membership.PendingKind = kind;
+        membership.LatestSourceStep = latestSourceStep;
+        membership.FirstDueStep = firstDueStep;
         membership.PendingPosition = _pendingCount;
         membership.LastExaminedPendingPass = 0;
         _pendingMemberships[_pendingCount++] = membershipIndex;
@@ -693,6 +734,8 @@ public sealed class ChunkPublicationWorkScheduler
         if (position != last) _memberships[replacement].PendingPosition = position;
         membership.PendingPosition = -1;
         membership.PendingKind = default;
+        membership.LatestSourceStep = 0;
+        membership.FirstDueStep = 0;
         membership.LastExaminedPendingPass = 0;
         _pendingScanPosition = _pendingCount == 0 ? 0 : Math.Min(position, _pendingCount - 1);
     }
@@ -968,6 +1011,8 @@ public sealed class ChunkPublicationWorkScheduler
     private struct MembershipState
     {
         internal ulong LastExaminedPendingPass;
+        internal ulong LatestSourceStep;
+        internal ulong FirstDueStep;
         internal int RecipientPrevious;
         internal int RecipientNext;
         internal int ChunkPrevious;

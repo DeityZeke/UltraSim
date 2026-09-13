@@ -189,7 +189,16 @@ public readonly record struct RemoteChunkWorldStateClientTimingSnapshot(
     ClientTimingDistribution DecodeAndApply,
     ClientTimingDistribution ProofDrain,
     RemoteChunkProofCensusSnapshot ProofCensus,
-    RemoteChunkDeliveryCensusSnapshot DeliveryCensus);
+    RemoteChunkDeliveryCensusSnapshot DeliveryCensus,
+    RemoteChunkBundleReceiveCensusSnapshot BundleCensus,
+    ClientTimingDistribution SemanticApplyIntervals);
+
+/// <summary>Bounded PF4C receive-side census; message 129 remains entry-proofed semantics.</summary>
+public readonly record struct RemoteChunkBundleReceiveCensusSnapshot(
+    ulong Envelopes,
+    ulong Entries,
+    ulong ApplicationPayloadBytes,
+    ClientValueDistribution EntriesPerEnvelope);
 
 /// <summary>Window-local PF4B outcomes for received chunk-delivery semantics.</summary>
 public readonly record struct RemoteChunkDeliveryCensusSnapshot(

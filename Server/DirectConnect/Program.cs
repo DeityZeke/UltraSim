@@ -62,7 +62,8 @@ using HostedUdpAdmissionHost host = CreateHost(
         UiDefinitionIdentity.From(InventoryUi.Definition),
         UiDefinitionIdentity.From(ServerMonitorUi.Definition),
     ], clientProfile, performanceProfile,
-    options.MaximumParticipants, options.AdmissionBurstPerAddress);
+    options.MaximumParticipants, options.AdmissionBurstPerAddress,
+    options.PublicationPolicy);
 host.ConfigureTelemetry(options.TelemetryLevel);
 authority.ConfigureTelemetry(options.TelemetryLevel == NetworkTelemetryLevel.Off
     ? GameTelemetryLevel.Off
@@ -93,6 +94,11 @@ Console.WriteLine(
     $"{performanceProfile.InputBurstWindowMilliseconds}ms " +
     $"revision={performanceProfile.Revision} hash={PerformanceHash(performanceProfile.Hash)}");
 Console.WriteLine(
+    $"Public ChunkPublication: representation={options.PublicationPolicy.Representation} " +
+    $"cadence={options.PublicationPolicy.Cadence.ImmediateSteps}/" +
+    $"{options.PublicationPolicy.Cadence.NearSteps}/" +
+    $"{options.PublicationPolicy.Cadence.FarSteps}");
+Console.WriteLine(
     $"This shared endpoint admits up to {options.MaximumParticipants} independent guests " +
     "into one Concept Demo authority.");
 Console.WriteLine("Press Ctrl+C to stop.");
@@ -111,7 +117,11 @@ WriteReady(options.ReadyFile, new DirectConnectReady(
     performanceProfile.MaximumInputHz, performanceProfile.RecommendedInputHz,
     performanceProfile.InputBurstCapacity,
     performanceProfile.InputBurstWindowMilliseconds,
-    options.MaximumParticipants, authority.GetSnapshot().GenerationId));
+    options.MaximumParticipants, authority.GetSnapshot().GenerationId,
+    options.PublicationPolicy.Representation.ToString(),
+    options.PublicationPolicy.Cadence.ImmediateSteps,
+    options.PublicationPolicy.Cadence.NearSteps,
+    options.PublicationPolicy.Cadence.FarSteps));
 
 using var stopping = new CancellationTokenSource();
 DirectConnectWireAccounting? wireAccounting = null;
@@ -192,8 +202,12 @@ static HostedUdpAdmissionHost CreateHost(
     RemoteClientProfileAdvertisement? clientProfile = null,
     RemoteServerPerformanceProfile? serverPerformanceProfile = null,
     int maximumParticipants = 8,
-    int admissionBurstPerAddress = 4)
+    int admissionBurstPerAddress = 4,
+    RemoteChunkPublicationPolicy publicationPolicy = default)
 {
+    if (publicationPolicy == default)
+        publicationPolicy = RemoteChunkPublicationPolicy.CurrentBundled;
+    publicationPolicy.Validate();
     UdpProtocolLimits udp = UdpProtocolLimits.Default;
     SharedUdpProtocolLimits shared = SharedUdpProtocolLimits.Default with
     {
@@ -201,7 +215,8 @@ static HostedUdpAdmissionHost CreateHost(
     };
     var applications = new SharedRemoteGuestPlayableApplicationFactory(
         authority, realm, contentAuthorization, contentBackedUiDefinitions, clientProfile,
-        serverPerformanceProfile: serverPerformanceProfile);
+        serverPerformanceProfile: serverPerformanceProfile,
+        publicationPolicy: publicationPolicy);
     return new HostedUdpAdmissionHost(
         endpoint,
         identity,
@@ -381,7 +396,8 @@ internal readonly record struct DirectConnectOptions(
     bool EphemeralSmoke,
     int MaximumParticipants,
     int AdmissionBurstPerAddress,
-    NetworkTelemetryLevel TelemetryLevel)
+    NetworkTelemetryLevel TelemetryLevel,
+    RemoteChunkPublicationPolicy PublicationPolicy)
 {
     internal static DirectConnectOptions Parse(string[] arguments)
     {
@@ -409,6 +425,9 @@ internal readonly record struct DirectConnectOptions(
         int admissionBurstPerAddress =
             HostedUdpAdmissionLimits.Default.MaximumValidationsPerAddressPerBucket;
         NetworkTelemetryLevel telemetryLevel = NetworkTelemetryLevel.Off;
+        RemoteChunkPublicationRepresentation publicationRepresentation =
+            RemoteChunkPublicationRepresentation.Message129WhenBeneficial;
+        OfflineDirectChunkCadence publicationCadence = OfflineDirectChunkCadence.EvidenceProfile;
         foreach (string argument in arguments)
         {
             if (argument == "--ephemeral-smoke")
@@ -570,6 +589,35 @@ internal readonly record struct DirectConnectOptions(
                     throw new ArgumentException("--telemetry must be Off, Basic, or Detailed.");
                 continue;
             }
+            if (argument.StartsWith("--public-representation=", StringComparison.Ordinal))
+            {
+                string value = argument["--public-representation=".Length..]
+                    .Trim().ToLowerInvariant();
+                publicationRepresentation = value switch
+                {
+                    "standalone" => RemoteChunkPublicationRepresentation.Standalone,
+                    "message129" or "bundle" =>
+                        RemoteChunkPublicationRepresentation.Message129WhenBeneficial,
+                    _ => throw new ArgumentException(
+                        "--public-representation must be standalone or message129."),
+                };
+                continue;
+            }
+            if (argument.StartsWith("--public-cadence=", StringComparison.Ordinal))
+            {
+                string[] values = argument["--public-cadence=".Length..].Split('/');
+                if (values.Length != 3 ||
+                    !uint.TryParse(values[0], out uint immediate) ||
+                    !uint.TryParse(values[1], out uint near) ||
+                    !uint.TryParse(values[2], out uint far))
+                    throw new ArgumentException(
+                        "--public-cadence must be Immediate/Near/Far positive step counts.");
+                publicationCadence = new OfflineDirectChunkCadence(immediate, near, far);
+                if (!publicationCadence.IsValid)
+                    throw new ArgumentException(
+                        "--public-cadence must be positive and ordered Immediate <= Near <= Far.");
+                continue;
+            }
             throw new ArgumentException($"Unknown option '{argument}'.");
         }
         bool anyAccounting = accountingStartFile is not null || accountingReadyFile is not null ||
@@ -586,6 +634,9 @@ internal readonly record struct DirectConnectOptions(
         if (inputBurstCapacity < Math.Max(1, maximumPerBurstWindow))
             throw new ArgumentException(
                 "--input-burst is too small for the hard rate and burst window.");
+        var publicationPolicy = new RemoteChunkPublicationPolicy(
+            publicationCadence, publicationRepresentation);
+        publicationPolicy.Validate();
         return new DirectConnectOptions(
             endpoint, contentEndpoint, identity, readyFile, stopFile, summaryFile,
             accountingStartFile, accountingReadyFile, accountingStopFile,
@@ -593,7 +644,8 @@ internal readonly record struct DirectConnectOptions(
             simulationFrequencyHz, maximumInputHz, recommendedInputHz,
             inputBurstCapacity, inputBurstWindowMilliseconds,
             networkServiceDelayMilliseconds, smoke,
-            maximumParticipants, admissionBurstPerAddress, telemetryLevel);
+            maximumParticipants, admissionBurstPerAddress, telemetryLevel,
+            publicationPolicy);
 
         static string RequiredPath(string argument, string prefix)
         {
@@ -643,7 +695,11 @@ internal readonly record struct DirectConnectReady(
     ushort InputBurstCapacity,
     ushort InputBurstWindowMilliseconds,
     int MaximumParticipants,
-    ulong ServerGeneration);
+    ulong ServerGeneration,
+    string PublicRepresentation,
+    uint PublicImmediateSteps,
+    uint PublicNearSteps,
+    uint PublicFarSteps);
 
 internal readonly record struct DirectConnectSummary(
     ulong ServerGeneration,

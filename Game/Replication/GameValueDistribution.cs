@@ -23,6 +23,7 @@ public readonly record struct GameValueDistribution(
 internal sealed class GameValueDistributionWindow
 {
     private const int MaximumSamples = 256;
+    internal const int ReservedPayloadBytes = (MaximumSamples + 65) * sizeof(ulong);
     private readonly ulong[] _samples = new ulong[MaximumSamples];
     private readonly ulong[] _wholeBuckets = new ulong[65];
     private int _next;
