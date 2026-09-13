@@ -751,6 +751,54 @@ internal static class N1OfflineDirectChunkTests
         Equal(0UL, dormant.ExactQueryTicks);
     }
 
+    internal static void RecipientTelemetryWindowResetPreservesTopologyAndKnowledge()
+    {
+        using var fixture = new Fixture(historyCapacity: 16);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        var recipient = new OfflineDirectChunkRecipient(
+            new OfflineDirectChunkRecipientLimits(1_024, 8, 8),
+            GameChunkInterestProfile.Default,
+            OfflineDirectChunkCadence.EvidenceProfile);
+        var changes = new OfflineDirectChunkSubscriptionChange[1_024];
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace,
+                Position(0, 0, 8_000, 8_000), changes,
+                out OfflineDirectChunkReconcileResult initial));
+        int subscriptionCount = recipient.Subscriptions.Length;
+        int present = FindSubscription(recipient, Key(0, 0));
+        Equal(OfflineDirectChunkReadStatus.Snapshot,
+            recipient.TryBeginRead(fixture.Store, present, 0, out _));
+        recipient.CommitRead();
+        OfflineDirectChunkRecipientSnapshot before = recipient.GetSnapshot();
+        True(before.EnteredSubscriptions > 0);
+        True(before.SnapshotReads > 0);
+        True(initial.ChangeCount > 0);
+
+        recipient.ResetTelemetryWindow(enableReconcileAttribution: true);
+        OfflineDirectChunkRecipientSnapshot reset = recipient.GetSnapshot();
+        Equal(subscriptionCount, reset.SubscriptionCount);
+        Equal(0UL, reset.Reconciliations);
+        Equal(0UL, reset.EnteredSubscriptions);
+        Equal(0UL, reset.LeftSubscriptions);
+        Equal(0UL, reset.TierChanges);
+        Equal(0UL, reset.SnapshotReads);
+        Equal(0UL, reset.DeltaReads);
+        Equal(0UL, reset.FullInterestQueries);
+        Equal(0UL, reset.StableInterestFastPaths);
+        True(recipient.Subscriptions[present].HasKnowledge);
+        True(recipient.GetReconcileAttribution().Enabled);
+
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace,
+                Position(0, 0, 8_100, 8_000), changes, out _));
+        OfflineDirectChunkRecipientSnapshot after = recipient.GetSnapshot();
+        Equal(1UL, after.Reconciliations);
+        Equal(1UL, after.StableInterestFastPaths);
+        Equal(0UL, after.EnteredSubscriptions);
+        Equal(0UL, after.LeftSubscriptions);
+    }
+
     internal static void DirtySchedulerWarmedWorkDiscoveryAllocatesZero()
     {
         using var fixture = new Fixture(historyCapacity: 32);

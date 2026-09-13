@@ -446,7 +446,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         _sameChunkOutstanding.Clear();
         _proofEnvelopeOccupancy.Clear();
         _deliveryAgeSteps.Clear();
-        _recipient.ResetReconcileAttribution(level == GameTelemetryLevel.Detailed);
+        _recipient.ResetTelemetryWindow(level == GameTelemetryLevel.Detailed);
         _timedScheduleAttempts = _timedDeliveriesQueued = 0;
         _timedImmediateQueued = _timedNearQueued = _timedFarQueued = 0;
         _timedNoPayload = _timedCadenceDeferrals = 0;

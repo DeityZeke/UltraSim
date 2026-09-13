@@ -834,6 +834,34 @@ public sealed class OfflineDirectChunkRecipient
         _reconcilePublicationTicks = 0;
     }
 
+    /// <summary>
+    /// Clears one cold diagnostic window without changing the admitted subscriptions, applied
+    /// knowledge, source epoch, or pending read. The caller explicitly selects whether the more
+    /// detailed reconcile-stage clocks remain enabled for the next window.
+    /// </summary>
+    public void ResetTelemetryWindow(bool enableReconcileAttribution)
+    {
+        EnsureOwner();
+        _reconciliations = 0;
+        _enteredSubscriptions = 0;
+        _leftSubscriptions = 0;
+        _tierChanges = 0;
+        _immediateToNear = 0;
+        _nearToFar = 0;
+        _farToNear = 0;
+        _nearToImmediate = 0;
+        _otherTierChanges = 0;
+        _snapshotReads = 0;
+        _chunkAbsentReads = 0;
+        _deltaReads = 0;
+        _noChangeReads = 0;
+        _snapshotFallbacks = 0;
+        _cadenceDeferrals = 0;
+        _fullInterestQueries = 0;
+        _stableInterestFastPaths = 0;
+        ResetReconcileAttribution(enableReconcileAttribution);
+    }
+
     public OfflineDirectChunkReconcileAttribution GetReconcileAttribution()
     {
         EnsureOwner();
