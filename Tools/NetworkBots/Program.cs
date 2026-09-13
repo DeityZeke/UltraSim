@@ -263,7 +263,10 @@ internal sealed class BotHarness : IDisposable
             Thread.Sleep(1);
         }
         if (_bots.Any(static bot => bot.HasUnexpectedQueueDebt))
-            return Finish(false, "Input/session debt did not quiesce before measurement.");
+            return Finish(false,
+                "Input/session debt did not quiesce before measurement: " +
+                string.Join("; ", _bots.Where(static bot => bot.HasUnexpectedQueueDebt)
+                    .Take(8).Select(static bot => bot.DescribeUnexpectedQueueDebt())));
 
         _measurementStarted = Stopwatch.GetTimestamp();
         foreach (BotClient bot in _bots) bot.ResetTelemetryWindow();
@@ -931,6 +934,22 @@ internal sealed class BotClient : IDisposable
                      _inputScheduler.GetSnapshot().PendingObligations != 0 ||
                      _inputScheduler.GetSnapshot().SubmittedCompletionDebt != 0));
         }
+    }
+
+    internal string DescribeUnexpectedQueueDebt()
+    {
+        if (_session is null || State != BotLifetimeState.Active)
+            return $"bot={Id}:inactive";
+        RemotePlayableSessionSnapshot session = _session.GetSnapshot();
+        ClientWorldInputScheduleSnapshot input = _inputScheduler?.GetSnapshot() ?? default;
+        return $"bot={Id}:pendingCommand={_pendingCommand.Pending.Kind}/" +
+            $"{_pendingCommand.Pending.Sequence},playableRetained=" +
+            $"{session.Playable.CommandRetainedLocally},chatProof={session.Chat.HasPendingProof}," +
+            $"contentProof={session.Content.ProofRetained},continuous=" +
+            $"{input.ContinuousStatePending},obligations={input.PendingObligations}," +
+            $"completionDebt={input.SubmittedCompletionDebt},submitted=" +
+            $"{input.CommandsSubmitted},edgeCompleted={input.EdgeObligationsCompleted}," +
+            $"releaseCompleted={input.ReleaseOrStopCompleted}";
     }
 
     internal void StartScenario(long timestamp)

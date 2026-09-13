@@ -26,6 +26,11 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `concept-demo-pf4c-selected-chunk-bundling-cadence-2026-09-13.json` — exact-base and
+  implementation A/B/C/D Moving/Crowd matrix for standalone/message-129 and 1/2/4 versus 1/3/6,
+  single-hot/multi-hot/mixed-chaos controls, a 30-minute soak, actual 8-bot + 2-exported-Online
+  canary, bundle/MTU/per-tier freshness and per-step burst census, bounded diagnostic memory,
+  kernel cost, and the decision to accept bundling while retaining production cadence 1/2/4;
 - `concept-demo-pf4b-delta-proof-knowledge-efficiency-2026-09-12.json` — bounded
   Delta-120/Applied-Proof-130 census, exact later-proof knowledge advancement, proof-envelope
   occupancy, same-chunk outstanding/recovery overlap, matched Moving/Crowd runs, single-hot and

@@ -67,8 +67,11 @@ policy, render/input/submission clock separation, bounded authority enforcement,
 cadence proof. PF4A now closes the first measured
 optimization: exact bot action-outcome conservation plus an O(1) clean-recipient readiness path
 which eliminates quiet `ChunkPublication` traversal without changing ownership, cadence, AOI, or
-wire semantics. PF4B and later optimization, larger failure characterization, and external-human
-validation remain open. A post-F0.8 defensive UI correction also makes
+wire semantics. PF4B closes the exact Delta-120/Applied-Proof-130 knowledge census without a
+speculative proof delay, and PF4C closes beneficial selected-profile message-129 bundling while
+retaining the production 1/2/4 Immediate/Near/Far cadence. Later optimization, larger failure
+characterization, and external-human validation remain open. A post-F0.8 defensive UI correction
+also makes
 local shutdown independent from a saturated presentation queue, contains expected view-capacity
 rejection outside Game callbacks, retries local apply proofs without replaying renderer work,
 retains failed-close identity, and hardens compiled/native limits. It changes no demo authority,
@@ -1760,7 +1763,8 @@ then close:
     PF3 cadence/performance policy                                    CLOSED
     PF4A PF3 evidence integrity + quiet publication-work suppression   CLOSED
     PF4B Delta 120 / Applied Proof 130 analysis                         CLOSED (outcome C)
-    PF4C selected Game bundling / public-tier cadence                   NEXT
+    PF4C selected Game bundling / public-tier cadence                   CLOSED (bundling; cadence retained)
+    PF4D unreliable frame aggregation                                  NEXT
 ```
 
 Exact subsystem checkpoint labels should be chosen in the owning plan when the consumer reaches that

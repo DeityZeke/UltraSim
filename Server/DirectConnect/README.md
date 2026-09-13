@@ -87,6 +87,15 @@ knowledge-advancing Applied entries from non-advancing/negative results, and cur
 delivery debt. Unique-chunk saturation is explicit. These fields are diagnostic snapshots; they do
 not reset or advance application knowledge and do not include HTTP content bytes.
 
+PF4C selects beneficial message-129 composition for ordinary per-recipient ChunkPublication
+deltas/absences while retaining the existing 1/2/4 public-tier cadence. The defaults are
+`--public-representation=message129` and `--public-cadence=1/2/4`. Controlled evidence may select
+`--public-representation=standalone` or another positive ordered cadence such as `1/3/6`; these are
+measurement controls, not alternate ownership/AOI profiles. Snapshots remain 123/124/125, and
+bundled entries retain individual proof and recovery identity. Per-application Detailed reports
+include bundle packing, byte-limit closure, per-tier source-to-due/queue/proof freshness, and
+per-recipient authority-step publication/message/bundle/application-byte distributions.
+
 PF3 adds `--authority-hz=20|30|60`, `--maximum-input-hz`, `--recommended-input-hz`,
 `--input-burst`, `--input-burst-window-ms`, and `--network-service-delay-ms`. The authority publishes
 those finite semantics as an exact authenticated `ServerPerformanceProfile/v1` and waits for a fresh

@@ -62,6 +62,21 @@ A later exact Applied proof for the same application, publication epoch, chunk, 
 subscription can advance through its own exact ticket and retire older positive delivery debt
 whose truth it covers. Negative proofs remain independent. No optimistic sent cursor is introduced.
 
+PF4C composes the already-accepted message 129 with the selected `ChunkPublication` owner. One
+recipient's ordered due-work prefix may share an envelope only when it contains at least two
+ordinary Delta/Absence publications and the exact envelope is smaller than their standalone
+encoding. Each entry retains its own delivery identity, ledger ticket, application proof, and
+repair semantics. Snapshot Begin/Segment/Commit remains separate. Network queue rejection is
+atomic for the envelope: no entry becomes in-flight and no proof debt is published unless the
+whole message is admitted.
+
+The selected default is now message-129-when-beneficial with the existing Immediate/Near/Far
+1/2/4 authority-step cadence. Matched characterization found additional wire savings at 1/3/6,
+but that cadence is not selected until a production-client impairment path can prove freshness and
+recovery under loss/reordering. This is Game message composition above Network; it does not change
+Network frame aggregation, the Game protocol manifest, AOI, public ownership, or server-known-
+applied truth.
+
 Same-generation projection repair and authoritative generation replacement are
 different boundaries. Replacement creates a new `StateEpoch`, resets canonical
 replication identity, and invalidates old generation-local application facts.

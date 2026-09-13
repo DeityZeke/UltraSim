@@ -350,6 +350,7 @@ static void VerifyPf4cSelectedBundling(string root, string configuration)
             File.ReadAllText(Path.Combine(output, "accounting-summary.json")));
         JsonElement accounting = accountingDocument.RootElement;
         ulong bundles = 0, entries = 0, messagesSaved = 0, applied = 0;
+        ulong contradictory = 0, superseded = 0, unknownAfterSupersession = 0;
         foreach (JsonElement application in
                  accounting.GetProperty("RemoteApplications").EnumerateArray())
         {
@@ -363,13 +364,28 @@ static void VerifyPf4cSelectedBundling(string root, string configuration)
             bundles += bundle.GetProperty("Bundles").GetUInt64();
             entries += bundle.GetProperty("Entries").GetUInt64();
             messagesSaved += bundle.GetProperty("GameMessagesSaved").GetUInt64();
-            applied += proof.GetProperty("KnowledgeAdvancingEntries").GetUInt64();
-            ulong negative = proof.GetProperty("RejectedEntries").GetUInt64() +
-                proof.GetProperty("CapacityExceededEntries").GetUInt64() +
-                proof.GetProperty("ContradictoryEntries").GetUInt64() +
+            ulong received = proof.GetProperty("EntriesReceived").GetUInt64();
+            ulong appliedEntries = proof.GetProperty("AppliedEntries").GetUInt64();
+            ulong rejected = proof.GetProperty("RejectedEntries").GetUInt64();
+            ulong capacity = proof.GetProperty("CapacityExceededEntries").GetUInt64();
+            ulong contradictoryEntries =
+                proof.GetProperty("ContradictoryEntries").GetUInt64();
+            ulong malformedOrUnknown =
                 proof.GetProperty("MalformedOrUnknownEntries").GetUInt64();
+            ulong advancing = proof.GetProperty("KnowledgeAdvancingEntries").GetUInt64();
+            ulong nonAdvancing = proof.GetProperty("NonAdvancingAppliedEntries").GetUInt64();
+            ulong supersededEntries =
+                proof.GetProperty("SupersededOutstandingRetired").GetUInt64();
+            applied += advancing;
+            contradictory += contradictoryEntries;
+            superseded += supersededEntries;
+            unknownAfterSupersession += malformedOrUnknown;
             if (knowledge.GetProperty("Outstanding").GetProperty("HighWater").GetInt32() > 128 ||
-                negative != 0)
+                rejected != 0 || capacity != 0 || nonAdvancing != 0 ||
+                appliedEntries != advancing + nonAdvancing ||
+                received != appliedEntries + rejected + capacity + contradictoryEntries +
+                    malformedOrUnknown ||
+                malformedOrUnknown > supersededEntries)
                 throw new InvalidOperationException(
                     "PF4C selected-profile debt or proof outcomes diverged.");
             JsonElement perStep = readiness.GetProperty("OrdinaryPublicationsPerAuthorityStep");
@@ -402,7 +418,9 @@ static void VerifyPf4cSelectedBundling(string root, string configuration)
                 "PF4C did not exercise beneficial message-129 selected-profile bundling.");
         Console.WriteLine(
             $"PASS PF4C_SelectedBundling clients=50 bundles={bundles} entries={entries} " +
-            $"game_messages_saved={messagesSaved} knowledge_advancements={applied}");
+            $"game_messages_saved={messagesSaved} knowledge_advancements={applied} " +
+            $"contradictory={contradictory} superseded={superseded} " +
+            $"unknown_after_supersession={unknownAfterSupersession}");
     }
     finally
     {

@@ -8,7 +8,8 @@ PF3 now closes render/input/submission/authority/Network clock separation, authe
 performance policy, and real authority-side input-rate enforcement. PF4 measured optimization is
 now active: PF4A closes evidence-conserving bot action outcomes and quiet
 `ChunkPublication` work suppression; PF4B closes the bounded Delta/Applied-Proof knowledge census
-without accepting a speculative local knowledge optimization.
+without accepting a speculative local knowledge optimization; PF4C closes selected-profile
+message-129 bundling while retaining the proven 1/2/4 Immediate/Near/Far cadence.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -1752,6 +1753,33 @@ bound. Loss, reordering, reconnect, history recovery, and negative-proof behavio
 the maintained N1.2/N1.3 matrix and the new later-proof test. Exact long-window and exported-product
 results are recorded in the PF4B baseline.
 
+## PF4C — selected-profile message-129 bundling and public-tier cadence
+
+**Status: CLOSED — bundling accepted; cadence retained.** The selected production
+`ChunkPublication` adapter now groups two or more already-due ordinary Delta-120/Absence-121
+publications for one recipient into the existing message-129 envelope only when the exact encoded
+envelope is smaller than the standalone messages. A singleton remains the canonical standalone
+message, the 1,405-byte nonfragmenting limit is exact, and Snapshot-123/124/125 remains its own
+atomic Bulk transaction. Each bundled entry keeps its own delivery identity, ticket, application
+proof, recovery behavior, and server-known-applied transition. Failed Network admission publishes
+no partial delivery debt.
+
+The mandatory 50-client A/B/C/D matrix compared the exact pre-PF4C standalone 1/2/4 tree,
+bundled 1/2/4, standalone 1/3/6, and bundled 1/3/6 over matched ten-minute Moving and Crowd
+windows. Bundled 1/2/4 reduced server-to-client UDP payload by 32.45% in Moving and 28.23% in Crowd,
+and datagrams by 72.60% and 63.54%, respectively. Bundled 1/3/6 reduced the exact-base payload by
+44.91%/44.81% and datagrams by 73.07%/65.68%, but the repository does not yet have a production
+client-path impairment facility that can prove the extra cadence delay under loss and reordering.
+Therefore the production policy remains Immediate/Near/Far 1/2/4; 1/3/6 is recorded only as a
+future impairment-backed candidate.
+
+Permanent evidence also covers single-hot, multi-hot, and mixed-chaos controls, a 30-minute
+50-client mixed-chaos soak, and a five-minute 8-bot plus 2-actual-exported-Online canary. It records
+per-tier source-to-due/queue/proof freshness, per-recipient authority-step burst distributions,
+bundle packing/MTU utilization, bounded Off/Basic/Detailed memory, and zero-allocation warmed
+kernel probes. PF4C changes no public-state owner, AOI, participant bound, protocol identity,
+snapshot representation, Network frame aggregation, compression, or owner-state policy.
+
 ## PF4 — measured bandwidth/CPU optimization campaign
 
 Evaluate and accept only evidence-backed changes such as:
@@ -1915,8 +1943,8 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 15. Run mismatched-cadence correctness matrix. **CLOSED — PF3**
 16. Reconcile PF3 action accounting and suppress provably quiet publication work. **CLOSED — PF4A**
 17. Jointly evaluate Chunk Delta 120 and Chunk Applied Proof 130. **CLOSED — PF4B outcome C**
-18. Evaluate selected-profile Game bundling and public-tier cadence only from matched evidence. **NEXT — PF4C**
-19. Evaluate unreliable frame aggregation.
+18. Evaluate selected-profile Game bundling and public-tier cadence only from matched evidence. **CLOSED — PF4C; bundling accepted, cadence retained**
+19. Evaluate unreliable frame aggregation. **NEXT**
 20. Measure dense vs distributed AOI/fanout.
 21. Evaluate selective compression only where payload shape justifies it.
 22. Evaluate deeper wire compaction only if remaining measurements justify the complexity.

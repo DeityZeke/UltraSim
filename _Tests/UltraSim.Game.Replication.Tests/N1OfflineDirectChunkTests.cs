@@ -1246,12 +1246,23 @@ internal static class N1OfflineDirectChunkTests
         True(offMemory.BundleEntryAndRecordStagingBytes > 0);
         True(offMemory.BundleTicketAndMetadataStagingBytes > 0);
         Equal(0L, offMemory.RetainedDetailedDiagnosticBytes);
+        server.ConfigureTelemetry(GameTelemetryLevel.Basic);
+        RemoteChunkWorldStateServerSnapshot basicMemory = server.GetSnapshot();
+        Equal(0L, basicMemory.RetainedDetailedDiagnosticBytes);
         server.ConfigureTelemetry(GameTelemetryLevel.Detailed);
         RemoteChunkWorldStateServerSnapshot detailedMemory = server.GetSnapshot();
         True(detailedMemory.RetainedDetailedDiagnosticBytes > 0);
         server.ConfigureTelemetry(GameTelemetryLevel.Off);
         Equal(detailedMemory.RetainedDetailedDiagnosticBytes,
             server.GetSnapshot().RetainedDetailedDiagnosticBytes);
+        Console.WriteLine(
+            $"EVIDENCE PF4C memory bundle_scratch={offMemory.BundleScratchBytes} " +
+            $"entry_record_staging={offMemory.BundleEntryAndRecordStagingBytes} " +
+            $"ticket_metadata_staging={offMemory.BundleTicketAndMetadataStagingBytes} " +
+            $"fresh_off_diagnostic={offMemory.RetainedDetailedDiagnosticBytes} " +
+            $"fresh_basic_diagnostic={basicMemory.RetainedDetailedDiagnosticBytes} " +
+            $"detailed_diagnostic={detailedMemory.RetainedDetailedDiagnosticBytes} " +
+            $"detailed_to_off_retained={server.GetSnapshot().RetainedDetailedDiagnosticBytes}");
         server.ConfigureTelemetry(GameTelemetryLevel.Detailed);
         client.ConfigureTelemetry(NetworkTelemetryLevel.Detailed);
         fixture.Present(0, Position(0, 0, 2_100, 2_000), GameWorldPublicPrefabIds.Character);

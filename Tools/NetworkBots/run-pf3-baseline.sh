@@ -23,6 +23,7 @@ network_service_delay_ms=${14:-1}
 input_burst=${15:-10}
 input_burst_window_ms=${16:-100}
 checkpoint=${ULTRASIM_BOT_CHECKPOINT:-PF3}
+telemetry=${ULTRASIM_TELEMETRY:-Detailed}
 case "$checkpoint" in
     PF3) summary_schema=5 ;;
     PF4A) summary_schema=6 ;;
@@ -98,7 +99,7 @@ dotnet run --project Server/DirectConnect/UltraSim.Server.DirectConnect.csproj \
     --network-service-delay-ms="$network_service_delay_ms" \
     --public-representation="${ULTRASIM_PUBLIC_REPRESENTATION:-message129}" \
     --public-cadence="${ULTRASIM_PUBLIC_CADENCE:-1/2/4}" \
-    --telemetry=Detailed >"$output_dir/server.log" 2>&1 &
+    --telemetry="$telemetry" >"$output_dir/server.log" 2>&1 &
 server_pid=$!
 wait_file "$server_ready" 60
 
@@ -112,7 +113,7 @@ bot_arguments=(
     --measurement-release-file="$measurement_release"
     --measurement-complete-file="$measurement_complete"
     --ready-file="$bot_ready" --release-file="$bot_release"
-    --summary-file="$bot_summary" --telemetry=Detailed
+    --summary-file="$bot_summary" --telemetry="$telemetry"
     --checkpoint="$checkpoint"
 )
 if [[ "$scenario" == "sustained-input" ]]; then

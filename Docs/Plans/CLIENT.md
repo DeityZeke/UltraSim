@@ -36,7 +36,9 @@ proof. PF4A now closes exact headless-action conservation and the bounded clean-
 entering chunk scheduling; all dirty, interest, debt, retry, recovery, cadence, and source-lineage
 wake conditions remain explicit. PF4B closes its bounded Delta 120 / Applied Proof 130 knowledge
 census as outcome C: no client-local proof/delta optimization was worth weakening immediate exact
-knowledge. Selected-profile Game bundling/public-tier cadence is the next measured PF4 question.
+knowledge. PF4C now closes selected-profile message-129 bundling with exact per-entry proof and
+recovery while retaining the production 1/2/4 public-tier cadence; 1/3/6 remains an impairment-
+backed future candidate rather than an accepted policy change.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -2698,7 +2700,8 @@ PF2.5 replication ownership reconciliation + PF3 observability          CLOSED
 PF3 cadence/performance policy                                           CLOSED
 PF4A action evidence + quiet publication work suppression                CLOSED
 PF4B Delta/proof knowledge census                                           CLOSED (outcome C)
-PF4C+ Game bundling/cadence, tuning, ObjectScript, human testing            OPEN
+PF4C selected Game bundling / public-tier cadence                           CLOSED (bundling; cadence retained)
+PF4D+ frame aggregation, tuning, ObjectScript, human testing                OPEN
         |
         v
 repository generalization / extraction readiness

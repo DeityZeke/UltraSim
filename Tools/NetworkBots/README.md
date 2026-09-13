@@ -1,6 +1,6 @@
 # UltraSim headless Network bots
 
-`UltraSim.NetworkBots` is the maintained PF1/PF2/PF3/PF4A/PF4B load-generation and measurement client. One CLR process owns many
+`UltraSim.NetworkBots` is the maintained PF1/PF2/PF3/PF4A/PF4B/PF4C load-generation and measurement client. One CLR process owns many
 independent ordinary remote client lifetimes and advances them from one bounded central pump. Each
 bot has its own UDP transport, authenticated session, application epoch, profile/content proof,
 guest/control identity, Client Core state, command sequence, reconnect lifetime, and deterministic
@@ -321,4 +321,34 @@ protocol, or authority policy. The focused verifier runs a shorter real-UDP cens
 ```bash
 dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj \
   -c Release -- --pf4b-only
+```
+
+## PF4C selected-profile bundling and cadence matrix
+
+Schema v8 (`--checkpoint=PF4C`) preserves PF4A action conservation and PF4B knowledge/proof census,
+then adds client message-129 bundle receipt/apply counts and semantic-application intervals. The
+server report supplies per-tier source-to-due, due-to-Network-queue, source-to-Network-queue, and
+source-to-proof authority-step distributions, plus exact bundle entry/byte/MTU and per-recipient
+authority-step burst distributions.
+
+The maintained wrapper is:
+
+```bash
+ULTRASIM_PUBLIC_REPRESENTATION=message129 \
+ULTRASIM_PUBLIC_CADENCE=1/2/4 \
+Tools/NetworkBots/run-pf4c-baseline.sh moving 600s \
+  /tmp/ultrasim-pf4c-moving-50 50 500501 60s /tmp/ultrasim-pf4c-cache
+```
+
+Set `ULTRASIM_PUBLIC_REPRESENTATION=standalone` for the physical-representation control and
+`ULTRASIM_PUBLIC_CADENCE=1/3/6` for the characterized cadence candidate. `ULTRASIM_TELEMETRY` may
+select `Off`, `Basic`, or `Detailed`; PF4C evidence uses Detailed except for explicit bounded-memory
+controls. The accepted production combination is message129 plus 1/2/4. Single-entry candidates
+remain standalone and snapshots never enter message 129.
+
+The focused real-UDP plus exported-product gate is:
+
+```bash
+dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj \
+  -c Release -- --pf4c-only
 ```
