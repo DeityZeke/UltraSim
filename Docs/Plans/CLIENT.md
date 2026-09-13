@@ -52,6 +52,10 @@ Dirty/Maintained controls. It confirms outcome B while correcting the earlier fi
 the prior PF4E dense fixture already used message-129 bundling, and its cost follows
 ChunkPublication's semantic unit cost multiplied by useful chunk-publication count. The three
 Chunk workloads prove there is no context-free `<128` profile boundary.
+PF4E-R2 now closes the measured server CPU follow-up as outcome A: bundled Chunk publications use
+one trusted bounded semantic materialization and direct message-129 staging instead of an internal
+standalone encode/reparse cycle. The exported client's decoder, canonical standalone fallback,
+per-entry proof semantics, wire bytes, 1/2/4 cadence, and all Network policy remain unchanged.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -2718,6 +2722,7 @@ PF4C-R1 singleton MTU boundary repair                                        CLO
 PF4D unreliable Network-frame aggregation                                   CLOSED (cross-lane cap two)
 PF4E dense/distributed fanout + remaining-cost attribution                  CLOSED (outcome B)
 PF4E-R1 rated replication scaling reconciliation                            CLOSED (outcome B)
+PF4E-R2 ChunkPublication CPU efficiency                                     CLOSED (outcome A)
 selective compression experiment, then remaining pre-freeze work            NEXT
         |
         v

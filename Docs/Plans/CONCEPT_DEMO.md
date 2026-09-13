@@ -81,8 +81,12 @@ Dirty/Maintained scaling class and confirms outcome B for the selected profile w
 PF4E inference: the existing dense fixture was already message-129 bundled. Chunk semantic cost and
 the number of useful chunk publications, not a lack of Game bundling, explain its curve. `<128` is
 not a universal ChunkPublication boundary; the existing, explicitly unbatchable, and
-production-shaped fixtures have distinct boundaries. Later optimization, larger failure
-characterization, and external-human validation remain open. A post-F0.8 defensive UI correction
+production-shaped fixtures have distinct boundaries. PF4E-R2 then removes the measured
+bundled-publication encode/reparse cycle without changing
+semantic work, canonical bytes, proof identity, AOI, cadence, or the exported client decoder. The
+production-shaped 128 inclusive Network-plus-replication p95 now clears the 4 ms subsystem budget;
+selective compression remains a later bandwidth experiment, not part of this CPU repair. Larger
+failure characterization and external-human validation remain open. A post-F0.8 defensive UI correction
 also makes
 local shutdown independent from a saturated presentation queue, contains expected view-capacity
 rejection outside Game callbacks, retries local apply proofs without replaying renderer work,
@@ -1780,6 +1784,7 @@ then close:
     PF4D unreliable frame aggregation                                  CLOSED (cross-lane cap two)
     PF4E dense/distributed fanout + remaining-cost attribution          CLOSED (outcome B)
     PF4E-R1 rated replication scaling reconciliation                    CLOSED (outcome B)
+    PF4E-R2 ChunkPublication CPU efficiency                             CLOSED (outcome A)
     selective compression experiment                                   NEXT
 ```
 

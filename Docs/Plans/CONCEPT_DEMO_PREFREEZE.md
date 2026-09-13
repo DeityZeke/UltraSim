@@ -18,8 +18,12 @@ the former “unbatchable PF4E fixture” explanation is corrected: that fixture
 message-129 bundling, while ChunkPublication's per-publication semantics and the number of useful
 chunk publications drive its CPU curve. Current 50-client active wire cost remains
 payload-dominated, so a bounded selective-compression experiment is the next bandwidth candidate;
-no compression, self-public suppression, AOI, cadence, schema, or participant-limit change is part
-of PF4E or PF4E-R1.
+PF4E-R2 then closes ChunkPublication CPU efficiency as outcome A. The selected bundled path now
+materializes and validates trusted Game-owned Delta records once and writes message 129 directly,
+instead of encoding standalone 120 bytes, parsing them back, and encoding 129. The canonical
+standalone fallback, client/untrusted validation, delivery/proof transaction, wire bytes, and all
+selected production policies remain exact. No compression, self-public suppression, AOI, cadence,
+schema, or participant-limit change is part of PF4E, PF4E-R1, or PF4E-R2.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -1917,6 +1921,36 @@ the exact cap-one historical-policy controls are retained separately alongside i
 compression remains the next bandwidth experiment, not a proposed fix for ChunkPublication CPU
 scaling.
 
+## PF4E-R2 — ChunkPublication CPU efficiency
+
+**Status: CLOSED — outcome A, redundant transform removed.** Detailed attribution first measured
+the selected bundled server path. At production-shaped 128, discarded canonical standalone encode
+plus canonical reparse consumed 33.5% of schedule/codec/queue time; repeated bundle-side validation
+and hashing added another material cost. The accepted direct-staging path performs one bounded
+World-to-remote record materialization, validates and hashes that trusted internal representation
+once, and writes either the exact canonical standalone representation or message 129 after the
+unchanged exact benefit/MTU decision.
+
+The exact same-machine 128 production-shaped A/B retains 276,480 semantic publications and proofs,
+36,159 bundles, identical Game/Network bytes, and the same semantic digest. Schedule p95 falls from
+3.709 ms to 1.916 ms; inclusive Network-plus-replication p95 falls from 4.903 ms to 3.228 ms and
+therefore clears the strict 4.000 ms subsystem budget. Mean schedule cost falls 53.1%, from
+approximately 3.194 to 1.499
+microseconds per publication. The unbatchable control is essentially unchanged, correctly
+localizing the improvement to bundled preparation.
+
+External bytes still receive complete canonical decode validation. Prepared records are an
+internal Game friend seam and cannot be supplied by clients. Queue refusal still commits no
+delivery ID, debt, proof obligation, or cursor. Every bundle entry retains independent exact proof
+identity and retirement.
+
+Detailed census found substantial identical immutable delta-range reuse across recipients, but no
+shared cache/materialization owner was added: direct staging already meets the current 128 budget,
+and that broader memory/lifetime trade requires a separately justified checkpoint. The selected
+policy remains `ChunkPublication + Message129WhenBeneficial + 1/2/4`, cross-lane unreliable cap two,
+Game manifest v28, transport revision 2, and participant cap 64. Permanent evidence is in
+`_Benchmarks/Baselines/concept-demo-pf4e-r2-chunk-publication-cpu-efficiency-2026-09-13.json`.
+
 ## PF4 — measured bandwidth/CPU optimization campaign
 
 Evaluate and accept only evidence-backed changes such as:
@@ -2084,16 +2118,17 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 19. Evaluate unreliable frame aggregation. **CLOSED — PF4D; cross-lane cap two accepted**
 20. Measure dense vs distributed AOI/fanout. **CLOSED — PF4E; outcome B**
 21. Reconcile selected-profile rated scaling against current/historical controls. **CLOSED — PF4E-R1; outcome B**
-22. Evaluate selective compression only where payload shape justifies it. **NEXT — bounded experiment, not pre-accepted**
-23. Evaluate deeper wire compaction only if remaining measurements justify the complexity.
-24. Run correctness, soak, stress, migration, Chat, UI, fall, reconnect, and impairment swarms.
-25. Run mixed headless + exported Godot clients.
-26. Run external human Concept Demo validation.
-27. Choose/document the default deployment-performance policy.
-28. Record decisive performance/bandwidth/failure evidence.
-29. Full exact-tree verifier and export closure.
-30. Freeze/tag the Concept Demo baseline.
-31. Begin the separate extraction/genericization/ecosystem roadmap.
+22. Remove measured redundant ChunkPublication preparation. **CLOSED — PF4E-R2; outcome A**
+23. Evaluate selective compression only where payload shape justifies it. **NEXT — bounded experiment, not pre-accepted**
+24. Evaluate deeper wire compaction only if remaining measurements justify the complexity.
+25. Run correctness, soak, stress, migration, Chat, UI, fall, reconnect, and impairment swarms.
+26. Run mixed headless + exported Godot clients.
+27. Run external human Concept Demo validation.
+28. Choose/document the default deployment-performance policy.
+29. Record decisive performance/bandwidth/failure evidence.
+30. Full exact-tree verifier and export closure.
+31. Freeze/tag the Concept Demo baseline.
+32. Begin the separate extraction/genericization/ecosystem roadmap.
 ```
 
 The intended outcome is not merely a demo that works.

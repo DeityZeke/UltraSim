@@ -26,6 +26,11 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `concept-demo-pf4e-r2-chunk-publication-cpu-efficiency-2026-09-13.json` — attribution-first
+  removal of the server-internal standalone-120 encode/reparse/message-129 encode cycle, exact
+  canonical direct-staging microbench, probes-off 64/96/128/192 rated A/B, semantic/wire equality,
+  identical delta-range reuse census, Moving/Crowd/64-client controls, exported-client impairment,
+  long mixed-chaos soak, unchanged selected policy, and outcome A;
 - `concept-demo-pf4e-dense-distributed-fanout-attribution-2026-09-13.json` —
   corrected-window Quiet/Moving/Crowd product attribution, exact source-record-to-UDP cost funnels,
   fanout/topology/churn controls, per-client fairness/freshness/debt, self-public consumer audit,

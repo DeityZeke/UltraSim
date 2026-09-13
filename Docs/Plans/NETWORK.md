@@ -4,7 +4,8 @@ Status: **accepted / consumption-ready**, including physical Network capability 
 PF2.5 replication-ownership/observability reconciliation, PF3 authenticated performance policy,
 PF4A quiet publication-work suppression, PF4B chunk-knowledge census, PF4C selected Game-message
 bundling, the PF4C-R1 singleton MTU repair, PF4D unreliable Network-frame aggregation, PF4E
-dense/distributed fanout plus remaining-cost attribution, and PF4E-R1 rated scaling reconciliation,
+dense/distributed fanout plus remaining-cost attribution, PF4E-R1 rated scaling reconciliation,
+and PF4E-R2 direct ChunkPublication staging,
 as of
 2026-09-13.
 
@@ -77,6 +78,16 @@ operation-count decomposition assigns about 81.2% of the mean gap to publication
 to the unit premium. This confirms a real selected-profile CPU cost without indicating a product
 regression. See
 [`concept-demo-pf4e-r1-rated-replication-scaling-reconciliation-2026-09-13.md`](../../_Benchmarks/Baselines/concept-demo-pf4e-r1-rated-replication-scaling-reconciliation-2026-09-13.md).
+
+PF4E-R2 removes one measured server-internal representation cycle without changing this contract.
+For a due Delta, the remote composition now materializes and validates the trusted Game record set
+once. It writes canonical standalone 120 when selected, or writes those same validated records
+directly into message 129 when bundling is beneficial and fits. It no longer encodes temporary 120
+bytes and parses them back merely to stage a bundle. Untrusted readers retain full validation;
+queue admission, per-entry delivery debt/proof, and cursor advancement remain transactional and
+recipient-local. The production-shaped 128 inclusive Network-plus-replication p95 moves from 4.903
+ms to 3.228 ms in the accepted A/B with identical semantic and wire work. Policy, protocol
+manifest, transport revision, AOI, cadence, and participant bounds are unchanged.
 
 This document is the current Network/replication architecture contract. Historical
 checkpoint detail remains in git and immutable `_Benchmarks/Baselines` artifacts.

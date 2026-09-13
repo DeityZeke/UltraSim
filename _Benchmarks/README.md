@@ -402,6 +402,35 @@ dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerificati
 Accepted evidence is in
 [`concept-demo-pf4e-r1-rated-replication-scaling-reconciliation-2026-09-13.md`](Baselines/concept-demo-pf4e-r1-rated-replication-scaling-reconciliation-2026-09-13.md).
 
+## PF4E-R2 ChunkPublication CPU efficiency
+
+PF4E-R2 adds an opt-in detailed decomposition and a warmed canonical direct-staging microbench.
+The rated A/B must still use the PF4E-R1 command with `--probes-off`; detailed attribution and its
+reuse census are intentionally colder work and must not be quoted as the production rating.
+
+```bash
+dotnet run --project _Benchmarks/UltraSim.Network.V3ComparisonAdapter -c Release -- \
+  --p03-whole-flow --pf4e-r2-staging-microbench \
+  --micro-warmup=1000 --micro-iterations=5000 --micro-samples=7 \
+  --output=_Benchmarks/results/pf4e-r2-staging-microbench.json
+
+dotnet run --project _Benchmarks/UltraSim.Network.V3ComparisonAdapter -c Release -- \
+  --p03-whole-flow --pf4e-r2-chunk-cpu \
+  --implementation-label=local-attribution --warmup=30 --ticks=270 \
+  --populations=64,96,128 \
+  --output=_Benchmarks/results/pf4e-r2-attribution.json
+
+dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj \
+  -c Release -- --pf4e-r2-only
+```
+
+The microbench compares old canonical encode→parse→bundle encode with direct semantic staging for
+standalone Delta, 2/4/8-entry and near-MTU bundles, and Absence. It requires exact encoded-byte
+equality and zero warmed allocation. The attribution report includes subscription lookup,
+readiness/cadence, source read/copy, materialization, standalone/reparse/bundle stages, Network
+queue, bookkeeping, proof lookup/validation/retirement, and an exact bounded identical-delta-range
+census. See the PF4E-R2 accepted baseline for the exact A/B and product controls.
+
 ## Comparability
 
 Every cross-generation row is classified:

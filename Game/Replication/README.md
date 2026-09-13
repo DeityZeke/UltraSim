@@ -946,3 +946,17 @@ also corrects the prior fixture interpretation: the existing PF4E dense workload
 more useful chunk publications, plus a 1.17x mean per-publication premium. Explicit unbatchable and
 localized multichunk controls prove recipient count alone is not a ChunkPublication capacity
 statement. No replication policy changes in PF4E-R1.
+
+PF4E-R2 attributes and removes the bundled path's redundant internal transform. A due Delta is now
+materialized into bounded remote records once, checked and content-hashed once, then consumed by
+either the canonical standalone writer or the prepared message-129 writer after exact
+representation selection. Previously the bundled path encoded canonical message 120, parsed and
+validated those bytes back into staging, and encoded message 129. This prepared seam is internal to
+the Game assemblies; decoded client/network bytes still traverse the complete canonical reader.
+
+The optimization does not move or merge semantic identity. Each entry retains its own delivery ID,
+chunk lineage, revision/history floor, result, hash, outstanding debt, and proof. Network refusal
+still leaves all of those uncommitted. Exact 120/121 fallback and the 1,372/1,374-byte singleton MTU
+boundary remain permanent gates. The accepted production-shaped 128 run reduces mean scheduling
+CPU by 53.1% and inclusive Network-plus-replication p95 from 4.903 ms to 3.228 ms with identical
+wire bytes, proof counts, final cursors, and semantic digest.
