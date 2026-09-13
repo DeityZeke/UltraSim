@@ -96,7 +96,10 @@ internal static class N03ProtocolTests
             MinimumRetransmissionSteps = 2,
         };
         using RawPeerPair pair = new(s_manifest, limits, s_datagrams);
+        long freshOffReservedBytes = pair.Sender.GetSnapshot().ReservedBytes;
         pair.Sender.ConfigureTelemetry(NetworkTelemetryLevel.Detailed);
+        long detailedReservedBytes = pair.Sender.GetSnapshot().ReservedBytes;
+        True(detailedReservedBytes > freshOffReservedBytes);
         NetworkTrafficSnapshot start = pair.Sender.GetTrafficSnapshot();
         byte[] payload = [1, 2, 3, 4, 5];
         Equal(NetworkQueueStatus.Accepted,
@@ -127,6 +130,8 @@ internal static class N03ProtocolTests
         Equal(5, message.SentPayloadSizes.MaximumPayloadBytes);
         True(message.SentPayloadSizes.MaximumIsExact);
         Equal(delta.SumMessages(), delta.GetLane(NetworkLane.Control));
+        pair.Sender.ConfigureTelemetry(NetworkTelemetryLevel.Off);
+        Equal(freshOffReservedBytes, pair.Sender.GetSnapshot().ReservedBytes);
     }
 
     private static void WireAccountingCountsAggregatedDatagramOnce()
