@@ -1,6 +1,6 @@
 # UltraSim headless Network bots
 
-`UltraSim.NetworkBots` is the maintained PF1/PF2/PF3/PF4A/PF4B/PF4C/PF4D load-generation and measurement client. One CLR process owns many
+`UltraSim.NetworkBots` is the maintained PF1/PF2/PF3/PF4A/PF4B/PF4C/PF4D/PF4E/PF4F load-generation and measurement client. One CLR process owns many
 independent ordinary remote client lifetimes and advances them from one bounded central pump. Each
 bot has its own UDP transport, authenticated session, application epoch, profile/content proof,
 guest/control identity, Client Core state, command sequence, reconnect lifetime, and deterministic
@@ -425,3 +425,31 @@ For the accepted longer native export/impairment run, add
 actual Online artifact, starts two instances behind independent deterministic UDP proxies, and
 keeps eight ordinary headless clients on the same dedicated authority. Output may be retained with
 `--pf4e-native-evidence-output=/tmp/ultrasim-pf4e-native`.
+
+## PF4F selective message-129 compression
+
+Schema v11 (`--checkpoint=PF4F`) retains the preceding action, knowledge, freshness, proof, and
+Network aggregation evidence and adds per-client compressed representation bytes, recovered
+canonical bytes, malformed counts, and decompression timing. The server-side baseline separately
+records attempts, threshold skips, selections, failures, exact direct saving, and compression time.
+
+The maintained product A/B wrapper is:
+
+```bash
+ULTRASIM_PUBLIC_COMPRESSION=off \
+Tools/NetworkBots/run-pf4f-baseline.sh moving 600s \
+  /tmp/ultrasim-pf4f-moving-canonical 50 400614 60s /tmp/ultrasim-pf4f-cache
+
+ULTRASIM_PUBLIC_COMPRESSION=lz4 \
+Tools/NetworkBots/run-pf4f-baseline.sh moving 600s \
+  /tmp/ultrasim-pf4f-moving-compressed 50 400614 60s /tmp/ultrasim-pf4f-cache
+```
+
+Use `crowd` with seed `400615` for the accepted dense pair. Compression remains a Game
+representation layered after unchanged canonical message-129 composition; the bot uses the same
+ClientOnly decoder as exported Online. The focused real-UDP/export/impairment gate is:
+
+```bash
+dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj \
+  -c Release -- --pf4f-only
+```

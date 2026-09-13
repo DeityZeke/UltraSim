@@ -45,8 +45,8 @@ PF4D now closes the later physical representation: the same exported Online Clie
 bounded cross-lane cap-two unreliable aggregates with no added wait, while reliable traffic,
 per-frame semantics, Game replication ownership, AOI, and the accepted 1/2/4 cadence remain intact.
 PF4E now closes dense/distributed fanout, per-recipient fairness, exact self-public, payload-shape,
-and end-to-end cost attribution on that unchanged client path. The resulting next candidate is a
-bounded selective-compression experiment; no client codec or policy change has yet been accepted.
+and end-to-end cost attribution on that unchanged client path. Its result justified the later
+bounded selective-compression experiment now accepted by PF4F below.
 PF4E-R1 additionally reconciles the selected-profile rating against current and historical
 Dirty/Maintained controls. It confirms outcome B while correcting the earlier fixture explanation:
 the prior PF4E dense fixture already used message-129 bundling, and its cost follows
@@ -56,6 +56,13 @@ PF4E-R2 now closes the measured server CPU follow-up as outcome A: bundled Chunk
 one trusted bounded semantic materialization and direct message-129 staging instead of an internal
 standalone encode/reparse cycle. The exported client's decoder, canonical standalone fallback,
 per-entry proof semantics, wire bytes, 1/2/4 cadence, and all Network policy remain unchanged.
+PF4F now closes bounded selective message-129 compression as outcome B. The ClientOnly Online path
+uses fixed retained scratch to recover independently compressed Game message 148 into exact
+canonical message-129 bytes, then invokes the existing canonical reader. The selected five-byte
+LZ4-block wrapper is attempted only at 384 canonical bytes and selected only for at least 32 bytes
+of net saving. Malformed or oversized input cannot allocate peer-sized storage or mutate Client
+Core. Game manifest v29 changes; transport revision 2 and all client capability boundaries remain
+unchanged.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -2723,7 +2730,8 @@ PF4D unreliable Network-frame aggregation                                   CLOS
 PF4E dense/distributed fanout + remaining-cost attribution                  CLOSED (outcome B)
 PF4E-R1 rated replication scaling reconciliation                            CLOSED (outcome B)
 PF4E-R2 ChunkPublication CPU efficiency                                     CLOSED (outcome A)
-selective compression experiment, then remaining pre-freeze work            NEXT
+PF4F bounded selective message-129 compression                              CLOSED (outcome B)
+remaining pre-freeze work                                                    NEXT
         |
         v
 repository generalization / extraction readiness

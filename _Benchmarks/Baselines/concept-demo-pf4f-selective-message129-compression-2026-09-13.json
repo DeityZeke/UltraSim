@@ -1,0 +1,340 @@
+{
+  "schema": "ultrasim-concept-demo-pf4f-selective-message129-compression-v1",
+  "checkpoint": "PF4F",
+  "status": "CLOSED — outcome B; bounded selective threshold selected",
+  "capturedAtUtc": "2026-09-13",
+  "startingHead": "b3febc9978a41979598e21acdad1cecf61a48d36",
+  "measurementBase": "cbc0799b57e6d9bf3e0584527c2d10dadad55353",
+  "acceptedImplementationCommit": "cbc0799b57e6d9bf3e0584527c2d10dadad55353",
+  "pf4eR2Implementation": "5ab7f3317fd0815b9f0b0f39beaf1de427c8348b",
+  "featureCompleteCorrectnessCandidate": {
+    "sha": "af9fcb740c02eb08efa8d4985d929b50b135504e",
+    "changed": false,
+    "reason": "PF4F is a representation/performance policy. No pre-existing product correctness defect was discovered or repaired."
+  },
+  "environment": {
+    "configuration": "Release",
+    "runtime": ".NET 8.0.29",
+    "operatingSystem": "Unix 7.1.5.1",
+    "processor": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "logicalProcessors": 16,
+    "stopwatchFrequency": 1000000000,
+    "networkFlavors": {
+      "server": "ServerOnly",
+      "botsAndOnline": "ClientOnly",
+      "singlePlayer": "none"
+    }
+  },
+  "frozenProductionSemantics": {
+    "publicOwner": "ChunkPublication",
+    "bundlePolicy": "Message129WhenBeneficial",
+    "immediateNearFarCadence": [1, 2, 4],
+    "unreliableAggregation": "CrossLane cap 2",
+    "authorityHz": 60,
+    "participantCap": 64,
+    "transportRevision": 2,
+    "unchanged": [
+      "AOI",
+      "MTU",
+      "canonical bundle composition",
+      "bundle entry count/order",
+      "delivery/proof identities",
+      "recovery",
+      "Network refusal transaction",
+      "loss domain"
+    ]
+  },
+  "protocol": {
+    "oldGameManifestVersion": 28,
+    "newGameManifestVersion": 29,
+    "newGameManifestFingerprintHex": "bcffee5ecb21ff68",
+    "newGameManifestFingerprintDecimal": 13618865889094008680,
+    "registeredMessages": 49,
+    "canonicalMessage": {
+      "id": 129,
+      "key": "ultrasim.game.dirty-chunk-bundle",
+      "version": 1,
+      "stillValid": true
+    },
+    "compressedRepresentation": {
+      "id": 148,
+      "key": "ultrasim.game.compressed-dirty-chunk-bundle",
+      "version": 1,
+      "lane": "WorldState",
+      "delivery": "Unreliable",
+      "retention": "IndependentState"
+    },
+    "transportRevisionChanged": false,
+    "compatibility": "Exact Game-manifest compatibility remains required; canonical fallback is for current v29 peers and does not imply silent v28 compatibility."
+  },
+  "representation": {
+    "codec": "ultrasim-lz4-block-v1",
+    "codecDependency": "managed source in Game.Protocol; no new native dependency",
+    "independentBlocks": true,
+    "dynamicDictionary": false,
+    "wrapperBytes": 5,
+    "wrapperFields": [
+      "format/version byte",
+      "exact decoded canonical length uint16 network order",
+      "compressed length uint16 network order"
+    ],
+    "maximumCompressedInputBytes": 1400,
+    "maximumDecodedCanonicalBytes": 1405,
+    "maximumCompleteCompressedRepresentationBytes": 1405,
+    "serverHashScratchEntries": 4096,
+    "serverRetainedCompressionScratchBytesPerRecipient": 9597,
+    "clientRetainedDecodeScratchBytes": 1405,
+    "decodePipeline": "validate wrapper -> bounded decompress -> require exact output and full input consumption -> existing canonical message-129 reader",
+    "fallback": "exact canonical message 129",
+    "queueRule": "select one representation, attempt Network admission once; refusal does not try the other representation"
+  },
+  "oracle": {
+    "raw": "_Benchmarks/results/pf4f-2026-09-13/compression-oracle.json",
+    "seed": 1346778182,
+    "messages": 1024,
+    "corpusSha256": "2BD8B96DB20E786792FEE8C6E52C128A4375BA3121DC65A18B9875A1F1BA7051",
+    "canonicalBytes": 1002133,
+    "workloads": [
+      {"name": "moving", "messages": 256, "canonicalBytes": 154504, "minimumBytes": 229, "maximumBytes": 1153, "entries": 1022, "records": 2042},
+      {"name": "crowd", "messages": 256, "canonicalBytes": 300230, "minimumBytes": 841, "maximumBytes": 1330, "entries": 2406, "records": 3532},
+      {"name": "mixed-chaos", "messages": 256, "canonicalBytes": 224071, "minimumBytes": 152, "maximumBytes": 1366, "entries": 1375, "records": 3200},
+      {"name": "production-shaped", "messages": 256, "canonicalBytes": 323328, "minimumBytes": 1185, "maximumBytes": 1341, "entries": 1920, "records": 4736}
+    ],
+    "candidates": [
+      {
+        "codec": "ultrasim-lz4-block-v1",
+        "completeBytes": 469123,
+        "completeRatio": 0.4681244904618449,
+        "netBytesSaved": 533010,
+        "profitableMessagePercent": 100.0,
+        "encodeNanoseconds": {"mean": 7155.70, "p50": 8070, "p95": 9620, "p99": 12920, "max": 115009},
+        "decodeNanoseconds": {"mean": 5341.53, "p50": 6150, "p95": 6870, "p99": 9970, "max": 101709},
+        "encodeAllocatedBytes": 0,
+        "decodeAllocatedBytes": 0
+      },
+      {
+        "codec": "brotli-q1-w10",
+        "completeBytes": 467820,
+        "completeRatio": 0.46682426384521813,
+        "netBytesSaved": 534313,
+        "encodeNanoseconds": {"mean": 12376.95, "p50": 14050, "p95": 16770, "p99": 19250, "max": 36939},
+        "decodeNanoseconds": {"mean": 5261.94, "p50": 5850, "p95": 6820, "p99": 8510, "max": 1335468},
+        "totalAllocatedBytes": 524704
+      },
+      {
+        "codec": "brotli-q4-w10",
+        "completeBytes": 309772,
+        "completeRatio": 0.3091126626904812,
+        "netBytesSaved": 692361,
+        "encodeNanoseconds": {"mean": 18983.89, "p50": 19470, "p95": 24040, "p99": 27379, "max": 86890},
+        "decodeNanoseconds": {"mean": 3373.50, "p50": 3350, "p95": 4530, "p99": 5140, "max": 8350},
+        "totalAllocatedBytes": 524288
+      },
+      {
+        "codec": "zlib-fastest-cold-reference",
+        "completeBytes": 391757,
+        "completeRatio": 0.390923160897805,
+        "netBytesSaved": 610376,
+        "encodeNanoseconds": {"mean": 3965.28, "p50": 3800, "p95": 4570, "p99": 5970, "max": 1624246},
+        "decodeNanoseconds": {"mean": 1722.83, "p50": 1730, "p95": 2260, "p99": 2700, "max": 8910},
+        "totalAllocatedBytes": 20424064
+      }
+    ],
+    "selectionReason": "LZ4 retained material compression with lower encode CPU than Brotli, zero warmed managed allocation, no native/export dependency, and bounded caller-owned state. Brotli q4's stronger ratio did not justify its CPU/allocation trade for this checkpoint; zlib remained cold-only because of per-message allocation."
+  },
+  "selectedPolicy": {
+    "minimumCanonicalBytes": 384,
+    "minimumNetSavingsBytes": 32,
+    "wrapperIncludedInSaving": true,
+    "oracleAttemptedMessages": 946,
+    "oracleSelectedMessages": 946,
+    "oracleSelectedCanonicalBytes": 979811,
+    "oracleSelectedRepresentationBytes": 455853,
+    "oracleNetBytesSaved": 523958,
+    "oracleSelectedRatio": 0.4652458484340347,
+    "reason": "Compared with threshold 128, threshold 384 avoids 78 of 1024 codec invocations while retaining 98.30% of available byte saving. A 32-byte minimum prevents future marginal encodings even though every sampled >=384 message exceeded it."
+  },
+  "focusedCorrectness": {
+    "canonicalEqualityFixture": {"canonicalBytes": 1185, "compressedBytes": 574, "netSaved": 611, "warmedAllocatedBytes": 0},
+    "transactionalRefusal": {"refusedAttempts": 1, "retrySelected": 1, "canonicalBytes": 841, "compressedBytes": 420, "proofs": 8, "finalDebt": 0},
+    "impairment": {"messagesSent": 8, "independentMessagesReceived": 7, "duplicatesObserved": 48, "lossReorderDelayCorruption": "converged", "proofs": 8, "finalDebt": 0},
+    "hostileCases": [
+      "zero decoded length",
+      "decoded length above cap",
+      "compressed input above cap",
+      "truncated stream",
+      "random garbage and 256 deterministic fuzz inputs",
+      "valid prefix plus garbage",
+      "wrong decoded length smaller/larger",
+      "malformed canonical 129 after successful decompression",
+      "duplicate delivery IDs and duplicate chunk identity",
+      "invalid lineage",
+      "bad entry count/offset/record structure"
+    ],
+    "pf4cR1Boundary": {"canonicalDelta120Bytes": 1372, "singleEntry129Bytes": 1374, "canonicalFallbackRetained": true},
+    "gameReplicationTests": "156/156 passed",
+    "productionMessageClassificationComplete": true
+  },
+  "ratedProductionShaped": {
+    "rawCanonical": "_Benchmarks/results/pf4f-2026-09-13/rated-canonical.json",
+    "rawCompressed": "_Benchmarks/results/pf4f-2026-09-13/rated-compressed.json",
+    "seed": "fixed PF4E-R2 production-shaped seed",
+    "warmupTicks": 30,
+    "measuredTicks": 270,
+    "detailedStageRaw": "_Benchmarks/results/pf4f-2026-09-13/rated-compression-attribution.json",
+    "rows": [
+      {"recipients": 64, "canonicalScheduleP95Ms": 1.0135, "compressedScheduleP95Ms": 1.1251, "canonicalInclusiveP95Ms": 1.673534, "compressedInclusiveP95Ms": 1.602216, "canonicalLegacyP95Ms": 1.167869, "compressedLegacyP95Ms": 1.271749, "canonicalWireBytes": 31302082, "compressedWireBytes": 20598450, "publications": 138240, "proofs": 138240, "semanticDigest": "3E6BEB58A00B52C4"},
+      {"recipients": 96, "canonicalScheduleP95Ms": 1.4357, "compressedScheduleP95Ms": 1.6353, "canonicalInclusiveP95Ms": 2.361398, "compressedInclusiveP95Ms": 2.344899, "canonicalLegacyP95Ms": 1.655608, "compressedLegacyP95Ms": 1.849829, "canonicalWireBytes": 46822486, "compressedWireBytes": 30675773, "publications": 207360, "proofs": 207360, "semanticDigest": "82ABC2179B842B25"},
+      {"recipients": 128, "canonicalScheduleP95Ms": 1.9842, "compressedScheduleP95Ms": 2.1906, "canonicalInclusiveP95Ms": 3.249803, "compressedInclusiveP95Ms": 3.183732, "canonicalLegacyP95Ms": 2.306427, "compressedLegacyP95Ms": 2.488907, "canonicalWireBytes": 62311350, "compressedWireBytes": 40719718, "publications": 276480, "proofs": 276480, "semanticDigest": "03AAAD54B49C08E1"},
+      {"recipients": 192, "canonicalScheduleP95Ms": 2.9339, "compressedScheduleP95Ms": 3.3450, "canonicalInclusiveP95Ms": 4.807926, "compressedInclusiveP95Ms": 4.852115, "canonicalLegacyP95Ms": 3.466446, "compressedLegacyP95Ms": 3.852747, "canonicalWireBytes": 93503530, "compressedWireBytes": 61204218, "publications": 414720, "proofs": 414720, "semanticDigest": "B68335DCBE611DDA"}
+    ],
+    "r2ReferenceInclusive128P95Ms": 3.228,
+    "pf4fInclusive128P95Ms": 3.183732,
+    "strictBudgetMs": 4.0,
+    "remainingHeadroomMs": 0.816268,
+    "semanticWorkEqual": true,
+    "wireRepresentationOnlyDifference": true,
+    "compressionStage128": {
+      "attempts": 35670,
+      "totalMilliseconds": 75.180782,
+      "meanMicrosecondsPerAttempt": 2.108,
+      "maximumMicroseconds": 38,
+      "percentOfDetailedScheduleTicks": 11.315,
+      "note": "Detailed stage probes inflate the total clock and are not used for the rated p95 gate."
+    },
+    "warmedCodecAllocationBytesPerMessage": 0,
+    "ratedWholeHarnessAllocatedBytes128": {"canonical": 2224, "compressed": 5256},
+    "memory": {
+      "additionalServerReplicationReservationBytesPerRecipient": 9597,
+      "additionalAt128Bytes": 1228416,
+      "networkServerReservationChanged": false,
+      "noSharedDeltaCacheAdded": true
+    }
+  },
+  "productAB": {
+    "measurement": "real UDP, 50 ClientOnly bots, warm content, 60 second warmup, 600 second synchronized window",
+    "moving": {
+      "seed": 400614,
+      "canonical": {"durationMs": 600219, "udpPayloadOut": 1576680753, "udpDatagramsOut": 2732107, "gameApplicationOut": 1379455865, "serverCpuCores": 0.4105168280, "authorityP95Us": 932, "deadlineMisses": 0, "catchUpTicks": 0},
+      "compressed": {"durationMs": 600221, "udpPayloadOut": 1139910490, "udpDatagramsOut": 2681496, "gameApplicationOut": 945533183, "serverCpuCores": 0.4134143924, "authorityP95Us": 921, "deadlineMisses": 0, "catchUpTicks": 0},
+      "compression": {"attempts": 1521902, "selected": 1521902, "skippedBySize": 275236, "unprofitable": 0, "failures": 0, "canonicalSelectedBytes": 1220855766, "compressedRepresentationBytes": 780890996, "directBytesSaved": 439964770, "selectedBundlePercent": 84.6848},
+      "effects": {"udpPayloadReductionPercent": 27.7019, "gameApplicationReductionPercent": 31.4561, "datagramReductionPercent": 1.8525, "serverCpuIncreasePercent": 0.7058, "udpMegabytesPerSecondRemoved": 0.72768, "cpuCoresAddedPerUdpMegabytePerSecondRemoved": 0.003982},
+      "pf4dOccupancy": {"canonicalTwoFrameDatagrams": 482873, "compressedTwoFrameDatagrams": 534726, "canonicalPairOpportunities": 500211, "compressedPairOpportunities": 501038, "observedDatagramsSaved": 50611},
+      "clientDecode": {"messages": 1521813, "compressedBytes": 780865717, "canonicalBytes": 1220817229, "malformed": 0, "worstClientP95Us": 2, "maximumUs": 243},
+      "proofFreshnessMaxAuthoritySteps": {"immediate": 1, "near": 3, "far": 4},
+      "sourceGaps": 0,
+      "faults": 0,
+      "cleanRetirement": true
+    },
+    "crowd": {
+      "seed": 400615,
+      "canonical": {"durationMs": 600307, "udpPayloadOut": 1303194835, "udpDatagramsOut": 2667144, "gameApplicationOut": 1113314018, "serverCpuCores": 0.3910998872, "authorityP95Us": 881, "deadlineMisses": 0, "catchUpTicks": 0},
+      "compressed": {"durationMs": 600301, "udpPayloadOut": 1023313673, "udpDatagramsOut": 2655103, "gameApplicationOut": 833148318, "serverCpuCores": 0.3947019912, "authorityP95Us": 885, "deadlineMisses": 1, "catchUpTicks": 1},
+      "compression": {"attempts": 1335375, "selected": 1335375, "skippedBySize": 380145, "unprofitable": 0, "failures": 0, "canonicalSelectedBytes": 1027138688, "compressedRepresentationBytes": 633738935, "directBytesSaved": 393399753, "selectedBundlePercent": 77.8408},
+      "effects": {"udpPayloadReductionPercent": 21.4765, "gameApplicationReductionPercent": 25.1650, "datagramReductionPercent": 0.4515, "serverCpuIncreasePercent": 0.9210, "udpMegabytesPerSecondRemoved": 0.46624, "cpuCoresAddedPerUdpMegabytePerSecondRemoved": 0.007726},
+      "pf4dOccupancy": {"canonicalTwoFrameDatagrams": 402662, "compressedTwoFrameDatagrams": 469171, "canonicalPairOpportunities": 408922, "compressedPairOpportunities": 459824, "observedDatagramsSaved": 12041},
+      "clientDecode": {"messages": 1334925, "compressedBytes": 633496969, "canonicalBytes": 1026748264, "malformed": 0, "worstClientP95Us": 1, "maximumUs": 247},
+      "proofFreshnessMaxAuthoritySteps": {"immediate": 1, "near": 2, "far": 0},
+      "sourceGaps": 0,
+      "faults": 0,
+      "cleanRetirement": true,
+      "note": "One isolated authority deadline/catch-up occurred in the 600-second compressed Crowd window; the maintained 64-client control and 30-minute soak each recorded zero."
+    },
+    "attributionNote": "DirectBytesSaved is exact message-148 versus canonical-129 saving. UDP and datagram deltas include independently timed live-run semantic-count variance and natural PF4D occupancy effects; those deltas are not mislabeled as codec-only savings.",
+    "httpBodyBytesDuringMeasuredWindows": 0
+  },
+  "botHostHealth": {
+    "movingCompressed": {"workingSetHighWaterBytes": 843755520, "cpuMs": 420370, "pumpIntervalMs": {"p50": 3.25, "p95": 5.9, "p99": 6.95, "max": 10.759365}, "pumpDurationMs": {"p50": 2.2, "p95": 4.85, "p99": 5.85, "max": 7.90337}, "faults": 0},
+    "crowdCompressed": {"workingSetHighWaterBytes": 743968768, "cpuMs": 403920, "pumpIntervalMs": {"p50": 3.05, "p95": 4.8, "p99": 5.2, "max": 9.456187}, "pumpDurationMs": {"p50": 2.0, "p95": 3.75, "p99": 4.15, "max": 5.814499}, "faults": 0}
+  },
+  "productCap64": {
+    "raw": "_Benchmarks/results/pf4f-2026-09-13/product-cap-64",
+    "seed": 400616,
+    "bots": 64,
+    "warmupSeconds": 60,
+    "measurementSeconds": 300,
+    "connectionLifetimes": 65,
+    "successfulReconnects": 1,
+    "freshProofLifetimes": 65,
+    "compressionAttemptsAndSelections": 1433021,
+    "directBytesSaved": 610037411,
+    "authorityP95Us": 916,
+    "serverCpuCores": 0.56454836,
+    "deadlineMisses": 0,
+    "catchUpTicks": 0,
+    "sourceGaps": 0,
+    "actionFamiliesConserved": "6/6",
+    "faults": 0,
+    "cleanRetirement": true
+  },
+  "soak": {
+    "raw": "_Benchmarks/results/pf4f-2026-09-13/mixed-chaos-soak-30m",
+    "seed": 400617,
+    "bots": 50,
+    "warmupSeconds": 60,
+    "measuredActiveSeconds": 1800,
+    "connectionLifetimes": 51,
+    "successfulReconnects": 1,
+    "freshProofLifetimes": 51,
+    "compressionAttemptsAndSelections": 5573218,
+    "skippedBySize": 407232,
+    "canonicalSelectedBytes": 6477175838,
+    "compressedRepresentationBytes": 4105202591,
+    "directBytesSaved": 2371973247,
+    "clientMalformedCompressedMessages": 0,
+    "serverCpuCores": 0.4675871592,
+    "serverWorkingSetHighWaterBytes": 278478848,
+    "authorityP95Us": 1075,
+    "deadlineMisses": 0,
+    "catchUpTicks": 0,
+    "sourceGaps": 0,
+    "actions": {"movementAttempts": 53840, "jumpAttempts": 18071, "globalChat": 18072, "interactionCommands": 37625, "primaryAttempts": 17695, "nonsenseInputs": 50},
+    "actionFamiliesConserved": "6/6",
+    "botPumpIntervalMs": {"p50": 3.65, "p95": 7.30, "p99": 7.95, "max": 18.416094},
+    "botPumpDurationMs": {"p50": 2.6, "p95": 6.25, "p99": 6.9, "max": 17.361133},
+    "botWorkingSetHighWaterBytes": 719663104,
+    "faults": 0,
+    "cleanRetirement": true
+  },
+  "exportedOnlineImpairment": {
+    "raw": "_Benchmarks/results/pf4f-2026-09-13/native-impairment-5m",
+    "composition": "1 ServerOnly dedicated authority + 8 ClientOnly bots + 2 separate actual exported Online ClientOnly processes",
+    "seed": 130363,
+    "warmupSeconds": 60,
+    "measuredSeconds": 300,
+    "externalProxy": {"dropPeriod": 53, "reorderPeriod": 37, "aliceDropped": 1434, "aliceReordered": 1990, "bobDropped": 1437, "bobReordered": 1979},
+    "alice": {"healthy": true, "serverGeneration": 1, "compressedMessages": 6086, "compressedBytes": 1948320, "canonicalDecodedBytes": 3001895, "malformed": 0, "decodeP95Us": 6, "decodeMaxUs": 19, "frameP95Us": 2177, "actorRootsHighWater": 11, "actorCreates": 119, "actorRetires": 111},
+    "bob": {"healthy": true, "serverGeneration": 1, "compressedMessages": 6060, "compressedBytes": 1939829, "canonicalDecodedBytes": 2988834, "malformed": 0, "decodeP95Us": 6, "decodeMaxUs": 47, "frameP95Us": 2199, "actorRootsHighWater": 11, "actorCreates": 122, "actorRetires": 114},
+    "server": {"participantsAtWindowStart": 10, "participantsAtWindowEnd": 10, "connectionLifetimes": 11, "joins": 11, "leaves": 11, "sourceGaps": 0, "deadlineMisses": 0, "catchUpTicks": 0, "cpuCores": 0.0870257911, "compressionSelections": 53400, "directBytesSaved": 9154861, "cleanRetirement": true},
+    "botReconnects": 1,
+    "botFreshProofLifetimes": 9,
+    "proofConverged": true,
+    "presentationHealthy": true,
+    "ghostActors": false,
+    "result": "PASS"
+  },
+  "correctnessDiscoveries": {
+    "productDefects": [],
+    "testCorrection": "Initial hostile-field mutators used little-endian writes against network-order protocol fields. Tests were corrected to big-endian and strengthened with exact recovered-byte equality before acceptance. This was PF4F test development, not a pre-existing product defect."
+  },
+  "verification": {
+    "pf4fOnly": "PASS, including actual Online export, real UDP, 8 bots, 2 exported clients, external loss/reorder, canonical/compressed rated semantic equality",
+    "fullCanonicalRelease": "PASS",
+    "worktreeAtClosure": "clean after closure commit"
+  },
+  "outcome": {
+    "code": "B",
+    "decision": "Select bounded LZ4 message-129 compression at >=384 canonical bytes and >=32 complete-representation bytes saved.",
+    "largestRemainingContributors": [
+      "The remaining active downstream is still public WorldState/message-129-or-148 payload plus secure framing.",
+      "Proof 130 and OwnerState remain intentionally uncompressed and retain their current cadence/semantics.",
+      "PF4D cap-two aggregation leaves outer-datagram overhead where no compatible frame is simultaneously ready."
+    ],
+    "futureHypothesesNotStarted": [
+      "PF4E-R2 observed 98.97% identical delta-range reuse; separately evaluate bounded immutable source materialization only if another CPU/scale checkpoint earns the memory/lifetime trade.",
+      "Characterize remaining proof/header/owner-state bytes before considering deeper wire compaction.",
+      "Do not evaluate compression-aware extra packing without a separate semantic-loss/proof experiment."
+    ],
+    "next": "Resume the remaining pre-freeze swarm/failure characterization; PF4F does not begin shared caching, header compaction, compression-aware packing, or PF5 implementation."
+  }
+}

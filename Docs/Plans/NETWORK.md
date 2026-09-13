@@ -5,7 +5,7 @@ PF2.5 replication-ownership/observability reconciliation, PF3 authenticated perf
 PF4A quiet publication-work suppression, PF4B chunk-knowledge census, PF4C selected Game-message
 bundling, the PF4C-R1 singleton MTU repair, PF4D unreliable Network-frame aggregation, PF4E
 dense/distributed fanout plus remaining-cost attribution, PF4E-R1 rated scaling reconciliation,
-and PF4E-R2 direct ChunkPublication staging,
+PF4E-R2 direct ChunkPublication staging, and PF4F bounded selective message-129 compression,
 as of
 2026-09-13.
 
@@ -88,6 +88,21 @@ queue admission, per-entry delivery debt/proof, and cursor advancement remain tr
 recipient-local. The production-shaped 128 inclusive Network-plus-replication p95 moves from 4.903
 ms to 3.228 ms in the accepted A/B with identical semantic and wire work. Policy, protocol
 manifest, transport revision, AOI, cadence, and participant bounds are unchanged.
+
+PF4F changes only the later Game representation of an already-selected canonical message 129.
+The server first builds the exact same bounded canonical bundle and then may encode message 148 as
+one independently decodable LZ4 block. The selected attempt threshold is 384 canonical bytes and
+the complete five-byte-wrapper representation must save at least 32 bytes. No compressed payload
+may represent a canonical bundle which the unchanged bundler would not have admitted. Canonical
+129 remains valid fallback, and Network admission still occurs once before delivery/proof state is
+committed.
+
+The client decompresses into fixed retained scratch, requires the exact declared canonical length,
+and passes recovered bytes through the existing canonical message-129 reader. No cross-message
+dictionary or loss/reorder dependency exists. The new Game representation advances the Game
+manifest to v29; Network framing and transport revision 2 are unchanged. Matched product evidence
+records 27.70% Moving-50 and 21.48% Crowd-50 downstream UDP-payload reduction while the rated
+production-shaped 128 p95 remains 3.184 ms, below the 4.000 ms subsystem budget.
 
 This document is the current Network/replication architecture contract. Historical
 checkpoint detail remains in git and immutable `_Benchmarks/Baselines` artifacts.

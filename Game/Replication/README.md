@@ -960,3 +960,17 @@ still leaves all of those uncommitted. Exact 120/121 fallback and the 1,372/1,37
 boundary remain permanent gates. The accepted production-shaped 128 run reduces mean scheduling
 CPU by 53.1% and inclusive Network-plus-replication p95 from 4.903 ms to 3.228 ms with identical
 wire bytes, proof counts, final cursors, and semantic digest.
+
+PF4F retains that canonical preparation and selectively compresses only the completed message-129
+bytes. The chosen bounded LZ4-block representation is attempted at 384 canonical bytes and must
+save at least 32 bytes after its exact five-byte Game wrapper. It never changes bundle membership,
+entry order, delivery IDs, proof tickets, cadence, or loss domain. Failure or insufficient saving
+uses canonical 129; Network refusal never triggers an alternate queue attempt and leaves all
+publication state uncommitted.
+
+On receive, fixed scratch recovers bit-identical canonical 129 and the existing hostile canonical
+reader remains the sole semantic decoder. The Game manifest is v29 because message 148 is a new
+Game representation. Transport revision 2, cross-lane cap two, Immediate/Near/Far 1/2/4, AOI, and
+participant limits remain unchanged. PF4F's accepted evidence records zero warmed codec
+allocation, independent loss/reorder recovery, 27.70%/21.48% downstream UDP-payload reductions in
+Moving/Crowd, and a 3.184 ms production-shaped-128 inclusive p95.

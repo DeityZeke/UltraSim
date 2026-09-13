@@ -104,6 +104,13 @@ no wait, never combine reliable frames, and do not alter `ChunkPublication`, mes
 public cadence, AOI, participant capacity, or authority frequency. The readiness record and console
 startup summary print the effective cap/scope so a baseline cannot silently use another policy.
 
+PF4F independently selects `--public-compression=lz4` (also accepted as `selected`). The server
+still constructs the unchanged canonical message 129 first. Only canonical payloads of at least
+384 bytes are attempted, and message 148 is selected only when its complete five-byte wrapper saves
+at least 32 bytes. Use `--public-compression=off` or `canonical` for a matched control. Compression
+does not add bundle entries or change cadence, proof/debt, AOI, MTU, Network aggregation, authority
+frequency, or capacity. The startup/readiness record prints the effective codec and thresholds.
+
 PF3 adds `--authority-hz=20|30|60`, `--maximum-input-hz`, `--recommended-input-hz`,
 `--input-burst`, `--input-burst-window-ms`, and `--network-service-delay-ms`. The authority publishes
 those finite semantics as an exact authenticated `ServerPerformanceProfile/v1` and waits for a fresh

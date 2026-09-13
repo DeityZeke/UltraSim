@@ -85,7 +85,13 @@ production-shaped fixtures have distinct boundaries. PF4E-R2 then removes the me
 bundled-publication encode/reparse cycle without changing
 semantic work, canonical bytes, proof identity, AOI, cadence, or the exported client decoder. The
 production-shaped 128 inclusive Network-plus-replication p95 now clears the 4 ms subsystem budget;
-selective compression remains a later bandwidth experiment, not part of this CPU repair. Larger
+PF4F then closes the separately bounded representation experiment as outcome B. Canonical
+message-129 composition remains unchanged, while an independent LZ4-block representation is used
+only for payloads at least 384 bytes which save at least 32 bytes including its five-byte wrapper.
+Moving-50 and Crowd-50 downstream UDP payload falls 27.70% and 21.48%; production-shaped 128
+remains inside the 4 ms budget at 3.184 ms p95. Game manifest v29 carries the new Game message,
+while Network transport revision 2, cadence, AOI, proof semantics, MTU, aggregation, and the
+64-participant cap remain exact. Larger
 failure characterization and external-human validation remain open. A post-F0.8 defensive UI correction
 also makes
 local shutdown independent from a saturated presentation queue, contains expected view-capacity
@@ -1785,7 +1791,7 @@ then close:
     PF4E dense/distributed fanout + remaining-cost attribution          CLOSED (outcome B)
     PF4E-R1 rated replication scaling reconciliation                    CLOSED (outcome B)
     PF4E-R2 ChunkPublication CPU efficiency                             CLOSED (outcome A)
-    selective compression experiment                                   NEXT
+    PF4F bounded selective message-129 compression                      CLOSED (outcome B)
 ```
 
 Exact subsystem checkpoint labels should be chosen in the owning plan when the consumer reaches that

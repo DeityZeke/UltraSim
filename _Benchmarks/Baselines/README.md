@@ -26,6 +26,12 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `concept-demo-pf4f-selective-message129-compression-2026-09-13.json` — deterministic
+  bounded compression oracle and threshold study, exact canonical-byte recovery, malformed-input
+  and refusal transaction gates, zero-allocation LZ4 encode/decode, rated 64/96/128/192 CPU rows,
+  matched ten-minute Moving/Crowd product A/B, PF4D occupancy effects, 64-client control, 30-minute
+  mixed-chaos soak, actual exported Online five-minute external impairment, v29 Game-manifest
+  disposition, unchanged transport revision 2, and outcome B;
 - `concept-demo-pf4e-r2-chunk-publication-cpu-efficiency-2026-09-13.json` — attribution-first
   removal of the server-internal standalone-120 encode/reparse/message-129 encode cycle, exact
   canonical direct-staging microbench, probes-off 64/96/128/192 rated A/B, semantic/wire equality,
