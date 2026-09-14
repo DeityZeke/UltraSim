@@ -1717,19 +1717,34 @@ internal sealed class BotClient : IDisposable
 
     private void RunReconnectSwarm(long now, in WorldPosition position, bool allClients)
     {
-        RunMovingMeasurement(now, position, crowd: false);
-        if (!_measurementPhase || SuccessfulReconnects != 0 || _reconnectRequested) return;
+        if (!_measurementPhase || SuccessfulReconnects != 0 || _reconnectRequested)
+        {
+            RunMovingMeasurement(now, position, crowd: false);
+            return;
+        }
         int reconnectCount = allClients
             ? _options.BotCount
             : Math.Max(2, _options.BotCount / 4);
         int first = _options.BotCount - reconnectCount;
-        if (Id < first) return;
+        if (Id < first)
+        {
+            RunMovingMeasurement(now, position, crowd: false);
+            return;
+        }
         long ordinal = Id - first;
         long due = allClients
             ? 2_000 + ordinal * 350L
             : 4_000 + (ordinal % 4) * 150L + (ordinal / 4) * 2_000L;
         long elapsed = BotMonotonicClock.TicksToMilliseconds(now - _scenarioStarted);
-        if (elapsed < due || HasUnexpectedQueueDebt) return;
+        if (elapsed < due)
+        {
+            RunMovingMeasurement(now, position, crowd: false);
+            return;
+        }
+        // Once this lifetime is due to leave, stop producing new action/release work and allow
+        // its already-accepted debt to quiesce. Producing first could indefinitely move the
+        // debt-free retirement boundary under a large all-client churn wave.
+        if (HasUnexpectedQueueDebt) return;
         _reconnectRequested = true;
         BeginRetirement(now, reconnect: true);
     }

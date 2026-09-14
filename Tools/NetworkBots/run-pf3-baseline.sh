@@ -170,7 +170,7 @@ touch "$measurement_release"
 wait_measurement_complete "$measurement_complete" 90000 "$bot_summary"
 touch "$accounting_stop"
 wait_file "$accounting_summary" 60
-wait_file "$bot_ready" 60
+wait_measurement_complete "$bot_ready" 60 "$bot_summary"
 touch "$bot_release"
 wait "$bot_pid"
 bot_pid=
