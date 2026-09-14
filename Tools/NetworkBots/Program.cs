@@ -303,8 +303,29 @@ internal sealed class BotHarness : IDisposable
         if (_options.MeasurementCompleteFile is not null)
             BotFiles.WriteAtomic(_options.MeasurementCompleteFile, "complete");
         _quiescenceStarted = _scenarioCompleted;
+        // A fixed wall-clock window may end while an intentional reconnect is still in its
+        // transport/application admission tail.  That is not command debt, so the ordinary
+        // debt quiescence below cannot wait for it.  Stop counting the measured window at the
+        // exact requested boundary, keep generating no new scenario work, and require every
+        // scheduled lifetime transition to converge before judging the final semantic state.
+        // This is especially important under an external loss/reorder proxy: retirement may
+        // begin deterministically inside the window while fresh admission legitimately finishes
+        // a few seconds later.
+        long lifetimeConvergenceDeadline = BotMonotonicClock.AddMilliseconds(
+            _quiescenceStarted, 30_000);
+        while (_bots.Any(static bot => !bot.IsActive) &&
+               Stopwatch.GetTimestamp() < lifetimeConvergenceDeadline)
+        {
+            PumpOnce(allowNewChaos: false);
+            if (_bots.Any(static bot => bot.IsFaulted))
+                return Finish(false, "A bot faulted while converging an intentional lifetime transition.");
+            Thread.Sleep(1);
+        }
+        if (_bots.Any(static bot => !bot.IsActive))
+            return Finish(false,
+                "An intentional lifetime transition did not converge after the measured window.");
         long quiescenceDeadline = BotMonotonicClock.AddMilliseconds(
-            _quiescenceStarted, 10_000);
+            Stopwatch.GetTimestamp(), 10_000);
         while (_bots.Any(static bot => bot.HasUnexpectedQueueDebt) &&
                Stopwatch.GetTimestamp() < quiescenceDeadline)
         {
