@@ -2738,7 +2738,9 @@ PF4E-R1 rated replication scaling reconciliation                            CLOS
 PF4E-R2 ChunkPublication CPU efficiency                                     CLOSED (outcome A)
 PF4F bounded selective message-129 compression                              CLOSED (outcome B)
 PF5 product swarm/scaling/failure characterization                           CLOSED
-PF6 external human validation                                                NEXT
+PF5-R1 replication baseline/history-model audit                             CLOSED (outcome B)
+PF5-R2 Introduction/Rebase + shared latest-source model                     NEXT
+PF6 external human validation                                                PAUSED
         |
         v
 repository generalization / extraction readiness

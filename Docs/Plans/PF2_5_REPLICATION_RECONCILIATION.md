@@ -15,6 +15,15 @@ PF2.5 selects **Option A**: keep `ChunkPublication` as the one current-game dyna
 through Concept Demo freeze. This is a product-composition decision, not a claim that chunk
 publication is the fastest profile for every semantic class.
 
+**PF5-R1 follow-up (2026-09-14):** Option A still describes the currently shipped composition and
+no production switch occurs in the audit. It no longer describes the intended pre-freeze
+steady-state source-preparation model. PF5-R1 selected Outcome B after measuring recipient-specific
+retained-history reconstruction and globally coupled history pressure. PF6 is paused for a design
+checkpoint that preserves this document's identity/client/proof constraints while separating
+explicit current-state Introduction/Rebase, shared latest-source preparation, and recipient-local
+exact proof/absence debt. This is not a return to the old alternative profile identities and is
+not authorization for runtime cross-profile ownership.
+
 The result that should reopen this decision is a real post-freeze consumer—such as a materially
 larger actor population, housing/mutable structural overlays, or another independently addressable
 dynamic class—which fails an explicit CPU/freshness/wire budget under the current owner. A

@@ -32,7 +32,7 @@ Canonical 129 remains the exact fallback. Moving-50 and Crowd-50 reduce downstre
 4.000 ms subsystem budget at 3.184 ms p95. Game manifest v29 adds only the compressed Game
 representation; Network transport revision 2, entry composition, proof/debt, cadence, AOI, MTU,
 aggregation cap, and participant limit are unchanged.
-PF5 now closes product swarm, scaling, and failure characterization without changing that selected
+PF5 closes product swarm, scaling, and failure characterization without changing that selected
 policy. Real ClientOnly populations at 16/32/48/64, realized dense/distributed/grouped topology,
 convergence/dispersal, Chat, Inventory, vertical motion, reconnect/churn, external impairment, a
 30-minute 64-client soak, and mixed exported Online clients all retain bounded semantics and clean
@@ -40,7 +40,19 @@ retirement. The real 64-client authority remains near 1.1 ms p95 in the long soa
 synthetic production-shaped Network-plus-replication curve first crosses its 4 ms engineering
 budget between tested 160 and 192 rated recipients. That is a subsystem curve, not a CCU claim.
 Dense downstream public-state traffic and the single-host bot process are the first practical
-costs observed. No unresolved correctness fault or policy change blocks PF6 human validation.
+costs observed. PF5-R1 now closes the follow-up replication baseline/history audit as **Outcome B**.
+It does not reject current-state introduction or history-exhaustion rebase: those are necessary
+bounded costs. It rejects retained-history reconstruction as the fundamental *steady-state*
+latest-state preparation model. Synchronized recipients examined 65.5 retained nodes to emit one
+record per request while 98.44% of exact source ranges repeated; deliberately combined divergence
+still retained 75.90% exact-range reuse. A separate probe proved that pressure in one hot chunk can
+evict a cold chunk's needed history and force a semantically correct but unrelated rebase.
+
+PF5-R1 changes no production replication, wire, cadence, proof, or candidate semantics. PF6 is
+paused while the next replication-model checkpoint designs and proves explicit current-state
+Introduction/Rebase plus shared immutable latest-source preparation, recipient-local exact applied
+knowledge, and explicit removal/absence debt. Do not mistake this pause for an attempt to eliminate
+necessary first knowledge or recovery snapshots.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -2041,7 +2053,8 @@ one-host churn/admission boundary, not hidden as a passing steady-state result.
 Permanent evidence is in
 `_Benchmarks/Baselines/concept-demo-pf5-product-swarm-failure-characterization-2026-09-13.json`.
 PF5 keeps the selected 1/2/4 cadence, message 129, selective 148 compression, cross-lane cap two,
-manifest v29, transport revision 2, and participant cap 64. External human validation is next.
+manifest v29, transport revision 2, and participant cap 64. PF5-R1 is the intervening architecture
+audit; external human validation is paused pending its selected follow-up.
 
 Closure gates were:
 
@@ -2050,7 +2063,96 @@ Closure gates were:
 - mixed bot + native exported-client load passes at the chosen functional target;
 - known failure cliffs are documented rather than hidden.
 
+## PF5-R1 — replication baseline and history-model audit
+
+**Status: CLOSED — Outcome B.** Starting HEAD
+`61638fc70291bc117a5e933bf48bb04a19de0141` had no intervening replication/history semantic
+change after PF5. The measured instrumentation commit is
+`ca57f1eb23695ae7017ac3b3fd58acd5a9cf3876`. The audit adds only bounded, cold diagnostic
+observation and architecture-independent regressions; the feature-complete correctness candidate remains
+`af9fcb740c02eb08efa8d4985d929b50b135504e`.
+
+The accepted interpretation is:
+
+```text
+FIRST KNOWLEDGE / REBASE
+    capture complete current relevant truth at R0
+    deliver and prove R0
+    retain truth newer than R0
+
+STEADY STATE
+    shared authoritative latest-source preparation
+    + independent recipient delivery / exact applied proof
+
+BOUNDED HISTORY
+    bridge ordinary lag
+    not the database used to manufacture each ordinary latest-state delta
+```
+
+The current implementation gives each recipient an exact applied chunk revision, then implements
+an ordinary delta by walking that chunk's complete retained linked history, skipping old nodes,
+collapsing later mutations by public slot, rereading surviving current rows, and sorting the
+recipient result. On the 64-recipient semantic controls:
+
+| Scenario | Exact range reuse | History nodes/request | Records/request | Shadow reusable source preparation |
+| --- | ---: | ---: | ---: | ---: |
+| synchronized | 98.44% | 65.50 | 1.00 | 97.62% |
+| staggered joins | 98.14% | 72.14 | 1.00 | 97.89% |
+| cadence phases | 93.82% | 66.94 | 2.15 | 90.21% |
+| loss | 96.92% | 65.53 | 1.06 | 96.22% |
+| reorder | 96.89% | 65.50 | 1.25 | 96.50% |
+| proof delay | 98.44% | 65.50 | 3.93 | 98.34% |
+| combined divergence | 75.90% | 30.80 | 3.92 | 76.86% |
+
+The shadow oracle never serves production results. It executes every real source reconstruction,
+retains only bounded hashes/counters for the first exact `(epoch, chunk, from, to)` range, and
+reports the measured work that would be reusable if identical source truth were prepared once.
+All comparisons were exact and no range table overflowed.
+
+The fixed-total 512-publication matrix produced 1, 8, 64, and 512 unique source ranges for
+`1x512`, `8x64`, `64x8`, and `512x1` topology respectively. A separate eight-entry global-history
+probe demonstrated cross-chunk interference: 23 hot-chunk mutations evicted a cold chunk's one
+needed mutation and advanced its floor, correctly forcing a current-state rebase. In the explicit
+history-pressure scenario, 512 initial introductions remained distinct from 128
+`HistoryFloorLost` rebases.
+
+This evidence rejects a production exact-range cache as the first response. Such a cache would be
+valuable for synchronized recipients but would preserve the deeper recipient-history walk model,
+lose effectiveness as ranges diverge, and leave global history pressure coupling in place. The
+next checkpoint must instead design the semantic split between:
+
+```text
+source truth
+    epoch / chunk / current records / source revision / immutable prepared latest state
+
+recipient obligation
+    session + generation / queue admission / delivery ID / exact applied proof
+    applied knowledge / retry / explicit negative or absence debt
+```
+
+V2 is precedent only for source-side preparation: it encoded one entity payload, retained/coalesced
+latest state by item/scope, and reused immutable payload bytes for subscribers. Its connection
+tracker advanced on *sent*, not exact applied proof, and its scheduler/transport were different.
+Those V2 semantics must not return.
+
+Permanent regression covers delayed introduction with updates/removal, distinct recipient proof
+identity for one shared baseline, AOI leave/re-entry, history-floor rebase, explicit recovery,
+source-epoch reset, and reconnect-origin diagnosis. Focused verification is:
+
+```text
+dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj \
+  -c Release -- --pf5-r1-only --skip-godot
+```
+
+Permanent evidence is in
+`_Benchmarks/Baselines/concept-demo-pf5-r1-replication-baseline-history-audit-2026-09-14.json`
+and its concise companion report.
+
 ## PF6 — external human validation
+
+**Status: PAUSED after PF5-R1.** Resume only after the selected follow-up replication-model
+checkpoint preserves the complete PF0-PF5 correctness/product matrix. The pause is about the
+steady-state source-preparation model, not about eliminating first-entry or recovery baselines.
 
 Close when:
 
@@ -2199,12 +2301,15 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 24. Evaluate deeper wire compaction only if remaining measurements justify the complexity. **NOT SELECTED — PF5 payload evidence does not justify interrupting human validation**
 25. Run correctness, soak, stress, migration, Chat, UI, fall, reconnect, and impairment swarms. **CLOSED — PF5**
 26. Run mixed headless + exported Godot clients. **CLOSED — PF5**
-27. Run external human Concept Demo validation. **NEXT — PF6**
-28. Choose/document the default deployment-performance policy. **CLOSED — PF5 retains selected v29 defaults**
-29. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5**
-30. Full exact-tree verifier and export closure.
-31. Freeze/tag the Concept Demo baseline.
-32. Begin the separate extraction/genericization/ecosystem roadmap.
+27. Audit baseline/history ownership before human validation. **CLOSED — PF5-R1 outcome B**
+28. Design/prove explicit Introduction/Rebase plus shared latest-source preparation and exact
+    recipient proof/absence semantics. **NEXT — PF5-R2; PF6 remains paused**
+29. Run external human Concept Demo validation. **PAUSED — PF6**
+30. Choose/document the default deployment-performance policy. **CLOSED — PF5 retains selected v29 defaults**
+31. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5**
+32. Full exact-tree verifier and export closure.
+33. Freeze/tag the Concept Demo baseline.
+34. Begin the separate extraction/genericization/ecosystem roadmap.
 ```
 
 The intended outcome is not merely a demo that works.

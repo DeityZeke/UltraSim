@@ -6,8 +6,9 @@ PF4A quiet publication-work suppression, PF4B chunk-knowledge census, PF4C selec
 bundling, the PF4C-R1 singleton MTU repair, PF4D unreliable Network-frame aggregation, PF4E
 dense/distributed fanout plus remaining-cost attribution, PF4E-R1 rated scaling reconciliation,
 PF4E-R2 direct ChunkPublication staging, and PF4F bounded selective message-129 compression,
+plus the PF5-R1 replication baseline/history-model audit,
 as of
-2026-09-13.
+2026-09-14.
 
 Network N0, Terrain/World T0, N1.0-N1.4, Hosted H0.0-H0.5, the five-profile
 comparison program through P0.4, and the first real remote public-actor consumer
@@ -545,6 +546,44 @@ replacement conservatively refresh current truth rather than sleeping uncertain 
 
 First interest, invalid knowledge, and history-floor loss recover complete current
 truth. Leaving retires scope membership and invalidates outstanding lineage.
+
+### PF5-R1 baseline/history-model disposition
+
+PF5-R1 does not classify a complete current snapshot as waste. First knowledge of a relevant
+chunk must establish the recipient's baseline, and history exhaustion may legitimately rebase to
+current truth. The permanent distinction is:
+
+```text
+TrackingOrigin       when future source truth became relevant
+AppliedKnowledge     what this recipient has exactly proven
+Introduction         current truth required for first knowledge
+Rebase               current truth required after an unbridgeable gap
+```
+
+The current store uses retained mutation history for every post-baseline delta reconstruction.
+`TryCopyDelta` walks the chunk's retained history from its head, skips revisions at or before the
+recipient cursor, collapses newer entries by public slot, rereads current positive rows, and sorts
+the result. PF5-R1 measured that this is structurally more work than the semantic output commonly
+requires: the synchronized control examined 65.5 nodes to emit one record/request and repeated
+98.44% of exact source ranges. A combined stagger/loss/reorder/proof-delay/stall/AOI/reconnect
+attack reduced reuse, but exact ranges still repeated 75.90% and the bounded shadow oracle
+attributed 76.86% of measured source preparation to repeat ranges.
+
+The selected disposition is **Outcome B**: keep the currently shipped v29 implementation intact
+until its replacement passes the full product gates, but do not treat history-derived latest-state
+as the desired fundamental steady-state model. The next design must use explicit current-state
+Introduction/Rebase, shared immutable latest-source preparation, and recipient-local exact
+delivery/proof knowledge. Bounded history remains useful for ordinary lag/recovery.
+
+Removal remains the hard asymmetry. Present current state can supersede older positive state;
+removed rows no longer exist to be rediscovered. A replacement therefore needs explicit exact
+absence/removal debt—recipient-local or via an immutable source tombstone/publication—without
+weakening application proof. A shared source artifact must never share delivery ID, session,
+queue admission, proof, applied cursor, retry, or negative debt across recipients.
+
+The diagnostic API is cold, bounded, off by default, and never serves publication results. The
+shadow table records hashes/costs only; production still executes every real source read. See the
+[PF5-R1 evidence](../../_Benchmarks/Baselines/concept-demo-pf5-r1-replication-baseline-history-audit-2026-09-14.md).
 
 ### Snapshot / delta / absence
 

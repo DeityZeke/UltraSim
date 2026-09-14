@@ -128,6 +128,14 @@ chunk revisions, and bounded observer-independent dirty history. Snapshot/delta
 and borrowed-page reads are game-world semantics; no Network/session state or
 watcher list lives in the store.
 
+PF5-R1 preserves that implementation but rejects one earlier long-term implication: bounded dirty
+history is a valid bridge for ordinary recipient lag, not the desired database for rebuilding every
+steady-state latest-state publication. First AOI knowledge and history-exhaustion recovery still
+use complete current relevant truth. The selected follow-up will investigate shared immutable
+current/latest source preparation while keeping generation/session, queue admission, exact applied
+proof, cursor, and negative/absence debt recipient-local. Until that replacement is proved, the
+accepted v29 `ChunkPublication` path remains the production composition.
+
 T0.4 binds an optional immutable `WorldPack` to the same concrete game space and
 content meaning before generation publication. Pure pack queries describe that
 artifact; authoritative gameplay queries route through generation-owned
