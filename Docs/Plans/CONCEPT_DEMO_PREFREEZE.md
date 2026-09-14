@@ -2107,7 +2107,9 @@ recipient result. On the 64-recipient semantic controls:
 The shadow oracle never serves production results. It executes every real source reconstruction,
 retains only bounded hashes/counters for the first exact `(epoch, chunk, from, to)` range, and
 reports the measured work that would be reusable if identical source truth were prepared once.
-All comparisons were exact and no range table overflowed.
+The runtime census reported hash/count/materialized-size consistency with no mismatches or range
+table overflow; this is not a claim of mathematical record equality. The focused regression
+separately compares the bounded logical records directly.
 
 The fixed-total 512-publication matrix produced 1, 8, 64, and 512 unique source ranges for
 `1x512`, `8x64`, `64x8`, and `512x1` topology respectively. A separate eight-entry global-history

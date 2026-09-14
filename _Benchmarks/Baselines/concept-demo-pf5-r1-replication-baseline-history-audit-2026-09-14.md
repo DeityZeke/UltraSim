@@ -36,8 +36,10 @@ timing rows are in
 
 All PF5-R1 diagnostics are opt-in, owner-thread-bound, fixed-capacity, cold observations. The shadow
 oracle never supplies a production record and cannot change read selection, delivery identity,
-queue admission, proof, cursor advancement, or wire bytes. Its exact content comparisons reported
-zero mismatches and its bounded range table did not overflow.
+queue admission, proof, cursor advancement, or wire bytes. The large runtime census reported zero
+hash/count/materialized-size consistency mismatches and its bounded range table did not overflow.
+That is strong diagnostic evidence, not mathematical proof of record equality; the focused
+regression separately performs direct record comparison.
 
 ## Current model found in code
 
