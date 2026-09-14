@@ -591,15 +591,17 @@ internal static class N1OfflineDirectChunkTests
         WorldPublicEntityId removedIdentity = older.Deltas[1].Id;
         OfflineDirectChunkDeliveryTicket olderTicket = recipient.ReleaseReadForRemote(100);
 
-        fixture.Present(2, Position(0, 0, 4_000, 2_000),
+        // A later positive for an unrelated live row may not discharge the retained
+        // removal. The cumulative prepared result must still carry both facts.
+        fixture.Present(0, Position(0, 0, 2_300, 2_000),
             GameWorldPublicPrefabIds.Character);
         Equal(OfflineDirectChunkReadStatus.Delta,
             recipient.TryBeginRead(fixture.Store, subscription, 2,
                 out OfflineDirectChunkRead newer));
         Equal(2, newer.Deltas.Length);
-        Equal(WorldPublicOperation.Present, newer.Deltas[1].Operation);
-        Equal(removedIdentity.Index, newer.Deltas[1].Id.Index);
-        True(newer.Deltas[1].Id.Generation > removedIdentity.Generation);
+        Equal(WorldPublicOperation.Present, newer.Deltas[0].Operation);
+        Equal(WorldPublicOperation.Remove, newer.Deltas[1].Operation);
+        Equal(removedIdentity, newer.Deltas[1].Id);
         OfflineDirectChunkDeliveryTicket newerTicket = recipient.ReleaseReadForRemote(101);
         True(newerTicket.Cursor.Revision.Value > olderTicket.Cursor.Revision.Value);
 
@@ -613,7 +615,25 @@ internal static class N1OfflineDirectChunkTests
         Equal(OfflineDirectChunkReadStatus.NoChanges,
             recipient.TryBeginRead(fixture.Store, subscription, 3, out _));
         recipient.CommitRead();
-        Equal(0UL, fixture.Store.GetPreparedPublicationSnapshot().HistoryDerivedSteadyStateCalls);
+
+        // Reuse of the exact public slot is different: a complete newer-generation
+        // Present replaces the removed prior occupant while keeping generation order.
+        fixture.Present(2, Position(0, 0, 4_000, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        Equal(OfflineDirectChunkReadStatus.Delta,
+            recipient.TryBeginRead(fixture.Store, subscription, 4,
+                out OfflineDirectChunkRead reused));
+        Equal(1, reused.Deltas.Length);
+        Equal(WorldPublicOperation.Present, reused.Deltas[0].Operation);
+        Equal(removedIdentity.Index, reused.Deltas[0].Id.Index);
+        True(reused.Deltas[0].Id.Generation > removedIdentity.Generation);
+        Equal(OfflineDirectChunkAppliedProofStatus.Applied,
+            recipient.CommitAppliedProof(recipient.ReleaseReadForRemote(102)));
+
+        PreparedChunkPublicationSnapshot source = fixture.Store.GetPreparedPublicationSnapshot();
+        Equal(0UL, source.HistoryDerivedSteadyStateCalls);
+        True(source.TombstoneHighWater >= 1);
+        True(source.CoveragePublicationHighWater >= 5);
     }
 
     internal static void PreparedRetentionEvictionRebasesSlowRecipient()
