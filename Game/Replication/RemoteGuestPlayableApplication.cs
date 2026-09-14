@@ -749,6 +749,16 @@ public sealed class RemoteGuestPlayableApplication :
         }
     }
 
+    internal bool TryGetInterestAnchor(out WorldPosition anchor)
+    {
+        if (_recipient is null)
+        {
+            anchor = default;
+            return false;
+        }
+        return _recipient.TryGetLastInterestAnchor(out anchor);
+    }
+
     public void Dispose()
     {
         EnsureOwner();

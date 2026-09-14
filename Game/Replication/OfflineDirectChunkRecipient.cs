@@ -337,6 +337,17 @@ public sealed class OfflineDirectChunkRecipient
 
     public OfflineDirectChunkRecipientLimits Limits => _limits;
 
+    /// <summary>
+    /// Copies the last authority-resolved interest anchor for cold diagnostics. This never accepts
+    /// or changes client position and does not expose recipient delivery/proof state.
+    /// </summary>
+    public bool TryGetLastInterestAnchor(out WorldPosition anchor)
+    {
+        EnsureOwner();
+        anchor = _lastInterestAnchor;
+        return _hasLastInterestAnchor;
+    }
+
     internal uint GetCadencePeriod(ChunkInterestTier tier) => _cadence.Period(tier);
 
     internal bool IsCadenceDue(SpatialChunkKey key, ChunkInterestTier tier, ulong cadenceStep)

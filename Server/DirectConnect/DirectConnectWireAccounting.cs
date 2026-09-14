@@ -64,6 +64,25 @@ internal sealed record DirectConnectPublicationTrafficReport(
     ulong CompleteRecords,
     ulong PartialRecords);
 
+internal sealed record DirectConnectTopologySample(
+    long ElapsedMilliseconds,
+    ulong AuthorityTick,
+    int RemoteRecipients,
+    int OccupiedChunks,
+    int UniqueSubscriptionChunks,
+    int MultiplySubscribedChunks,
+    int Memberships,
+    GameValueDistribution SubscriptionsPerRecipient,
+    GameValueDistribution ImmediateSubscriptionsPerRecipient,
+    GameValueDistribution NearSubscriptionsPerRecipient,
+    GameValueDistribution FarSubscriptionsPerRecipient,
+    GameValueDistribution RecipientsPerChunk,
+    ulong SourceCommitsObserved,
+    ulong SourceCommitGaps,
+    ulong DirtyChunksObserved,
+    ulong DirtyRecipientFanout,
+    GameValueDistribution RecipientsPerDirtyChunk);
+
 internal sealed record DirectConnectWireAccountingSummary(
     string PhysicalMetric,
     string HttpMetric,
@@ -91,6 +110,8 @@ internal sealed record DirectConnectWireAccountingSummary(
     GameTickTimingSnapshot AuthorityTiming,
     SharedRemoteReplicationCensusSnapshot RemoteReplication,
     DirectConnectPublicationTrafficReport AuthoritativePublications,
+    DirectConnectTopologySample[] TopologySamples,
+    bool TopologySamplesSaturated,
     RemoteGuestPlayableServerSnapshot[] RemoteApplications,
     double ProcessCpuMilliseconds,
     double CpuSecondsPerWallSecond,
@@ -111,6 +132,7 @@ internal sealed record DirectConnectWireAccountingSummary(
 /// </summary>
 internal sealed class DirectConnectWireAccounting
 {
+    private const int MaximumTopologySamples = 4_096;
     private readonly Dictionary<ConnectionId, HostedUdpServerConnectionTrafficSnapshot> _start = [];
     private readonly HashSet<ConnectionId> _retiredBeforeStart = [];
     private readonly UdpPayloadTrafficSnapshot _listenerStart;
@@ -121,6 +143,9 @@ internal sealed class DirectConnectWireAccounting
     private readonly ChunkPublicationStoreSnapshot _publicationStart;
     private readonly long _started;
     private readonly Process _process;
+    private readonly SharedPlayableAuthority _authority;
+    private readonly DirectConnectTopologySample[] _topologySamples =
+        new DirectConnectTopologySample[MaximumTopologySamples];
     private readonly double _cpuStart;
     private readonly long _allocatedStart;
     private readonly int _gen0Start;
@@ -130,6 +155,9 @@ internal sealed class DirectConnectWireAccounting
     private long _managedHeapHighWater;
     private int _threadHighWater;
     private long _nextResourceSample;
+    private long _nextTopologySample;
+    private int _topologySampleCount;
+    private bool _topologySamplesSaturated;
 
     internal DirectConnectWireAccounting(
         HostedUdpAdmissionHost host,
@@ -153,6 +181,7 @@ internal sealed class DirectConnectWireAccounting
         for (int ordinal = 0; host.TryGetRetiredTraffic(ordinal, out var retired); ordinal++)
             _retiredBeforeStart.Add(retired.Connection);
         _process = Process.GetCurrentProcess();
+        _authority = authority;
         _process.Refresh();
         _cpuStart = _process.TotalProcessorTime.TotalMilliseconds;
         _allocatedStart = GC.GetTotalAllocatedBytes(precise: false);
@@ -164,18 +193,52 @@ internal sealed class DirectConnectWireAccounting
         _threadHighWater = _process.Threads.Count;
         _started = Stopwatch.GetTimestamp();
         _nextResourceSample = _started;
+        _nextTopologySample = _started;
     }
 
     internal void Sample(bool force = false)
     {
         long now = Stopwatch.GetTimestamp();
-        if (!force && now < _nextResourceSample) return;
-        _process.Refresh();
-        _workingSetHighWater = Math.Max(_workingSetHighWater, _process.WorkingSet64);
-        _managedHeapHighWater = Math.Max(
-            _managedHeapHighWater, GC.GetGCMemoryInfo().HeapSizeBytes);
-        _threadHighWater = Math.Max(_threadHighWater, _process.Threads.Count);
-        _nextResourceSample = checked(now + Math.Max(1, Stopwatch.Frequency / 4));
+        if (force || now >= _nextResourceSample)
+        {
+            _process.Refresh();
+            _workingSetHighWater = Math.Max(_workingSetHighWater, _process.WorkingSet64);
+            _managedHeapHighWater = Math.Max(
+                _managedHeapHighWater, GC.GetGCMemoryInfo().HeapSizeBytes);
+            _threadHighWater = Math.Max(_threadHighWater, _process.Threads.Count);
+            _nextResourceSample = checked(now + Math.Max(1, Stopwatch.Frequency / 4));
+        }
+        if (_authority.TelemetryLevel == GameTelemetryLevel.Detailed &&
+            (force || now >= _nextTopologySample))
+        {
+            if (_topologySampleCount == _topologySamples.Length)
+                _topologySamplesSaturated = true;
+            else
+            {
+                SharedPlayableAuthoritySnapshot snapshot = _authority.GetSnapshot();
+                SharedRemoteReplicationCensusSnapshot census = snapshot.RemoteReplication;
+                _topologySamples[_topologySampleCount++] = new DirectConnectTopologySample(
+                    Math.Max(0, checked((long)((Int128)(now - _started) * 1_000 /
+                        Stopwatch.Frequency))),
+                    snapshot.SimulationTick,
+                    census.CurrentRemoteRecipients,
+                    census.CurrentOccupiedChunks,
+                    census.CurrentUniqueSharedChunks,
+                    census.CurrentMultiplySubscribedChunks,
+                    census.CurrentMemberships,
+                    census.SubscriptionsPerRecipient,
+                    census.ImmediateSubscriptionsPerRecipient,
+                    census.NearSubscriptionsPerRecipient,
+                    census.FarSubscriptionsPerRecipient,
+                    census.RecipientsPerChunk,
+                    census.SourceCommitsObserved,
+                    census.SourceCommitGaps,
+                    census.DirtyChunksObserved,
+                    census.DirtyRecipientFanout,
+                    census.RecipientsPerDirtyChunk);
+            }
+            _nextTopologySample = checked(now + Math.Max(1, Stopwatch.Frequency));
+        }
     }
 
     internal DirectConnectWireAccountingSummary Complete(
@@ -299,6 +362,8 @@ internal sealed class DirectConnectWireAccounting
             throw new InvalidOperationException(
                 "The bounded remote-application diagnostic destination was too small.");
         Array.Resize(ref applicationSnapshots, applicationCount);
+        var topologySamples = new DirectConnectTopologySample[_topologySampleCount];
+        Array.Copy(_topologySamples, topologySamples, _topologySampleCount);
         _process.Refresh();
         double cpuMilliseconds = Math.Max(
             0, _process.TotalProcessorTime.TotalMilliseconds - _cpuStart);
@@ -352,6 +417,8 @@ internal sealed class DirectConnectWireAccounting
                     publicationEnd.StateFlagsChanges),
                 Difference(_publicationStart.CompleteRecords, publicationEnd.CompleteRecords),
                 Difference(_publicationStart.PartialRecords, publicationEnd.PartialRecords)),
+            topologySamples,
+            _topologySamplesSaturated,
             applicationSnapshots,
             cpuMilliseconds,
             cpuMilliseconds / durationMilliseconds,

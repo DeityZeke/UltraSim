@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -lt 3 || $# -gt 16 ]]; then
-    echo "usage: $0 <quiet|sustained-input|moving|crowd|single-hot|multi-hot|mixed-chaos> <duration> <output-dir> [bots=50] [seed=300301] [warmup=60s] [cache-dir] [authority-hz=60] [maximum-input-hz=60] [recommended-input-hz=30] [sample-hz=120] [submit-hz=recommended] [input-mode=compliant] [network-service-delay-ms=1] [input-burst=10] [input-burst-window-ms=100]" >&2
+if [[ $# -lt 3 || $# -gt 17 ]]; then
+    echo "usage: $0 <scenario> <duration> <output-dir> [bots=50] [seed=300301] [warmup=60s] [cache-dir] [authority-hz=60] [maximum-input-hz=60] [recommended-input-hz=30] [sample-hz=120] [submit-hz=recommended] [input-mode=compliant] [network-service-delay-ms=1] [input-burst=10] [input-burst-window-ms=100] [clusters=1]" >&2
     exit 2
 fi
 
@@ -22,8 +22,10 @@ input_mode=${13:-compliant}
 network_service_delay_ms=${14:-1}
 input_burst=${15:-10}
 input_burst_window_ms=${16:-100}
+clusters=${17:-1}
 checkpoint=${ULTRASIM_BOT_CHECKPOINT:-PF3}
 telemetry=${ULTRASIM_TELEMETRY:-Detailed}
+accounting_test_marker_args=()
 case "$checkpoint" in
     PF3) summary_schema=5 ;;
     PF4A) summary_schema=6 ;;
@@ -32,11 +34,15 @@ case "$checkpoint" in
     PF4D) summary_schema=9 ;;
     PF4E) summary_schema=10 ;;
     PF4F) summary_schema=11 ;;
+    PF5) summary_schema=12 ;;
     *) echo "unsupported bot evidence checkpoint: $checkpoint" >&2; exit 2 ;;
 esac
+if [[ "$checkpoint" == "PF5" ]]; then
+    accounting_test_marker_args+=(--accounting-test-marker="PF5 $scenario")
+fi
 
 case "$scenario" in
-    quiet|sustained-input|moving|crowd|single-hot|multi-hot|mixed-chaos) ;;
+    quiet|sustained-input|moving|crowd|single-hot|multi-hot|mixed-chaos|clusters|migration-converge|migration-disperse|chat-swarm|inventory-swarm|vertical-swarm|reconnect-swarm|connection-churn) ;;
     *) echo "unsupported PF3 scenario: $scenario" >&2; exit 2 ;;
 esac
 if [[ -e "$output_dir" ]]; then
@@ -105,7 +111,8 @@ dotnet run --project Server/DirectConnect/UltraSim.Server.DirectConnect.csproj \
     --public-compression="${ULTRASIM_PUBLIC_COMPRESSION:-off}" \
     --unreliable-frame-cap="${ULTRASIM_UNRELIABLE_FRAME_CAP:-2}" \
     --unreliable-aggregation-scope="${ULTRASIM_UNRELIABLE_AGGREGATION_SCOPE:-cross-lane}" \
-    --telemetry="$telemetry" >"$output_dir/server.log" 2>&1 &
+    --telemetry="$telemetry" "${accounting_test_marker_args[@]}" \
+    >"$output_dir/server.log" 2>&1 &
 server_pid=$!
 wait_file "$server_ready" 60
 
@@ -124,6 +131,9 @@ bot_arguments=(
     --unreliable-aggregation-scope="${ULTRASIM_UNRELIABLE_AGGREGATION_SCOPE:-cross-lane}"
     --checkpoint="$checkpoint"
 )
+if [[ "$checkpoint" == "PF5" ]]; then
+    bot_arguments+=(--clusters="$clusters")
+fi
 if [[ "$scenario" == "sustained-input" ]]; then
     bot_arguments+=(--input-sample-hz="$sample_hz" --input-submit-hz="$submit_hz" --input-mode="$input_mode")
 fi
@@ -150,11 +160,20 @@ server_pid=
 
 jq -e --arg checkpoint "$checkpoint" --argjson schema "$summary_schema" \
     '.passed and .cleanRetirement and .checkpoint == $checkpoint and .schemaVersion == $schema and
-     (($checkpoint != "PF4A" and $checkpoint != "PF4B" and $checkpoint != "PF4C" and $checkpoint != "PF4D" and $checkpoint != "PF4E" and $checkpoint != "PF4F") or
+     (($checkpoint != "PF4A" and $checkpoint != "PF4B" and $checkpoint != "PF4C" and $checkpoint != "PF4D" and $checkpoint != "PF4E" and $checkpoint != "PF4F" and $checkpoint != "PF5") or
       ([.actionOutcomes[] | select((.conserved | not) or (.terminal | not))] | length) == 0)' \
     "$bot_summary" >/dev/null
 jq -e '.PhysicalTransportReconciled and .LogicalMessageReconciled and .ParticipantsAtEnd == .ParticipantsAtStart' \
     "$accounting_summary" >/dev/null
+if [[ "$checkpoint" == "PF5" ]]; then
+    jq -e '
+      (.TopologySamplesSaturated | not) and
+      (.TopologySamples | length) >= 2 and
+      ([.TopologySamples[] | select(.RemoteRecipients > 0 and .OccupiedChunks > 0 and .Memberships > 0)] | length) > 0 and
+      .RemoteReplication.SourceCommitGaps == 0 and
+      .HttpBody.ResponseBodyBytes == 0
+    ' "$accounting_summary" >/dev/null
+fi
 jq -e '.CleanRetirement and .Participants == 0 and .EstablishedSessions == 0' \
     "$server_summary" >/dev/null
 

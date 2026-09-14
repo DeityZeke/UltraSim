@@ -152,6 +152,10 @@ while (!stopping.IsCancellationRequested)
         File.Exists(options.AccountingStartFile))
     {
         wireAccounting = new DirectConnectWireAccounting(host, authority, content);
+        if (options.AccountingTestMarker is not null &&
+            !authority.PublishTestMarker(
+                GameTestMarkerPhase.Start, options.AccountingTestMarker).Accepted)
+            throw new InvalidOperationException("The PF5 accounting START marker was rejected.");
         WriteReady(options.AccountingReadyFile, new { Ready = true });
         Console.WriteLine("PF2 Direct Connect wire-accounting window started.");
     }
@@ -159,6 +163,14 @@ while (!stopping.IsCancellationRequested)
     if (!wireAccountingWritten && wireAccounting is not null &&
         options.AccountingStopFile is not null && File.Exists(options.AccountingStopFile))
     {
+        if (options.AccountingTestMarker is not null)
+        {
+            GameTestMarkerResult marker = authority.PublishTestMarker(
+                GameTestMarkerPhase.Complete, options.AccountingTestMarker);
+            if (!marker.Accepted)
+                Console.Error.WriteLine(
+                    $"PF5 accounting COMPLETE marker was not published: {marker.Message}");
+        }
         WriteReady(options.AccountingSummaryFile,
             wireAccounting.Complete(host, authority, content));
         wireAccountingWritten = true;
@@ -404,6 +416,7 @@ internal readonly record struct DirectConnectOptions(
     string? AccountingReadyFile,
     string? AccountingStopFile,
     string? AccountingSummaryFile,
+    string? AccountingTestMarker,
     string ClientProfile,
     int SimulationFrequencyHz,
     int MaximumInputHz,
@@ -434,6 +447,7 @@ internal readonly record struct DirectConnectOptions(
         string? accountingReadyFile = null;
         string? accountingStopFile = null;
         string? accountingSummaryFile = null;
+        string? accountingTestMarker = null;
         string clientProfile = "third-person";
         int simulationFrequencyHz = 60;
         int maximumInputHz = 60;
@@ -529,6 +543,15 @@ internal readonly record struct DirectConnectOptions(
             if (argument.StartsWith("--accounting-summary-file=", StringComparison.Ordinal))
             {
                 accountingSummaryFile = RequiredPath(argument, "--accounting-summary-file=");
+                continue;
+            }
+            if (argument.StartsWith("--accounting-test-marker=", StringComparison.Ordinal))
+            {
+                accountingTestMarker = argument["--accounting-test-marker=".Length..].Trim();
+                if (accountingTestMarker.Length is 0 or > 64 ||
+                    accountingTestMarker.Any(char.IsControl))
+                    throw new ArgumentException(
+                        "--accounting-test-marker must be 1..64 printable characters.");
                 continue;
             }
             if (argument.StartsWith("--client-profile=", StringComparison.Ordinal))
@@ -686,6 +709,9 @@ internal readonly record struct DirectConnectOptions(
             accountingStopFile is null || accountingSummaryFile is null))
             throw new ArgumentException(
                 "PF2 accounting start, stop, and summary files must be supplied together.");
+        if (accountingTestMarker is not null && !anyAccounting)
+            throw new ArgumentException(
+                "--accounting-test-marker requires the accounting window options.");
         if (recommendedInputHz > maximumInputHz)
             throw new ArgumentException(
                 "--recommended-input-hz cannot exceed --maximum-input-hz.");
@@ -700,7 +726,7 @@ internal readonly record struct DirectConnectOptions(
         return new DirectConnectOptions(
             endpoint, contentEndpoint, identity, readyFile, stopFile, summaryFile,
             accountingStartFile, accountingReadyFile, accountingStopFile,
-            accountingSummaryFile, clientProfile,
+            accountingSummaryFile, accountingTestMarker, clientProfile,
             simulationFrequencyHz, maximumInputHz, recommendedInputHz,
             inputBurstCapacity, inputBurstWindowMilliseconds,
             networkServiceDelayMilliseconds, smoke,

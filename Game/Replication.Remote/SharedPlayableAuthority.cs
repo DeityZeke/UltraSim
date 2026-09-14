@@ -138,7 +138,9 @@ public readonly record struct SharedRemoteReplicationCensusSnapshot(
     GameValueDistribution ImmediateSubscriptionsPerRecipient,
     GameValueDistribution NearSubscriptionsPerRecipient,
     GameValueDistribution FarSubscriptionsPerRecipient,
-    GameValueDistribution RecipientsPerChunk);
+    GameValueDistribution RecipientsPerChunk,
+    int CurrentOccupiedChunks,
+    int CurrentMultiplySubscribedChunks);
 
 public enum GameTestMarkerPhase : byte
 {
@@ -866,6 +868,7 @@ public sealed class SharedPlayableAuthority : IDisposable
         var near = new GameValueDistributionWindow();
         var far = new GameValueDistributionWindow();
         var perChunk = new Dictionary<SpatialChunkKey, int>();
+        var occupiedChunks = new HashSet<SpatialChunkKey>();
         int recipients = 0;
         int memberships = 0;
         for (int index = 0; index < _remoteApplications.Length; index++)
@@ -881,10 +884,16 @@ public sealed class SharedPlayableAuthority : IDisposable
             near.Record(checked((ulong)nearCount));
             far.Record(checked((ulong)farCount));
             application.AccumulateSubscriptionCounts(perChunk);
+            if (application.TryGetInterestAnchor(out WorldPosition anchor))
+                occupiedChunks.Add(new SpatialChunkKey(GameWorldState.DefaultSpace, anchor.Chunk));
         }
         var recipientsPerChunk = new GameValueDistributionWindow();
+        int multiplySubscribedChunks = 0;
         foreach (int count in perChunk.Values)
+        {
             recipientsPerChunk.Record(checked((ulong)count));
+            if (count > 1) multiplySubscribedChunks++;
+        }
         return new SharedRemoteReplicationCensusSnapshot(
             _tickTimings.Level,
             _remoteSourceCommitsObserved,
@@ -901,7 +910,7 @@ public sealed class SharedPlayableAuthority : IDisposable
             perChunk.Count,
             memberships,
             subscriptions.Capture(), immediate.Capture(), near.Capture(), far.Capture(),
-            recipientsPerChunk.Capture());
+            recipientsPerChunk.Capture(), occupiedChunks.Count, multiplySubscribedChunks);
     }
 
     private static void SaturatingIncrement(ref ulong value)

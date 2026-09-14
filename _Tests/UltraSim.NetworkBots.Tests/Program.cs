@@ -32,6 +32,8 @@ var tests = new (string Name, Action Body)[]
     ("PF4DCheckpointSelectsExplicitAggregationPolicy", PF4DCheckpointSelectsExplicitAggregationPolicy),
     ("PF4ECheckpointRetainsSelectedProductionPolicy", PF4ECheckpointRetainsSelectedProductionPolicy),
     ("PF4FCheckpointRetainsSelectedCompressionPolicy", PF4FCheckpointRetainsSelectedCompressionPolicy),
+    ("PF5TopologyScenariosAreFiniteAndExplicit", PF5TopologyScenariosAreFiniteAndExplicit),
+    ("PF5EndpointFanoutRequiresOneEndpointPerBot", PF5EndpointFanoutRequiresOneEndpointPerBot),
 };
 
 foreach ((string name, Action body) in tests)
@@ -180,6 +182,58 @@ static void ActionStagesRetainNoEdgeAndAuthorityOutcomes()
 
     accounting.Reset();
     Equal((ulong)0, accounting.Snapshot(BotCommandKind.Jump).Generated);
+}
+
+static void PF5TopologyScenariosAreFiniteAndExplicit()
+{
+    foreach (string scenario in new[]
+             {
+                 "clusters", "migration-converge", "migration-disperse", "chat-swarm",
+                 "inventory-swarm", "vertical-swarm", "reconnect-swarm", "connection-churn",
+             })
+    {
+        var arguments = new List<string>
+        {
+            "--endpoint=127.0.0.1:7777",
+            $"--fingerprint={new string('1', 64)}",
+            "--bots=8", "--seed=500501", "--duration=8s",
+            $"--scenario={scenario}", "--cache=/tmp/ultrasim-bot-pf5-options",
+            "--checkpoint=PF5",
+        };
+        if (scenario is "clusters" or "migration-converge" or "migration-disperse")
+            arguments.Add("--clusters=8");
+        BotOptions options = BotOptions.Parse(arguments.ToArray());
+        Equal("PF5", options.Checkpoint);
+        Equal(scenario, options.Scenario);
+        Equal(scenario is "clusters" or "migration-converge" or "migration-disperse" ? 8 : 1,
+            options.ClusterCount);
+    }
+    Equal(BotTargetRegion.Central, BotScenarioTopology.RegionForGroup(8, 0));
+    Equal(BotTargetRegion.Far, BotScenarioTopology.RegionForGroup(8, 4));
+    Equal(BotTargetRegion.Sky, BotScenarioTopology.RegionForGroup(8, 7));
+    Throws<ArgumentException>(() => BotOptions.Parse(
+    [
+        "--endpoint=127.0.0.1:7777", $"--fingerprint={new string('1', 64)}",
+        "--bots=8", "--seed=1", "--duration=8s", "--scenario=clusters",
+        "--clusters=3", "--cache=/tmp/ultrasim-bot-pf5-options",
+    ]));
+}
+
+static void PF5EndpointFanoutRequiresOneEndpointPerBot()
+{
+    string[] common =
+    [
+        "--endpoint=127.0.0.1:7777", $"--fingerprint={new string('1', 64)}",
+        "--bots=2", "--seed=1", "--duration=8s", "--scenario=quiet",
+        "--cache=/tmp/ultrasim-bot-pf5-endpoints", "--checkpoint=PF5",
+    ];
+    BotOptions options = BotOptions.Parse(
+        [.. common, "--endpoint-list=127.0.0.1:8001,127.0.0.1:8002"]);
+    Equal(2, options.EndpointCount);
+    Equal("127.0.0.1:8001", options.EndpointForBot(0));
+    Equal("127.0.0.1:8002", options.EndpointForBot(1));
+    Throws<ArgumentException>(() => BotOptions.Parse(
+        [.. common, "--endpoint-list=127.0.0.1:8001"]));
 }
 
 static void PF4ACheckpointSelectsConservationSchema()

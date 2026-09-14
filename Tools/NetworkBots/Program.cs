@@ -28,6 +28,7 @@ catch (Exception exception) when (exception is ArgumentException or FormatExcept
 Console.WriteLine(
     $"{options.Checkpoint} BOT RUN endpoint={options.Endpoint} bots={options.BotCount} seed={options.Seed} " +
     $"warmupMs={options.WarmupMilliseconds} durationMs={options.DurationMilliseconds} scenario={options.Scenario} " +
+    $"clusters={options.ClusterCount} endpointCount={options.EndpointCount} " +
     $"inputMode={options.InputMode} sampleHz={options.InputSampleHz} submitHz={options.InputSubmitHz} " +
     $"frames={options.UnreliableFrameCap}/{options.UnreliableAggregationScope} " +
     $"cache={options.CacheRoot} network=ClientOnly");
@@ -181,7 +182,7 @@ internal sealed class BotHarness : IDisposable
                     }
                 }
                 _admissionCompleted = Stopwatch.GetTimestamp();
-                if (_options.IsMixedChaos && !WaitForSwordContenders())
+                if (_options.RequiresSword && !WaitForSwordContenders())
                     return Finish(false,
                         "No bot could locate the sword through its ordinary public world state.");
                 _scenarioStarted = Stopwatch.GetTimestamp();
@@ -209,7 +210,7 @@ internal sealed class BotHarness : IDisposable
                     foreach (BotClient bot in _bots)
                         bot.SetMeasurementTarget(target, bot.Id == moverIndex);
                 }
-                foreach (BotClient bot in _bots) bot.StartScenario(_scenarioStarted);
+                foreach (BotClient bot in _bots) bot.StartScenario(_scenarioStarted, measured: false);
                 Console.WriteLine(
                     $"{_options.Checkpoint} BOT SWARM ACTIVE bots={_bots.Length} generation=" +
                     $"{_bots[0].ServerGenerationId} sessions={_bots.Sum(static bot => bot.SessionCount)}");
@@ -232,7 +233,7 @@ internal sealed class BotHarness : IDisposable
                 Thread.Sleep(1);
             }
             _scenarioStarted = Stopwatch.GetTimestamp();
-            foreach (BotClient bot in _bots) bot.StartScenario(_scenarioStarted);
+            foreach (BotClient bot in _bots) bot.StartScenario(_scenarioStarted, measured: false);
         }
 
         if (_options.MeasurementReadyFile is not null)
@@ -250,7 +251,7 @@ internal sealed class BotHarness : IDisposable
                 Thread.Sleep(1);
             }
             _scenarioStarted = Stopwatch.GetTimestamp();
-            foreach (BotClient bot in _bots) bot.StartScenario(_scenarioStarted);
+            foreach (BotClient bot in _bots) bot.StartScenario(_scenarioStarted, measured: false);
         }
 
         // A measured window owns its generated/submitted/completed input counts. Drain any
@@ -272,6 +273,7 @@ internal sealed class BotHarness : IDisposable
                     .Take(8).Select(static bot => bot.DescribeUnexpectedQueueDebt())));
 
         _measurementStarted = Stopwatch.GetTimestamp();
+        foreach (BotClient bot in _bots) bot.StartScenario(_measurementStarted, measured: true);
         foreach (BotClient bot in _bots) bot.ResetTelemetryWindow();
         _wireMeasurement = new BotWireMeasurement(
             _bots, _source, _cache, _options.DurationMilliseconds, _measurementStarted);
@@ -389,7 +391,7 @@ internal sealed class BotHarness : IDisposable
         if (_wireSummary is null || !_wireSummary.PhysicalTransportReconciled ||
             !_wireSummary.LogicalMessageReconciled)
             return "PF2 physical/logical traffic accounting did not reconcile.";
-        if (_options.Checkpoint is "PF4A" or "PF4B" or "PF4C" or "PF4D" or "PF4E" or "PF4F")
+        if (_options.Checkpoint is "PF4A" or "PF4B" or "PF4C" or "PF4D" or "PF4E" or "PF4F" or "PF5")
         {
             BotActionOutcomeReport[] outcomes =
                 BotRunSummary.CreateActionOutcomes(_bots, _clientTelemetry);
@@ -408,7 +410,10 @@ internal sealed class BotHarness : IDisposable
         }
         if (!_options.IsMixedChaos)
         {
-            if (_options.Scenario is "moving" or "crowd" or "single-hot" or "multi-hot" &&
+            if (_options.Scenario is "moving" or "crowd" or "single-hot" or "multi-hot" or
+                    "clusters" or "migration-converge" or "migration-disperse" or
+                    "chat-swarm" or "inventory-swarm" or "vertical-swarm" or
+                    "reconnect-swarm" or "connection-churn" &&
                 _bots.Sum(static bot => bot.MovementAccepted) == 0)
                 return $"The {_options.Scenario} scenario produced no authoritative movement.";
             if (_options.Scenario == "single-hot")
@@ -450,6 +455,51 @@ internal sealed class BotHarness : IDisposable
                         bot.StaleSessionReplaysFenced != 1))
                     return "An old application/control-session command was not explicitly replayed and fenced.";
             }
+            if (_options.Scenario is "clusters" or "migration-disperse")
+            {
+                BotTargetRegion[] required = Enumerable.Range(0, _options.ClusterCount)
+                    .Select(group => BotScenarioTopology.RegionForGroup(
+                        _options.ClusterCount, group)).Distinct().ToArray();
+                foreach (BotTargetRegion region in required)
+                    if (!_bots.Any(bot => BotScenarioTopology.Classify(bot.CurrentPosition) == region))
+                        return $"The {_options.Scenario} scenario did not realize requested region {region}.";
+            }
+            if (_options.Scenario == "migration-converge" &&
+                _bots.Any(bot => BotScenarioTopology.Classify(bot.CurrentPosition) !=
+                    BotTargetRegion.Central))
+                return "The convergence migration did not return every participant to Central.";
+            if (_options.Scenario == "chat-swarm" &&
+                (_bots.Sum(static bot => bot.LocalChatSubmitted) == 0 ||
+                 _bots.Sum(static bot => bot.GlobalChatSubmitted) == 0 ||
+                 _bots.Sum(static bot => bot.LocalChatObserved) == 0 ||
+                 _bots.Sum(static bot => bot.GlobalChatObserved) == 0 ||
+                 _bots.Any(static bot => bot.ChatObservationGaps != 0)))
+                return "The Chat swarm did not conserve Local/Global submission and observation.";
+            if (_options.Scenario == "inventory-swarm" &&
+                (_bots.Sum(static bot => bot.SwordInteractionAttempts) < 2 ||
+                 _bots.Sum(static bot => bot.SwordPickupObserved) == 0 ||
+                 _bots.Sum(static bot => bot.SwordEquipObserved) == 0 ||
+                 _bots.Sum(static bot => bot.SwordDropObserved) == 0))
+                return "The Inventory swarm did not complete authoritative sword contention/pickup/equip/drop.";
+            if (_options.Scenario == "vertical-swarm" &&
+                (_bots.Sum(static bot => bot.VerticalTransitions) == 0 ||
+                 _bots.Sum(static bot => bot.LandingRecoveries) == 0 ||
+                 !_bots.Any(static bot => bot.SawAirborne)))
+                return "The vertical swarm did not observe authoritative airborne/landing transitions.";
+            if (_options.Scenario is "reconnect-swarm" or "connection-churn")
+            {
+                int expected = _options.Scenario == "connection-churn"
+                    ? _bots.Length
+                    : Math.Max(2, _bots.Length / 4);
+                if (_bots.Sum(static bot => bot.SuccessfulReconnects) != expected ||
+                    _bots.Sum(static bot => bot.FreshProofLifetimes) != _bots.Length + expected ||
+                    _bots.Any(static bot => bot.StaleActorObservedAfterReconnect))
+                    return $"The reconnect workload did not establish {expected} clean fresh lifetimes.";
+                if (_reconnectObservers.Any(static observer => !observer.Converged))
+                    return "Observer clients did not retire the old actor and acquire its replacement.";
+            }
+            if (_bots.Any(static bot => bot.HasUnexpectedQueueDebt))
+                return "A bot retained unexpected session queue debt at the acceptance boundary.";
             return null;
         }
         if (_bots.Sum(static bot => bot.MovementAccepted) == 0 ||
@@ -505,7 +555,7 @@ internal sealed class BotHarness : IDisposable
 
     private void TrackReconnectIdentity()
     {
-        if (!_options.IsMixedChaos) return;
+        if (!_options.HasReconnect) return;
         BotClient subject = _bots[^1];
         WorldPublicEntityId oldIdentity = subject.PriorPublicActor.IsValid
             ? subject.PriorPublicActor
@@ -514,6 +564,7 @@ internal sealed class BotHarness : IDisposable
         for (int index = 0; index < _reconnectObservers.Length; index++)
         {
             BotClient observer = _bots[index];
+            if (!observer.IsActive) continue;
             if (subject.SuccessfulReconnects == 0)
                 _reconnectObservers[index].ObserveBefore(
                     observer.ContainsPublic(oldIdentity) &&
@@ -557,7 +608,10 @@ internal sealed class BotHarness : IDisposable
             .ThenBy(static candidate => candidate.bot.Id)
             .ToArray();
         if (candidates.Length == 0) return false;
-        for (int index = 0; index < Math.Min(2, candidates.Length); index++)
+        int contenders = _options.Scenario == "inventory-swarm"
+            ? Math.Min(8, candidates.Length)
+            : Math.Min(2, candidates.Length);
+        for (int index = 0; index < contenders; index++)
             candidates[index].Bot.SetSwordContender();
         return true;
     }
@@ -702,6 +756,48 @@ internal enum BotEdgePressureState : byte
     Complete = 2,
 }
 
+internal enum BotTargetRegion : byte
+{
+    Central = 1,
+    Far = 2,
+    Sky = 3,
+}
+
+internal static class BotScenarioTopology
+{
+    internal static BotTargetRegion RegionForGroup(int clusters, int group)
+    {
+        if (clusters <= 1) return BotTargetRegion.Central;
+        if (clusters == 2) return group == 0 ? BotTargetRegion.Central : BotTargetRegion.Far;
+        if (clusters == 4)
+            return group switch
+            {
+                0 or 1 => BotTargetRegion.Central,
+                2 => BotTargetRegion.Far,
+                _ => BotTargetRegion.Sky,
+            };
+        return group switch
+        {
+            <= 2 => BotTargetRegion.Central,
+            <= 5 => BotTargetRegion.Far,
+            _ => BotTargetRegion.Sky,
+        };
+    }
+
+    internal static int SubgroupForGroup(int clusters, int group) =>
+        clusters <= 2 ? 0 : group % 3;
+
+    internal static BotTargetRegion Classify(in WorldPosition position)
+    {
+        if (position.Chunk.X >= 64) return BotTargetRegion.Far;
+        bool withinSkyFootprint = position.GlobalXMillimeters is >= 23_000 and < 32_000 &&
+            position.GlobalZMillimeters is >= 5_500 and < 12_500;
+        return withinSkyFootprint && position.YMillimeters >= 3_000
+            ? BotTargetRegion.Sky
+            : BotTargetRegion.Central;
+    }
+}
+
 internal sealed class BotClient : IDisposable
 {
     private const int MaximumResidentChunks = 192;
@@ -759,6 +855,7 @@ internal sealed class BotClient : IDisposable
     private ulong _priorApplicationEpoch;
     private WorldPublicEntityId _priorPublicActor;
     private WorldPublicEntityId _currentPublicActor;
+    private WorldPosition _lastObservedPosition;
     private ClientPublicActorVerticalPhase _lastVertical;
     private string? _fault;
     private bool _measurementOriginSet;
@@ -772,6 +869,13 @@ internal sealed class BotClient : IDisposable
     private UdpPayloadTrafficSnapshot _retiredUdpTraffic;
     private NetworkTrafficSnapshot? _retiredSecureTraffic;
     private bool _trafficCapturedForCurrentLifetime;
+    private bool _measurementPhase;
+    private long _nextChatSubmission;
+    private bool _clusterAnchorSet;
+    private long _clusterAnchorX;
+    private long _clusterAnchorZ;
+    private bool _routeDoorOpenRequested;
+    private bool _routeDoorRecoveryRequested;
     private ulong _rateLimitedCommandsObserved;
     private ulong _lastRateLimitedCommands;
     private GameControlSessionEpoch _priorControlSession;
@@ -871,7 +975,7 @@ internal sealed class BotClient : IDisposable
     internal WorldPublicEntityId CurrentPublicActor => _currentPublicActor;
     internal string? Fault => _fault;
     internal WorldPosition CurrentPosition =>
-        _session?.GetSnapshot().Playable.Position ?? default;
+        _session?.GetSnapshot().Playable.Position ?? _lastObservedPosition;
 
     internal void SetMeasurementTarget(in WorldPosition target, bool isSingleHotMover)
     {
@@ -974,14 +1078,17 @@ internal sealed class BotClient : IDisposable
             $"releaseCompleted={input.ReleaseOrStopCompleted}";
     }
 
-    internal void StartScenario(long timestamp)
+    internal void StartScenario(long timestamp, bool measured)
     {
         _scenarioStarted = timestamp;
+        _measurementPhase = measured;
         _nextChaos = BotMonotonicClock.AddMilliseconds(
             timestamp, 6_000 + _random.NextInt(500));
         _nextNavigation = timestamp;
         _nextSwordAttempt = BotMonotonicClock.AddMilliseconds(timestamp, 100);
         _nextInputSample = timestamp;
+        _nextChatSubmission = BotMonotonicClock.AddMilliseconds(
+            timestamp, 500 + checked((Id % 10) * 150L));
     }
 
     internal void SetSwordContender() => _swordContender = true;
@@ -1205,7 +1312,7 @@ internal sealed class BotClient : IDisposable
                 UnreliableAggregationScope = _options.UnreliableAggregationScope,
             });
         _connection.ConfigureTelemetry(_options.TelemetryLevel);
-        if (!_connection.TryStart(_options.Endpoint, _options.Fingerprint))
+        if (!_connection.TryStart(_options.EndpointForBot(Id), _options.Fingerprint))
         {
             ClientDirectConnectSnapshot failed = _connection.GetSnapshot();
             Fail($"Direct Connect start failed: {failed.Failure}: {failed.Detail}");
@@ -1248,6 +1355,7 @@ internal sealed class BotClient : IDisposable
     private void Observe(in RemotePlayableSessionSnapshot snapshot)
     {
         RemotePlayableClientSnapshot playable = snapshot.Playable;
+        _lastObservedPosition = playable.Position;
         if (_pendingCommand.TryComplete(
                 playable.ApplicationSessionEpoch,
                 playable.LastProcessedCommandSequence,
@@ -1348,9 +1456,307 @@ internal sealed class BotClient : IDisposable
             case "sustained-input":
                 RunSustainedInput(now, snapshot.Playable.Position);
                 return;
+            case "clusters":
+                RunClusteredMeasurement(now, snapshot.Playable.Position, _options.ClusterCount);
+                return;
+            case "migration-converge":
+                RunMigration(now, snapshot.Playable.Position, converge: true);
+                return;
+            case "migration-disperse":
+                RunMigration(now, snapshot.Playable.Position, converge: false);
+                return;
+            case "chat-swarm":
+                RunChatSwarm(now, snapshot.Playable.Position);
+                return;
+            case "inventory-swarm":
+                RunInventorySwarm(now, snapshot.Playable.Position);
+                return;
+            case "vertical-swarm":
+                RunVerticalSwarm(now, snapshot.Playable.Position);
+                return;
+            case "reconnect-swarm":
+                RunReconnectSwarm(now, snapshot.Playable.Position, allClients: false);
+                return;
+            case "connection-churn":
+                RunReconnectSwarm(now, snapshot.Playable.Position, allClients: true);
+                return;
             default:
                 throw new InvalidOperationException($"Unknown bot scenario '{_options.Scenario}'.");
         }
+    }
+
+    private void RunMigration(long now, in WorldPosition position, bool converge)
+    {
+        int clusters;
+        if (!_measurementPhase)
+            clusters = converge ? _options.ClusterCount : 1;
+        else
+        {
+            long elapsed = BotMonotonicClock.TicksToMilliseconds(now - _scenarioStarted);
+            long transition = Math.Max(1_000, _options.DurationMilliseconds / 5L);
+            bool transitioned = elapsed >= transition;
+            clusters = converge
+                ? transitioned ? 1 : _options.ClusterCount
+                : transitioned ? _options.ClusterCount : 1;
+        }
+        RunClusteredMeasurement(now, position, clusters);
+    }
+
+    private void RunClusteredMeasurement(long now, in WorldPosition position, int clusters)
+    {
+        if (TryPrepareCabinExit(now, position)) return;
+        int group = clusters <= 1 ? 0 : Id % clusters;
+        BotTargetRegion region = BotScenarioTopology.RegionForGroup(clusters, group);
+        BotTargetRegion current = BotScenarioTopology.Classify(position);
+        if (current != region)
+        {
+            _clusterAnchorSet = false;
+            if (current == BotTargetRegion.Far)
+            {
+                // The finite Far Island already defines an ordinary authoritative
+                // fall/recovery route to the Central region. Use that product behavior for
+                // return migration rather than assuming every generated terrain approach to
+                // the return gate is navigable by this intentionally simple steering client.
+                if (now >= _nextNavigation && !_pendingCommand.HasPendingExactCompletion)
+                {
+                    _ = TryMovement(-1f, 0f, position, now);
+                    _nextNavigation = BotMonotonicClock.AddMilliseconds(now, 250);
+                }
+                return;
+            }
+            if (region == BotTargetRegion.Far)
+            {
+                if (now >= _nextNavigation)
+                {
+                    DriveTowardInteractable(
+                        GameWorldPublicPrefabIds.FarGate, now, position);
+                    _nextNavigation = BotMonotonicClock.AddMilliseconds(now, 200);
+                }
+                return;
+            }
+            if (region == BotTargetRegion.Sky)
+            {
+                if (now >= _nextNavigation)
+                {
+                    DriveTowardInteractable(
+                        GameWorldPublicPrefabIds.SkyTelepad, now, position);
+                    _nextNavigation = BotMonotonicClock.AddMilliseconds(now, 200);
+                }
+                return;
+            }
+            // The Sky Island has no privileged return action. Ordinary movement/jump off its
+            // finite edge drives the existing fall/recovery path back into the central world.
+            if (now >= _nextNavigation)
+            {
+                _ = TryMovement(1f, .35f, position, now);
+                _nextNavigation = BotMonotonicClock.AddMilliseconds(now, 250);
+            }
+            return;
+        }
+
+        if (!_clusterAnchorSet)
+        {
+            _clusterAnchorSet = true;
+            (_clusterAnchorX, _clusterAnchorZ) = region switch
+            {
+                BotTargetRegion.Central => (15_500L, 7_000L),
+                BotTargetRegion.Far => (
+                    checked((long)128 * GameWorldSpatialProfile.WorldChunkEdgeUnits + 8_000),
+                    16_000L),
+                BotTargetRegion.Sky => (28_000L, 9_000L),
+                _ => throw new InvalidOperationException("Unknown PF5 target region."),
+            };
+        }
+        if (now < _nextNavigation || _pendingCommand.HasPendingExactCompletion) return;
+        long elapsedMilliseconds = BotMonotonicClock.TicksToMilliseconds(now - _scenarioStarted);
+        int subgroup = BotScenarioTopology.SubgroupForGroup(clusters, group);
+        double centerAngle = subgroup * (Math.PI * 2d / 3d);
+        double subgroupRadius = region == BotTargetRegion.Sky ? 250d : 3_000d;
+        double orbitRadius = region == BotTargetRegion.Sky ? 250d : 1_250d;
+        long targetX = checked(_clusterAnchorX +
+            (long)Math.Round(Math.Cos(centerAngle) * subgroupRadius));
+        long targetZ = checked(_clusterAnchorZ +
+            (long)Math.Round(Math.Sin(centerAngle) * subgroupRadius));
+        double orbit = ((Id * 47 + (elapsedMilliseconds / 500) * 23) % 360) * Math.PI / 180d;
+        targetX = checked(targetX + (long)Math.Round(Math.Cos(orbit) * orbitRadius));
+        targetZ = checked(targetZ + (long)Math.Round(Math.Sin(orbit) * orbitRadius));
+        DriveTowardPoint(targetX, targetZ, now, position);
+        _nextNavigation = BotMonotonicClock.AddMilliseconds(now, 250);
+        // Migration is intended to isolate AOI/topology transition cost. Avoid starting a
+        // decorative jump at the exact measured-window boundary; the dedicated vertical and
+        // mixed-chaos workloads own sustained jump/fall pressure.
+        if (_options.Scenario is not ("migration-converge" or "migration-disperse"))
+            RunPeriodicJump(now, elapsedMilliseconds, 13 + Id % 7);
+    }
+
+    private bool TryPrepareCabinExit(long now, in WorldPosition position)
+    {
+        long x = position.GlobalXMillimeters;
+        long z = position.GlobalZMillimeters;
+        if (Id == 0 && !_routeDoorOpenRequested &&
+            TryFindPublic(GameWorldPublicPrefabIds.CabinDoor, out WorldPublicRecord door))
+        {
+            long dx = door.Position.GlobalXMillimeters - x;
+            long dz = door.Position.GlobalZMillimeters - z;
+            if (checked(dx * dx + dz * dz) <= 1_200L * 1_200L &&
+                !_pendingCommand.HasPendingExactCompletion)
+            {
+                _routeDoorOpenRequested = TryInteraction(door.Id);
+                return true;
+            }
+            if (now >= _nextNavigation)
+            {
+                DriveTowardPoint(door.Position.GlobalXMillimeters,
+                    door.Position.GlobalZMillimeters, now, position);
+                _nextNavigation = BotMonotonicClock.AddMilliseconds(now, 200);
+            }
+            return true;
+        }
+        bool withinCabin = x is > 12_150 and < 19_850 && z is > 8_500 and < 14_850;
+        if (!withinCabin) return false;
+        // Bot 0 is the deterministic ordinary client that opens the shared cabin door once.
+        // Other clients simply submit ordinary movement toward the exit and wait at collision
+        // until that accepted Game interaction opens it; no private door state is consulted.
+        long elapsed = BotMonotonicClock.TicksToMilliseconds(now - _scenarioStarted);
+        if (Id != 0 && elapsed < checked(Id * 2_000L)) return true;
+        if (Id != 0 && !_routeDoorRecoveryRequested && elapsed >= Math.Max(
+                20_000, checked(Id * 2_000L + 10_000)) &&
+            TryFindPublic(GameWorldPublicPrefabIds.CabinDoor, out WorldPublicRecord recoveryDoor))
+        {
+            long dx = recoveryDoor.Position.GlobalXMillimeters - x;
+            long dz = recoveryDoor.Position.GlobalZMillimeters - z;
+            if (checked(dx * dx + dz * dz) <= 1_200L * 1_200L &&
+                !_pendingCommand.HasPendingExactCompletion)
+            {
+                _routeDoorRecoveryRequested = TryInteraction(recoveryDoor.Id);
+                return true;
+            }
+        }
+        if (now >= _nextNavigation)
+        {
+            DriveTowardPoint(16_000, 7_500, now, position);
+            _nextNavigation = BotMonotonicClock.AddMilliseconds(now, 200);
+        }
+        return true;
+    }
+
+    private void RunChatSwarm(long now, in WorldPosition position)
+    {
+        RunMovingMeasurement(now, position, crowd: true);
+        if (!_measurementPhase || now < _nextChatSubmission || _session is null) return;
+        long elapsed = BotMonotonicClock.TicksToMilliseconds(now - _scenarioStarted);
+        bool global = ((elapsed / 8_000) + Id) % 3 == 0;
+        string text = $"PF1:{_options.Seed}:bot={Id}:pf5-chat={elapsed / 1_000}";
+        if (_session.Chat.TrySubmit(text,
+                global ? ClientChatSpeechMode.Global : ClientChatSpeechMode.Say))
+        {
+            if (global) GlobalChatSubmitted++;
+            else LocalChatSubmitted++;
+        }
+        _nextChatSubmission = BotMonotonicClock.AddMilliseconds(
+            now, 8_000 + checked((Id % 7) * 350L));
+    }
+
+    private void RunInventorySwarm(long now, in WorldPosition position)
+    {
+        if (!_measurementPhase)
+        {
+            RunMovingMeasurement(now, position, crowd: true);
+            return;
+        }
+        long elapsed = BotMonotonicClock.TicksToMilliseconds(now - _scenarioStarted);
+        if (_swordContender && SwordPickupObserved == 0 && now >= _nextSwordAttempt)
+        {
+            if (TryFindPublic(GameWorldPublicPrefabIds.IronSword, out WorldPublicRecord sword))
+            {
+                long dx = sword.Position.GlobalXMillimeters - position.GlobalXMillimeters;
+                long dz = sword.Position.GlobalZMillimeters - position.GlobalZMillimeters;
+                if (checked(dx * dx + dz * dz) <= 1_200L * 1_200L)
+                {
+                    if (TryInteraction(sword.Id)) SwordInteractionAttempts++;
+                    _nextSwordAttempt = BotMonotonicClock.AddMilliseconds(now, 500);
+                }
+                else if (now >= _nextNavigation)
+                {
+                    DriveTowardInteractable(GameWorldPublicPrefabIds.IronSword, now, position);
+                    _nextNavigation = BotMonotonicClock.AddMilliseconds(now, 250);
+                }
+            }
+        }
+        if (_swordContender && !_inventoryRequested && elapsed >= 1_000 &&
+            TryCommand(new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.Unchanged, GamePlayerActions.None, true),
+                BotCommandKind.UiOpen,
+                flags: RemotePlayableCommandFlags.OpenInventoryRequested))
+            _inventoryRequested = true;
+        DriveInventory(elapsed);
+        if (!_swordContender) RunMovingMeasurement(now, position, crowd: true);
+    }
+
+    private void RunVerticalSwarm(long now, in WorldPosition position)
+    {
+        int route = Id % 3;
+        if (route == 0)
+        {
+            RunClusteredMeasurement(now, position, clusters: 4);
+            return;
+        }
+        if (route == 1 && BotScenarioTopology.Classify(position) != BotTargetRegion.Sky)
+        {
+            if (now >= _nextNavigation)
+            {
+                DriveTowardInteractable(GameWorldPublicPrefabIds.SkyTelepad, now, position);
+                _nextNavigation = BotMonotonicClock.AddMilliseconds(now, 200);
+            }
+            return;
+        }
+        RunMovingMeasurement(now, position, crowd: false);
+        long elapsed = BotMonotonicClock.TicksToMilliseconds(now - _scenarioStarted);
+        RunPeriodicJump(now, elapsed, 4 + Id % 3);
+    }
+
+    private void RunReconnectSwarm(long now, in WorldPosition position, bool allClients)
+    {
+        RunMovingMeasurement(now, position, crowd: false);
+        if (!_measurementPhase || SuccessfulReconnects != 0 || _reconnectRequested) return;
+        int reconnectCount = allClients
+            ? _options.BotCount
+            : Math.Max(2, _options.BotCount / 4);
+        int first = _options.BotCount - reconnectCount;
+        if (Id < first) return;
+        long ordinal = Id - first;
+        long due = allClients
+            ? 2_000 + ordinal * 350L
+            : 4_000 + (ordinal % 4) * 150L + (ordinal / 4) * 2_000L;
+        long elapsed = BotMonotonicClock.TicksToMilliseconds(now - _scenarioStarted);
+        if (elapsed < due || HasUnexpectedQueueDebt) return;
+        _reconnectRequested = true;
+        BeginRetirement(now, reconnect: true);
+    }
+
+    private void RunPeriodicJump(long now, long elapsedMilliseconds, int seconds)
+    {
+        long second = elapsedMilliseconds / 1_000;
+        if (second <= 0 || second == _lastMeasurementJumpSecond || second % seconds != 0 ||
+            _pendingCommand.HasPendingExactCompletion)
+            return;
+        _lastMeasurementJumpSecond = second;
+        _ = TryPhysicalAction(ClientSemanticAction.Jump, GamePlayerActions.Jump,
+            BotCommandKind.Jump);
+    }
+
+    private void DriveTowardPoint(long targetX, long targetZ, long now, in WorldPosition position)
+    {
+        long dx = targetX - position.GlobalXMillimeters;
+        long dz = targetZ - position.GlobalZMillimeters;
+        long distanceSquared = checked(dx * dx + dz * dz);
+        if (distanceSquared <= 250L * 250L)
+        {
+            _ = TryMovement(0, 0, position, now);
+            return;
+        }
+        double length = Math.Sqrt(distanceSquared);
+        _ = TryMovement((float)(dx / length), (float)(dz / length), position, now);
     }
 
     private void RunSustainedInput(long now, in WorldPosition position)
@@ -1876,7 +2282,30 @@ internal sealed class BotClient : IDisposable
 
     private void DriveTowardInteractable(uint prefab, long now, in WorldPosition position)
     {
-        if (!TryFindPublic(prefab, out WorldPublicRecord target)) return;
+        if (!TryFindPublic(prefab, out WorldPublicRecord target))
+        {
+            // Scenario navigation may know the public Concept Demo landmark location, but it
+            // still waits for ordinary disclosure before it can nominate an entity/action.
+            // The coordinates create only ordinary movement intent and grant no target handle.
+            if (prefab == GameWorldPublicPrefabIds.FarGate)
+            {
+                if (position.Chunk.X < 64 &&
+                    TryDriveCentralFarGateRoute(now, position))
+                    return;
+                else if (Math.Abs(position.GlobalZMillimeters - 20_000) > 2_000)
+                    DriveTowardPoint(position.GlobalXMillimeters, 20_000, now, position);
+                else
+                {
+                    long fallbackX = position.Chunk.X >= 64
+                        ? checked((long)128 * GameWorldSpatialProfile.WorldChunkEdgeUnits + 8_000)
+                        : 0;
+                    DriveTowardPoint(fallbackX, 20_000, now, position);
+                }
+            }
+            else if (prefab == GameWorldPublicPrefabIds.SkyTelepad)
+                DriveTowardPoint(21_000, 6_500, now, position);
+            return;
+        }
         long dx = target.Position.GlobalXMillimeters - position.GlobalXMillimeters;
         long dz = target.Position.GlobalZMillimeters - position.GlobalZMillimeters;
         long distanceSquared = checked(dx * dx + dz * dz);
@@ -1886,8 +2315,57 @@ internal sealed class BotClient : IDisposable
                 _ = TryInteraction(target.Id);
             return;
         }
+        // The authored Far Gate route crosses the cabin/plaza most reliably as two ordinary
+        // player legs. This is client-side navigation only: the target is still discovered from
+        // public state, and Game remains the sole arbiter of motion and interaction.
+        if (prefab == GameWorldPublicPrefabIds.FarGate && position.Chunk.X < 64 &&
+            TryDriveCentralFarGateRoute(now, position))
+        {
+            return;
+        }
+        if (prefab == GameWorldPublicPrefabIds.FarGate && Math.Abs(dz) > 2_000)
+        {
+            DriveTowardPoint(position.GlobalXMillimeters,
+                target.Position.GlobalZMillimeters, now, position);
+            return;
+        }
         double length = Math.Sqrt(distanceSquared);
         _ = TryMovement((float)(dx / length), (float)(dz / length), position, now);
+    }
+
+    private bool TryDriveCentralFarGateRoute(long now, in WorldPosition position)
+    {
+        long x = position.GlobalXMillimeters;
+        long z = position.GlobalZMillimeters;
+        // Shared-authority spawn rows can begin inside the cabin or north of it. Route the
+        // former through the real south doorway and the latter around the west wall before
+        // approaching the gate. These are only public world landmarks converted into ordinary
+        // movement intent; Game still performs every collision and relocation decision.
+        bool withinCabin = x is > 12_150 and < 19_850 && z is > 9_150 and < 14_850;
+        if (withinCabin)
+        {
+            if (Math.Abs(x - 16_000) > 500)
+                DriveTowardPoint(16_000, z, now, position);
+            else
+                DriveTowardPoint(16_000, 7_500, now, position);
+            return true;
+        }
+        if (x > 9_000)
+        {
+            DriveTowardPoint(8_000, z, now, position);
+            return true;
+        }
+        if (z < 21_750)
+        {
+            DriveTowardPoint(x, 22_000, now, position);
+            return true;
+        }
+        if (x > 1_250)
+        {
+            DriveTowardPoint(0, Math.Max(z, 22_000), now, position);
+            return true;
+        }
+        return false;
     }
 
     private void DriveInventory(long elapsed)
@@ -2468,6 +2946,16 @@ internal readonly record struct BotActionOutcomeReport(
     bool Conserved,
     bool Terminal);
 
+internal readonly record struct BotFinalPositionReport(
+    int BotId,
+    int RequestedCluster,
+    string ClassifiedRegion,
+    int ChunkX,
+    int ChunkZ,
+    long GlobalXMillimeters,
+    int YMillimeters,
+    long GlobalZMillimeters);
+
 internal sealed record BotRunSummary
 {
     public required int SchemaVersion { get; init; }
@@ -2475,7 +2963,9 @@ internal sealed record BotRunSummary
     public required bool Passed { get; init; }
     public required string? Detail { get; init; }
     public required string Endpoint { get; init; }
+    public required int EndpointCount { get; init; }
     public required string Scenario { get; init; }
+    public required int ClusterCount { get; init; }
     public required string InputMode { get; init; }
     public required int ConfiguredInputSampleHz { get; init; }
     public required int ConfiguredInputSubmitHz { get; init; }
@@ -2584,6 +3074,7 @@ internal sealed record BotRunSummary
     public required BotInputRateReport InputRates { get; init; }
     public required BotAcrossClientTimingReport AcrossClientTiming { get; init; }
     public required BotActionOutcomeReport[] ActionOutcomes { get; init; }
+    public required BotFinalPositionReport[] FinalPositions { get; init; }
     public required BotHttpBodyTrafficReport LifetimeHttpBody { get; init; }
     public required BotCacheTrafficReport LifetimeContentCache { get; init; }
     public required BotPumpWindowSummary MeasuredPump { get; init; }
@@ -2627,13 +3118,16 @@ internal sealed record BotRunSummary
             "PF4C" => 8,
             "PF4D" => 9,
             "PF4E" => 10,
-            _ => 11,
+            "PF4F" => 11,
+            _ => 12,
         },
         Checkpoint = options.Checkpoint,
         Passed = passed,
         Detail = detail,
         Endpoint = options.Endpoint,
+        EndpointCount = options.EndpointCount,
         Scenario = options.Scenario,
+        ClusterCount = options.ClusterCount,
         InputMode = options.InputMode.ToString(),
         ConfiguredInputSampleHz = options.InputSampleHz,
         ConfiguredInputSubmitHz = options.InputSubmitHz,
@@ -2771,6 +3265,20 @@ internal sealed record BotRunSummary
         InputRates = CreateInputRates(options, clientTelemetry),
         AcrossClientTiming = CreateAcrossClientTiming(clientTelemetry),
         ActionOutcomes = CreateActionOutcomes(bots, clientTelemetry),
+        FinalPositions = bots.Select(bot =>
+        {
+            WorldPosition position = bot.CurrentPosition;
+            int group = options.ClusterCount <= 1 ? 0 : bot.Id % options.ClusterCount;
+            return new BotFinalPositionReport(
+                bot.Id,
+                group,
+                BotScenarioTopology.Classify(position).ToString(),
+                position.Chunk.X,
+                position.Chunk.Z,
+                position.GlobalXMillimeters,
+                position.YMillimeters,
+                position.GlobalZMillimeters);
+        }).ToArray(),
         LifetimeHttpBody = lifetimeHttpBody,
         LifetimeContentCache = lifetimeContentCache,
         MeasuredPump = measuredPump,
@@ -3042,9 +3550,17 @@ internal readonly record struct BotOptions(
     int UnreliableFrameCap = 2,
     NetworkUnreliableAggregationScope UnreliableAggregationScope =
         NetworkUnreliableAggregationScope.CrossLane,
-    string? CheckpointOverride = null)
+    string? CheckpointOverride = null,
+    string[]? EndpointOverrides = null,
+    int ClusterCount = 1)
 {
     internal bool IsMixedChaos => string.Equals(Scenario, "mixed-chaos", StringComparison.Ordinal);
+    internal bool RequiresSword => IsMixedChaos || Scenario == "inventory-swarm";
+    internal bool HasReconnect => IsMixedChaos || Scenario is "reconnect-swarm" or "connection-churn";
+    internal int EndpointCount => EndpointOverrides?.Length ?? 1;
+    internal string EndpointForBot(int id) => EndpointOverrides is null
+        ? Endpoint
+        : EndpointOverrides[id];
     internal string Checkpoint => CheckpointOverride ?? (Scenario == "sustained-input" ? "PF3" :
         TelemetryLevel == NetworkTelemetryLevel.Detailed
         ? "PF2.5"
@@ -3078,10 +3594,15 @@ internal readonly record struct BotOptions(
         NetworkUnreliableAggregationScope unreliableAggregationScope =
             NetworkUnreliableAggregationScope.CrossLane;
         string? checkpointOverride = null;
+        string[]? endpointOverrides = null;
+        int clusters = 1;
         foreach (string argument in arguments)
         {
             if (argument == "--verbose") { verbose = true; continue; }
             if (TryValue(argument, "--endpoint=", out string? value)) endpoint = value;
+            else if (TryValue(argument, "--endpoint-list=", out value))
+                endpointOverrides = value!.Split(',', StringSplitOptions.TrimEntries |
+                    StringSplitOptions.RemoveEmptyEntries);
             else if (TryValue(argument, "--fingerprint=", out value)) fingerprint = value;
             else if (TryValue(argument, "--bots=", out value) && int.TryParse(value, out int parsedBots)) bots = parsedBots;
             else if (TryValue(argument, "--seed=", out value) && ulong.TryParse(value, out ulong parsedSeed)) seed = parsedSeed;
@@ -3121,8 +3642,11 @@ internal readonly record struct BotOptions(
                         "--unreliable-aggregation-scope must be same-lane or cross-lane."),
                 };
             else if (TryValue(argument, "--checkpoint=", out value) &&
-                value is "PF2" or "PF2.5" or "PF3" or "PF4A" or "PF4B" or "PF4C" or "PF4D" or "PF4E" or "PF4F")
+                value is "PF2" or "PF2.5" or "PF3" or "PF4A" or "PF4B" or "PF4C" or "PF4D" or "PF4E" or "PF4F" or "PF5")
                 checkpointOverride = value;
+            else if (TryValue(argument, "--clusters=", out value) &&
+                int.TryParse(value, out int parsedClusters))
+                clusters = parsedClusters;
             else throw new ArgumentException($"Unknown or malformed option '{argument}'.");
         }
         if (!ClientDirectConnectEndpoint.TryParse(endpoint, out _))
@@ -3135,10 +3659,30 @@ internal readonly record struct BotOptions(
         if (duration is < 2_000 or > 86_400_000)
             throw new ArgumentException("--duration must be between 2 seconds and 24 hours.");
         if (scenario is not ("mixed-chaos" or "quiet" or "moving" or "crowd" or
-                "single-hot" or "multi-hot" or "sustained-input"))
+                "single-hot" or "multi-hot" or "sustained-input" or "clusters" or
+                "migration-converge" or "migration-disperse" or "chat-swarm" or
+                "inventory-swarm" or "vertical-swarm" or "reconnect-swarm" or
+                "connection-churn"))
             throw new ArgumentException(
                 "--scenario must be mixed-chaos, quiet, moving, crowd, single-hot, " +
-                "multi-hot, or sustained-input.");
+                "multi-hot, sustained-input, clusters, migration-converge, " +
+                "migration-disperse, chat-swarm, inventory-swarm, vertical-swarm, " +
+                "reconnect-swarm, or connection-churn.");
+        if (clusters is not (1 or 2 or 4 or 8))
+            throw new ArgumentException("--clusters must be 1, 2, 4, or 8.");
+        if (scenario is not ("clusters" or "migration-converge" or "migration-disperse") &&
+            clusters != 1)
+            throw new ArgumentException(
+                "--clusters requires clusters, migration-converge, or migration-disperse.");
+        if (endpointOverrides is not null)
+        {
+            if (endpointOverrides.Length != bots)
+                throw new ArgumentException("--endpoint-list must contain exactly one endpoint per bot.");
+            foreach (string candidate in endpointOverrides)
+                if (!ClientDirectConnectEndpoint.TryParse(candidate, out _))
+                    throw new ArgumentException(
+                        "--endpoint-list contains a non-canonical IPv4 Direct Connect endpoint.");
+        }
         if (inputSampleHz is < 0 or > 1_000)
             throw new ArgumentException("--input-sample-hz must be between 1 and 1000 when set.");
         if (inputSubmitHz is < 0 or > 1_000)
@@ -3171,7 +3715,8 @@ internal readonly record struct BotOptions(
             measurementReady, measurementRelease, measurementComplete,
             stagger, verbose, warmup, telemetryLevel,
             inputSampleHz, inputSubmitHz, inputMode,
-            unreliableFrameCap, unreliableAggregationScope, checkpointOverride);
+            unreliableFrameCap, unreliableAggregationScope, checkpointOverride,
+            endpointOverrides, clusters);
     }
 
     private static bool TryValue(string argument, string prefix, out string? value)
