@@ -556,7 +556,7 @@
   "verification": {
     "networkBotTests": "24/24 passed",
     "focusedPf5": "passed with three external impairment profiles plus actual exported Contentless Online clients; maintained five-minute native impairment interval passed",
-    "fullCanonicalRelease": "pending final recorded run",
-    "worktreeAtEvidenceDraft": "clean before evidence/documentation closure"
+    "fullCanonicalRelease": "passed from clean PF5 closure tree 97261c532f149f64b2952a68df0662305e562e39; final evidence-only metadata update rechecked by architecture-only verification",
+    "worktreeAtFullVerification": "clean"
   }
 }
