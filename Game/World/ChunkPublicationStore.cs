@@ -261,6 +261,7 @@ public sealed partial class ChunkPublicationStore
     private readonly int[] _planAvailableSlots;
     private readonly uint[] _planReuseStamps;
     private readonly SpatialChunkKey[] _affectedKeys;
+    private readonly ulong[] _affectedPreviousRevisions;
     private readonly ulong[] _affectedRevisions;
     private readonly PendingDirty[] _pendingDirty;
     private readonly int[] _queryIndices;
@@ -299,6 +300,14 @@ public sealed partial class ChunkPublicationStore
     private int _activeAffectedCount;
 
     public ChunkPublicationStore(PublicationEpoch epoch, ChunkPublicationLimits limits)
+        : this(epoch, limits, PreparedChunkPublicationReadModel.PreparedLatestState)
+    {
+    }
+
+    internal ChunkPublicationStore(
+        PublicationEpoch epoch,
+        ChunkPublicationLimits limits,
+        PreparedChunkPublicationReadModel readModel)
     {
         if (!epoch.IsValid)
             throw new ArgumentException("A publication store requires a valid epoch.", nameof(epoch));
@@ -340,11 +349,13 @@ public sealed partial class ChunkPublicationStore
         _planAvailableSlots = new int[entities * 2];
         _planReuseStamps = new uint[entities];
         _affectedKeys = new SpatialChunkKey[entities * 2];
+        _affectedPreviousRevisions = new ulong[entities * 2];
         _affectedRevisions = new ulong[entities * 2];
         _pendingDirty = new PendingDirty[entities * 2];
         _queryIndices = new int[entities];
         _queryStamps = new uint[entities];
         _queryLatest = new HistoryEntry[entities];
+        InitializePreparedPublicationStorage(readModel, entities);
         ResetFreeStorage();
     }
 
@@ -491,6 +502,7 @@ public sealed partial class ChunkPublicationStore
         {
             int chunk = GetOrCreateChunk(_affectedKeys[index]);
             bool beginsIncarnation = _chunks[chunk].Revision == 0;
+            _affectedPreviousRevisions[index] = _chunks[chunk].Revision;
             ulong revision = ++_revisionSequence;
             _affectedRevisions[index] = revision;
             _chunks[chunk].Revision = revision;
@@ -611,7 +623,26 @@ public sealed partial class ChunkPublicationStore
         Span<WorldPublicDeltaRecord> destination,
         out ChunkPublicationBatch batch)
     {
+        return _preparedReadModel == PreparedChunkPublicationReadModel.PreparedLatestState
+            ? TryCopyPreparedDelta(key, cursor, destination, out batch)
+            : TryCopyHistoryDerivedDelta(key, cursor, destination, out batch);
+    }
+
+    internal ChunkPublicationReadStatus TryCopyHistoryDerivedComparison(
+        SpatialChunkKey key,
+        ChunkPublicationCursor cursor,
+        Span<WorldPublicDeltaRecord> destination,
+        out ChunkPublicationBatch batch) =>
+        TryCopyHistoryDerivedDelta(key, cursor, destination, out batch);
+
+    private ChunkPublicationReadStatus TryCopyHistoryDerivedDelta(
+        SpatialChunkKey key,
+        ChunkPublicationCursor cursor,
+        Span<WorldPublicDeltaRecord> destination,
+        out ChunkPublicationBatch batch)
+    {
         EnsureOwner();
+        SaturatingIncrement(ref _historyDerivedDeltaCalls);
         if (!cursor.IsValid || cursor.Epoch != Epoch || cursor.Key != key ||
             !TryFindChunk(key, out int chunkSlot))
         {
@@ -1021,16 +1052,29 @@ public sealed partial class ChunkPublicationStore
         }
         EnsureHistoryCapacity(pendingCount);
         SortPendingDirty(pendingCount);
-        for (int index = 0; index < pendingCount; index++)
+        int index = 0;
+        while (index < pendingCount)
         {
-            ref readonly PendingDirty pending = ref _pendingDirty[index];
-            int chunk = FindChunkRequired(pending.Key);
-            AppendHistory(chunk, new HistoryEntry(
-                _chunks[chunk].Revision,
-                pending.Operation,
-                pending.Fields,
-                pending.Id,
-                pending.EntityVersion));
+            long preparedStarted = PreparedAttributionTimestamp();
+            SpatialChunkKey key = _pendingDirty[index].Key;
+            int end = index + 1;
+            while (end < pendingCount && _pendingDirty[end].Key == key) end++;
+            int chunk = FindChunkRequired(key);
+            int publication = BeginPreparedPublication(
+                chunk, key, FindAffectedPreviousRevision(key), _chunks[chunk].Revision, end - index);
+            for (; index < end; index++)
+            {
+                ref readonly PendingDirty pending = ref _pendingDirty[index];
+                int node = AppendHistory(chunk, new HistoryEntry(
+                    _chunks[chunk].Revision,
+                    pending.Operation,
+                    pending.Fields,
+                    pending.Id,
+                    pending.EntityVersion));
+                AttachPreparedRecord(publication, node, in pending);
+            }
+            CompletePreparedPublication(publication);
+            AttributePreparedSource(preparedStarted);
         }
         _historyAudit?.ObserveOccupancy(_historyCount);
     }
@@ -1058,7 +1102,7 @@ public sealed partial class ChunkPublicationStore
         }
     }
 
-    private void AppendHistory(int chunkSlot, HistoryEntry value)
+    private int AppendHistory(int chunkSlot, HistoryEntry value)
     {
         int node = _freeHistory[--_freeHistoryCount];
         value.ChunkSlot = chunkSlot;
@@ -1075,11 +1119,13 @@ public sealed partial class ChunkPublicationStore
         _chunks[chunkSlot].HistoryTail = node;
         _historyCount++;
         _historyAudit?.RecordHistoryEntry(node, _commitSequence + 1, value.Revision);
+        return node;
     }
 
     private void RemoveHistoryNode(int node, bool pressureEviction = false)
     {
         HistoryEntry entry = _history[node];
+        RemovePreparedRecord(node, pressureEviction);
         _historyAudit?.RecordHistoryRemoval(node, entry.Revision, pressureEviction);
         if (entry.PreviousGlobal >= 0) _history[entry.PreviousGlobal].NextGlobal = entry.NextGlobal;
         else _historyGlobalHead = entry.NextGlobal;
@@ -1097,6 +1143,7 @@ public sealed partial class ChunkPublicationStore
 
     private void ClearAllHistory()
     {
+        ClearPreparedPublications();
         for (int chunk = 0; chunk < _chunks.Length; chunk++)
         {
             _chunks[chunk].HistoryHead = -1;
@@ -1434,6 +1481,21 @@ public sealed partial class ChunkPublicationStore
         throw new InvalidOperationException("Publication mutation has no staged chunk revision.");
     }
 
+    private ulong FindAffectedPreviousRevision(SpatialChunkKey key)
+    {
+        int low = 0;
+        int high = _activeAffectedCount - 1;
+        while (low <= high)
+        {
+            int middle = low + ((high - low) >> 1);
+            int order = _affectedKeys[middle].CompareTo(key);
+            if (order == 0) return _affectedPreviousRevisions[middle];
+            if (order < 0) low = middle + 1;
+            else high = middle - 1;
+        }
+        throw new InvalidOperationException("Publication mutation has no staged prior chunk revision.");
+    }
+
     private void PopExpectedFreeSlot(int expected)
     {
         while (_freeSlotCount != 0)
@@ -1534,11 +1596,13 @@ public sealed partial class ChunkPublicationStore
         (long)_planAvailableSlots.Length * sizeof(int) +
         (long)_planReuseStamps.Length * sizeof(uint) +
         (long)_affectedKeys.Length * Unsafe.SizeOf<SpatialChunkKey>() +
+        (long)_affectedPreviousRevisions.Length * sizeof(ulong) +
         (long)_affectedRevisions.Length * sizeof(ulong) +
         (long)_pendingDirty.Length * Unsafe.SizeOf<PendingDirty>() +
         (long)_queryIndices.Length * sizeof(int) +
         (long)_queryStamps.Length * sizeof(uint) +
-        (long)_queryLatest.Length * Unsafe.SizeOf<HistoryEntry>());
+        (long)_queryLatest.Length * Unsafe.SizeOf<HistoryEntry>() +
+        CalculatePreparedPublicationReservedBytes());
 
     private void EnsureOwner()
     {

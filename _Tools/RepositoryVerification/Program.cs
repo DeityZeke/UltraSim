@@ -25,6 +25,19 @@ Console.WriteLine("PASS documentation architecture and links");
 if (options.ArchitectureOnly)
     return 0;
 
+if (options.Pf5R2Only)
+{
+    Run(root, "dotnet",
+    [
+        "run", "--project",
+        "_Tests/UltraSim.Game.Replication.Tests/UltraSim.Game.Replication.Tests.csproj",
+        "-c", options.Configuration,
+    ]);
+    VerifyPf5R2SharedPublication(root, options.Configuration);
+    Console.WriteLine("PASS PF5-R2 focused verification");
+    return 0;
+}
+
 if (options.Pf5R1Only)
 {
     Run(root, "dotnet",
@@ -36,6 +49,73 @@ if (options.Pf5R1Only)
     VerifyPf5R1HistoryAudit(root, options.Configuration);
     Console.WriteLine("PASS PF5-R1 focused verification");
     return 0;
+}
+
+static void VerifyPf5R2SharedPublication(string root, string configuration)
+{
+    string scope = Path.Combine(Path.GetTempPath(), "ultrasim-repository-verification",
+        Environment.ProcessId.ToString(), "pf5-r2");
+    if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    Directory.CreateDirectory(scope);
+    string output = Path.Combine(scope, "shared-publication.json");
+    try
+    {
+        Run(root, "dotnet",
+        [
+            "run", "--project",
+            "_Benchmarks/UltraSim.Network.V3ComparisonAdapter/UltraSim.Network.V3ComparisonAdapter.csproj",
+            "-c", configuration, "--", "--p03-whole-flow",
+            "--pf5-r2-shared-publication", "--focused", "--warmup=12", "--ticks=45",
+            $"--output={output}",
+        ]);
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(output));
+        JsonElement report = document.RootElement;
+        if (report.GetProperty("Schema").GetString() !=
+            "ultrasim-concept-demo-pf5-r2-shared-publication-v1")
+            throw new InvalidOperationException("PF5-R2 audit schema was not canonical.");
+        JsonElement[] divergence = report.GetProperty("DivergenceScenarios")
+            .EnumerateArray().Select(static value => value.Clone()).ToArray();
+        if (divergence.Length != 3)
+            throw new InvalidOperationException("PF5-R2 focused divergence matrix was incomplete.");
+        foreach (JsonElement scenario in divergence)
+        {
+            JsonElement source = scenario.GetProperty("PreparedSource");
+            if (!source.GetProperty("Selected").GetBoolean() ||
+                source.GetProperty("HistoryDerivedSteadyStateCalls").GetUInt64() != 0 ||
+                source.GetProperty("PreparedSourcePublications").GetUInt64() == 0 ||
+                source.GetProperty("ReferencedSourcePublications").GetUInt64() == 0)
+                throw new InvalidOperationException(
+                    "PF5-R2 divergence did not remain on shared source publications.");
+        }
+        JsonElement[] rows = report.GetProperty("Rows")
+            .EnumerateArray().Select(static value => value.Clone()).ToArray();
+        foreach (IGrouping<int, JsonElement> population in rows.GroupBy(static value =>
+                     value.GetProperty("Population").GetInt32()))
+        {
+            JsonElement oldRow = population.Single(static value =>
+                !value.GetProperty("Prepared").GetBoolean());
+            JsonElement newRow = population.Single(static value =>
+                value.GetProperty("Prepared").GetBoolean());
+            if (oldRow.GetProperty("Flow").GetProperty("SemanticDigest").GetString() !=
+                    newRow.GetProperty("Flow").GetProperty("SemanticDigest").GetString() ||
+                oldRow.GetProperty("Flow").GetProperty("ProfileCounters")
+                    .GetProperty("PreparedPublication")
+                    .GetProperty("HistoryDerivedSteadyStateCalls").GetUInt64() == 0 ||
+                newRow.GetProperty("Flow").GetProperty("ProfileCounters")
+                    .GetProperty("PreparedPublication")
+                    .GetProperty("HistoryDerivedSteadyStateCalls").GetUInt64() != 0)
+                throw new InvalidOperationException("PF5-R2 old/new selection or semantics diverged.");
+            if (population.Key == 128 && newRow.GetProperty("Flow").GetProperty("Timing")
+                    .GetProperty("NetworkAndRemoteReplication").GetProperty("P95")
+                    .GetDouble() > 4.0)
+                throw new InvalidOperationException(
+                    "PF5-R2 prepared 128-recipient path exceeded the 4 ms subsystem budget.");
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    }
 }
 
 if (options.Pf5Only)
@@ -4652,6 +4732,7 @@ internal sealed record VerificationOptions(
     bool Pf4fOnly,
     bool Pf5Only,
     bool Pf5R1Only,
+    bool Pf5R2Only,
     bool Pf3Only,
     bool Pf3NativeOnly,
     bool Pf25LongNative,
@@ -4673,7 +4754,7 @@ internal sealed record VerificationOptions(
             pf3Only = false, pf3NativeOnly = false, pf4aOnly = false, pf4bOnly = false,
             pf4cOnly = false, pf4dOnly = false, pf4eOnly = false, pf4eR1Only = false,
             pf4eR2Only = false, pf4fOnly = false, pf5Only = false,
-            pf5R1Only = false,
+            pf5R1Only = false, pf5R2Only = false,
             pf25LongNative = false,
             allConfigurations = false;
         bool skipGodot = false, noRestore = false;
@@ -4700,6 +4781,7 @@ internal sealed record VerificationOptions(
             else if (argument == "--pf4f-only") pf4fOnly = true;
             else if (argument == "--pf5-only") pf5Only = true;
             else if (argument == "--pf5-r1-only") pf5R1Only = true;
+            else if (argument == "--pf5-r2-only") pf5R2Only = true;
             else if (argument == "--pf2.5-long-native") pf25LongNative = true;
             else if (argument == "--all-configurations") allConfigurations = true;
             else if (argument == "--skip-godot") skipGodot = true;
@@ -4807,13 +4889,14 @@ internal sealed record VerificationOptions(
             throw new ArgumentException("Verification configuration must be Debug or Release.");
         if ((pf1Only || pf2Only || pf25Only || pf3Only || pf3NativeOnly || pf4aOnly ||
              pf4bOnly || pf4cOnly || pf4dOnly || pf4eOnly || pf4eR1Only || pf4eR2Only ||
-             pf4fOnly || pf5Only || pf5R1Only) && architectureOnly)
+             pf4fOnly || pf5Only || pf5R1Only || pf5R2Only) && architectureOnly)
             throw new ArgumentException("Focused PF verification cannot be architecture-only.");
         if ((pf1Only ? 1 : 0) + (pf2Only ? 1 : 0) + (pf25Only ? 1 : 0) +
             (pf3Only ? 1 : 0) + (pf3NativeOnly ? 1 : 0) + (pf4aOnly ? 1 : 0) +
             (pf4bOnly ? 1 : 0) + (pf4cOnly ? 1 : 0) + (pf4dOnly ? 1 : 0) +
             (pf4eOnly ? 1 : 0) + (pf4eR1Only ? 1 : 0) + (pf4eR2Only ? 1 : 0) +
-            (pf4fOnly ? 1 : 0) + (pf5Only ? 1 : 0) + (pf5R1Only ? 1 : 0) > 1)
+            (pf4fOnly ? 1 : 0) + (pf5Only ? 1 : 0) + (pf5R1Only ? 1 : 0) +
+            (pf5R2Only ? 1 : 0) > 1)
             throw new ArgumentException("Choose one focused PF verification mode.");
         if ((pf25LongNative || pf25EvidenceOutputDirectory is not null) && !pf25Only)
             throw new ArgumentException(
@@ -4838,7 +4921,7 @@ internal sealed record VerificationOptions(
             !pf4cOnly && !pf4dOnly && !pf4eOnly && !pf4fOnly && !pf5Only)
             throw new ArgumentException(
                 "Native PF options require --pf3-only, --pf3-native-only, --pf4a-only, --pf4b-only, --pf4c-only, --pf4d-only, --pf4e-only, --pf4f-only, or --pf5-only.");
-        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only, pf4fOnly, pf5Only, pf5R1Only,
+        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only, pf4fOnly, pf5Only, pf5R1Only, pf5R2Only,
             pf3Only, pf3NativeOnly,
             pf25LongNative,
             allConfigurations, configuration, skipGodot, noRestore, godot,

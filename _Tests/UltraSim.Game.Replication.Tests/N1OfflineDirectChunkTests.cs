@@ -234,7 +234,10 @@ internal static class N1OfflineDirectChunkTests
 
     internal static void HistoryAuditMeasuresScanCollapseAndShadowReuse()
     {
-        using var fixture = new Fixture(historyCapacity: 64, entityCount: 2);
+        using var fixture = new Fixture(
+            historyCapacity: 64,
+            entityCount: 2,
+            readModel: PreparedChunkPublicationReadModel.HistoryDerivedComparison);
         SpatialChunkKey key = Key(0, 0);
         fixture.Present(0, Position(0, 0, 2_000, 2_000),
             GameWorldPublicPrefabIds.Character);
@@ -412,6 +415,293 @@ internal static class N1OfflineDirectChunkTests
             OfflineDirectChunkSnapshotReasonAuditSnapshot snapshot,
             OfflineDirectChunkSnapshotReason reason) =>
             snapshot.Reasons.Single(value => value.Reason == reason);
+    }
+
+    internal static void PreparedLatestStateMatchesHistoryRecordsExactly()
+    {
+        using var fixture = new Fixture(historyCapacity: 64, entityCount: 3);
+        SpatialChunkKey key = Key(0, 0);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        var snapshots = new WorldPublicRecord[8];
+        Equal(ChunkPublicationReadStatus.Snapshot,
+            fixture.Store.TryCopySnapshot(key, snapshots, out ChunkPublicationBatch baseline));
+
+        fixture.Present(0, Position(0, 0, 2_100, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        fixture.Present(1, Position(0, 0, 3_000, 2_000),
+            GameWorldPublicPrefabIds.WoodlandAnimal);
+        fixture.Present(0, Position(0, 0, 2_200, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        fixture.Remove(1);
+
+        var prepared = new WorldPublicDeltaRecord[8];
+        var history = new WorldPublicDeltaRecord[8];
+        Equal(ChunkPublicationReadStatus.Delta,
+            fixture.Store.TryCopyDelta(key, baseline.Cursor, prepared,
+                out ChunkPublicationBatch preparedBatch));
+        Equal(ChunkPublicationReadStatus.Delta,
+            fixture.Store.TryCopyHistoryDerivedComparison(key, baseline.Cursor, history,
+                out ChunkPublicationBatch historyBatch));
+        Equal(historyBatch, preparedBatch);
+        Equal(historyBatch.Count, preparedBatch.Count);
+        for (int index = 0; index < preparedBatch.Count; index++)
+            Equal(history[index], prepared[index]);
+        var preparedRemote = new RemoteChunkDeltaRecord[preparedBatch.Count];
+        var historyRemote = new RemoteChunkDeltaRecord[historyBatch.Count];
+        MaterializeRemote(prepared.AsSpan(0, preparedBatch.Count), preparedRemote);
+        MaterializeRemote(history.AsSpan(0, historyBatch.Count), historyRemote);
+        byte[] preparedBytes = new byte[UltraSimGameProtocol.MaximumMessageBytes];
+        byte[] historyBytes = new byte[UltraSimGameProtocol.MaximumMessageBytes];
+        True(UltraSimGameProtocol.TryWriteChunkDelta(
+            preparedBytes, 7, fixture.Store.Epoch.Value, 8,
+            key.Space.Value, key.Coord.X, key.Coord.Z,
+            baseline.Cursor.Revision.Value, preparedBatch.Cursor.Revision.Value,
+            preparedBatch.HistoryFloor.Value, preparedRemote, out int preparedWritten));
+        True(UltraSimGameProtocol.TryWriteChunkDelta(
+            historyBytes, 7, fixture.Store.Epoch.Value, 8,
+            key.Space.Value, key.Coord.X, key.Coord.Z,
+            baseline.Cursor.Revision.Value, historyBatch.Cursor.Revision.Value,
+            historyBatch.HistoryFloor.Value, historyRemote, out int historyWritten));
+        Equal(historyWritten, preparedWritten);
+        True(preparedBytes.AsSpan(0, preparedWritten)
+            .SequenceEqual(historyBytes.AsSpan(0, historyWritten)));
+
+        PreparedChunkPublicationSnapshot census = fixture.Store.GetPreparedPublicationSnapshot();
+        True(census.Selected);
+        Equal(5UL, census.PreparedSourcePublications);
+        Equal(1UL, census.RecipientRangeReads);
+        Equal(4UL, census.ReferencedSourcePublications);
+        Equal(1UL, census.HistoryDerivedSteadyStateCalls); // explicit comparison only
+
+        static void MaterializeRemote(
+            ReadOnlySpan<WorldPublicDeltaRecord> source,
+            Span<RemoteChunkDeltaRecord> destination)
+        {
+            for (int index = 0; index < source.Length; index++)
+            {
+                ref readonly WorldPublicDeltaRecord delta = ref source[index];
+                WorldPublicRecord current = delta.Current;
+                destination[index] = new RemoteChunkDeltaRecord(
+                    (RemoteChunkPublicOperation)delta.Operation,
+                    (RemoteChunkPublicFieldMask)delta.Fields,
+                    delta.Id.Index,
+                    delta.Id.Generation,
+                    delta.EntityPublicVersion,
+                    current.PrefabId,
+                    current.Position.Local.XMillimeters,
+                    current.Position.Local.ZMillimeters,
+                    current.Position.YMillimeters,
+                    current.Orientation.Units,
+                    (ushort)current.StateFlags,
+                    current.LastChangedRevision.Value);
+            }
+        }
+    }
+
+    internal static void SharedPublicationsRetainIndependentRecipientProof()
+    {
+        const int recipientCount = 8;
+        using var fixture = new Fixture(historyCapacity: 64, entityCount: 2);
+        SpatialChunkKey key = Key(0, 0);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        var recipients = new OfflineDirectChunkRecipient[recipientCount];
+        var subscriptions = new int[recipientCount];
+        Span<OfflineDirectChunkSubscriptionChange> changes =
+            stackalloc OfflineDirectChunkSubscriptionChange[64];
+        for (int index = 0; index < recipientCount; index++)
+        {
+            recipients[index] = new OfflineDirectChunkRecipient(
+                new OfflineDirectChunkRecipientLimits(64, 8, 8), Interest,
+                new OfflineDirectChunkCadence(1, 1, 1));
+            Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+                recipients[index].Reconcile(fixture.Store, GameWorldState.DefaultSpace,
+                    Position(0, 0, 8_000, 8_000), changes, out _));
+            subscriptions[index] = FindSubscription(recipients[index], key);
+            Equal(OfflineDirectChunkReadStatus.Snapshot,
+                recipients[index].TryBeginRead(fixture.Store, subscriptions[index], 0, out _));
+            recipients[index].CommitRead();
+        }
+        PreparedChunkPublicationSnapshot before = fixture.Store.GetPreparedPublicationSnapshot();
+        fixture.Present(0, Position(0, 0, 2_500, 2_000),
+            GameWorldPublicPrefabIds.Character);
+
+        var tickets = new OfflineDirectChunkDeliveryTicket[recipientCount];
+        for (int index = 0; index < recipientCount; index++)
+        {
+            Equal(OfflineDirectChunkReadStatus.Delta,
+                recipients[index].TryBeginRead(fixture.Store, subscriptions[index], 1,
+                    out OfflineDirectChunkRead read));
+            Equal(1, read.Deltas.Length);
+            tickets[index] = recipients[index].ReleaseReadForRemote(checked((ulong)index + 1));
+        }
+        Equal(OfflineDirectChunkAppliedProofStatus.Applied,
+            recipients[0].CommitAppliedProof(tickets[0]));
+        True(recipients[0].Subscriptions[subscriptions[0]].HasKnowledge);
+        for (int index = 1; index < recipientCount; index++)
+            False(recipients[index].Subscriptions[subscriptions[index]].Cursor == tickets[0].Cursor);
+        for (int index = 1; index < recipientCount; index++)
+            Equal(OfflineDirectChunkAppliedProofStatus.Applied,
+                recipients[index].CommitAppliedProof(tickets[index]));
+
+        PreparedChunkPublicationSnapshot after = fixture.Store.GetPreparedPublicationSnapshot();
+        Equal(1UL, after.PreparedSourcePublications - before.PreparedSourcePublications);
+        Equal((ulong)recipientCount, after.RecipientRangeReads - before.RecipientRangeReads);
+        Equal((ulong)recipientCount,
+            after.ReferencedSourcePublications - before.ReferencedSourcePublications);
+        Equal(0UL, after.HistoryDerivedSteadyStateCalls);
+    }
+
+    internal static void LagCoverageRemovalAndOutOfOrderProofAreExact()
+    {
+        using var fixture = new Fixture(historyCapacity: 64, entityCount: 3);
+        SpatialChunkKey key = Key(0, 0);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        fixture.Present(1, Position(0, 0, 3_000, 2_000),
+            GameWorldPublicPrefabIds.WoodlandAnimal);
+        var recipient = new OfflineDirectChunkRecipient(
+            new OfflineDirectChunkRecipientLimits(64, 8, 8), Interest,
+            new OfflineDirectChunkCadence(1, 1, 1));
+        Span<OfflineDirectChunkSubscriptionChange> changes =
+            stackalloc OfflineDirectChunkSubscriptionChange[64];
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace,
+                Position(0, 0, 8_000, 8_000), changes, out _));
+        int subscription = FindSubscription(recipient, key);
+        Equal(OfflineDirectChunkReadStatus.Snapshot,
+            recipient.TryBeginRead(fixture.Store, subscription, 0, out _));
+        recipient.CommitRead();
+        ChunkPublicationRevision baseline = recipient.Subscriptions[subscription].Cursor.Revision;
+
+        fixture.Present(0, Position(0, 0, 2_100, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        fixture.Present(1, Position(0, 0, 3_100, 2_000),
+            GameWorldPublicPrefabIds.WoodlandAnimal);
+        fixture.Present(0, Position(0, 0, 2_200, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        fixture.Remove(1);
+        Equal(OfflineDirectChunkReadStatus.Delta,
+            recipient.TryBeginRead(fixture.Store, subscription, 1,
+                out OfflineDirectChunkRead older));
+        Equal(2, older.Deltas.Length);
+        Equal(WorldPublicOperation.Present, older.Deltas[0].Operation);
+        Equal(WorldPublicOperation.Remove, older.Deltas[1].Operation);
+        WorldPublicEntityId removedIdentity = older.Deltas[1].Id;
+        OfflineDirectChunkDeliveryTicket olderTicket = recipient.ReleaseReadForRemote(100);
+
+        fixture.Present(2, Position(0, 0, 4_000, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        Equal(OfflineDirectChunkReadStatus.Delta,
+            recipient.TryBeginRead(fixture.Store, subscription, 2,
+                out OfflineDirectChunkRead newer));
+        Equal(2, newer.Deltas.Length);
+        Equal(WorldPublicOperation.Present, newer.Deltas[1].Operation);
+        Equal(removedIdentity.Index, newer.Deltas[1].Id.Index);
+        True(newer.Deltas[1].Id.Generation > removedIdentity.Generation);
+        OfflineDirectChunkDeliveryTicket newerTicket = recipient.ReleaseReadForRemote(101);
+        True(newerTicket.Cursor.Revision.Value > olderTicket.Cursor.Revision.Value);
+
+        Equal(OfflineDirectChunkAppliedProofStatus.Applied,
+            recipient.CommitAppliedProof(newerTicket));
+        Equal(newerTicket.Cursor.Revision,
+            recipient.Subscriptions[subscription].Cursor.Revision);
+        Equal(OfflineDirectChunkAppliedProofStatus.Stale,
+            recipient.CommitAppliedProof(olderTicket));
+        True(recipient.Subscriptions[subscription].Cursor.Revision.Value > baseline.Value);
+        Equal(OfflineDirectChunkReadStatus.NoChanges,
+            recipient.TryBeginRead(fixture.Store, subscription, 3, out _));
+        recipient.CommitRead();
+        Equal(0UL, fixture.Store.GetPreparedPublicationSnapshot().HistoryDerivedSteadyStateCalls);
+    }
+
+    internal static void PreparedRetentionEvictionRebasesSlowRecipient()
+    {
+        using var fixture = new Fixture(historyCapacity: 3, entityCount: 2);
+        SpatialChunkKey key = Key(0, 0);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        var recipient = new OfflineDirectChunkRecipient(
+            new OfflineDirectChunkRecipientLimits(64, 8, 8), Interest,
+            new OfflineDirectChunkCadence(1, 1, 1));
+        recipient.ConfigureSnapshotReasonAudit(true);
+        Span<OfflineDirectChunkSubscriptionChange> changes =
+            stackalloc OfflineDirectChunkSubscriptionChange[64];
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace,
+                Position(0, 0, 8_000, 8_000), changes, out _));
+        int subscription = FindSubscription(recipient, key);
+        Equal(OfflineDirectChunkReadStatus.Snapshot,
+            recipient.TryBeginRead(fixture.Store, subscription, 0, out _));
+        recipient.CommitRead();
+        for (int update = 0; update < 8; update++)
+            fixture.Present(0, Position(0, 0, 2_100 + update, 2_000),
+                GameWorldPublicPrefabIds.Character);
+
+        Equal(OfflineDirectChunkReadStatus.Snapshot,
+            recipient.TryBeginRead(fixture.Store, subscription, 1,
+                out OfflineDirectChunkRead rebase));
+        Equal(1, rebase.Snapshot.Length);
+        recipient.CommitRead();
+        PreparedChunkPublicationSnapshot source = fixture.Store.GetPreparedPublicationSnapshot();
+        True(source.RetentionEvictions >= 6);
+        True(source.PressureEvictions >= 6);
+        Equal(3, source.RetainedPublications);
+        Equal(3, source.RetainedRecords);
+        Equal(1UL, source.RebaseRequirements);
+        OfflineDirectChunkSnapshotReasonAuditSnapshot reasons =
+            recipient.GetSnapshotReasonAudit();
+        Equal(1UL, reasons.Reasons.Single(value =>
+            value.Reason == OfflineDirectChunkSnapshotReason.HistoryFloorLost).Occurrences);
+    }
+
+    internal static void PreparedFixedTopologySeparatesSourceFromRecipientScaling()
+    {
+        foreach ((int chunks, int recipientsPerChunk) in new[]
+                 {
+                     (1, 512),
+                     (8, 64),
+                     (64, 8),
+                     (512, 1),
+                 })
+        {
+            using var fixture = new Fixture(
+                historyCapacity: Math.Max(1_024, chunks * 4), entityCount: chunks);
+            fixture.PresentAllAcrossChunks(2_000, 1);
+            var cursors = new ChunkPublicationCursor[chunks];
+            var snapshot = new WorldPublicRecord[1];
+            for (int chunk = 0; chunk < chunks; chunk++)
+            {
+                SpatialChunkKey key = Key(chunk, 0);
+                Equal(ChunkPublicationReadStatus.Snapshot,
+                    fixture.Store.TryCopySnapshot(key, snapshot, out ChunkPublicationBatch batch));
+                cursors[chunk] = batch.Cursor;
+            }
+            PreparedChunkPublicationSnapshot before =
+                fixture.Store.GetPreparedPublicationSnapshot();
+            fixture.PresentAllAcrossChunks(2_100, 1);
+            var delta = new WorldPublicDeltaRecord[1];
+            for (int chunk = 0; chunk < chunks; chunk++)
+            for (int recipient = 0; recipient < recipientsPerChunk; recipient++)
+            {
+                Equal(ChunkPublicationReadStatus.Delta,
+                    fixture.Store.TryCopyDelta(Key(chunk, 0), cursors[chunk], delta,
+                        out ChunkPublicationBatch batch));
+                Equal(1, batch.Count);
+            }
+            PreparedChunkPublicationSnapshot after =
+                fixture.Store.GetPreparedPublicationSnapshot();
+            Equal((ulong)chunks,
+                after.PreparedSourcePublications - before.PreparedSourcePublications);
+            Equal(512UL, after.RecipientRangeReads - before.RecipientRangeReads);
+            Equal(512UL,
+                after.ReferencedSourcePublications - before.ReferencedSourcePublications);
+            Equal(0UL, after.HistoryDerivedSteadyStateCalls);
+            Console.WriteLine($"EVIDENCE PF5-R2 topology chunks={chunks} " +
+                $"recipients_per_chunk={recipientsPerChunk} source_preparations={chunks} " +
+                "recipient_relationships=512 old_history_calls=0");
+        }
     }
 
     internal static void DirtySchedulerSkipsCleanScopesAndFansOutOnce()
@@ -3764,8 +4054,13 @@ internal static class N1OfflineDirectChunkTests
         private readonly EcsWorld _world;
         private readonly Entity[] _entities;
         private readonly int _entityCapacity;
+        private readonly PreparedChunkPublicationReadModel _readModel;
 
-        internal Fixture(int historyCapacity, int entityCount = 4)
+        internal Fixture(
+            int historyCapacity,
+            int entityCount = 4,
+            PreparedChunkPublicationReadModel readModel =
+                PreparedChunkPublicationReadModel.PreparedLatestState)
         {
             if (entityCount <= 0) throw new ArgumentOutOfRangeException(nameof(entityCount));
             WorldPack pack = GamePlayableWorld.CreateWorldPack();
@@ -3788,6 +4083,7 @@ internal static class N1OfflineDirectChunkTests
             ]);
             True(pack.TryBind(binding, out BoundWorldPack? bound, out _));
             Bound = bound!;
+            _readModel = readModel;
             _entityCapacity = Math.Max(16, entityCount);
             _entities = new Entity[entityCount];
             _world = new EcsWorld(
@@ -3860,7 +4156,8 @@ internal static class N1OfflineDirectChunkTests
         private ChunkPublicationStore CreateStore(int historyCapacity) => new(
             PublicationEpoch.Create(),
             new ChunkPublicationLimits(
-                _entityCapacity, checked(_entityCapacity * 2), 2, historyCapacity));
+                _entityCapacity, checked(_entityCapacity * 2), 2, historyCapacity),
+            _readModel);
 
         public void Dispose() => _world.Dispose();
     }

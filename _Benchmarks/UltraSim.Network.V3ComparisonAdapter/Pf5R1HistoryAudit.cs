@@ -58,7 +58,9 @@ internal static class Pf5R1HistoryAudit
         foreach (string scenario in scenarios)
         {
             Console.WriteLine($"PF5-R1 semantic audit {scenario}: constructing...");
-            using var run = new SemanticScenario(scenario, recipients, ticks, Seed);
+            using var run = new SemanticScenario(
+                scenario, recipients, ticks, Seed,
+                PreparedChunkPublicationReadModel.HistoryDerivedComparison);
             Pf5R1ScenarioReport row = run.Run();
             semantic.Add(row);
             Console.WriteLine($"PF5-R1 {scenario}: requests={row.DeltaRangeRequests:N0}, " +
@@ -147,6 +149,18 @@ internal static class Pf5R1HistoryAudit
         File.WriteAllText(output, JsonSerializer.Serialize(report,
             new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
         Console.WriteLine(Path.GetFullPath(output));
+    }
+
+    internal static Pf5R1ScenarioReport RunPreparedScenarioForPf5R2(
+        string scenario,
+        int recipients,
+        int ticks,
+        int seed)
+    {
+        using var run = new SemanticScenario(
+            scenario, recipients, ticks, seed,
+            PreparedChunkPublicationReadModel.PreparedLatestState);
+        return run.Run();
     }
 
     private static Pf5R1TopologyReport RunFixedTopology(int hotChunks, int fanout)
@@ -357,7 +371,12 @@ internal static class Pf5R1HistoryAudit
         private ulong _retiredCursorTicks;
         private ulong _relationshipHighWater;
 
-        internal SemanticScenario(string id, int recipientCount, int ticks, int seed)
+        internal SemanticScenario(
+            string id,
+            int recipientCount,
+            int ticks,
+            int seed,
+            PreparedChunkPublicationReadModel readModel)
         {
             _id = id;
             _recipientCount = recipientCount;
@@ -385,8 +404,11 @@ internal static class Pf5R1HistoryAudit
                     int region = chunk / ChunksPerRegion;
                     int local = chunk % ChunksPerRegion;
                     return (region * 24 + local % 4, local / 4);
-                });
+                },
+                readModel);
             _source.Store.ConfigureHistoryAudit(new ChunkPublicationHistoryAuditLimits(65_536));
+            _source.Store.ConfigurePreparedPublicationAttribution(
+                readModel == PreparedChunkPublicationReadModel.PreparedLatestState);
             _recipients = new RecipientState[recipientCount];
             if (!_staggered)
                 for (int index = 0; index < recipientCount; index++)
@@ -448,6 +470,8 @@ internal static class Pf5R1HistoryAudit
             }
             ulong wallTicks = checked((ulong)(Stopwatch.GetTimestamp() - wallStarted));
             ChunkPublicationHistoryAuditSnapshot audit = _source.Store.GetHistoryAuditSnapshot();
+            PreparedChunkPublicationSnapshot prepared =
+                _source.Store.GetPreparedPublicationSnapshot();
             Require(audit.ShadowContentMismatches == 0 && !audit.RangeTableOverflowed,
                 $"{_id} shadow range oracle diverged or overflowed.");
             Pf5R1HistorySummary summary = ToSummary(audit);
@@ -494,7 +518,8 @@ internal static class Pf5R1HistoryAudit
                 _retiredSourceReadTicks, _retiredMaterializationTicks,
                 _retiredMaterializedRecords, _retiredProofValidationTicks,
                 _retiredCursorTicks,
-                "Semantic/proof diagnostic harness; no UDP clock. The real-UDP selected-policy control is reported separately.");
+                "Semantic/proof diagnostic harness; no UDP clock. The real-UDP selected-policy control is reported separately.",
+                prepared);
         }
 
         private void Activate(int index, bool reconnect, int tick)
@@ -788,7 +813,9 @@ internal static class Pf5R1HistoryAudit
             int entityCount,
             int chunkCount,
             int historyCapacity,
-            Func<int, (int X, int Z)> chunkForEntity)
+            Func<int, (int X, int Z)> chunkForEntity,
+            PreparedChunkPublicationReadModel readModel =
+                PreparedChunkPublicationReadModel.HistoryDerivedComparison)
         {
             if (entityCount <= 0 || chunkCount <= 0 || entityCount % chunkCount != 0)
                 throw new ArgumentOutOfRangeException(nameof(entityCount));
@@ -817,7 +844,8 @@ internal static class Pf5R1HistoryAudit
             }
             Store = new ChunkPublicationStore(PublicationEpoch.Create(),
                 new ChunkPublicationLimits(entityCount, checked(entityCount * 2), 64,
-                    historyCapacity));
+                    historyCapacity),
+                readModel);
             Require(Store.TryCommit(_changes, out _), "PF5-R1 initial source commit failed.");
         }
 
@@ -1058,7 +1086,8 @@ internal sealed record Pf5R1ScenarioReport(
     ulong DeltaRecordsMaterialized,
     ulong ProofValidationTicks,
     ulong CursorAdvancementTicks,
-    string ClockScope);
+    string ClockScope,
+    PreparedChunkPublicationSnapshot PreparedSource = default);
 
 internal readonly record struct Pf5R1SnapshotReasonRow(
     string Reason,

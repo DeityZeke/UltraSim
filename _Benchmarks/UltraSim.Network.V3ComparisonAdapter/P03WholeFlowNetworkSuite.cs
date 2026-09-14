@@ -25,6 +25,11 @@ internal static class P03WholeFlowNetworkSuite
 
     internal static void Run(string[] args)
     {
+        if (args.Contains("--pf5-r2-shared-publication", StringComparer.Ordinal))
+        {
+            Pf5R2SharedPublicationAudit.Run(args);
+            return;
+        }
         if (args.Contains("--pf5-r1-history-audit", StringComparer.Ordinal))
         {
             Pf5R1HistoryAudit.Run(args);
@@ -921,7 +926,9 @@ internal sealed class P03WholeFlowHarness : IDisposable
         bool gameDetailedAttribution = false,
         RemoteChunkBundleCompressionPolicy compression = default,
         bool historyAudit = false,
-        bool legacyRangeCensus = true)
+        bool legacyRangeCensus = true,
+        PreparedChunkPublicationReadModel chunkReadModel =
+            PreparedChunkPublicationReadModel.PreparedLatestState)
     {
         _workload = workload;
         _profile = profile;
@@ -973,7 +980,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
                 workload, _sessions, _x, _z, _versions, chunkBatch: true),
             P03NetworkProfile.ChunkPublication => new P03ChunkPublicationRemoteAdapter(
                 workload, _sessions, _x, _z, _versions, s_content, compression,
-                historyAudit, legacyRangeCensus),
+                historyAudit, legacyRangeCensus, chunkReadModel),
             P03NetworkProfile.DirtyChunkSpatialFanout => new P03DirtyChunkRemoteAdapter(
                 workload, _sessions, _x, _z, _versions, s_content),
             _ => throw new ArgumentOutOfRangeException(nameof(profile)),
@@ -1777,7 +1784,9 @@ internal abstract class P03ChunkRemoteAdapterBase : P03RemoteProfileAdapter
 
     protected P03ChunkRemoteAdapterBase(P03NetworkWorkload workload,
         SharedUdpProtocolSession[] sessions, long[] x, long[] z, ulong[] versions,
-        WorldContentFingerprint content)
+        WorldContentFingerprint content,
+        PreparedChunkPublicationReadModel readModel =
+            PreparedChunkPublicationReadModel.PreparedLatestState)
         : base(workload, sessions, x, z, versions)
     {
         World = new EcsWorld(GameSchema.CreateSchema(), new EcsWorldOptions(
@@ -1796,7 +1805,8 @@ internal abstract class P03ChunkRemoteAdapterBase : P03RemoteProfileAdapter
             PublicationEpoch.Create(),
             new ChunkPublicationLimits(workload.Entities,
                 checked(workload.Entities * 2), 64,
-                Math.Max(65_536, checked(workload.Entities * 64))));
+                Math.Max(65_536, checked(workload.Entities * 64))),
+            readModel);
         Changes = new WorldPublicChange[workload.Entities];
         for (int index = 0; index < workload.Entities; index++)
             Changes[index] = Present(index);
@@ -2076,6 +2086,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
     private ulong _snapshotOrRecoveryDeliveries;
     private int _maximumDuePerRecipientPass;
     private ChunkPublicationStoreSnapshot _sourceBaseline;
+    private PreparedChunkPublicationSnapshot _preparedBaseline;
     private GameTelemetryLevel _telemetryLevel;
     private ulong _deltaRangeRequests;
     private ulong _uniqueDeltaRanges;
@@ -2091,8 +2102,10 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
         WorldContentFingerprint content,
         RemoteChunkBundleCompressionPolicy compression = default,
         bool historyAudit = false,
-        bool legacyRangeCensus = true)
-        : base(workload, sessions, x, z, versions, content)
+        bool legacyRangeCensus = true,
+        PreparedChunkPublicationReadModel readModel =
+            PreparedChunkPublicationReadModel.PreparedLatestState)
+        : base(workload, sessions, x, z, versions, content, readModel)
     {
         _historyAuditEnabled = historyAudit;
         _legacyRangeCensusEnabled = legacyRangeCensus;
@@ -2393,6 +2406,8 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
                 _reusableDeltaRangeRecords, _censusSourceDeltaReads),
             Compression = compression,
             HistoryAudit = _historyAuditEnabled ? Source.GetHistoryAuditSnapshot() : null,
+            PreparedPublication = DifferencePreparedPublication(
+                Source.GetPreparedPublicationSnapshot(), _preparedBaseline),
         };
     }
     internal override void ResetCounters()
@@ -2409,9 +2424,40 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
         for (int index = 0; index < _servers.Length; index++)
             _servers[index].ConfigureTelemetry(_telemetryLevel);
         _sourceBaseline = Source.GetSnapshot();
+        _preparedBaseline = Source.GetPreparedPublicationSnapshot();
         if (_historyAuditEnabled)
             Source.ConfigureHistoryAudit(new ChunkPublicationHistoryAuditLimits(65_536));
     }
+
+    private static PreparedChunkPublicationSnapshot DifferencePreparedPublication(
+        PreparedChunkPublicationSnapshot after,
+        PreparedChunkPublicationSnapshot before) => new(
+            after.Selected,
+            after.PublicationCapacity,
+            after.RecordCapacity,
+            after.RetainedPublications,
+            after.RetainedRecords,
+            after.RetainedTombstones,
+            after.PublicationHighWater,
+            after.RecordHighWater,
+            after.TombstoneHighWater,
+            Difference(after.AuthoritativeSourceMutations, before.AuthoritativeSourceMutations),
+            Difference(after.DirtySourceChunks, before.DirtySourceChunks),
+            Difference(after.PreparedSourcePublications, before.PreparedSourcePublications),
+            Difference(after.PreparedSourceRecords, before.PreparedSourceRecords),
+            Difference(after.RecipientRangeReads, before.RecipientRangeReads),
+            Difference(after.ReferencedSourcePublications, before.ReferencedSourcePublications),
+            Difference(after.ReferencedSourceRecords, before.ReferencedSourceRecords),
+            Difference(after.HistoryDerivedSteadyStateCalls,
+                before.HistoryDerivedSteadyStateCalls),
+            Difference(after.RetentionEvictions, before.RetentionEvictions),
+            Difference(after.PressureEvictions, before.PressureEvictions),
+            Difference(after.RebaseRequirements, before.RebaseRequirements),
+            Difference(after.SourcePreparationTicks, before.SourcePreparationTicks),
+            Difference(after.RecipientRangePreparationTicks,
+                before.RecipientRangePreparationTicks),
+            after.CoveragePublicationHighWater,
+            after.ReservedBytes);
 
     private void CaptureDeltaRangeReuseCensus()
     {
@@ -3071,7 +3117,8 @@ internal readonly record struct P03ProfileCounters(
     P03ChunkCpuAttribution ChunkCpu = default,
     P03DeltaRangeReuseCensus DeltaRangeReuse = default,
     P03CompressionCounters Compression = default,
-    ChunkPublicationHistoryAuditSnapshot? HistoryAudit = null);
+    ChunkPublicationHistoryAuditSnapshot? HistoryAudit = null,
+    PreparedChunkPublicationSnapshot PreparedPublication = default);
 
 internal readonly record struct P03CompressionCounters(
     ulong Attempts,
