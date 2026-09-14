@@ -1,6 +1,6 @@
 # UltraSim headless Network bots
 
-`UltraSim.NetworkBots` is the maintained PF1/PF2/PF3/PF4A/PF4B/PF4C/PF4D/PF4E/PF4F load-generation and measurement client. One CLR process owns many
+`UltraSim.NetworkBots` is the maintained PF1–PF5 load-generation and measurement client. One CLR process owns many
 independent ordinary remote client lifetimes and advances them from one bounded central pump. Each
 bot has its own UDP transport, authenticated session, application epoch, profile/content proof,
 guest/control identity, Client Core state, command sequence, reconnect lifetime, and deterministic
@@ -453,3 +453,54 @@ ClientOnly decoder as exported Online. The focused real-UDP/export/impairment ga
 dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj \
   -c Release -- --pf4f-only
 ```
+
+## PF5 product swarm and failure characterization
+
+Schema v12 (`--checkpoint=PF5`) adds bounded realized-topology sampling and deterministic product
+workloads without adding privileged authority access. The new scenarios are `clusters`,
+`migration-converge`, `migration-disperse`, `chat-swarm`, `inventory-swarm`, `vertical-swarm`,
+`reconnect-swarm`, and `connection-churn`. `--clusters=1|2|4|8` labels intended groups; final bot
+positions and the server's occupied/subscription/fanout census record what the finite demo world
+actually realized.
+
+Use the selected v29 product wrapper from the repository root:
+
+```bash
+Tools/NetworkBots/run-pf5-baseline.sh moving 120s \
+  /tmp/ultrasim-pf5-moving64 64 505501 60s /tmp/ultrasim-pf5-cache
+
+Tools/NetworkBots/run-pf5-baseline.sh clusters 120s \
+  /tmp/ultrasim-pf5-clusters4 64 505503 120s /tmp/ultrasim-pf5-cache \
+  60 60 30 120 30 compliant 1 10 100 4
+
+Tools/NetworkBots/run-pf5-baseline.sh mixed-chaos 1800s \
+  /tmp/ultrasim-pf5-soak64 64 505507 60s /tmp/ultrasim-pf5-cache
+```
+
+The wrapper freezes `ChunkPublication`, message 129 when beneficial, selective message-148 LZ4 at
+384/32, cadence 1/2/4, and Network CrossLane cap two. For a deliberate same-machine 64-client
+all-lifetime churn run, raise only the loopback same-address admission burst explicitly:
+
+```bash
+ULTRASIM_SAME_ADDRESS_ADMISSION_BURST=1024 \
+Tools/NetworkBots/run-pf5-baseline.sh connection-churn 180s \
+  /tmp/ultrasim-pf5-churn64 64 505506 60s /tmp/ultrasim-pf5-cache
+```
+
+This is not a participant-cap bypass. It prevents one development address from dominating the
+admission rate limiter while the authority still admits at most 64 simultaneous participants.
+The ordinary default-burst failure is retained as PF5 boundary evidence.
+
+Run the permanent kernel/application/bot plus external impairment/export gate with:
+
+```bash
+dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj \
+  -c Release -- --pf5-only
+```
+
+For the five-minute exported-client longevity form, add
+`--pf5-native-warmup-seconds=60 --pf5-native-measurement-seconds=300`. The gate first runs 16
+independent ClientOnly bots through light/moderate/heavy deterministic external proxies, then one
+exported Online product twice beside eight impaired bots and beside sixteen ordinary bots. A
+scheduled reconnect may finish in a bounded post-window convergence tail; that tail does not
+extend or rewrite the exact measured traffic window.

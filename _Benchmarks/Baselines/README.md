@@ -26,6 +26,12 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `concept-demo-pf5-product-swarm-failure-characterization-2026-09-13.json` — selected-v29
+  16/32/48/64 real-product population curve, bounded realized density/topology, grouped and
+  convergence/dispersal workloads, Chat/Inventory/vertical/reconnect/churn conservation, explicit
+  admission/client-pump failure boundary, 30-minute 64-client soak, three external impairment
+  profiles, mixed exported Online longevity, separate synthetic 64–192 subsystem curve, remaining
+  byte stack, retained deployment defaults, and PF6 human-readiness decision;
 - `concept-demo-pf4f-selective-message129-compression-2026-09-13.json` — deterministic
   bounded compression oracle and threshold study, exact canonical-byte recovery, malformed-input
   and refusal transaction gates, zero-allocation LZ4 encode/decode, rated 64/96/128/192 CPU rows,

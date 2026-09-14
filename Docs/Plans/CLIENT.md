@@ -62,7 +62,13 @@ canonical message-129 bytes, then invokes the existing canonical reader. The sel
 LZ4-block wrapper is attempted only at 384 canonical bytes and selected only for at least 32 bytes
 of net saving. Malformed or oversized input cannot allocate peer-sized storage or mutate Client
 Core. Game manifest v29 changes; transport revision 2 and all client capability boundaries remain
-unchanged.
+unchanged. PF5 now closes product swarm/failure characterization on that same physical client:
+16/32/48/64 real ClientOnly sessions, realized dense/grouped/migration topology, functional Chat,
+Inventory, vertical and reconnect/churn swarms, deterministic external impairment, and mixed
+actual exported Online processes. A 30-minute 64-client run retains bounded proof debt, zero source
+gaps/deadline misses/catch-up ticks, action conservation, and clean retirement. No PF5 measurement
+changes client protocol, cadence, AOI, capability packaging, or the 64-participant product cap;
+external human validation is next.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -2731,7 +2737,8 @@ PF4E dense/distributed fanout + remaining-cost attribution                  CLOS
 PF4E-R1 rated replication scaling reconciliation                            CLOSED (outcome B)
 PF4E-R2 ChunkPublication CPU efficiency                                     CLOSED (outcome A)
 PF4F bounded selective message-129 compression                              CLOSED (outcome B)
-remaining pre-freeze work                                                    NEXT
+PF5 product swarm/scaling/failure characterization                           CLOSED
+PF6 external human validation                                                NEXT
         |
         v
 repository generalization / extraction readiness

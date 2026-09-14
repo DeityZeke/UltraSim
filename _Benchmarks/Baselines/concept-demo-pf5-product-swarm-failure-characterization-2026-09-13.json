@@ -1,0 +1,562 @@
+{
+  "schema": "ultrasim-concept-demo-pf5-product-swarm-failure-characterization-v1",
+  "checkpoint": "PF5",
+  "status": "CLOSED — product envelope characterized; no production-policy change",
+  "capturedAtUtc": "2026-09-13",
+  "startingHead": "42897d9cd90f7cb86db56c8883e1f50abf60d970",
+  "measurementBase": "dce090996a1e0f43df22eb002549403da553c6c4",
+  "acceptedHarnessHead": "c4ed15579e84172f592e7bd69f1dcd6a90cd0a28",
+  "implementationCommits": [
+    "448696862ac0c0478fb4ef11662958a5e60168e5",
+    "b17dbc038715ef605cf9d308fcb8e068234d8743",
+    "57a1fe8b749f4a017933206825720ddbd6d96d94",
+    "dce090996a1e0f43df22eb002549403da553c6c4",
+    "c4ed15579e84172f592e7bd69f1dcd6a90cd0a28"
+  ],
+  "featureCompleteCorrectnessCandidate": {
+    "sha": "af9fcb740c02eb08efa8d4985d929b50b135504e",
+    "changed": false,
+    "reason": "PF5 changed only bounded load-generation, orchestration, and cold diagnostic census code. No pre-existing Game, client, Network, content, or product correctness defect was found or repaired."
+  },
+  "environment": {
+    "configuration": "Release",
+    "runtime": ".NET 8.0.29",
+    "sdk": "8.0.129",
+    "operatingSystem": "Linux 7.1.5-1-cachyos x86_64",
+    "processor": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "physicalCores": 8,
+    "logicalProcessors": 16,
+    "hostMemoryBytes": 32738627584,
+    "networkFlavors": {
+      "server": "ServerOnly",
+      "botsAndOnline": "ClientOnly",
+      "complete": "Full",
+      "singlePlayer": "none"
+    },
+    "hostCaveat": "Server, one multi-client bot process, proxies, and exported clients share this one development host. CPU/core values are process CPU seconds per wall second, not percent of the whole 16-logical-CPU machine."
+  },
+  "selectedProductionPolicy": {
+    "publicOwner": "ChunkPublication",
+    "bundlePolicy": "Message129WhenBeneficial",
+    "compression": {
+      "message": 148,
+      "codec": "ultrasim-lz4-block-v1",
+      "minimumCanonicalBytes": 384,
+      "minimumNetSavingBytes": 32
+    },
+    "immediateNearFarCadence": [1, 2, 4],
+    "unreliableAggregation": "CrossLane cap 2 with no added departure delay",
+    "gameManifestVersion": 29,
+    "transportRevision": 2,
+    "participantCap": 64,
+    "authorityHz": 60,
+    "changedByPf5": false
+  },
+  "measurementDefinitions": {
+    "productClient": "one ordinary authenticated ClientOnly Direct Connect lifetime using production UDP, client profile, content/CAS proof, WorldPack, guest admission, Client Core, Game protocol, and ordinary public/private semantics",
+    "udpPayloadBytes": "exact UDP datagram payload lengths; excludes estimated IP/UDP headers and all HTTP body transfer",
+    "gameApplicationBytes": "logical registered Game-message payload bytes; not additive with frame or UDP totals",
+    "networkAndRemoteReplication": "inclusive selected-profile subsystem wall clock exposed by the synthetic rated harness; not inferred from process CPU and not claimed for real-product runs where that aggregate clock is unavailable",
+    "authorityTiming": "real dedicated authority tick duration; distinct from Network/replication and whole-process CPU",
+    "botPump": "one central-process service interval over all real bot transports/sessions",
+    "window": "clients admitted and content/profile/application proof complete, scenario positioned, warmup complete, synchronized cumulative snapshots taken, then explicit measured delta",
+    "content": "measured steady-state windows were warm and transferred zero HTTP body bytes; lifetime cold/preseed transfer is reported separately where relevant"
+  },
+  "harness": {
+    "project": "Tools/NetworkBots/UltraSim.NetworkBots.csproj",
+    "schemaVersion": 12,
+    "runner": "Tools/NetworkBots/run-pf5-baseline.sh",
+    "focusedVerifier": "--pf5-only",
+    "boundedTopologySamples": 4096,
+    "newScenarios": [
+      "clusters",
+      "migration-converge",
+      "migration-disperse",
+      "chat-swarm",
+      "inventory-swarm",
+      "vertical-swarm",
+      "reconnect-swarm",
+      "connection-churn"
+    ],
+    "authorityPrivileges": false,
+    "directEcs": false,
+    "godotDependency": false,
+    "networkTestingDependency": false,
+    "notes": [
+      "Each bot retains an independent real UDP transport, authenticated application epoch, client semantic state, control sequence, content proof, guest body, and reconnect lifetime.",
+      "Final positions and requested cluster labels make intended versus realized geography inspectable.",
+      "Migration uses only ordinary movement, public interaction, telepad/gate, and authoritative fall/recovery paths. Far-to-Central convergence deliberately uses the finite Far-island edge and normal recovery after repeated ordinary gate approaches proved geometrically unreliable for simple bots.",
+      "A post-window convergence barrier keeps the exact measured duration fixed while allowing an already-scheduled impaired reconnect to finish before final semantic health is judged."
+    ]
+  },
+  "productPopulationCurve": {
+    "scenario": "moving",
+    "seed": 505501,
+    "warmupSeconds": 60,
+    "measurementSeconds": 120,
+    "rawRoot": "_Benchmarks/results/pf5-2026-09-13",
+    "rows": [
+      {
+        "participants": 16,
+        "serverCpuCores": 0.1325686739,
+        "serverRssBytes": 224694272,
+        "authorityUs": {"p50": 280, "p95": 312, "p99": 367, "max": 1677},
+        "deadlineMisses": 1,
+        "catchUpTicks": 1,
+        "serverToClientUdpBytesPerSecond": 359312.7724,
+        "clientToServerUdpBytesPerSecond": 175414.4382,
+        "serverToClientDatagramsPerSecond": 1066.6078,
+        "clientToServerDatagramsPerSecond": 1051.3996,
+        "botCpuCores": 0.3729166675,
+        "botRssBytes": 333783040,
+        "botPumpIntervalMs": {"p50": 1.65, "p95": 2.10, "p99": 2.75, "max": 5.961499}
+      },
+      {
+        "participants": 32,
+        "serverCpuCores": 0.2543972722,
+        "serverRssBytes": 248479744,
+        "authorityUs": {"p50": 541, "p95": 574, "p99": 587, "max": 974},
+        "deadlineMisses": 0,
+        "catchUpTicks": 0,
+        "serverToClientUdpBytesPerSecond": 975714.7631,
+        "clientToServerUdpBytesPerSecond": 491164.2139,
+        "serverToClientDatagramsPerSecond": 2565.0239,
+        "clientToServerDatagramsPerSecond": 2458.8174,
+        "botCpuCores": 0.5554166667,
+        "botRssBytes": 535191552,
+        "botPumpIntervalMs": {"p50": 2.25, "p95": 3.45, "p99": 4.10, "max": 7.939821}
+      },
+      {
+        "participants": 48,
+        "serverCpuCores": 0.3948046765,
+        "serverRssBytes": 270434304,
+        "authorityUs": {"p50": 852, "p95": 904, "p99": 1081, "max": 2109},
+        "deadlineMisses": 0,
+        "catchUpTicks": 0,
+        "serverToClientUdpBytesPerSecond": 1791797.3434,
+        "clientToServerUdpBytesPerSecond": 900486.3543,
+        "serverToClientDatagramsPerSecond": 4239.6897,
+        "clientToServerDatagramsPerSecond": 4082.8576,
+        "botCpuCores": 0.6781666667,
+        "botRssBytes": 792707072,
+        "botPumpIntervalMs": {"p50": 3.00, "p95": 5.60, "p99": 6.45, "max": 13.099347}
+      },
+      {
+        "participants": 64,
+        "serverCpuCores": 0.5242813679,
+        "serverRssBytes": 257622016,
+        "authorityUs": {"p50": 1143, "p95": 1200, "p99": 1261, "max": 1541},
+        "deadlineMisses": 1,
+        "catchUpTicks": 1,
+        "serverToClientUdpBytesPerSecond": 2868923.8673,
+        "clientToServerUdpBytesPerSecond": 1373997.2667,
+        "serverToClientDatagramsPerSecond": 6346.0054,
+        "clientToServerDatagramsPerSecond": 5951.9004,
+        "botCpuCores": 0.7565,
+        "botRssBytes": 903159808,
+        "botPumpIntervalMs": {"p50": 3.90, "p95": 7.55, "p99": 8.70, "max": 14.73189}
+      }
+    ],
+    "interpretation": "Authority p95 and process CPU rise smoothly through the fixed 64-participant product cap. The isolated deadline/catch-up observations at 16 and 64 are non-monotonic host/scheduler tails; the longer 64-client soak records zero."
+  },
+  "densityMatrix": {
+    "measurementSeconds": 120,
+    "rows": [
+      {
+        "workload": "shared-dense crowd-64",
+        "seed": 505502,
+        "serverCpuCores": 0.5426730409,
+        "authorityP95Us": 1345,
+        "serverToClientUdpBytes": 443443740,
+        "occupiedChunks": {"min": 7, "mean": 8.3033, "max": 10},
+        "uniqueSubscriptionChunks": {"min": 594, "mean": 600.4754, "max": 622},
+        "membershipsMean": 32161.7869,
+        "recipientsPerChunkMean": 53.5672,
+        "dirtyChunkFanout": {"average": 64, "p50": 64, "p95": 64, "p99": 64, "max": 64},
+        "sourceGaps": 0
+      },
+      {
+        "workload": "grouped 2x32",
+        "seed": 505503,
+        "serverCpuCores": 0.4364963868,
+        "authorityP95Us": 939,
+        "serverToClientUdpBytes": 159897513,
+        "occupiedChunksMean": 8.0574,
+        "uniqueSubscriptionChunksMean": 1111.4180,
+        "membershipsMean": 32195.0082,
+        "recipientsPerChunkMean": 28.9682,
+        "dirtyChunkFanout": {"average": 27.9054, "p50": 14, "p95": 50, "p99": 50, "max": 50},
+        "sourceGaps": 0
+      },
+      {
+        "workload": "grouped 4x16",
+        "seed": 505503,
+        "serverCpuCores": 0.4729634218,
+        "authorityP95Us": 1045,
+        "serverToClientUdpBytes": 163239404,
+        "occupiedChunksMean": 6.1803,
+        "uniqueSubscriptionChunksMean": 1107.3934,
+        "membershipsMean": 32195.4590,
+        "recipientsPerChunkMean": 29.0737,
+        "dirtyChunkFanout": {"average": 35.0940, "p50": 56, "p95": 56, "p99": 56, "max": 56},
+        "sourceGaps": 0
+      },
+      {
+        "workload": "grouped 8x8",
+        "seed": 505503,
+        "serverCpuCores": 0.4513860020,
+        "authorityP95Us": 998,
+        "serverToClientUdpBytes": 155006370,
+        "occupiedChunksMean": 7.1066,
+        "uniqueSubscriptionChunksMean": 1101.7705,
+        "membershipsMean": 32184.7459,
+        "recipientsPerChunkMean": 29.2126,
+        "dirtyChunkFanout": {"average": 30.9720, "p50": 10, "p95": 54, "p99": 54, "max": 54},
+        "sourceGaps": 0
+      }
+    ],
+    "finding": "Realized topology, not requested group count, predicts cost. The finite demo geography and large selected interest footprint make 4x16 and 8x8 non-monotonic; the retained census prevents those labels from being misreported as equal-fanout clusters."
+  },
+  "migration": {
+    "warmupSeconds": 120,
+    "measurementSeconds": 180,
+    "converge": {
+      "seed": 505504,
+      "occupiedChunks": {"min": 5, "mean": 5.7143, "max": 9},
+      "uniqueSubscriptionChunks": {"min": 571, "mean": 698.4615, "max": 1100},
+      "recipientsPerChunkMean": 49.5906,
+      "dirtyChunkFanout": {"average": 47.1623, "p95": 64, "max": 64},
+      "authorityUs": {"p95": 732, "p99": 909, "max": 1897},
+      "serverCpuCores": 0.3870602722,
+      "serverToClientUdpBytes": 258416465,
+      "chunkCrossings": 4663,
+      "distinctChunksVisited": 309,
+      "finalRegion": "all 64 Central",
+      "sourceGaps": 0,
+      "cleanRetirement": true
+    },
+    "disperse": {
+      "seed": 505505,
+      "occupiedChunks": {"min": 3, "mean": 4.2473, "max": 6},
+      "uniqueSubscriptionChunks": {"min": 529, "mean": 929.1813, "max": 1066},
+      "recipientsPerChunkMean": 37.5377,
+      "dirtyChunkFanout": {"average": 42.9268, "p95": 49, "p99": 49, "max": 64},
+      "authorityUs": {"p95": 1097, "p99": 1150, "max": 2078},
+      "serverCpuCores": 0.5018606947,
+      "serverToClientUdpBytes": 424506282,
+      "chunkCrossings": 565,
+      "distinctChunksVisited": 256,
+      "realizedRegions": ["Central", "Far", "Sky"],
+      "sourceGaps": 0,
+      "cleanRetirement": true
+    },
+    "result": "Both directions produce bounded transient topology and proof work. No runaway backlog, source gap, stale publication, or failed retirement was observed."
+  },
+  "functionalSwarms": {
+    "common": {"bots": 64, "seed": 505506, "warmupSeconds": 60, "measurementSeconds": 120},
+    "chat": {
+      "localSubmitted": 581,
+      "localObserved": 17690,
+      "globalSubmitted": 298,
+      "globalObserved": 19072,
+      "observationGaps": 0,
+      "chatOccurrenceMessages": 36826,
+      "explanation": "36,762 player-observer occurrences plus one trusted PF5 System-start occurrence delivered to 64 recipients exactly reconcile the 36,826 server occurrences.",
+      "authorityP95Us": 1260,
+      "serverCpuCores": 0.5491966119,
+      "cleanRetirement": true
+    },
+    "inventoryAndActions": {
+      "ordinarySwordContentionAttempts": 310,
+      "interactionAccepted": 15,
+      "interactionRejected": 295,
+      "pickupObserved": 1,
+      "equipObserved": 1,
+      "dropObserved": 1,
+      "primaryAccepted": 1,
+      "duplicatedOrLostItems": 0,
+      "authorityP95Us": 1117,
+      "serverCpuCores": 0.5298866726,
+      "cleanRetirement": true
+    },
+    "vertical": {
+      "jumpAttempts": 861,
+      "jumpsAccepted": 728,
+      "jumpsRejected": 133,
+      "verticalTransitions": 2621,
+      "landingRecoveries": 929,
+      "chunkCrossings": 926,
+      "distinctChunksVisited": 502,
+      "authorityP95Us": 1221,
+      "serverCpuCores": 0.4992641985,
+      "permanentlyMissingActors": 0,
+      "cleanRetirement": true
+    }
+  },
+  "reconnectAndChurn": {
+    "reconnectSwarm": {
+      "bots": 64,
+      "reconnectedBots": 16,
+      "applicationLifetimes": 80,
+      "freshProofLifetimes": 80,
+      "observerRetirementAndReplacement": "2/2",
+      "staleActorsObserved": 0,
+      "authorityP95Us": 1378,
+      "serverCpuCores": 0.5323889332,
+      "sourceGaps": 0,
+      "serverJoinsLeaves": "80/80",
+      "cleanRetirement": true
+    },
+    "connectionChurn": {
+      "bots": 64,
+      "applicationLifetimes": 128,
+      "freshProofLifetimes": 128,
+      "successfulReconnects": 64,
+      "observerRetirementAndReplacement": "2/2",
+      "staleActorsObserved": 0,
+      "authorityP95Us": 1214,
+      "serverCpuCores": 0.4943988465,
+      "serverRssBytes": 417992704,
+      "botMeasuredRssBytes": 1627947008,
+      "botPumpIntervalMs": {"p50": 4.15, "p95": 6.70, "p99": 7.95, "max": 54.775715},
+      "serverJoinsLeaves": "128/128",
+      "sourceGaps": 0,
+      "cleanRetirement": true,
+      "configuration": "same-address admission burst explicitly raised to 1024 for this loopback-only all-client churn workload; participant capacity remained 64"
+    },
+    "observedBoundary": {
+      "configuration": "default same-address admission burst 128, 64 clients reconnecting on one loopback address",
+      "result": "43 of 64 reconnects completed before one bot exhausted bounded discovery retries; 129 initial retries were observed",
+      "failure": "DiscoveryFailed: No compatible deployment-key announcement was received",
+      "botPumpMaximumMs": 2437.875625,
+      "botRssBytes": 1795854336,
+      "classification": ["benchmark-client pump saturation", "bounded same-address admission/discovery refusal"],
+      "graceful": true,
+      "authorityCorruption": false,
+      "interpretation": "This is an explicit loopback churn/development-host boundary, not a 64-player steady-state failure and not a reason to change production admission policy in PF5."
+    }
+  },
+  "longSoak": {
+    "scenario": "mixed-chaos",
+    "bots": 64,
+    "seed": 505507,
+    "warmupSeconds": 60,
+    "measuredActiveMilliseconds": 1800334,
+    "applicationLifetimes": 65,
+    "successfulReconnects": 1,
+    "freshProofLifetimes": 65,
+    "server": {
+      "cpuCores": 0.5847859342,
+      "rssBytes": 293875712,
+      "managedHeapHighWaterBytes": 145610408,
+      "authoritySamples": 108022,
+      "authorityUs": {"p50": 1067, "p95": 1115, "p99": 1146, "max": 3830},
+      "deadlineMisses": 0,
+      "catchUpTicks": 0,
+      "sourceGaps": 0,
+      "listenerQueueHighWater": 8,
+      "listenerCapacityDrops": 0,
+      "replicationTransportDeferrals": 704,
+      "replicationCapacityDeferrals": 0,
+      "outstandingDeliveryHighWater": 115,
+      "proofDeliveryAgeMaxSteps": 10,
+      "sourceToProofMaxSteps": 38,
+      "snapshotTimeoutsRecovered": 9
+    },
+    "botHost": {
+      "cpuCores": 0.8233388889,
+      "measuredRssBytes": 953495552,
+      "lifetimeRssBytes": 966578176,
+      "pumpIntervalMs": {"p50": 5.30, "p95": 10.10, "p99": 10.95, "max": 31.452564},
+      "pumpDurationMs": {"p50": 4.25, "p95": 9.00, "p99": 9.85, "max": 30.393043},
+      "faults": 0
+    },
+    "wire": {
+      "serverToClientUdpPayloadBytes": 9302612426,
+      "serverToClientDatagrams": 21141698,
+      "clientToServerUdpPayloadBytes": 3748074043,
+      "clientToServerDatagrams": 17538228,
+      "serverDataUdpPayloadBytes": 8955374122,
+      "serverAckUdpPayloadBytes": 346224192,
+      "serverKeepAliveUdpPayloadBytes": 1013584,
+      "clientRetransmittedDataUdpPayloadBytes": 4331895,
+      "httpBodyBytesDuringMeasuredWindow": 0
+    },
+    "compression": {
+      "attempts": 8741903,
+      "selected": 8741903,
+      "canonicalBytesSelected": 9921732318,
+      "compressedRepresentationBytes": 6252810231,
+      "directBytesSaved": 3668922087,
+      "selectionRatePercentOfAttempts": 100.0,
+      "clientDecompressionP95UsWorst": 2
+    },
+    "aggregation": {
+      "serverFramesReceivedByClients": 15504307,
+      "serverDatagramsReceivedByClients": 9758959,
+      "twoFrameDatagramsReceivedByClients": 5745348,
+      "maximumFrames": 2
+    },
+    "actions": {
+      "movementSubmitted": 68663,
+      "jumpsCompleted": 22835,
+      "interactionsCompleted": 47418,
+      "primaryCompleted": 22799,
+      "releaseOrStopCompleted": 99721,
+      "localChatSubmitted": 1,
+      "globalChatSubmitted": 23094,
+      "globalChatObserved": 1478016,
+      "chatObservationGaps": 0,
+      "swordPickupEquipDrop": "1/1/1",
+      "verticalTransitions": 57227,
+      "landings": 19423,
+      "actionFamiliesConserved": "6/6",
+      "unexplainedActionLoss": 0
+    },
+    "fairness": {
+      "perClientCommandCompletionP95Us": {"p50Client": 19074, "p95Client": 22851, "p99Client": 24082, "worstClient": 24497},
+      "perClientSemanticApplyIntervalP95Us": {"p50Client": 17159, "p95Client": 18063, "p99Client": 18220, "worstClient": 18489},
+      "perClientProofQueueToProcessP95Us": {"p50Client": 53606, "p95Client": 59301, "p99Client": 60230, "worstClient": 60729},
+      "perClientOutstandingHighWater": {"p50Client": 72, "p95Client": 94, "p99Client": 105, "worstClient": 115},
+      "persistentStarvationObserved": false,
+      "note": "Owner-state interval alone is coalescing/activity-sensitive and is not used as the starvation verdict; public semantic apply and command completion remain bounded across all 64 clients."
+    },
+    "retirement": {"serverJoins": 65, "serverLeaves": 65, "participants": 0, "sessions": 0, "clean": true}
+  },
+  "remainingDownstreamByteStackDuringSoak": {
+    "structuralAndPublicWorld": {"applicationBytes": 6969201862, "frameBytes": 7234246709},
+    "ownerPrivateState": {"applicationBytes": 335326740, "frameBytes": 427142395},
+    "publicPresentation": {"applicationBytes": 258211113, "frameBytes": 342994771},
+    "chat": {"applicationBytes": 147414512, "frameBytes": 181409800},
+    "uiAndMonitor": {"applicationBytes": 56739, "frameBytes": 58050},
+    "secureDataUdpPayloadBytes": 8955374122,
+    "ackUdpPayloadBytes": 346224192,
+    "keepAliveUdpPayloadBytes": 1013584,
+    "finalUdpPayloadBytes": 9302612426,
+    "interpretation": "Structural/public Game truth remains the dominant structural target. After PF4F, Network-frame and secure-envelope overhead is material but much smaller than the semantic/public payload; PF5 does not justify interrupting human validation for another header-compaction checkpoint."
+  },
+  "syntheticRatedCurve": {
+    "raw": "_Benchmarks/results/pf5-2026-09-13/synthetic-rated-64-192.json",
+    "workload": "production-shaped localized multichunk",
+    "warmupTicks": 45,
+    "measuredTicks": 270,
+    "rows": [
+      {"recipients": 64, "scheduleP95Ms": 1.1670, "networkAndReplicationP95Ms": 1.650535, "legacyServerRoleP95Ms": 1.316619, "wholeFlowP95Ms": 6.3447, "publications": 138240, "proofs": 138240, "wireBytes": 20589648},
+      {"recipients": 96, "scheduleP95Ms": 1.6573, "networkAndReplicationP95Ms": 2.343948, "legacyServerRoleP95Ms": 1.863239, "wholeFlowP95Ms": 9.4340, "publications": 207360, "proofs": 207360, "wireBytes": 30659835},
+      {"recipients": 128, "scheduleP95Ms": 2.1403, "networkAndReplicationP95Ms": 3.059781, "legacyServerRoleP95Ms": 2.425628, "wholeFlowP95Ms": 12.4920, "publications": 276480, "proofs": 276480, "wireBytes": 40703648},
+      {"recipients": 160, "scheduleP95Ms": 2.6899, "networkAndReplicationP95Ms": 3.984091, "legacyServerRoleP95Ms": 3.140357, "wholeFlowP95Ms": 16.3439, "publications": 345600, "proofs": 345600, "wireBytes": 50886658},
+      {"recipients": 192, "scheduleP95Ms": 3.3597, "networkAndReplicationP95Ms": 4.841588, "legacyServerRoleP95Ms": 3.835377, "wholeFlowP95Ms": 19.2269, "publications": 414720, "proofs": 414720, "wireBytes": 61255423}
+    ],
+    "budgetCrossing": "between tested 160 and 192 rated recipients",
+    "ccuClaim": false,
+    "productNormalization": {
+      "realMoving64": "64 independently authenticated clients, dynamic AOI/chunk crossings, 85,311 dirty chunks over 120 seconds, 5,459,904 dirty-recipient fanout, approximately 2.87 MB/s downstream UDP",
+      "synthetic64": "fixed 20 dirty entities/tick, eight useful publication-shaped obligations per recipient/tick, 138,240 publications in 270 ticks, 20.59 MB wire in the short deterministic harness",
+      "explanation": "The rated fixture deliberately concentrates repeatable publication work and includes benchmark client decode/proof flow. It maps subsystem scaling, while the real-product run maps the current 64-participant product envelope."
+    }
+  },
+  "impairment": {
+    "topology": "16 real ClientOnly clients, one independent external userspace UDP proxy per client, selected v29 policy, active mixed-chaos, one reconnect",
+    "seed": 505517,
+    "profiles": [
+      {"name": "light", "dropEveryDatagrams": 101, "reorderEveryDatagrams": 67, "holdMilliseconds": 10, "dropped": 550, "reordered": 366, "freshLifetimes": 17, "decompressedMessages": 11552, "result": "pass"},
+      {"name": "moderate", "dropEveryDatagrams": 53, "reorderEveryDatagrams": 37, "holdMilliseconds": 20, "dropped": 1088, "reordered": 1510, "freshLifetimes": 17, "decompressedMessages": 12745, "result": "pass"},
+      {"name": "heavy-plausible", "dropEveryDatagrams": 29, "reorderEveryDatagrams": 23, "holdMilliseconds": 35, "dropped": 1938, "reordered": 2379, "freshLifetimes": 17, "decompressedMessages": 11581, "result": "pass"}
+    ],
+    "sourceGaps": 0,
+    "actionConservation": "6/6 each",
+    "proofRecovery": "converged",
+    "cleanRetirement": true,
+    "note": "Counts are deterministic-policy outcomes but can vary slightly with wall-clock packet interleaving; the exact proxy parameters, seed, semantic gates, and zero-gap result are the reproducible contract."
+  },
+  "exportedProduct": {
+    "status": "pass",
+    "composition": [
+      "8 ClientOnly bots + 2 separately running exported Online clients behind independent external impairment proxies",
+      "16 ClientOnly bots + 2 separately running exported Online clients without proxy impairment"
+    ],
+    "nativeProduct": "actual exported Online executable, not editor launch",
+    "sameAccountingPath": true,
+    "impairedFiveMinuteRun": {
+      "population": "8 ClientOnly bots + 2 exported Online clients",
+      "warmupSeconds": 60,
+      "measurementSeconds": 300,
+      "serverGeneration": 1,
+      "serverCpuPerCore": 0.08449155,
+      "serverWorkingSetBytesHighWater": 231702528,
+      "authorityMicroseconds": {"p50": 230, "p95": 269, "p99": 288, "max": 1957},
+      "authorityDeadlineMisses": 0,
+      "authorityCatchUpTicks": 0,
+      "freshConnectionLifetimes": 11,
+      "headlessReconnects": 1,
+      "applicationContentProofs": 11,
+      "nativeAlice": {"commandsSubmitted": 9372, "commandsCompleted": 9366, "worldDeltasApplied": 49849, "compressedMessages": 7692, "canonicalDecodedBytes": 3722837, "chatOccurrencesApplied": 461, "uiApplications": 300, "healthy": true},
+      "nativeBob": {"commandsSubmitted": 9372, "commandsCompleted": 9365, "worldDeltasApplied": 49902, "compressedMessages": 7711, "canonicalDecodedBytes": 3735601, "chatOccurrencesApplied": 461, "uiApplications": 300, "healthy": true},
+      "proxyAlice": {"dropEveryDatagrams": 53, "reorderEveryDatagrams": 37, "holdMilliseconds": 20, "dropped": 1437, "reordered": 1979},
+      "proxyBob": {"dropEveryDatagrams": 53, "reorderEveryDatagrams": 37, "holdMilliseconds": 20, "dropped": 1440, "reordered": 1966},
+      "cleanRetirement": true
+    },
+    "normalMixedRun": {
+      "population": "16 ClientOnly bots + 2 exported Online clients",
+      "warmupSeconds": 10,
+      "measurementSeconds": 60,
+      "serverGeneration": 1,
+      "serverCpuPerCore": 0.139273,
+      "serverWorkingSetBytesHighWater": 234823680,
+      "authorityMicroseconds": {"p50": 245, "p95": 330, "p99": 409, "max": 1519},
+      "authorityDeadlineMisses": 0,
+      "authorityCatchUpTicks": 0,
+      "freshConnectionLifetimes": 19,
+      "headlessReconnects": 1,
+      "applicationContentProofs": 19,
+      "nativeAlice": {"commandsSubmitted": 1871, "commandsCompleted": 1863, "worldDeltasApplied": 13809, "compressedMessages": 3015, "canonicalDecodedBytes": 1795298, "chatOccurrencesApplied": 183, "uiApplications": 61, "healthy": true},
+      "nativeBob": {"commandsSubmitted": 1872, "commandsCompleted": 1863, "worldDeltasApplied": 13806, "compressedMessages": 3014, "canonicalDecodedBytes": 1794849, "chatOccurrencesApplied": 183, "uiApplications": 61, "healthy": true},
+      "cleanRetirement": true
+    },
+    "ordinaryGameplay": ["join", "movement", "public actors", "nameplates/presentation", "Chat", "Inventory UI", "compressed public world", "clean leave"],
+    "contentlessOnline": "export inspection retains zero bundled playable world/body payload and uses authenticated HTTP/CAS/application proof",
+    "singlePlayer": "canonical verifier retains the Network-free packet-free local composition"
+  },
+  "failureClassification": [
+    {
+      "observation": "one isolated authority deadline/catch-up in several short localhost runs",
+      "class": "host scheduler/timing tail",
+      "graceful": true,
+      "evidence": "non-monotonic across 16/32/48/64 and absent in the 30-minute 64-client soak"
+    },
+    {
+      "observation": "default one-address admission burst plus simultaneous 64-client reconnect wave exhausted one bot's bounded discovery retries",
+      "class": "benchmark-client pump saturation plus bounded admission/capacity refusal",
+      "graceful": true,
+      "evidence": "authority did not fault; explicitly configured loopback churn profile completed 128/128 joins/leaves"
+    },
+    {
+      "observation": "synthetic selected-profile Network+replication p95 first exceeds 4 ms at tested 192",
+      "class": "subsystem engineering-budget crossing",
+      "graceful": true,
+      "evidence": "160 is 3.984091 ms; 192 is 4.841588 ms; no product CCU inference"
+    }
+  ],
+  "conclusions": {
+    "firstObservedProductCost": "dense public-state downstream bandwidth/datagram rate, followed on this single-host setup by the multi-client bot process memory/pump cost; the real 64-client authority was not close to its 16.67 ms deadline",
+    "firstSyntheticSubsystemBoundary": "4 ms Network+remote-replication p95 crossing between tested 160 and 192 rated recipients",
+    "productionDefaultsRecommended": true,
+    "recommendedDefaults": "retain ChunkPublication, message129 when beneficial, message148 LZ4 at 384/32, Immediate/Near/Far 1/2/4, and CrossLane cap 2",
+    "deeperWireCompactionJustifiedNow": false,
+    "deeperWireCompactionReason": "public semantic payload still dominates and no measured correctness/deployment boundary requires another pre-human representation change",
+    "sharedDeltaMaterializationJustifiedNow": false,
+    "sharedDeltaMaterializationReason": "PF4E-R2's 98.97% reuse remains a valid future CPU hypothesis, but real 64-client authority and process CPU are healthy and the synthetic 128/160 rows already meet the selected subsystem budget",
+    "productionParticipantCapChanged": false,
+    "performanceOptimizationPerformed": false,
+    "unresolvedCorrectnessFaults": 0,
+    "humanValidationReady": true,
+    "humanValidationCaveat": "PF5 is one Linux development-host characterization, not a public-WAN, heterogeneous-hardware, or maximum-CCU certification.",
+    "nextCheckpoint": "PF6 external human Concept Demo validation"
+  },
+  "verification": {
+    "networkBotTests": "24/24 passed",
+    "focusedPf5": "passed with three external impairment profiles plus actual exported Contentless Online clients; maintained five-minute native impairment interval passed",
+    "fullCanonicalRelease": "pending final recorded run",
+    "worktreeAtEvidenceDraft": "clean before evidence/documentation closure"
+  }
+}

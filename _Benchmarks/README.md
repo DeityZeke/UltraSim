@@ -39,7 +39,7 @@ when those systems exist.
 | `UltraSim.Game.ReplicationBenchmarks` | N0.1 100K canonical changed-state capture and OfflineDirect semantic apply. |
 | `UltraSim.Network.N1Benchmarks` | N1.0 packet-free chunk-recipient controls, N1.1 canonical codecs, N1.2 ordinary transport, N1.3 atomic snapshot recovery, and N1.4 dirty-scheduling/storage/adoption evidence. |
 | `UltraSim.Network.HostedH05` | H0.5 dedicated server plus independent external client processes through hosted admission, connection-owner sharding, H0.3 rebinding, mixed N1 traffic, cross-chunk migration, proof-gated completion, and reconnect. |
-| `UltraSim.NetworkBots` | PF1 real ClientOnly headless product: many independent remote application/control lifetimes in one CLR, deterministic mixed-chaos correctness, reconnect, and process/pump telemetry. |
+| `UltraSim.NetworkBots` | PF1–PF5 real ClientOnly headless product: many independent remote application/control lifetimes in one CLR, deterministic correctness/measurement/density/migration/functional/churn scenarios, reconnect, wire/topology, and process/pump telemetry. |
 | `UltraSim.Spatial.Benchmarks` | Terrain T0.0 dependency-neutral spatial math and fixed game-position profile: normalization, reconstruction, key/hash/order, AABB distance, and terrain-cell lookup. |
 | `UltraSim.WorldSpatialIndex.Benchmarks` | Terrain T0.1 split post-step/index costs: idle observation, same-home change, cross-chunk migration, create/remove, full rebuild, and member reads. |
 | `UltraSim.TerrainEncoding.Benchmarks` | Terrain T0.2 fixed 16 m/0.5 m geometry, global-vs-based height candidate matrix, synthetic multi-datum distribution, reconstructed shared-edge equality, scratch, and encode/decode evidence. |
@@ -66,6 +66,10 @@ artifact/protocol identity, cold refresh/capacity policy, packet-free Local and 
 authority shapes, sanitized participant lifecycle, and trusted marker-to-System convergence.
 PF1 records the first 8-headless-plus-2-exported-Online mixed correctness swarm; it is load-tool
 acceptance, not a CCU, bandwidth, cadence, or production-performance claim.
+PF5 records the fixed-cap 16/32/48/64 product curve, realized dense/grouped/migration topology,
+functional and reconnect/churn swarms, deterministic external impairment, a 30-minute 64-client
+soak, exported Online longevity, and the separate synthetic 64–192 rated-recipient curve. The
+synthetic curve is subsystem scaling evidence and is never relabeled as product CCU.
 
 Network benchmarks/tests consume deterministic impairment, ProtocolLoopback,
 two-ended connected UDP, and self-trusted topology from the separate

@@ -32,6 +32,15 @@ Canonical 129 remains the exact fallback. Moving-50 and Crowd-50 reduce downstre
 4.000 ms subsystem budget at 3.184 ms p95. Game manifest v29 adds only the compressed Game
 representation; Network transport revision 2, entry composition, proof/debt, cadence, AOI, MTU,
 aggregation cap, and participant limit are unchanged.
+PF5 now closes product swarm, scaling, and failure characterization without changing that selected
+policy. Real ClientOnly populations at 16/32/48/64, realized dense/distributed/grouped topology,
+convergence/dispersal, Chat, Inventory, vertical motion, reconnect/churn, external impairment, a
+30-minute 64-client soak, and mixed exported Online clients all retain bounded semantics and clean
+retirement. The real 64-client authority remains near 1.1 ms p95 in the long soak; the separate
+synthetic production-shaped Network-plus-replication curve first crosses its 4 ms engineering
+budget between tested 160 and 192 rated recipients. That is a subsystem curve, not a CCU claim.
+Dense downstream public-state traffic and the single-host bot process are the first practical
+costs observed. No unresolved correctness fault or policy change blocks PF6 human validation.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -2004,7 +2013,37 @@ Close when chosen changes have permanent before/after evidence and no semantic r
 
 ## PF5 — swarm/soak/failure matrix
 
-Close when:
+**Status: CLOSED.** The maintained ClientOnly harness now exposes bounded realized-topology census
+and deterministic grouped, migration, Chat, Inventory/action, vertical, reconnect, and full-churn
+workloads. The selected v29 policy was characterized at 16/32/48/64 real participants. A
+30-minute 64-client mixed-chaos run completed 65 fresh application/proof lifetimes, conserved all
+six action families, recorded zero source gaps/deadline misses/catch-up ticks, kept proof debt
+bounded, and retired 65/65 joins cleanly.
+
+Density is not treated as a population label. The dense run averaged 53.57 recipients per
+subscribed chunk and dirty fanout 64, while grouped workloads averaged about 29 recipients per
+chunk with non-monotonic dirty fanout because the finite demo regions and selected interest radius
+overlap. Migration runs retain the actual before/after topology rather than assuming requested
+clusters were realized.
+
+The focused gate applies three exact loss/reorder/delay profiles to 16 independent real UDP clients
+and also runs two actual exported Online processes with headless clients. Reconnects establish new
+transport/application/content/publication knowledge and observer clients retire the old actor
+identity before accepting the replacement.
+
+The one deliberate failure boundary was a simultaneous 64-client loopback reconnect wave under
+the default one-address admission burst: the benchmark client pump reached a 2.44-second tail and
+one client exhausted bounded discovery retries. The authority did not corrupt. Raising only that
+explicit loopback-development admission burst allowed the maintained churn workload to complete
+128/128 joins/leaves while the participant cap remained 64. This is retained as a graceful
+one-host churn/admission boundary, not hidden as a passing steady-state result.
+
+Permanent evidence is in
+`_Benchmarks/Baselines/concept-demo-pf5-product-swarm-failure-characterization-2026-09-13.json`.
+PF5 keeps the selected 1/2/4 cadence, message 129, selective 148 compression, cross-lane cap two,
+manifest v29, transport revision 2, and participant cap 64. External human validation is next.
+
+Closure gates were:
 
 - crowd, distributed, migration, fall, Chat, UI, reconnect, and impairment runs are reproducible;
 - 8–16 functional and higher stress ranges are characterized;
@@ -2157,12 +2196,12 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 21. Reconcile selected-profile rated scaling against current/historical controls. **CLOSED — PF4E-R1; outcome B**
 22. Remove measured redundant ChunkPublication preparation. **CLOSED — PF4E-R2; outcome A**
 23. Evaluate selective compression only where payload shape justifies it. **CLOSED — PF4F; outcome B**
-24. Evaluate deeper wire compaction only if remaining measurements justify the complexity.
-25. Run correctness, soak, stress, migration, Chat, UI, fall, reconnect, and impairment swarms.
-26. Run mixed headless + exported Godot clients.
-27. Run external human Concept Demo validation.
-28. Choose/document the default deployment-performance policy.
-29. Record decisive performance/bandwidth/failure evidence.
+24. Evaluate deeper wire compaction only if remaining measurements justify the complexity. **NOT SELECTED — PF5 payload evidence does not justify interrupting human validation**
+25. Run correctness, soak, stress, migration, Chat, UI, fall, reconnect, and impairment swarms. **CLOSED — PF5**
+26. Run mixed headless + exported Godot clients. **CLOSED — PF5**
+27. Run external human Concept Demo validation. **NEXT — PF6**
+28. Choose/document the default deployment-performance policy. **CLOSED — PF5 retains selected v29 defaults**
+29. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5**
 30. Full exact-tree verifier and export closure.
 31. Freeze/tag the Concept Demo baseline.
 32. Begin the separate extraction/genericization/ecosystem roadmap.

@@ -111,6 +111,14 @@ at least 32 bytes. Use `--public-compression=off` or `canonical` for a matched c
 does not add bundle entries or change cadence, proof/debt, AOI, MTU, Network aggregation, authority
 frequency, or capacity. The startup/readiness record prints the effective codec and thresholds.
 
+PF5 characterization may add `--accounting-test-marker=<bounded text>` only when an explicit
+accounting window is configured. The authority emits one trusted System occurrence at window start
+and one at completion through the existing Chat occurrence path; participants do not gain System
+publication authority. Detailed snapshots also expose a bounded cold census of current remote
+recipients, occupied actor chunks, unique/multiply-subscribed chunks, memberships, tier counts,
+recipients per chunk, dirty-chunk fanout, source commits, and source gaps. These observations do not
+change AOI, cadence, proof state, or publication scheduling.
+
 PF3 adds `--authority-hz=20|30|60`, `--maximum-input-hz`, `--recommended-input-hz`,
 `--input-burst`, `--input-burst-window-ms`, and `--network-service-delay-ms`. The authority publishes
 those finite semantics as an exact authenticated `ServerPerformanceProfile/v1` and waits for a fresh
