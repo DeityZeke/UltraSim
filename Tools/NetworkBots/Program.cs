@@ -1719,7 +1719,7 @@ internal sealed class BotClient : IDisposable
     {
         if (!_measurementPhase || SuccessfulReconnects != 0 || _reconnectRequested)
         {
-            RunMovingMeasurement(now, position, crowd: false);
+            RunMovingMeasurement(now, position, crowd: false, allowJump: !allClients);
             return;
         }
         int reconnectCount = allClients
@@ -1728,7 +1728,7 @@ internal sealed class BotClient : IDisposable
         int first = _options.BotCount - reconnectCount;
         if (Id < first)
         {
-            RunMovingMeasurement(now, position, crowd: false);
+            RunMovingMeasurement(now, position, crowd: false, allowJump: !allClients);
             return;
         }
         long ordinal = Id - first;
@@ -1738,7 +1738,7 @@ internal sealed class BotClient : IDisposable
         long elapsed = BotMonotonicClock.TicksToMilliseconds(now - _scenarioStarted);
         if (elapsed < due)
         {
-            RunMovingMeasurement(now, position, crowd: false);
+            RunMovingMeasurement(now, position, crowd: false, allowJump: !allClients);
             return;
         }
         // Once this lifetime is due to leave, stop producing new action/release work and allow
@@ -1922,7 +1922,11 @@ internal sealed class BotClient : IDisposable
         return true;
     }
 
-    private void RunMovingMeasurement(long now, in WorldPosition position, bool crowd)
+    private void RunMovingMeasurement(
+        long now,
+        in WorldPosition position,
+        bool crowd,
+        bool allowJump = true)
     {
         if (!_measurementOriginSet)
         {
@@ -1932,7 +1936,7 @@ internal sealed class BotClient : IDisposable
         }
         long elapsed = BotMonotonicClock.TicksToMilliseconds(now - _scenarioStarted);
         long second = elapsed / 1_000;
-        if (second != _lastMeasurementJumpSecond &&
+        if (allowJump && second != _lastMeasurementJumpSecond &&
             second > 0 && second % (11 + Id % 5) == 0 &&
             !_pendingCommand.HasPendingExactCompletion)
         {
