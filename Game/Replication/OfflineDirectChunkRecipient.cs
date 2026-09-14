@@ -125,6 +125,33 @@ public enum OfflineDirectChunkAppliedProofStatus : byte
 }
 
 /// <summary>
+/// Diagnostic cause for a complete current-state read. The value is never encoded and does not
+/// participate in publication, delivery, or proof identity.
+/// </summary>
+public enum OfflineDirectChunkSnapshotReason : byte
+{
+    None = 0,
+    FirstSubscriptionIntroduction = 1,
+    HistoryFloorLost = 2,
+    SourceEpochReset = 3,
+    ReconnectGenerationReset = 4,
+    ExplicitRecovery = 5,
+    InvalidCursorOrKey = 6,
+    PreviouslyAbsentNowPresent = 7,
+    Other = 8,
+}
+
+public readonly record struct OfflineDirectChunkSnapshotReasonObservation(
+    OfflineDirectChunkSnapshotReason Reason,
+    ulong Occurrences,
+    ulong RecordsCopied,
+    ulong SourceCopyTicks);
+
+public sealed record OfflineDirectChunkSnapshotReasonAuditSnapshot(
+    bool Enabled,
+    OfflineDirectChunkSnapshotReasonObservation[] Reasons);
+
+/// <summary>
 /// Trusted server-side record of one encoded remote delivery. The constructor is internal so
 /// untrusted proof bytes cannot manufacture publication knowledge without a retained offer.
 /// </summary>
@@ -262,6 +289,7 @@ public sealed class OfflineDirectChunkRecipient
     private readonly OfflineDirectChunkRecipientLimits _limits;
     private readonly ChunkInterestProfile _interestProfile;
     private readonly OfflineDirectChunkCadence _cadence;
+    private readonly OfflineDirectChunkSnapshotReason _initialSnapshotReason;
     private OfflineDirectChunkSubscriptionState[] _subscriptions;
     private OfflineDirectChunkSubscriptionState[] _nextSubscriptions;
     private readonly ChunkInterestEntry[] _previousInterest;
@@ -315,18 +343,30 @@ public sealed class OfflineDirectChunkRecipient
     private ulong _attributedSnapshotRecordsCopied;
     private ulong _attributedAppliedProofCommitCalls;
     private ulong _attributedAppliedProofCommitTicks;
+    private SnapshotReasonCounter[]? _snapshotReasonCounters;
 
     public OfflineDirectChunkRecipient(
         OfflineDirectChunkRecipientLimits limits,
         ChunkInterestProfile interestProfile,
-        OfflineDirectChunkCadence cadence)
+        OfflineDirectChunkCadence cadence,
+        OfflineDirectChunkSnapshotReason initialSnapshotReason =
+            OfflineDirectChunkSnapshotReason.FirstSubscriptionIntroduction)
     {
         if (!limits.IsValid) throw new ArgumentOutOfRangeException(nameof(limits));
         if (!interestProfile.IsValid) throw new ArgumentOutOfRangeException(nameof(interestProfile));
         if (!cadence.IsValid) throw new ArgumentOutOfRangeException(nameof(cadence));
+        if (initialSnapshotReason is OfflineDirectChunkSnapshotReason.None or
+            OfflineDirectChunkSnapshotReason.HistoryFloorLost or
+            OfflineDirectChunkSnapshotReason.ExplicitRecovery or
+            OfflineDirectChunkSnapshotReason.InvalidCursorOrKey or
+            OfflineDirectChunkSnapshotReason.PreviouslyAbsentNowPresent or
+            OfflineDirectChunkSnapshotReason.Other)
+            throw new ArgumentOutOfRangeException(nameof(initialSnapshotReason),
+                "A new recipient may begin as a first subscription or reconnect generation.");
         _limits = limits;
         _interestProfile = interestProfile;
         _cadence = cadence;
+        _initialSnapshotReason = initialSnapshotReason;
         _subscriptions = new OfflineDirectChunkSubscriptionState[limits.MaximumSubscriptions];
         _nextSubscriptions = new OfflineDirectChunkSubscriptionState[limits.MaximumSubscriptions];
         _previousInterest = new ChunkInterestEntry[limits.MaximumSubscriptions];
@@ -336,6 +376,37 @@ public sealed class OfflineDirectChunkRecipient
     }
 
     public OfflineDirectChunkRecipientLimits Limits => _limits;
+
+    /// <summary>
+    /// Enables or resets bounded snapshot-cause accounting. This cold diagnostic state never
+    /// changes read selection, cadence, cursor advancement, or proof handling.
+    /// </summary>
+    public void ConfigureSnapshotReasonAudit(bool enabled)
+    {
+        EnsureOwner();
+        _snapshotReasonCounters = enabled
+            ? new SnapshotReasonCounter[Enum.GetValues<OfflineDirectChunkSnapshotReason>().Length]
+            : null;
+    }
+
+    public OfflineDirectChunkSnapshotReasonAuditSnapshot GetSnapshotReasonAudit()
+    {
+        EnsureOwner();
+        if (_snapshotReasonCounters is null)
+            return new OfflineDirectChunkSnapshotReasonAuditSnapshot(false, []);
+        var observations = new OfflineDirectChunkSnapshotReasonObservation[
+            _snapshotReasonCounters.Length - 1];
+        for (int index = 1; index < _snapshotReasonCounters.Length; index++)
+        {
+            ref readonly SnapshotReasonCounter counter = ref _snapshotReasonCounters[index];
+            observations[index - 1] = new OfflineDirectChunkSnapshotReasonObservation(
+                (OfflineDirectChunkSnapshotReason)index,
+                counter.Occurrences,
+                counter.RecordsCopied,
+                counter.SourceCopyTicks);
+        }
+        return new OfflineDirectChunkSnapshotReasonAuditSnapshot(true, observations);
+    }
 
     /// <summary>
     /// Copies the last authority-resolved interest anchor for cold diagnostics. This never accepts
@@ -569,6 +640,7 @@ public sealed class OfflineDirectChunkRecipient
         ChunkPublicationReadStatus publicationStatus;
         ChunkPublicationBatch batch;
         ChunkPublicationCursor cursor = CursorFor(subscription);
+        OfflineDirectChunkSnapshotReason snapshotReason = OfflineDirectChunkSnapshotReason.None;
         if (cursor.IsValid)
         {
             long deltaCopyStarted = ReadAttributionTimestamp();
@@ -597,13 +669,28 @@ public sealed class OfflineDirectChunkRecipient
                     return read.Status;
                 case ChunkPublicationReadStatus.SnapshotRequired:
                     _snapshotFallbacks++;
+                    snapshotReason = batch.HistoryFloor.IsValid &&
+                        cursor.Revision.Value < batch.HistoryFloor.Value
+                            ? OfflineDirectChunkSnapshotReason.HistoryFloorLost
+                            : OfflineDirectChunkSnapshotReason.InvalidCursorOrKey;
                     break;
                 default:
                     throw new InvalidOperationException($"Unexpected publication delta status: {publicationStatus}.");
             }
         }
+        else
+        {
+            snapshotReason = subscription.IntroductionReason !=
+                    OfflineDirectChunkSnapshotReason.None
+                ? subscription.IntroductionReason
+                : subscription.HasKnowledge
+                    ? OfflineDirectChunkSnapshotReason.PreviouslyAbsentNowPresent
+                    : OfflineDirectChunkSnapshotReason.FirstSubscriptionIntroduction;
+        }
 
-        long snapshotCopyStarted = ReadAttributionTimestamp();
+        long snapshotCopyStarted = _readAttributionEnabled || _snapshotReasonCounters is not null
+            ? Stopwatch.GetTimestamp()
+            : 0;
         publicationStatus = source.TryCopySnapshot(
             subscription.Key, _snapshotScratch, out batch);
         if (_readAttributionEnabled)
@@ -613,6 +700,8 @@ public sealed class OfflineDirectChunkRecipient
             if (publicationStatus == ChunkPublicationReadStatus.Snapshot)
                 SaturatingAdd(ref _attributedSnapshotRecordsCopied, checked((ulong)batch.Count));
         }
+        RecordSnapshotReason(snapshotReason, publicationStatus == ChunkPublicationReadStatus.Snapshot
+            ? batch.Count : 0, snapshotCopyStarted);
         if (publicationStatus == ChunkPublicationReadStatus.Snapshot)
             return PublishPending(subscriptionIndex, OfflineDirectChunkReadStatus.Snapshot,
                 source.Epoch, batch, _snapshotScratch.AsSpan(0, batch.Count), default, out read);
@@ -655,8 +744,14 @@ public sealed class OfflineDirectChunkRecipient
             return read.Status;
         }
 
+        long snapshotCopyStarted = _readAttributionEnabled || _snapshotReasonCounters is not null
+            ? Stopwatch.GetTimestamp()
+            : 0;
         ChunkPublicationReadStatus status = source.TryCopySnapshot(
             _subscriptions[subscriptionIndex].Key, _snapshotScratch, out var batch);
+        RecordSnapshotReason(OfflineDirectChunkSnapshotReason.ExplicitRecovery,
+            status == ChunkPublicationReadStatus.Snapshot ? batch.Count : 0,
+            snapshotCopyStarted);
         if (status == ChunkPublicationReadStatus.Snapshot)
         {
             _snapshotFallbacks++;
@@ -686,6 +781,7 @@ public sealed class OfflineDirectChunkRecipient
                 subscription.AppliedRevision = _pendingBatch.Cursor.Revision;
                 subscription.HasKnowledge = true;
                 _snapshotReads++;
+                subscription.IntroductionReason = OfflineDirectChunkSnapshotReason.None;
                 break;
             case OfflineDirectChunkReadStatus.Delta:
                 subscription.AppliedRevision = _pendingBatch.Cursor.Revision;
@@ -702,6 +798,7 @@ public sealed class OfflineDirectChunkRecipient
                 subscription.HasKnowledge = true;
                 _snapshotReads++;
                 _chunkAbsentReads++;
+                subscription.IntroductionReason = OfflineDirectChunkSnapshotReason.None;
                 break;
             default:
                 throw new InvalidOperationException("The pending publication status cannot be committed.");
@@ -763,6 +860,7 @@ public sealed class OfflineDirectChunkRecipient
                 return OfflineDirectChunkAppliedProofStatus.Duplicate;
             subscription.AppliedRevision = default;
             subscription.HasKnowledge = true;
+            subscription.IntroductionReason = OfflineDirectChunkSnapshotReason.None;
             _snapshotReads++;
             _chunkAbsentReads++;
             return OfflineDirectChunkAppliedProofStatus.Applied;
@@ -777,6 +875,8 @@ public sealed class OfflineDirectChunkRecipient
         }
         subscription.AppliedRevision = ticket.Cursor.Revision;
         subscription.HasKnowledge = true;
+        if (ticket.Status == OfflineDirectChunkReadStatus.Snapshot)
+            subscription.IntroductionReason = OfflineDirectChunkSnapshotReason.None;
         if (ticket.Status == OfflineDirectChunkReadStatus.Snapshot) _snapshotReads++;
         else _deltaReads++;
         return OfflineDirectChunkAppliedProofStatus.Applied;
@@ -987,6 +1087,21 @@ public sealed class OfflineDirectChunkRecipient
         _attributedAppliedProofCommitTicks = 0;
     }
 
+    private void RecordSnapshotReason(
+        OfflineDirectChunkSnapshotReason reason,
+        int records,
+        long started)
+    {
+        if (_snapshotReasonCounters is null || reason == OfflineDirectChunkSnapshotReason.None)
+            return;
+        ref SnapshotReasonCounter counter = ref _snapshotReasonCounters[(int)reason];
+        SaturatingIncrement(ref counter.Occurrences);
+        SaturatingAdd(ref counter.RecordsCopied, checked((ulong)records));
+        long elapsed = Stopwatch.GetTimestamp() - started;
+        if (elapsed > 0)
+            SaturatingAdd(ref counter.SourceCopyTicks, checked((ulong)elapsed));
+    }
+
     private OfflineDirectChunkReadStatus PublishPending(
         int subscriptionIndex,
         OfflineDirectChunkReadStatus status,
@@ -1127,7 +1242,10 @@ public sealed class OfflineDirectChunkRecipient
                     interest.Tier,
                     sourceReset ? default : retained.AppliedRevision,
                     !sourceReset && retained.HasKnowledge,
-                    StablePhase(interest.Key, _cadence.Period(interest.Tier)));
+                    StablePhase(interest.Key, _cadence.Period(interest.Tier)),
+                    sourceReset
+                        ? OfflineDirectChunkSnapshotReason.SourceEpochReset
+                        : retained.IntroductionReason);
                 if (retained.Tier != interest.Tier)
                     changes[written++] = new OfflineDirectChunkSubscriptionChange(
                         OfflineDirectChunkSubscriptionChangeKind.TierChanged,
@@ -1142,7 +1260,9 @@ public sealed class OfflineDirectChunkRecipient
                     interest.Tier,
                     default,
                     false,
-                    StablePhase(interest.Key, _cadence.Period(interest.Tier)));
+                    StablePhase(interest.Key, _cadence.Period(interest.Tier)),
+                    !_sourceEpoch.IsValid ? _initialSnapshotReason :
+                        OfflineDirectChunkSnapshotReason.FirstSubscriptionIntroduction);
                 changes[written++] = new OfflineDirectChunkSubscriptionChange(
                     OfflineDirectChunkSubscriptionChangeKind.Entered,
                     interest.Key,
@@ -1229,19 +1349,22 @@ public sealed class OfflineDirectChunkRecipient
             ChunkInterestTier tier,
             ChunkPublicationRevision appliedRevision,
             bool hasKnowledge,
-            uint cadencePhase)
+            uint cadencePhase,
+            OfflineDirectChunkSnapshotReason introductionReason)
         {
             Key = key;
             AppliedRevision = appliedRevision;
             CadencePhase = cadencePhase;
             Tier = tier;
             HasKnowledgeByte = hasKnowledge ? (byte)1 : (byte)0;
+            IntroductionReason = introductionReason;
         }
 
         internal SpatialChunkKey Key;
         internal ChunkPublicationRevision AppliedRevision;
         internal uint CadencePhase;
         internal ChunkInterestTier Tier;
+        internal OfflineDirectChunkSnapshotReason IntroductionReason;
         private byte HasKnowledgeByte;
 
         internal readonly ChunkInterestEntry Interest => new(Key, Tier);
@@ -1250,5 +1373,12 @@ public sealed class OfflineDirectChunkRecipient
             readonly get => HasKnowledgeByte != 0;
             set => HasKnowledgeByte = value ? (byte)1 : (byte)0;
         }
+    }
+
+    private struct SnapshotReasonCounter
+    {
+        internal ulong Occurrences;
+        internal ulong RecordsCopied;
+        internal ulong SourceCopyTicks;
     }
 }

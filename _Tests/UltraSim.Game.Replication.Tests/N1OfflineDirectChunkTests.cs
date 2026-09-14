@@ -232,6 +232,188 @@ internal static class N1OfflineDirectChunkTests
         Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
     }
 
+    internal static void HistoryAuditMeasuresScanCollapseAndShadowReuse()
+    {
+        using var fixture = new Fixture(historyCapacity: 64, entityCount: 2);
+        SpatialChunkKey key = Key(0, 0);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        var records = new WorldPublicRecord[4];
+        Equal(ChunkPublicationReadStatus.Snapshot,
+            fixture.Store.TryCopySnapshot(key, records, out ChunkPublicationBatch baseline));
+        fixture.Store.ConfigureHistoryAudit(new ChunkPublicationHistoryAuditLimits(64));
+        for (int update = 0; update < 10; update++)
+            fixture.Present(0, Position(0, 0, 2_100 + update, 2_000),
+                GameWorldPublicPrefabIds.Character);
+
+        var deltas = new WorldPublicDeltaRecord[4];
+        Equal(ChunkPublicationReadStatus.Delta,
+            fixture.Store.TryCopyDelta(key, baseline.Cursor, deltas, out ChunkPublicationBatch first));
+        WorldPublicDeltaRecord expected = deltas[0];
+        Equal(1, first.Count);
+        Equal(ChunkPublicationReadStatus.Delta,
+            fixture.Store.TryCopyDelta(key, baseline.Cursor, deltas, out ChunkPublicationBatch second));
+        Equal(first, second);
+        Equal(expected, deltas[0]);
+
+        ChunkPublicationHistoryAuditSnapshot audit = fixture.Store.GetHistoryAuditSnapshot();
+        True(audit.Enabled);
+        Equal(2UL, audit.DeltaRequests);
+        Equal(1, audit.DistinctRanges);
+        Equal(1UL, audit.RepeatedRangeRequests);
+        Equal(22UL, audit.HistoryNodesExamined);
+        Equal(2UL, audit.HistoryNodesSkipped);
+        Equal(20UL, audit.HistoryNodesAfterCursor);
+        Equal(18UL, audit.DuplicateMutations);
+        Equal(2UL, audit.DeltaRecordsEmitted);
+        Equal(2UL, audit.CurrentRecordLookups);
+        Equal(0UL, audit.ShadowContentMismatches);
+        True(audit.ShadowReusablePreparationTicks > 0);
+        Equal(1, audit.Ranges.Length);
+        Equal(2UL, audit.Ranges[0].Requests);
+        Equal(11UL, audit.Ranges[0].HistoryNodesExamined / audit.Ranges[0].Requests);
+        Equal(9UL, audit.Ranges[0].DuplicateMutations / audit.Ranges[0].Requests);
+        False(audit.RangeTableOverflowed);
+    }
+
+    internal static void IntroductionMutationAndRemovalCannotDisappear()
+    {
+        using var fixture = new Fixture(historyCapacity: 32, entityCount: 2);
+        SpatialChunkKey key = Key(0, 0);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        var recipient = new OfflineDirectChunkRecipient(
+            new OfflineDirectChunkRecipientLimits(64, 8, 8), Interest,
+            new OfflineDirectChunkCadence(1, 1, 1));
+        Span<OfflineDirectChunkSubscriptionChange> changes =
+            stackalloc OfflineDirectChunkSubscriptionChange[64];
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace,
+                Position(0, 0, 8_000, 8_000), changes, out _));
+        int subscription = FindSubscription(recipient, key);
+
+        Equal(OfflineDirectChunkReadStatus.Snapshot,
+            recipient.TryBeginRead(fixture.Store, subscription, 0,
+                out OfflineDirectChunkRead introduction));
+        Equal(1, introduction.Snapshot.Length);
+        ChunkPublicationRevision introducedRevision = introduction.Batch.Cursor.Revision;
+        OfflineDirectChunkDeliveryTicket delayedIntroduction =
+            recipient.ReleaseReadForRemote(11);
+        False(recipient.Subscriptions[subscription].HasKnowledge);
+
+        // The baseline is now in flight. A positive update and then removal must remain debt newer
+        // than the baseline revision; neither may be hidden by proving the older introduction.
+        fixture.Present(0, Position(0, 0, 2_500, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        fixture.Remove(0);
+        Equal(OfflineDirectChunkAppliedProofStatus.Applied,
+            recipient.CommitAppliedProof(delayedIntroduction));
+        Equal(introducedRevision, recipient.Subscriptions[subscription].Cursor.Revision);
+
+        Equal(OfflineDirectChunkReadStatus.Delta,
+            recipient.TryBeginRead(fixture.Store, subscription, 1,
+                out OfflineDirectChunkRead afterProof));
+        Equal(1, afterProof.Deltas.Length);
+        Equal(WorldPublicOperation.Remove, afterProof.Deltas[0].Operation);
+        True(afterProof.Batch.Cursor.Revision.Value > introducedRevision.Value);
+        OfflineDirectChunkDeliveryTicket removal = recipient.ReleaseReadForRemote(12);
+        Equal(OfflineDirectChunkAppliedProofStatus.Applied,
+            recipient.CommitAppliedProof(removal));
+
+        // Re-entry after proven absence/current removal starts with no inherited applied cursor.
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace,
+                Position(10, 10, 8_000, 8_000), changes, out _));
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace,
+                Position(0, 0, 8_000, 8_000), changes, out _));
+        subscription = FindSubscription(recipient, key);
+        False(recipient.Subscriptions[subscription].HasKnowledge);
+        Equal(OfflineDirectChunkReadStatus.Snapshot,
+            recipient.TryBeginRead(fixture.Store, subscription, 2, out _));
+        recipient.CommitRead();
+    }
+
+    internal static void SnapshotReasonsAndRecipientProofRemainIndependent()
+    {
+        using var fixture = new Fixture(historyCapacity: 2, entityCount: 2);
+        SpatialChunkKey key = Key(0, 0);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        var first = new OfflineDirectChunkRecipient(
+            new OfflineDirectChunkRecipientLimits(64, 8, 8), Interest,
+            new OfflineDirectChunkCadence(1, 1, 1));
+        var second = new OfflineDirectChunkRecipient(
+            new OfflineDirectChunkRecipientLimits(64, 8, 8), Interest,
+            new OfflineDirectChunkCadence(1, 1, 1),
+            OfflineDirectChunkSnapshotReason.ReconnectGenerationReset);
+        first.ConfigureSnapshotReasonAudit(true);
+        second.ConfigureSnapshotReasonAudit(true);
+        Span<OfflineDirectChunkSubscriptionChange> changes =
+            stackalloc OfflineDirectChunkSubscriptionChange[64];
+        WorldPosition anchor = Position(0, 0, 8_000, 8_000);
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            first.Reconcile(fixture.Store, GameWorldState.DefaultSpace, anchor, changes, out _));
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            second.Reconcile(fixture.Store, GameWorldState.DefaultSpace, anchor, changes, out _));
+        int firstSubscription = FindSubscription(first, key);
+        int secondSubscription = FindSubscription(second, key);
+        Equal(OfflineDirectChunkReadStatus.Snapshot,
+            first.TryBeginRead(fixture.Store, firstSubscription, 0, out _));
+        OfflineDirectChunkDeliveryTicket firstTicket = first.ReleaseReadForRemote(101);
+        Equal(OfflineDirectChunkReadStatus.Snapshot,
+            second.TryBeginRead(fixture.Store, secondSubscription, 0, out _));
+        OfflineDirectChunkDeliveryTicket secondTicket = second.ReleaseReadForRemote(202);
+        Equal(firstTicket.Cursor, secondTicket.Cursor);
+        False(firstTicket.DeliveryId == secondTicket.DeliveryId);
+        Equal(OfflineDirectChunkAppliedProofStatus.Applied, first.CommitAppliedProof(firstTicket));
+        True(first.Subscriptions[firstSubscription].HasKnowledge);
+        False(second.Subscriptions[secondSubscription].HasKnowledge);
+        Equal(OfflineDirectChunkAppliedProofStatus.Applied, second.CommitAppliedProof(secondTicket));
+
+        for (int update = 0; update < 6; update++)
+            fixture.Present(0, Position(0, 0, 2_100 + update, 2_000),
+                GameWorldPublicPrefabIds.Character);
+        Equal(OfflineDirectChunkReadStatus.Snapshot,
+            first.TryBeginRead(fixture.Store, firstSubscription, 1, out _));
+        first.CommitRead();
+        Equal(OfflineDirectChunkReadStatus.Snapshot,
+            first.TryBeginSnapshotRead(fixture.Store, firstSubscription, out _));
+        first.CommitRead();
+
+        fixture.ReplaceStore(historyCapacity: 2);
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            first.Reconcile(fixture.Store, GameWorldState.DefaultSpace, anchor, changes,
+                out OfflineDirectChunkReconcileResult reset));
+        True(reset.SourceReset);
+        firstSubscription = FindSubscription(first, key);
+        Equal(OfflineDirectChunkReadStatus.ChunkAbsent,
+            first.TryBeginRead(fixture.Store, firstSubscription, 2, out _));
+        first.CommitRead();
+
+        OfflineDirectChunkSnapshotReasonAuditSnapshot firstAudit =
+            first.GetSnapshotReasonAudit();
+        OfflineDirectChunkSnapshotReasonAuditSnapshot secondAudit =
+            second.GetSnapshotReasonAudit();
+        Equal(1UL, Reason(firstAudit,
+            OfflineDirectChunkSnapshotReason.FirstSubscriptionIntroduction).Occurrences);
+        Equal(1UL, Reason(firstAudit,
+            OfflineDirectChunkSnapshotReason.HistoryFloorLost).Occurrences);
+        Equal(1UL, Reason(firstAudit,
+            OfflineDirectChunkSnapshotReason.ExplicitRecovery).Occurrences);
+        Equal(1UL, Reason(firstAudit,
+            OfflineDirectChunkSnapshotReason.SourceEpochReset).Occurrences);
+        Equal(1UL, Reason(secondAudit,
+            OfflineDirectChunkSnapshotReason.ReconnectGenerationReset).Occurrences);
+        Equal(0UL, Reason(secondAudit,
+            OfflineDirectChunkSnapshotReason.FirstSubscriptionIntroduction).Occurrences);
+
+        static OfflineDirectChunkSnapshotReasonObservation Reason(
+            OfflineDirectChunkSnapshotReasonAuditSnapshot snapshot,
+            OfflineDirectChunkSnapshotReason reason) =>
+            snapshot.Reasons.Single(value => value.Reason == reason);
+    }
+
     internal static void DirtySchedulerSkipsCleanScopesAndFansOutOnce()
     {
         using var fixture = new Fixture(historyCapacity: 64, entityCount: 2);

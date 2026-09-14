@@ -25,6 +25,11 @@ internal static class P03WholeFlowNetworkSuite
 
     internal static void Run(string[] args)
     {
+        if (args.Contains("--pf5-r1-history-audit", StringComparer.Ordinal))
+        {
+            Pf5R1HistoryAudit.Run(args);
+            return;
+        }
         if (args.Contains("--pf4f-compression-oracle", StringComparer.Ordinal))
         {
             Pf4fCompressionOracle.Run(args);
@@ -914,7 +919,9 @@ internal sealed class P03WholeFlowHarness : IDisposable
         int frameCap,
         bool stageTimingEnabled = true,
         bool gameDetailedAttribution = false,
-        RemoteChunkBundleCompressionPolicy compression = default)
+        RemoteChunkBundleCompressionPolicy compression = default,
+        bool historyAudit = false,
+        bool legacyRangeCensus = true)
     {
         _workload = workload;
         _profile = profile;
@@ -965,7 +972,8 @@ internal sealed class P03WholeFlowHarness : IDisposable
             P03NetworkProfile.DirtyEntityChunkBatchFanout => new P03DirtyEntityRemoteAdapter(
                 workload, _sessions, _x, _z, _versions, chunkBatch: true),
             P03NetworkProfile.ChunkPublication => new P03ChunkPublicationRemoteAdapter(
-                workload, _sessions, _x, _z, _versions, s_content, compression),
+                workload, _sessions, _x, _z, _versions, s_content, compression,
+                historyAudit, legacyRangeCensus),
             P03NetworkProfile.DirtyChunkSpatialFanout => new P03DirtyChunkRemoteAdapter(
                 workload, _sessions, _x, _z, _versions, s_content),
             _ => throw new ArgumentOutOfRangeException(nameof(profile)),
@@ -2055,6 +2063,8 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
     private readonly int[] _rangeRecordCounts;
     private readonly WorldPublicDeltaRecord[] _rangeCensusScratch =
         new WorldPublicDeltaRecord[UltraSimGameProtocol.MaximumChunkPublicationRecords];
+    private readonly bool _historyAuditEnabled;
+    private readonly bool _legacyRangeCensusEnabled;
     private ulong _dueCandidates;
     private ulong _simultaneouslyDueCandidates;
     private ulong _multiDueRecipientPasses;
@@ -2079,9 +2089,13 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
     internal P03ChunkPublicationRemoteAdapter(P03NetworkWorkload workload,
         SharedUdpProtocolSession[] sessions, long[] x, long[] z, ulong[] versions,
         WorldContentFingerprint content,
-        RemoteChunkBundleCompressionPolicy compression = default)
+        RemoteChunkBundleCompressionPolicy compression = default,
+        bool historyAudit = false,
+        bool legacyRangeCensus = true)
         : base(workload, sessions, x, z, versions, content)
     {
+        _historyAuditEnabled = historyAudit;
+        _legacyRangeCensusEnabled = legacyRangeCensus;
         int subscriptions = workload.Id.StartsWith("sparse", StringComparison.Ordinal) ? 128 : 1_024;
         _recipients = new OfflineDirectChunkRecipient[workload.Recipients];
         _recipientIds = new ChunkReplicationRecipientId[workload.Recipients];
@@ -2127,6 +2141,8 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
                 sessions[index].Client, Caches[index], ApplicationEpoch, 64, 256);
         }
         while (_scheduler.TryDequeueDue(0, out _)) { }
+        if (_historyAuditEnabled)
+            Source.ConfigureHistoryAudit(new ChunkPublicationHistoryAuditLimits(65_536));
     }
 
     internal override void ConfigureTelemetry(GameTelemetryLevel level)
@@ -2190,7 +2206,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
             _dueWorks[recipient * MaximumDuePerRecipient + count] = work;
             _dueCounts[recipient] = count + 1;
         }
-        if (_telemetryLevel == GameTelemetryLevel.Detailed)
+        if (_telemetryLevel == GameTelemetryLevel.Detailed && _legacyRangeCensusEnabled)
             CaptureDeltaRangeReuseCensus();
         for (int recipient = 0; recipient < _servers.Length; recipient++)
         {
@@ -2376,6 +2392,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
                 _deltaRangeRecordInstances, _uniqueDeltaRangeRecords,
                 _reusableDeltaRangeRecords, _censusSourceDeltaReads),
             Compression = compression,
+            HistoryAudit = _historyAuditEnabled ? Source.GetHistoryAuditSnapshot() : null,
         };
     }
     internal override void ResetCounters()
@@ -2392,6 +2409,8 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
         for (int index = 0; index < _servers.Length; index++)
             _servers[index].ConfigureTelemetry(_telemetryLevel);
         _sourceBaseline = Source.GetSnapshot();
+        if (_historyAuditEnabled)
+            Source.ConfigureHistoryAudit(new ChunkPublicationHistoryAuditLimits(65_536));
     }
 
     private void CaptureDeltaRangeReuseCensus()
@@ -3051,7 +3070,8 @@ internal readonly record struct P03ProfileCounters(
     ulong SourceSnapshotFallbacks = 0,
     P03ChunkCpuAttribution ChunkCpu = default,
     P03DeltaRangeReuseCensus DeltaRangeReuse = default,
-    P03CompressionCounters Compression = default);
+    P03CompressionCounters Compression = default,
+    ChunkPublicationHistoryAuditSnapshot? HistoryAudit = null);
 
 internal readonly record struct P03CompressionCounters(
     ulong Attempts,

@@ -227,7 +227,7 @@ public readonly record struct ChunkPublicationStoreSnapshot(
 /// Generation-owned packed current public state plus observer-independent bounded dirty history.
 /// All mutation and scratch-backed query operations are owner-thread bound.
 /// </summary>
-public sealed class ChunkPublicationStore
+public sealed partial class ChunkPublicationStore
 {
     private readonly int _ownerThreadId;
     private readonly ChunkPublicationLimits _limits;
@@ -295,6 +295,7 @@ public sealed class ChunkPublicationStore
     private ulong _completeRecords;
     private ulong _partialRecords;
     private bool _changeCensusEnabled;
+    private ChunkPublicationHistoryAuditState? _historyAudit;
     private int _activeAffectedCount;
 
     public ChunkPublicationStore(PublicationEpoch epoch, ChunkPublicationLimits limits)
@@ -359,6 +360,32 @@ public sealed class ChunkPublicationStore
         _transformChanges = _prefabChanges = 0;
         _orientationChanges = _stateFlagsChanges = 0;
         _completeRecords = _partialRecords = 0;
+    }
+
+    /// <summary>
+    /// Enables a bounded, diagnostic-only PF5-R1 audit of retained-history reads. The audit never
+    /// serves publication records and cannot alter source, cursor, delivery, or proof semantics.
+    /// Enabling it allocates its fixed-capacity tables once on the owner thread; disabling it
+    /// releases those diagnostic tables.
+    /// </summary>
+    public void ConfigureHistoryAudit(ChunkPublicationHistoryAuditLimits limits)
+    {
+        EnsureOwner();
+        if (!limits.Enabled)
+        {
+            _historyAudit = null;
+            return;
+        }
+        limits.Validate();
+        _historyAudit = new ChunkPublicationHistoryAuditState(limits, _history.Length, _chunks.Length);
+        _historyAudit.ObserveOccupancy(_historyCount);
+    }
+
+    /// <summary>Returns a cold immutable copy of the diagnostic audit state.</summary>
+    public ChunkPublicationHistoryAuditSnapshot GetHistoryAuditSnapshot()
+    {
+        EnsureOwner();
+        return _historyAudit?.Capture(this) ?? ChunkPublicationHistoryAuditSnapshot.Disabled(Epoch);
     }
 
     public PublicationEpoch Epoch { get; }
@@ -563,6 +590,7 @@ public sealed class ChunkPublicationStore
             return ChunkPublicationReadStatus.DestinationTooSmall;
         }
 
+        long auditStarted = _historyAudit?.Timestamp() ?? 0;
         int written = 0;
         for (int page = chunk.HeadPage; page >= 0; page = _pageNext[page])
         {
@@ -571,6 +599,7 @@ public sealed class ChunkPublicationStore
                 destination[written++] = ReadRecord(start + row, key);
         }
         SortRecords(destination[..written]);
+        _historyAudit?.RecordSnapshot(key, chunk.Revision, written, auditStarted);
         _snapshotReads++;
         batch = CreateBatch(ChunkPublicationReadStatus.Snapshot, key, chunk, written, written);
         return ChunkPublicationReadStatus.Snapshot;
@@ -610,12 +639,29 @@ public sealed class ChunkPublicationStore
             return ChunkPublicationReadStatus.SnapshotRequired;
         }
 
+        ChunkPublicationHistoryAuditState? audit = _historyAudit;
+        long completeStarted = audit?.Timestamp() ?? 0;
+        long historyStarted = completeStarted;
+        ulong nodesExamined = 0;
+        ulong nodesSkipped = 0;
+        ulong nodesAfterCursor = 0;
+        ulong duplicateMutations = 0;
+        ulong duplicateCollapses = 0;
+        ulong currentRecordLookups = 0;
+        ulong collapseTicks = 0;
         uint stamp = NextQueryStamp();
         int count = 0;
         for (int node = chunk.HistoryHead; node >= 0; node = _history[node].NextChunk)
         {
             ref readonly HistoryEntry entry = ref _history[node];
-            if (entry.Revision <= cursor.Revision.Value) continue;
+            if (audit is not null) nodesExamined++;
+            if (entry.Revision <= cursor.Revision.Value)
+            {
+                if (audit is not null) nodesSkipped++;
+                continue;
+            }
+            if (audit is not null) nodesAfterCursor++;
+            long collapseStarted = audit?.Timestamp() ?? 0;
             int publicIndex = checked((int)entry.Id.Index);
             if (_queryStamps[publicIndex] != stamp)
             {
@@ -625,6 +671,11 @@ public sealed class ChunkPublicationStore
             }
             else
             {
+                if (audit is not null)
+                {
+                    duplicateMutations++;
+                    duplicateCollapses++;
+                }
                 HistoryEntry previous = _queryLatest[publicIndex];
                 _queryLatest[publicIndex] = entry;
                 if (previous.Id == entry.Id &&
@@ -632,19 +683,23 @@ public sealed class ChunkPublicationStore
                     entry.Operation == WorldPublicOperation.Present)
                     _queryLatest[publicIndex].Fields |= previous.Fields;
             }
+            if (audit is not null) collapseTicks += audit.Elapsed(collapseStarted);
         }
+        ulong historyTicks = audit?.Elapsed(historyStarted) ?? 0;
 
         if (destination.Length < count)
         {
             batch = CreateBatch(ChunkPublicationReadStatus.DestinationTooSmall, key, chunk, 0, count);
             return ChunkPublicationReadStatus.DestinationTooSmall;
         }
+        long lookupStarted = audit?.Timestamp() ?? 0;
         for (int index = 0; index < count; index++)
         {
             ref readonly HistoryEntry entry = ref _queryLatest[_queryIndices[index]];
             WorldPublicRecord current = default;
             if (entry.Operation == WorldPublicOperation.Present)
             {
+                if (audit is not null) currentRecordLookups++;
                 int publicSlot = checked((int)entry.Id.Index);
                 ref readonly PublicSlot slot = ref _slots[publicSlot];
                 if (!slot.Active || slot.Generation != entry.Id.Generation ||
@@ -655,7 +710,17 @@ public sealed class ChunkPublicationStore
             destination[index] = new WorldPublicDeltaRecord(
                 entry.Operation, entry.Fields, entry.Id, entry.EntityVersion, current);
         }
+        ulong lookupTicks = audit?.Elapsed(lookupStarted) ?? 0;
+        long sortStarted = audit?.Timestamp() ?? 0;
         SortRecords(destination[..count]);
+        ulong sortTicks = audit?.Elapsed(sortStarted) ?? 0;
+        if (audit is not null)
+            audit.RecordDelta(
+                Epoch, key, cursor.Revision.Value, chunk.Revision,
+                destination[..count], nodesExamined, nodesSkipped, nodesAfterCursor,
+                duplicateMutations, duplicateCollapses, currentRecordLookups,
+                historyTicks, collapseTicks, lookupTicks, sortTicks,
+                audit.Elapsed(completeStarted));
         _deltaReads++;
         batch = CreateBatch(ChunkPublicationReadStatus.Delta, key, chunk, count, count);
         return ChunkPublicationReadStatus.Delta;
@@ -942,13 +1007,16 @@ public sealed class ChunkPublicationStore
     private void CommitHistory(int pendingCount)
     {
         _largestDirtyCommit = Math.Max(_largestDirtyCommit, pendingCount);
+        _historyAudit?.RecordCommit(_commitSequence + 1, pendingCount, affectedChunks: _activeAffectedCount);
         if (pendingCount > _history.Length)
         {
+            _historyAudit?.RecordGlobalInvalidation(_historyCount);
             ClearAllHistory();
             for (int chunk = 0; chunk < _chunks.Length; chunk++)
                 if (_chunks[chunk].Occupied)
                     _chunks[chunk].HistoryFloor = _chunks[chunk].Revision;
             _historyInvalidations++;
+            _historyAudit?.ObserveOccupancy(_historyCount);
             return;
         }
         EnsureHistoryCapacity(pendingCount);
@@ -964,6 +1032,7 @@ public sealed class ChunkPublicationStore
                 pending.Id,
                 pending.EntityVersion));
         }
+        _historyAudit?.ObserveOccupancy(_historyCount);
     }
 
     private void EnsureHistoryCapacity(int required)
@@ -975,10 +1044,17 @@ public sealed class ChunkPublicationStore
             ref readonly HistoryEntry oldest = ref _history[_historyGlobalHead];
             int chunk = oldest.ChunkSlot;
             ulong revision = oldest.Revision;
+            int removed = 0;
             while (_chunks[chunk].HistoryHead >= 0 &&
                    _history[_chunks[chunk].HistoryHead].Revision == revision)
-                RemoveHistoryNode(_chunks[chunk].HistoryHead);
-            _chunks[chunk].HistoryFloor = Math.Max(_chunks[chunk].HistoryFloor, revision);
+            {
+                RemoveHistoryNode(_chunks[chunk].HistoryHead, pressureEviction: true);
+                removed++;
+            }
+            ulong previousFloor = _chunks[chunk].HistoryFloor;
+            _chunks[chunk].HistoryFloor = Math.Max(previousFloor, revision);
+            _historyAudit?.RecordHistoryFloorAdvance(
+                _chunks[chunk].Key, previousFloor, _chunks[chunk].HistoryFloor, removed);
         }
     }
 
@@ -998,11 +1074,13 @@ public sealed class ChunkPublicationStore
         else _chunks[chunkSlot].HistoryHead = node;
         _chunks[chunkSlot].HistoryTail = node;
         _historyCount++;
+        _historyAudit?.RecordHistoryEntry(node, _commitSequence + 1, value.Revision);
     }
 
-    private void RemoveHistoryNode(int node)
+    private void RemoveHistoryNode(int node, bool pressureEviction = false)
     {
         HistoryEntry entry = _history[node];
+        _historyAudit?.RecordHistoryRemoval(node, entry.Revision, pressureEviction);
         if (entry.PreviousGlobal >= 0) _history[entry.PreviousGlobal].NextGlobal = entry.NextGlobal;
         else _historyGlobalHead = entry.NextGlobal;
         if (entry.NextGlobal >= 0) _history[entry.NextGlobal].PreviousGlobal = entry.PreviousGlobal;
