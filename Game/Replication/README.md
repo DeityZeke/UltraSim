@@ -238,7 +238,8 @@ ChunkPublication                         selected dynamic-public profile
     OfflineDirectChunkRecipient
     ChunkPublicationWorkScheduler
     RemoteChunkWorldStateServer
-    recipient/chunk subscriptions + chunk revision/history
+    shared immutable prepared source publications
+    recipient/chunk subscriptions + exact applied cursor/proof
 
 DirtyEntitySpatialFanout                 retained alternative
     DirtyEntitySpatialFanout + RemoteDirtyEntitySpatialFanoutServer
@@ -974,3 +975,27 @@ Game representation. Transport revision 2, cross-lane cap two, Immediate/Near/Fa
 participant limits remain unchanged. PF4F's accepted evidence records zero warmed codec
 allocation, independent loss/reorder recovery, 27.70%/21.48% downstream UDP-payload reductions in
 Moving/Crowd, and a 3.184 ms production-shaped-128 inclusive p95.
+
+PF5-R2 changes the selected source preparation beneath those unchanged delivery/wire policies.
+One immutable source publication is frozen per authoritative dirty-chunk revision interval. It
+contains exact epoch/key/from/to coverage, complete current positive records for that interval,
+and explicit removals. Recipient scheduling now follows a contiguous chain of those already
+prepared publications from its exact proven cursor; it does not reconstruct ordinary latest state
+by walking retained raw mutation history and rereading authoritative rows for each recipient.
+
+Introduction and Rebase remain complete current-state operations. Capturing an Introduction at R0
+establishes tracking origin, not applied knowledge, and R1+ prepared facts remain outstanding while
+R0 is in flight. Retention exhaustion causes a complete Rebase and never lets a slow recipient pin
+source storage. A later positive for another public slot cannot discharge a removal; a complete
+new-generation Present for the exact reused slot may replace the prior occupant in cumulative
+current truth. Missing any prepared interval forces Rebase—a higher revision is not coverage.
+
+Delivery ID, application session/generation, queue admission, proof ticket, applied cursor,
+cadence, retry, recovery, and negative debt remain independently recipient-owned. The old
+history-derived reader is a friend-only test/benchmark comparison. At the production-shaped 128
+point, 2,160 source preparations served 284,861 prepared recipient reads with zero selected history
+calls; inclusive Network-plus-replication p95 improved from 3.220 ms to 2.658 ms. The fixed source
+reservation increased by 13,766,560 bytes in that fixture while old comparison/linkage storage is
+still retained. See the
+[PF5-R2 baseline](../../_Benchmarks/Baselines/concept-demo-pf5-r2-shared-latest-state-publication-2026-09-14.md)
+for equivalence, divergence, bounded eviction/Rebase, and product/export evidence.

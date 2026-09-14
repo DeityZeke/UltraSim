@@ -1,0 +1,220 @@
+{
+  "Schema": "ultrasim-concept-demo-pf5-r2-accepted-evidence-v1",
+  "CapturedDate": "2026-09-14",
+  "StartingHead": "02fb6a3d3b15c89273467ceed613215f869ed8b5",
+  "Pf5R1EvidenceCorrectionCommit": "7f5209f153861690d4a90b1f0595f78e5a1a4333",
+  "ImplementationCommit": "992fc541460f18534da9036c73cb711277de11ce",
+  "CorrectnessCandidate": "992fc541460f18534da9036c73cb711277de11ce",
+  "PriorCorrectnessCandidate": "af9fcb740c02eb08efa8d4985d929b50b135504e",
+  "MeasurementHead": "5e41673a6967e54c951a2a5b2f8ddbedef003fa3",
+  "CorrectnessGateHead": "d1b4b5e74271ae487d67778526947e7fa9319f82",
+  "ProductionSemanticsChanged": true,
+  "ExternalGameSemanticsChanged": false,
+  "WireOrProtocolIdentityChanged": false,
+  "RawMeasurement": {
+    "Path": "concept-demo-pf5-r2-shared-latest-state-publication-2026-09-14.raw.json",
+    "Sha256": "4b415d9278ad5dda87af6171f6055c8d427113996e030fca0bdf5ac7bc442577",
+    "Runtime": ".NET 8.0.29",
+    "OperatingSystem": "Linux 7.1.5.1",
+    "Processor": "AMD Ryzen 7 7800X3D",
+    "LogicalProcessors": 16,
+    "StopwatchFrequency": 1000000000,
+    "WarmupTicks": 30,
+    "MeasuredTicks": 270,
+    "SamplesThrough128": 3,
+    "SamplesAbove128": 1,
+    "Seed": 1599209473
+  },
+  "ProductionPolicy": {
+    "Replication": "ChunkPublication",
+    "Bundling": "Message129WhenBeneficial",
+    "Compression": "LZ4 message148 canonical>=384 and saving>=32",
+    "Cadence": "Immediate/Near/Far 1/2/4",
+    "Aggregation": "CrossLane cap 2",
+    "AuthorityHz": 60,
+    "ParticipantCap": 64,
+    "GameManifest": 29,
+    "TransportRevision": 2
+  },
+  "Architecture": {
+    "OldSelectedRead": "For each recipient range, walk retained per-chunk history, collapse mutations, reread current positive rows, sort, and materialize.",
+    "NewSelectedRead": "Authoritative commit freezes one immutable record set per dirty chunk interval; recipient reads traverse only the retained prepared interval chain needed after their proven cursor, collapse bounded latest-state records, and preserve contiguous coverage.",
+    "SourceArtifact": [
+      "PublicationEpoch/source lifetime",
+      "SpatialChunkKey",
+      "FromRevisionExclusive",
+      "ToRevisionInclusive",
+      "frozen WorldPublicDeltaRecord values including removals"
+    ],
+    "ExplicitlyNotShared": [
+      "application session or generation",
+      "DeliveryId",
+      "Network queue admission",
+      "proof ticket or applied cursor",
+      "cadence, retry, recovery, or recipient negative debt"
+    ],
+    "Introduction": "First scope knowledge copies complete current relevant truth at R0; tracking origin is not knowledge and only matching application proof establishes R0.",
+    "Rebase": "Missing prepared contiguous coverage or a cursor below HistoryFloor requests a complete current-state snapshot; the recipient does not pin source storage.",
+    "PositiveSupersession": "Within a cumulative contiguous range, repeated Present records for the same public identity may collapse to the latest complete current row while preserving the union of changed fields.",
+    "UnrelatedPositiveState": "Cannot discharge an earlier removal for another public slot; the cumulative output retains both facts.",
+    "SlotGenerationReuse": "A complete Present for a newer generation of the exact reused public slot replaces the removed prior occupant; old-generation traffic remains ordered below it.",
+    "Coverage": "A prepared interval is followed from the recipient's exact proven revision until current revision. Missing any interval causes Rebase; a higher revision alone never establishes coverage.",
+    "Removal": "Remove is frozen in the source publication as an explicit tombstone record and is independently delivered/proven per recipient. Eviction is recovered only by a complete Rebase which atomically removes omitted client rows.",
+    "HistoryDerivedComparisonAvailability": "internal friend test/benchmark control only; every public ChunkPublicationStore constructor selects PreparedLatestState"
+  },
+  "Bounds": {
+    "ProductionShapedFixture": {
+      "PublicationCapacity": 65536,
+      "RecordCapacity": 65536,
+      "RetainedPublications": 2450,
+      "RetainedRecords": 7000,
+      "PublicationHighWater": 2450,
+      "RecordHighWater": 7000,
+      "TombstoneHighWater": 0,
+      "PreparedReservedBytes": 13766560,
+      "OldProfileServerReservedBytes": 51138624,
+      "PreparedProfileServerReservedBytes": 64905184,
+      "NetworkServerReservedBytesBoth": 53712939,
+      "Note": "This moving positive-state fixture creates no removals; the focused removal regression reaches tombstone high-water >=1."
+    },
+    "PressureFixture": {
+      "PublicationCapacity": 256,
+      "RecordCapacity": 256,
+      "RetainedPublications": 256,
+      "RetainedRecords": 256,
+      "RetentionEvictions": 1184,
+      "PressureEvictions": 1184,
+      "Rebases": 128,
+      "PreparedReservedBytes": 55040
+    },
+    "MinimalSlowRecipientRegression": {
+      "PublicationCapacity": 3,
+      "RecordCapacity": 3,
+      "MinimumObservedEvictions": 6,
+      "Rebases": 1,
+      "TruthAfterRebase": "exact current snapshot"
+    },
+    "WarmedManagedAllocationPerMessage": 0
+  },
+  "ExactCorrectness": {
+    "PreparedVersusHistoryRecords": "direct field-for-field equality",
+    "PreparedVersusHistoryCanonicalDeltaBytes": "bit-for-bit equality",
+    "SharedRecipientCount": 8,
+    "SharedSourcePreparations": 1,
+    "IndependentDeliveryAndProofIdentities": true,
+    "RecipientAProofSatisfiedRecipientB": false,
+    "UnrelatedRemovalSurvivesLaterPositive": true,
+    "ExactSlotNewGenerationSupersedesPriorOccupant": true,
+    "OutOfOrderProofSafe": true,
+    "DuplicateAndStaleProofSafe": true,
+    "QueueRefusalTransactional": true,
+    "IntroductionMutationAndRemovalPreserved": true,
+    "AoiSourceEpochAndReconnectFenced": true,
+    "HistoryDerivedCallsInSelectedSteadyState": 0
+  },
+  "SourceSharingAtProductionShaped128": {
+    "AuthoritativeSourceMutations": 5400,
+    "DirtySourceChunks": 2160,
+    "PreparedSourcePublications": 2160,
+    "PreparedSourceRecords": 5400,
+    "RecipientRangeReads": 284861,
+    "ReferencedSourcePublications": 284861,
+    "ReferencedSourceRecords": 714639,
+    "AveragePublicationReferencesPerPreparedPublication": 131.88,
+    "AverageRecordReferencesPerPreparedRecord": 132.34,
+    "SemanticDeliveries": 276480,
+    "ProofEntries": 276480,
+    "HistoryDerivedSteadyStateCalls": 0
+  },
+  "Divergence": [
+    {"Scenario":"synchronized","Prepared":1456,"References":46080,"ReferencesPerPrepared":31.65,"CoverageHighWater":1,"Introductions":512,"Rebases":0,"Evictions":0,"ProofsApplied":46080},
+    {"Scenario":"staggered-joins","Prepared":1456,"References":38768,"ReferencesPerPrepared":26.63,"CoverageHighWater":1,"Introductions":512,"Rebases":0,"Evictions":0,"ProofsApplied":38768},
+    {"Scenario":"cadence-phases","Prepared":1456,"References":46080,"ReferencesPerPrepared":31.65,"CoverageHighWater":90,"Introductions":512,"Rebases":0,"Evictions":0,"ProofsApplied":11520},
+    {"Scenario":"controlled-loss","Prepared":1456,"References":48786,"ReferencesPerPrepared":33.51,"CoverageHighWater":3,"Introductions":512,"Rebases":0,"Evictions":0,"ProofsApplied":43383},
+    {"Scenario":"controlled-reorder","Prepared":1456,"References":57472,"ReferencesPerPrepared":39.47,"CoverageHighWater":2,"Introductions":512,"Rebases":0,"Evictions":0,"ProofsApplied":34688},
+    {"Scenario":"proof-delay","Prepared":1456,"References":181248,"ReferencesPerPrepared":124.48,"CoverageHighWater":4,"Introductions":512,"Rebases":0,"Evictions":0,"ProofsApplied":44544},
+    {"Scenario":"temporary-stalls","Prepared":1456,"References":46080,"ReferencesPerPrepared":31.65,"CoverageHighWater":31,"Introductions":512,"Rebases":0,"Evictions":0,"ProofsApplied":42240},
+    {"Scenario":"aoi-churn","Prepared":1456,"References":42464,"ReferencesPerPrepared":29.16,"CoverageHighWater":1,"Introductions":2048,"Rebases":0,"Evictions":0,"ProofsApplied":43072},
+    {"Scenario":"reconnect","Prepared":1456,"References":46080,"ReferencesPerPrepared":31.65,"CoverageHighWater":1,"Introductions":512,"ReconnectBaselines":64,"Rebases":0,"Evictions":0,"ProofsApplied":46080},
+    {"Scenario":"history-pressure","Prepared":1440,"References":42112,"ReferencesPerPrepared":29.24,"CoverageHighWater":1,"Introductions":512,"Rebases":128,"Evictions":1184,"ProofsApplied":42240},
+    {"Scenario":"combined-divergence","Prepared":1456,"References":32192,"ReferencesPerPrepared":22.11,"CoverageHighWater":12,"Introductions":1826,"ReconnectBaselines":64,"Rebases":0,"Evictions":944,"ProofsApplied":7093}
+  ],
+  "FixedTotalTopology": [
+    {"Chunks":1,"RecipientsPerChunk":512,"SourcePreparations":1,"RecipientReferences":512,"OldHistoryCalls":0},
+    {"Chunks":8,"RecipientsPerChunk":64,"SourcePreparations":8,"RecipientReferences":512,"OldHistoryCalls":0},
+    {"Chunks":64,"RecipientsPerChunk":8,"SourcePreparations":64,"RecipientReferences":512,"OldHistoryCalls":0},
+    {"Chunks":512,"RecipientsPerChunk":1,"SourcePreparations":512,"RecipientReferences":512,"OldHistoryCalls":0}
+  ],
+  "UninstrumentedCompletePathMilliseconds": [
+    {"Population":64,"Model":"History","ScheduleP50":0.9161,"ScheduleP95":1.1988,"ScheduleP99":1.2871,"ScheduleMax":1.4475,"InclusiveP50":1.337688,"InclusiveP95":1.650017,"InclusiveP99":1.747183,"InclusiveMax":1.936471},
+    {"Population":64,"Model":"Prepared","ScheduleP50":0.7331,"ScheduleP95":0.9229,"ScheduleP99":0.9885,"ScheduleMax":1.0219,"InclusiveP50":1.169561,"InclusiveP95":1.396859,"InclusiveP99":1.463787,"InclusiveMax":1.508897},
+    {"Population":96,"Model":"History","ScheduleP50":1.3716,"ScheduleP95":1.7201,"ScheduleP99":1.8754,"ScheduleMax":1.8958,"InclusiveP50":2.014012,"InclusiveP95":2.389999,"InclusiveP99":2.565176,"InclusiveMax":2.607646},
+    {"Population":96,"Model":"Prepared","ScheduleP50":1.0651,"ScheduleP95":1.3180,"ScheduleP99":1.3704,"ScheduleMax":1.4479,"InclusiveP50":1.702625,"InclusiveP95":1.995450,"InclusiveP99":2.042045,"InclusiveMax":2.187412},
+    {"Population":128,"Model":"History","ScheduleP50":1.8355,"ScheduleP95":2.2741,"ScheduleP99":2.4855,"ScheduleMax":2.5290,"InclusiveP50":2.722766,"InclusiveP95":3.219661,"InclusiveP99":3.376791,"InclusiveMax":3.435332},
+    {"Population":128,"Model":"Prepared","ScheduleP50":1.4466,"ScheduleP95":1.7292,"ScheduleP99":1.8319,"ScheduleMax":1.9386,"InclusiveP50":2.336399,"InclusiveP95":2.657564,"InclusiveP99":2.805596,"InclusiveMax":2.855015},
+    {"Population":160,"Model":"History","ScheduleP95":2.8788,"InclusiveP95":4.118964},
+    {"Population":160,"Model":"Prepared","ScheduleP95":2.1541,"InclusiveP95":3.336030},
+    {"Population":192,"Model":"History","ScheduleP95":3.1964,"InclusiveP95":4.565770},
+    {"Population":192,"Model":"Prepared","ScheduleP95":2.6036,"InclusiveP95":4.066124},
+    {"Population":256,"Model":"History","ScheduleP95":4.5818,"InclusiveP95":6.574845},
+    {"Population":256,"Model":"Prepared","ScheduleP95":3.4788,"InclusiveP95":5.408434},
+    {"Population":300,"Model":"History","ScheduleP95":5.2641,"InclusiveP95":7.519095},
+    {"Population":300,"Model":"Prepared","ScheduleP95":4.0623,"InclusiveP95":6.361822},
+    {"Population":350,"Model":"History","ScheduleP95":6.3297,"InclusiveP95":9.046098},
+    {"Population":350,"Model":"Prepared","ScheduleP95":4.8176,"InclusiveP95":7.710623}
+  ],
+  "HeadlinePerformance": {
+    "Population": 128,
+    "ScheduleP95OldMilliseconds": 2.2741,
+    "ScheduleP95NewMilliseconds": 1.7292,
+    "ScheduleP95ReductionPercent": 23.96,
+    "InclusiveP95OldMilliseconds": 3.219661,
+    "InclusiveP95NewMilliseconds": 2.657564,
+    "InclusiveP95ReductionPercent": 17.46,
+    "InclusiveBudgetMilliseconds": 4.0,
+    "RemainingHeadroomMilliseconds": 1.342436,
+    "OldFirstFailingTestedPopulation": 160,
+    "NewFirstFailingTestedPopulation": 192,
+    "SyntheticNotProductCcu": true
+  },
+  "WireAndSemanticGuardrailAt128": {
+    "SemanticDigestBoth": "03AAAD54B49C08E1",
+    "SemanticPublicationsBoth": 276480,
+    "GameMessagesBoth": 43154,
+    "ProofEntriesBoth": 276480,
+    "DatagramsBoth": 69546,
+    "MedianOldUdpPayloadBytes": 40850532,
+    "MedianPreparedUdpPayloadBytes": 40852075,
+    "DifferenceBytes": 1543,
+    "DifferencePercent": 0.0038,
+    "Explanation": "Separate fresh harnesses use different publication-epoch values, which slightly changes compressed bytes. Direct same-lineage regression proves canonical delta bytes bit-identical; message/datagram/cadence/proof work is exact."
+  },
+  "ProductControls": {
+    "ExternalImpairment": [
+      {"Profile":"light","Bots":16,"Reconnects":1,"Joins":17,"Leaves":17,"Clean":true},
+      {"Profile":"moderate","Bots":16,"Reconnects":1,"Joins":17,"Leaves":17,"Clean":true},
+      {"Profile":"heavy-plausible","Bots":16,"Reconnects":1,"Joins":17,"Leaves":17,"Clean":true}
+    ],
+    "ImpairedMixedExport": {"Bots":8,"ActualExportedOnlineClients":2,"ConnectionLifetimes":11,"ServerGeneration":1,"Clean":true,"AliceAndBobLossAndReorderObserved":true},
+    "MixedExport": {"Bots":16,"ActualExportedOnlineClients":2,"ConnectionLifetimes":19,"ServerGeneration":1,"Joins":19,"Leaves":19,"Clean":true,"ServerUdpPayloadSent":12227974,"ServerUdpPayloadReceived":5603556,"AuthorityP95Microseconds":314,"DeadlineMisses":0,"CatchUpTicks":0},
+    "ContentlessOnline": {"BundledWorldPacks":0,"BundledPackages":0,"ColdFilesFetchedPerNativeClient":6,"ColdBodyBytesFetchedPerNativeClient":7669828,"ApplicationProofsPerNativeClient":1},
+    "NetworkCapabilities": {"Server":"ServerOnly","BotsAndOnline":"ClientOnly"}
+  },
+  "Verification": {
+    "GameReplicationTests": "164 passed",
+    "FocusedPf5R2": "passed",
+    "FullCanonicalReleaseAndExports": "passed at implementation candidate",
+    "Pf5ProductAndImpairment": "passed at measurement head",
+    "SinglePlayerPacketFree": "passed",
+    "CompleteLocalAndRemote": "passed",
+    "WorktreeAtMeasurement": "clean"
+  },
+  "RemainingRisks": [
+    "The prepared store currently retains the old bounded HistoryEntry/link pool as storage linkage and comparison support, so the 13.77 MB prepared reservation is additive; removing the comparison/storage duplication is a future bounded-memory refinement, not part of R2.",
+    "Cross-publication collapsing remains conservative and recipient reads still perform bounded recipient-local collapse/sort over the needed prepared interval chain.",
+    "A recipient beyond retained coverage rebases safely; workload-specific retention sizing remains deployment policy.",
+    "Synthetic rated populations above the product cap are architecture characterization, not CCU evidence."
+  ],
+  "Outcome": "A — replacement accepted",
+  "Pf6Disposition": "May be reconsidered only after independent review of correctness candidate 992fc541460f18534da9036c73cb711277de11ce."
+}

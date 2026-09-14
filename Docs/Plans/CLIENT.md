@@ -2739,8 +2739,9 @@ PF4E-R2 ChunkPublication CPU efficiency                                     CLOS
 PF4F bounded selective message-129 compression                              CLOSED (outcome B)
 PF5 product swarm/scaling/failure characterization                           CLOSED
 PF5-R1 replication baseline/history-model audit                             CLOSED (outcome B)
-PF5-R2 Introduction/Rebase + shared latest-source model                     NEXT
-PF6 external human validation                                                PAUSED
+PF5-R2 shared latest-state publication                                       CLOSED (outcome A)
+PF5-R2 independent correctness-candidate review                              NEXT
+PF6 external human validation                                                PAUSED pending review
         |
         v
 repository generalization / extraction readiness

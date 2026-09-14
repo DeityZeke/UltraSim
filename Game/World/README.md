@@ -170,6 +170,7 @@ generational WorldPublicEntityId
 monotonic entity-public versions
 chunk publication revisions
 one bounded global dirty-history pool
+one bounded immutable prepared-publication store
 ```
 
 These identities do not alias ECS handles, spatial membership slots, durable
@@ -178,22 +179,38 @@ public identity and publishes a source remove before a target present using
 successive entity-public versions. Destruction/public-component removal emits a
 tombstone; ECS slot reuse advances the public generation.
 
-Snapshots and coalesced deltas write complete results into caller-owned spans.
+On authoritative mutation, each dirty chunk interval freezes one recipient-independent prepared
+publication containing exact from/to revision coverage plus complete current positive records and
+explicit removal records. Public `TryCopyDelta` reads only a contiguous chain of those immutable
+publications from the caller's proven cursor; it no longer walks raw retained history or rereads
+current positive rows per recipient. The retained history-derived reader is comparison-only for
+friend tests/benchmarks.
+
+Snapshots and coalesced prepared deltas write complete results into caller-owned spans.
 Each cursor binds its epoch, chunk key, and chunk-local revision. An old,
 wrong-key, future, foreign-epoch, or pre-recreation cursor requests a snapshot;
 no-change cursors produce no rows. A `ChunkAbsent` snapshot is authoritative
 empty state: consumers clear that page and retain no cursor. History pressure
 never rejects a representable current page: an
 oversized dirty commit advances the current revision/floor, clears incomplete
-history, and forces older consumers to snapshot. Observer cursors and watcher
+history/prepared coverage, and forces older consumers to snapshot. No recipient pins retained
+source publications. Observer cursors and watcher
 lists are deliberately absent.
 
-For one reusable public Index, a higher Generation globally supersedes lower
-generations across all chunk pages. Within one Index/Generation, the higher
-entity-public version wins. This permits a new-generation Present to coalesce an
-older generation's Remove without allowing delayed old state to survive. Batches
-carry no simulation tick: the game-world commit counter is generation-local and
-is not an authoritative clock.
+For one reusable public Index, a higher Generation globally supersedes lower generations across all
+chunk pages. Within one Index/Generation, the higher entity-public version wins. In one contiguous
+cumulative prepared range, later complete positive state for the same identity may coalesce while
+retaining the union of changed fields. A positive for another Index cannot discharge a retained
+Remove. A new-generation Present for the exact reused Index can replace the prior generation's
+Remove without allowing delayed old state to survive. Missing any prepared revision interval
+requests a complete current-state Rebase; a higher revision alone is not coverage. Batches carry
+no simulation tick: the game-world commit counter is generation-local and is not an authoritative
+clock.
+
+The prepared store is fixed-capacity by publication and record slots, epoch-fenced, and
+owner-thread-bound. It contains no recipient, delivery, session, queue, proof, cursor, or retry
+state. PF5-R2 records the selected architecture and measured reservation in
+`_Benchmarks/Baselines/concept-demo-pf5-r2-shared-latest-state-publication-2026-09-14.md`.
 
 The cheapest local bridge can borrow committed read-only SoA pages until the
 next mutation/replacement. Canonical semantic bytes instead use the sorted

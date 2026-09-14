@@ -1799,8 +1799,9 @@ then close:
     PF4F bounded selective message-129 compression                      CLOSED (outcome B)
     PF5 product swarm/scaling/failure characterization                   CLOSED
     PF5-R1 replication baseline/history-model audit                     CLOSED (outcome B)
-    PF5-R2 explicit Introduction/Rebase + shared latest-source design   NEXT
-    PF6 external human validation                                       PAUSED
+    PF5-R2 shared latest-state publication                              CLOSED (outcome A)
+    PF5-R2 independent correctness-candidate review                     NEXT
+    PF6 external human validation                                       PAUSED pending review
 ```
 
 Exact subsystem checkpoint labels should be chosen in the owning plan when the consumer reaches that

@@ -5,8 +5,8 @@ PF2.5 replication-ownership/observability reconciliation, PF3 authenticated perf
 PF4A quiet publication-work suppression, PF4B chunk-knowledge census, PF4C selected Game-message
 bundling, the PF4C-R1 singleton MTU repair, PF4D unreliable Network-frame aggregation, PF4E
 dense/distributed fanout plus remaining-cost attribution, PF4E-R1 rated scaling reconciliation,
-PF4E-R2 direct ChunkPublication staging, and PF4F bounded selective message-129 compression,
-plus the PF5-R1 replication baseline/history-model audit,
+PF4E-R2 direct ChunkPublication staging, PF4F bounded selective message-129 compression,
+the PF5-R1 replication baseline/history-model audit, and PF5-R2 shared latest-state publication,
 as of
 2026-09-14.
 
@@ -547,7 +547,7 @@ replacement conservatively refresh current truth rather than sleeping uncertain 
 First interest, invalid knowledge, and history-floor loss recover complete current
 truth. Leaving retires scope membership and invalidates outstanding lineage.
 
-### PF5-R1 baseline/history-model disposition
+### PF5-R1/R2 baseline and shared-publication disposition
 
 PF5-R1 does not classify a complete current snapshot as waste. First knowledge of a relevant
 chunk must establish the recipient's baseline, and history exhaustion may legitimately rebase to
@@ -560,7 +560,7 @@ Introduction         current truth required for first knowledge
 Rebase               current truth required after an unbridgeable gap
 ```
 
-The current store uses retained mutation history for every post-baseline delta reconstruction.
+The pre-R2 store used retained mutation history for every post-baseline delta reconstruction.
 `TryCopyDelta` walks the chunk's retained history from its head, skips revisions at or before the
 recipient cursor, collapses newer entries by public slot, rereads current positive rows, and sorts
 the result. PF5-R1 measured that this is structurally more work than the semantic output commonly
@@ -569,21 +569,37 @@ requires: the synchronized control examined 65.5 nodes to emit one record/reques
 attack reduced reuse, but exact ranges still repeated 75.90% and the bounded shadow oracle
 attributed 76.86% of measured source preparation to repeat ranges.
 
-The selected disposition is **Outcome B**: keep the currently shipped v29 implementation intact
-until its replacement passes the full product gates, but do not treat history-derived latest-state
-as the desired fundamental steady-state model. The next design must use explicit current-state
-Introduction/Rebase, shared immutable latest-source preparation, and recipient-local exact
-delivery/proof knowledge. Bounded history remains useful for ordinary lag/recovery.
+PF5-R2 closes the replacement as **Outcome A**. Each authoritative dirty-chunk interval now freezes
+one immutable source publication with its epoch/key, exact from/to revision coverage, complete
+positive records, and explicit removals. Recipients follow the retained prepared interval chain
+from their exact proven cursor; ordinary lag, loss, reorder, delayed proof, cadence skew, and stalls
+do not invoke raw-history reconstruction. A missing interval or cursor below the retained floor
+requests an explicit current-state Rebase. The old history-derived reader is friend-test/benchmark
+comparison only; every public store constructor selects prepared latest state.
 
-Removal remains the hard asymmetry. Present current state can supersede older positive state;
-removed rows no longer exist to be rediscovered. A replacement therefore needs explicit exact
-absence/removal debt—recipient-local or via an immutable source tombstone/publication—without
-weakening application proof. A shared source artifact must never share delivery ID, session,
-queue admission, proof, applied cursor, retry, or negative debt across recipients.
+Removal remains explicit. A prepared `Remove` record is retained as source-side tombstone truth,
+while its delivery/proof obligation stays recipient-local. A later positive for another public slot
+cannot discharge it. A complete Present for a newer generation of the exact reused public slot may
+replace the removed prior occupant in cumulative current truth. If a required tombstone/publication
+has been evicted, only a proven complete Rebase establishes current absence.
+
+The prepared artifact never owns delivery ID, application session/generation, queue admission,
+proof, applied cursor, retry, cadence, AOI lifetime, or recipient negative debt. A later exact
+cumulative proof advances only because its delivery began at the same proven cursor and contains a
+contiguous prepared chain; a higher revision alone is not coverage.
 
 The diagnostic API is cold, bounded, off by default, and never serves publication results. The
-shadow table records hashes/costs only; production still executes every real source read. See the
-[PF5-R1 evidence](../../_Benchmarks/Baselines/concept-demo-pf5-r1-replication-baseline-history-audit-2026-09-14.md).
+shadow table records hashes/costs only; production still executes every real source read. PF5-R2's
+direct equivalence test compares every logical record and canonical Delta-120 byte. At the
+production-shaped 128 point, 2,160 prepared source publications served 284,861 recipient reads;
+selected old-history calls were zero. Inclusive Network+replication p95 improved from 3.220 ms to
+2.658 ms, retaining 1.342 ms headroom under the 4 ms budget. The old tested crossing was 160 rated
+recipients; the prepared path first crossed at 192. These are synthetic architecture points, not
+CCU. Prepared storage adds a fixed 13,766,560-byte reservation in that fixture while the retained
+comparison/link pool remains; removing that duplication is a future memory refinement.
+
+See the [PF5-R1 audit](../../_Benchmarks/Baselines/concept-demo-pf5-r1-replication-baseline-history-audit-2026-09-14.md)
+and [PF5-R2 closure](../../_Benchmarks/Baselines/concept-demo-pf5-r2-shared-latest-state-publication-2026-09-14.md).
 
 ### Snapshot / delta / absence
 

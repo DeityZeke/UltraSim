@@ -48,11 +48,16 @@ record per request while 98.44% of exact source ranges repeated; deliberately co
 still retained 75.90% exact-range reuse. A separate probe proved that pressure in one hot chunk can
 evict a cold chunk's needed history and force a semantically correct but unrelated rebase.
 
-PF5-R1 changes no production replication, wire, cadence, proof, or candidate semantics. PF6 is
-paused while the next replication-model checkpoint designs and proves explicit current-state
-Introduction/Rebase plus shared immutable latest-source preparation, recipient-local exact applied
-knowledge, and explicit removal/absence debt. Do not mistake this pause for an attempt to eliminate
-necessary first knowledge or recovery snapshots.
+PF5-R1 changes no production replication, wire, cadence, proof, or candidate semantics. PF5-R2 now
+closes the selected replacement as **Outcome A**. Each authoritative dirty-chunk interval is
+prepared once as bounded immutable source truth; independently lagging recipients retain their own
+delivery IDs, queue admission, exact applied proof, cursors, retry/recovery, and removal obligations.
+At the production-shaped 128 point, 2,160 source preparations served 284,861 recipient reads with
+zero selected history-reconstruction calls. Inclusive Network-plus-replication p95 improved from
+3.220 ms to 2.658 ms, and the tested 4 ms crossing moved from 160 to 192 synthetic rated recipients.
+Introduction/Rebase remain complete current-state costs and retention exhaustion still rebases
+safely. PF6 remains paused only for independent review of the new correctness candidate, not for
+another implementation checkpoint.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -2054,7 +2059,8 @@ Permanent evidence is in
 `_Benchmarks/Baselines/concept-demo-pf5-product-swarm-failure-characterization-2026-09-13.json`.
 PF5 keeps the selected 1/2/4 cadence, message 129, selective 148 compression, cross-lane cap two,
 manifest v29, transport revision 2, and participant cap 64. PF5-R1 is the intervening architecture
-audit; external human validation is paused pending its selected follow-up.
+audit; PF5-R2 closes its shared-publication follow-up. External human validation remains paused for
+independent review of the new correctness candidate.
 
 Closure gates were:
 
@@ -2150,11 +2156,72 @@ Permanent evidence is in
 `_Benchmarks/Baselines/concept-demo-pf5-r1-replication-baseline-history-audit-2026-09-14.json`
 and its concise companion report.
 
+## PF5-R2 — shared latest-state publication
+
+**Status: CLOSED — Outcome A.** Starting HEAD
+`02fb6a3d3b15c89273467ceed613215f869ed8b5` contained no intervening production replication
+semantic change after PF5-R1. PF5-R1's broad shadow evidence wording was first corrected to
+hash/count/materialized-size consistency at `7f5209f153861690d4a90b1f0595f78e5a1a4333`.
+
+The selected production implementation and new correctness candidate are
+`992fc541460f18534da9036c73cb711277de11ce`. It changes the internal authoritative preparation
+model, but changes no Game wire message, protocol identity, cadence, AOI, proof, Network policy, or
+participant limit.
+
+```text
+AUTHORITATIVE DIRTY CHUNK INTERVAL
+    -> one bounded immutable prepared source publication
+        epoch + chunk + exact from/to coverage
+        complete current positive records + explicit removals
+
+RECIPIENT
+    -> follows contiguous retained prepared intervals from exact proven cursor
+    -> owns DeliveryId / queue / session / proof / cursor / retry / recovery
+```
+
+Introduction remains complete relevant current truth at R0. Its capture establishes tracking
+origin, not applied knowledge; R1+ prepared facts cannot disappear while R0 is in flight. If any
+required prepared interval has left bounded retention, the recipient receives/proves a complete
+current Rebase. Slow recipients cannot pin source storage.
+
+Positive latest state may coalesce only across a contiguous covered range. A later positive for an
+unrelated public slot cannot discharge a removal. A complete Present for a newer generation of the
+exact reused public slot replaces the removed prior occupant according to existing public-generation
+ordering. Missing coverage always rebases; revision magnitude alone never grants knowledge.
+
+The production-shaped 128-recipient result prepared 2,160 source publications once and referenced
+them 284,861 times (about 131.88 references/preparation), with 276,480 independent semantic
+deliveries/proofs and zero selected raw-history reconstruction calls. Median-of-three p95 moved:
+
+```text
+schedule/codec/queue              2.274 ms -> 1.729 ms  (-23.96%)
+Network + remote replication      3.220 ms -> 2.658 ms  (-17.46%)
+```
+
+The old tested 4 ms crossing was 160 synthetic rated recipients; prepared publication passes at
+160 (3.336 ms) and first narrowly fails at 192 (4.066 ms). These are architecture curves, not CCU.
+Fixed-total topology now produces 1/8/64/512 source preparations for
+`1x512`/`8x64`/`64x8`/`512x1` while every row retains 512 recipient references. Loss, reorder,
+proof delay, stalls, cadence skew, AOI churn, reconnect, and combined divergence all remain on the
+shared path. A 256-record pressure fixture evicts 1,184 publications and safely performs 128
+current-state Rebases.
+
+The representative store adds a fixed 13,766,560-byte prepared reservation while the old bounded
+history/link storage remains as linkage/comparison scaffolding. Removing that duplication is a
+future memory refinement; R2 introduces no unbounded cache or recipient pinning.
+
+All 164 replication tests, focused PF5-R2 verification, the complete canonical Release/export
+matrix, three external impairment profiles, and mixed 8/16 ClientOnly bots plus two actual exported
+Online clients passed with exact retirement. Permanent evidence is in
+`_Benchmarks/Baselines/concept-demo-pf5-r2-shared-latest-state-publication-2026-09-14.json`, its raw
+companion, and its concise report.
+
 ## PF6 — external human validation
 
-**Status: PAUSED after PF5-R1.** Resume only after the selected follow-up replication-model
-checkpoint preserves the complete PF0-PF5 correctness/product matrix. The pause is about the
-steady-state source-preparation model, not about eliminating first-entry or recovery baselines.
+**Status: PAUSED for independent PF5-R2 candidate review.** PF5-R2 has preserved the complete
+PF0-PF5 correctness/product matrix and removed the selected architectural blocker. Resume after an
+independent adversarial review of candidate `992fc541460f18534da9036c73cb711277de11ce`, particularly
+prepared coverage chains, removals/public-slot reuse, eviction/Rebase, and lookup deletion.
 
 Close when:
 
@@ -2305,8 +2372,9 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 26. Run mixed headless + exported Godot clients. **CLOSED — PF5**
 27. Audit baseline/history ownership before human validation. **CLOSED — PF5-R1 outcome B**
 28. Design/prove explicit Introduction/Rebase plus shared latest-source preparation and exact
-    recipient proof/absence semantics. **NEXT — PF5-R2; PF6 remains paused**
-29. Run external human Concept Demo validation. **PAUSED — PF6**
+    recipient proof/absence semantics. **CLOSED — PF5-R2 outcome A**
+29. Independently review the PF5-R2 correctness candidate, then run external human Concept Demo
+    validation. **PAUSED — review first, then PF6**
 30. Choose/document the default deployment-performance policy. **CLOSED — PF5 retains selected v29 defaults**
 31. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5**
 32. Full exact-tree verifier and export closure.
