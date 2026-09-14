@@ -26,6 +26,7 @@ clusters=${17:-1}
 checkpoint=${ULTRASIM_BOT_CHECKPOINT:-PF3}
 telemetry=${ULTRASIM_TELEMETRY:-Detailed}
 accounting_test_marker_args=()
+same_address_admission_burst=${ULTRASIM_SAME_ADDRESS_ADMISSION_BURST:-128}
 case "$checkpoint" in
     PF3) summary_schema=5 ;;
     PF4A) summary_schema=6 ;;
@@ -89,6 +90,24 @@ wait_file() {
     done
 }
 
+wait_measurement_complete() {
+    local path=$1
+    local seconds=$2
+    local failure_summary=$3
+    local deadline=$((SECONDS + seconds))
+    while [[ ! -f "$path" ]]; do
+        if [[ -f "$failure_summary" ]]; then
+            echo "bot harness exited before producing $path; see $failure_summary" >&2
+            return 1
+        fi
+        if (( SECONDS >= deadline )); then
+            echo "timed out waiting for $path" >&2
+            return 1
+        fi
+        sleep 0.2
+    done
+}
+
 cd "$repo"
 dotnet run --project Server/DirectConnect/UltraSim.Server.DirectConnect.csproj \
     -c Release -p:UltraSimNetworkFlavor=ServerOnly --no-build -- \
@@ -100,7 +119,8 @@ dotnet run --project Server/DirectConnect/UltraSim.Server.DirectConnect.csproj \
     --accounting-ready-file="$accounting_ready" \
     --accounting-stop-file="$accounting_stop" \
     --accounting-summary-file="$accounting_summary" \
-    --maximum-participants="$bots" --same-address-admission-burst=128 \
+    --maximum-participants="$bots" \
+    --same-address-admission-burst="$same_address_admission_burst" \
     --authority-hz="$authority_hz" \
     --maximum-input-hz="$maximum_input_hz" \
     --recommended-input-hz="$recommended_input_hz" \
@@ -147,7 +167,7 @@ wait_file "$measurement_ready" 600
 touch "$accounting_start"
 wait_file "$accounting_ready" 30
 touch "$measurement_release"
-wait_file "$measurement_complete" 90000
+wait_measurement_complete "$measurement_complete" 90000 "$bot_summary"
 touch "$accounting_stop"
 wait_file "$accounting_summary" 60
 wait_file "$bot_ready" 60
