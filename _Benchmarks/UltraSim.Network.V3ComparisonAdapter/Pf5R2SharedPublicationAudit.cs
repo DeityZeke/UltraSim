@@ -31,6 +31,13 @@ internal static class Pf5R2SharedPublicationAudit
             populations.Any(value => value is < 2 or > 512))
             throw new ArgumentOutOfRangeException(nameof(args));
 
+        // Do not let the first retained A/B row pay one-time JIT/static setup that
+        // its paired implementation avoids. These runs are deliberately omitted
+        // from the report; retained rows still construct fresh harnesses and use
+        // the caller's exact warmup/measurement settings.
+        Prime(PreparedChunkPublicationReadModel.HistoryDerivedComparison);
+        Prime(PreparedChunkPublicationReadModel.PreparedLatestState);
+
         int divergenceRecipients = ReadInt(args, "--divergence-recipients", focused ? 16 : 64);
         int divergenceTicks = ReadInt(args, "--divergence-ticks", focused ? 45 : 180);
         string[] scenarios = focused
@@ -129,6 +136,22 @@ internal static class Pf5R2SharedPublicationAudit
             new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
         Console.WriteLine(Path.GetFullPath(output));
         return;
+
+        static void Prime(PreparedChunkPublicationReadModel model)
+        {
+            using var harness = new P03WholeFlowHarness(
+                P03NetworkWorkload.ChunkProductionDense(16)
+                    .WithServerTickAndAoICadence(16, P03AoICadencePolicy.Selected124),
+                P03NetworkProfile.ChunkPublication,
+                2,
+                stageTimingEnabled: false,
+                gameDetailedAttribution: false,
+                compression: RemoteChunkBundleCompressionPolicy.Selected,
+                historyAudit: false,
+                legacyRangeCensus: false,
+                chunkReadModel: model);
+            _ = harness.Run(12, 12);
+        }
 
         void RunOne(int population, int sample, PreparedChunkPublicationReadModel model)
         {
