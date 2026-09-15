@@ -1097,12 +1097,13 @@ internal sealed class P03WholeFlowHarness : IDisposable
             if (measure) pumpTicks += Stopwatch.GetTimestamp() - pumpStarted;
         }
         if (!measure) return;
+        long authorityThroughNetworkTicks = Stopwatch.GetTimestamp() - totalStarted;
         int networkEndOrder = captureBoundary ? ++boundaryOrder : 0;
         int combinedEndOrder = captureBoundary ? ++boundaryOrder : 0;
         double serverApp = ToMilliseconds(_tickServerApplication);
         double clientApp = ToMilliseconds(_tickClientApplication);
         double pump = ToMilliseconds(pumpTicks);
-        _tick.Add(Elapsed(totalStarted));
+        _tick.Add(ToMilliseconds(authorityThroughNetworkTicks));
         _authority.Add(authority);
         _schedule.Add(schedule);
         _pump.Add(pump);
@@ -1111,7 +1112,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
         _networkAndRemoteReplication.Add(ToMilliseconds(networkReplicationTicks));
         if (_authorityThroughNetworkTimingEnabled)
             _authorityThroughNetworkAndRemoteReplication.Add(
-                ToMilliseconds(checked(authorityTicks + networkReplicationTicks)));
+                ToMilliseconds(authorityThroughNetworkTicks));
         if (captureBoundary)
         {
             _timingBoundary = new P03TimingBoundaryEvidence(
@@ -3007,8 +3008,8 @@ internal readonly record struct P03TimingBoundaryEvidence(
     int NetworkEndOrder,
     int CombinedEndOrder,
     ulong PreparedSourcePublicationsObserved,
-    bool CombinedFromPerTickRawDurations,
-    bool CombinedFromPhasePercentiles);
+    bool CombinedFromSingleElapsedInterval,
+    bool CombinedFromPhaseDurations);
 
 internal readonly record struct P03ProtocolTiming(
     P03ProtocolStage Server,

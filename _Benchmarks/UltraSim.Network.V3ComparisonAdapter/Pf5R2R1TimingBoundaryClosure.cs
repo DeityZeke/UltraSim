@@ -71,8 +71,8 @@ internal static class Pf5R2R1TimingBoundaryClosure
             overheadControlP95 == 0 ? 0 :
                 (overheadEnabled.Timing.NetworkAndRemoteReplication.P95 - overheadControlP95) /
                 overheadControlP95 * 100d,
-            "The combined sample reuses the existing authority/network timestamps; its timed " +
-            "path adds no Stopwatch read, only one checked tick addition and one retained-list append " +
+            "The direct combined interval reuses the existing whole-tick start and endpoint " +
+            "timestamp; its timed path adds no Stopwatch read and only one retained-list append " +
             "after the narrow Network sample has been captured.");
 
         var rows = new List<Pf5R2R1ComparisonRow>();
@@ -107,7 +107,7 @@ internal static class Pf5R2R1TimingBoundaryClosure
         string output = ReadText(args, "--output") ??
             "_Benchmarks/results/pf5-r2-r1-timing-boundary.json";
         var report = new Pf5R2R1TimingReport(
-            "ultrasim-concept-demo-pf5-r2-r1-timing-boundary-v1",
+            "ultrasim-concept-demo-pf5-r2-r1-timing-boundary-v2",
             DateTimeOffset.UtcNow,
             MeasurementBase,
             ReadGitSha(),
@@ -123,10 +123,11 @@ internal static class Pf5R2R1TimingBoundaryClosure
             "ApplyAuthority, including ChunkPublication commit and prepared source creation.",
             "NetworkAndRemoteReplication begins after ApplyAuthority and accumulates the existing " +
             "server-owned scheduling, server Network, and server proof-application work.",
-            "AuthorityThroughNetworkAndRemoteReplication is one retained sample per tick formed " +
-            "from that tick's directly measured, non-overlapping AuthorityMutation and " +
-            "NetworkAndRemoteReplication raw stopwatch ticks before any distribution statistic; " +
-            "it is never synthesized from aggregate percentiles.",
+            "AuthorityThroughNetworkAndRemoteReplication is one direct elapsed interval per tick " +
+            "from immediately before authoritative mutation through the endpoint after the final " +
+            "remote transport/application/proof pump. It includes the interleaved client-side " +
+            "transport and semantic work required to reach that endpoint and is never reconstructed " +
+            "from phase durations or aggregate percentiles.",
             "ChunkPublication; Message129WhenBeneficial; selective message148 LZ4 " +
             "canonical>=384/saving>=32; Immediate/Near/Far 1/2/4; CrossLane cap 2; " +
             "Game manifest v29; transport revision 2; authority 60 Hz; participant cap 64",
@@ -207,18 +208,19 @@ internal static class Pf5R2R1TimingBoundaryClosure
                 boundary.NetworkStartOrder < boundary.NetworkEndOrder &&
                 boundary.NetworkEndOrder < boundary.CombinedEndOrder &&
                 boundary.PreparedSourcePublicationsObserved != 0 &&
-                boundary.CombinedFromPerTickRawDurations &&
-                !boundary.CombinedFromPhasePercentiles,
+                boundary.CombinedFromSingleElapsedInterval &&
+                !boundary.CombinedFromPhaseDurations,
             "PF5-R2-R1 source preparation escaped the direct per-tick combined boundary.");
         Require(row.Timing.AuthorityMutation.Samples == ticks &&
                 row.Timing.NetworkAndRemoteReplication.Samples == ticks &&
                 row.Timing.AuthorityThroughNetworkAndRemoteReplication.Samples == ticks,
             "PF5-R2-R1 timing sample counts diverged.");
-        double expectedMean = row.Timing.AuthorityMutation.Mean +
-            row.Timing.NetworkAndRemoteReplication.Mean;
-        Require(Math.Abs(expectedMean -
-                row.Timing.AuthorityThroughNetworkAndRemoteReplication.Mean) <= 0.000_001,
-            "PF5-R2-R1 combined mean was not built from same-tick raw durations.");
+        Require(Math.Abs(row.Timing.Tick.Mean -
+                row.Timing.AuthorityThroughNetworkAndRemoteReplication.Mean) <= 0.000_001 &&
+                row.Timing.AuthorityThroughNetworkAndRemoteReplication.Mean >=
+                    row.Timing.AuthorityMutation.Mean +
+                    row.Timing.NetworkAndRemoteReplication.Mean,
+            "PF5-R2-R1 combined sample was not the direct authority-through-pump interval.");
     }
 
     private static void RequireEquivalent(in P03WholeFlowRow left, in P03WholeFlowRow right)

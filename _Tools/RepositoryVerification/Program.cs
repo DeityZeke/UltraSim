@@ -65,7 +65,7 @@ static void VerifyPf5R2R1TimingBoundary(string root, string configuration)
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(output));
         JsonElement report = document.RootElement;
         if (report.GetProperty("Schema").GetString() !=
-            "ultrasim-concept-demo-pf5-r2-r1-timing-boundary-v1")
+            "ultrasim-concept-demo-pf5-r2-r1-timing-boundary-v2")
             throw new InvalidOperationException("PF5-R2-R1 timing schema was not canonical.");
         JsonElement boundary = report.GetProperty("BoundaryRegression");
         int combinedStart = boundary.GetProperty("CombinedStartOrder").GetInt32();
@@ -80,8 +80,8 @@ static void VerifyPf5R2R1TimingBoundary(string root, string configuration)
               prepared < authorityEnd && authorityEnd < networkStart &&
               networkStart < networkEnd && networkEnd < combinedEnd) ||
             boundary.GetProperty("PreparedSourcePublicationsObserved").GetUInt64() == 0 ||
-            !boundary.GetProperty("CombinedFromPerTickRawDurations").GetBoolean() ||
-            boundary.GetProperty("CombinedFromPhasePercentiles").GetBoolean())
+            !boundary.GetProperty("CombinedFromSingleElapsedInterval").GetBoolean() ||
+            boundary.GetProperty("CombinedFromPhaseDurations").GetBoolean())
             throw new InvalidOperationException(
                 "PF5-R2-R1 did not structurally retain source preparation inside its combined boundary.");
         foreach (IGrouping<int, JsonElement> population in report.GetProperty("Rows")
@@ -94,14 +94,22 @@ static void VerifyPf5R2R1TimingBoundary(string root, string configuration)
                 value.GetProperty("Prepared").GetBoolean());
             JsonElement oldFlow = oldRow.GetProperty("Flow");
             JsonElement newFlow = newRow.GetProperty("Flow");
+            JsonElement oldTiming = oldFlow.GetProperty("Timing");
+            JsonElement newTiming = newFlow.GetProperty("Timing");
             if (oldFlow.GetProperty("SemanticDigest").GetString() !=
                     newFlow.GetProperty("SemanticDigest").GetString() ||
-                oldFlow.GetProperty("Timing")
+                oldTiming
                     .GetProperty("AuthorityThroughNetworkAndRemoteReplication")
                     .GetProperty("Samples").GetInt32() != 45 ||
-                newFlow.GetProperty("Timing")
+                newTiming
                     .GetProperty("AuthorityThroughNetworkAndRemoteReplication")
-                    .GetProperty("Samples").GetInt32() != 45)
+                    .GetProperty("Samples").GetInt32() != 45 ||
+                Math.Abs(oldTiming.GetProperty("Tick").GetProperty("Mean").GetDouble() -
+                    oldTiming.GetProperty("AuthorityThroughNetworkAndRemoteReplication")
+                        .GetProperty("Mean").GetDouble()) > 0.000_001 ||
+                Math.Abs(newTiming.GetProperty("Tick").GetProperty("Mean").GetDouble() -
+                    newTiming.GetProperty("AuthorityThroughNetworkAndRemoteReplication")
+                        .GetProperty("Mean").GetDouble()) > 0.000_001)
                 throw new InvalidOperationException(
                     "PF5-R2-R1 focused semantic/timing samples did not reconcile.");
         }
