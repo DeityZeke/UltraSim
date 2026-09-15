@@ -25,6 +25,11 @@ internal static class P03WholeFlowNetworkSuite
 
     internal static void Run(string[] args)
     {
+        if (args.Contains("--pf5-r2-r1-timing-boundary", StringComparer.Ordinal))
+        {
+            Pf5R2R1TimingBoundaryClosure.Run(args);
+            return;
+        }
         if (args.Contains("--pf5-r2-shared-publication", StringComparer.Ordinal))
         {
             Pf5R2SharedPublicationAudit.Run(args);
@@ -897,6 +902,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
     private readonly int _frameCap;
     private readonly bool _stageTimingEnabled;
     private readonly bool _gameDetailedAttribution;
+    private readonly bool _authorityThroughNetworkTimingEnabled;
     private readonly NetworkProtocolLimits _protocolLimits;
     private readonly SharedUdpProtocolHost _host;
     private readonly SharedUdpProtocolSession[] _sessions;
@@ -911,8 +917,10 @@ internal sealed class P03WholeFlowHarness : IDisposable
     private readonly List<double> _serverApplication = new();
     private readonly List<double> _clientApplication = new();
     private readonly List<double> _networkAndRemoteReplication = new();
+    private readonly List<double> _authorityThroughNetworkAndRemoteReplication = new();
     private readonly List<double> _serverRole = new();
     private readonly List<double> _clientRole = new();
+    private P03TimingBoundaryEvidence _timingBoundary;
     private bool _disposed;
     private long _tickServerApplication;
     private long _tickClientApplication;
@@ -927,6 +935,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
         RemoteChunkBundleCompressionPolicy compression = default,
         bool historyAudit = false,
         bool legacyRangeCensus = true,
+        bool authorityThroughNetworkTimingEnabled = true,
         PreparedChunkPublicationReadModel chunkReadModel =
             PreparedChunkPublicationReadModel.PreparedLatestState)
     {
@@ -935,6 +944,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
         _frameCap = frameCap;
         _stageTimingEnabled = stageTimingEnabled;
         _gameDetailedAttribution = gameDetailedAttribution;
+        _authorityThroughNetworkTimingEnabled = authorityThroughNetworkTimingEnabled;
         _x = new long[workload.Entities];
         _z = new long[workload.Entities];
         _versions = new ulong[workload.Entities];
@@ -1033,8 +1043,11 @@ internal sealed class P03WholeFlowHarness : IDisposable
                 P03Metric.From(_tick), P03Metric.From(_authority), P03Metric.From(_schedule),
                 P03Metric.From(_pump), P03Metric.From(_serverApplication),
                 P03Metric.From(_clientApplication),
-                P03Metric.From(_networkAndRemoteReplication), P03Metric.From(_serverRole),
+                P03Metric.From(_networkAndRemoteReplication),
+                P03Metric.From(_authorityThroughNetworkAndRemoteReplication),
+                P03Metric.From(_serverRole),
                 P03Metric.From(_clientRole), protocol),
+            _timingBoundary,
             transport, profile, _adapter.SemanticDigest(), allocated,
             checked(profileServerReserved + profileClientReserved),
             profileServerReserved, profileClientReserved,
@@ -1047,11 +1060,28 @@ internal sealed class P03WholeFlowHarness : IDisposable
     {
         P03ProtocolTiming protocolBefore = measure ? CaptureProtocolTiming() : default;
         long totalStarted = measure ? Stopwatch.GetTimestamp() : 0;
+        bool captureBoundary = measure && _authorityThroughNetworkTimingEnabled &&
+            !_timingBoundary.Captured;
+        int boundaryOrder = 0;
+        int combinedStartOrder = captureBoundary ? ++boundaryOrder : 0;
+        int authorityStartOrder = captureBoundary ? ++boundaryOrder : 0;
+        ulong preparedBefore = captureBoundary
+            ? _adapter.PreparedSourcePublicationCount
+            : 0;
         long started = measure ? Stopwatch.GetTimestamp() : 0;
         Mutate(tick);
         _adapter.ApplyAuthority(tick, _workload.MoveRecipients ? _workload.DirtyEntitiesPerTick : 0);
-        double authority = measure ? Elapsed(started) : 0;
+        long authorityTicks = measure ? Stopwatch.GetTimestamp() - started : 0;
+        double authority = ToMilliseconds(authorityTicks);
+        ulong preparedAfter = captureBoundary
+            ? _adapter.PreparedSourcePublicationCount
+            : 0;
+        int preparedSourceObservedOrder = captureBoundary && preparedAfter > preparedBefore
+            ? ++boundaryOrder
+            : 0;
+        int authorityEndOrder = captureBoundary ? ++boundaryOrder : 0;
 
+        int networkStartOrder = captureBoundary ? ++boundaryOrder : 0;
         started = measure ? Stopwatch.GetTimestamp() : 0;
         _adapter.Schedule(checked((ulong)tick));
         long networkReplicationTicks = measure ? Stopwatch.GetTimestamp() - started : 0;
@@ -1067,6 +1097,8 @@ internal sealed class P03WholeFlowHarness : IDisposable
             if (measure) pumpTicks += Stopwatch.GetTimestamp() - pumpStarted;
         }
         if (!measure) return;
+        int networkEndOrder = captureBoundary ? ++boundaryOrder : 0;
+        int combinedEndOrder = captureBoundary ? ++boundaryOrder : 0;
         double serverApp = ToMilliseconds(_tickServerApplication);
         double clientApp = ToMilliseconds(_tickClientApplication);
         double pump = ToMilliseconds(pumpTicks);
@@ -1077,6 +1109,24 @@ internal sealed class P03WholeFlowHarness : IDisposable
         _serverApplication.Add(serverApp);
         _clientApplication.Add(clientApp);
         _networkAndRemoteReplication.Add(ToMilliseconds(networkReplicationTicks));
+        if (_authorityThroughNetworkTimingEnabled)
+            _authorityThroughNetworkAndRemoteReplication.Add(
+                ToMilliseconds(checked(authorityTicks + networkReplicationTicks)));
+        if (captureBoundary)
+        {
+            _timingBoundary = new P03TimingBoundaryEvidence(
+                true,
+                combinedStartOrder,
+                authorityStartOrder,
+                preparedSourceObservedOrder,
+                authorityEndOrder,
+                networkStartOrder,
+                networkEndOrder,
+                combinedEndOrder,
+                preparedAfter >= preparedBefore ? preparedAfter - preparedBefore : 0,
+                true,
+                false);
+        }
         P03ProtocolTiming current = CaptureProtocolTiming();
         _serverRole.Add(authority + schedule + serverApp +
             Math.Max(0, current.ServerMilliseconds - protocolBefore.ServerMilliseconds));
@@ -1164,11 +1214,15 @@ internal sealed class P03WholeFlowHarness : IDisposable
     {
         _tick.Clear(); _authority.Clear(); _schedule.Clear(); _pump.Clear();
         _serverApplication.Clear(); _clientApplication.Clear();
-        _networkAndRemoteReplication.Clear(); _serverRole.Clear(); _clientRole.Clear();
+        _networkAndRemoteReplication.Clear();
+        _authorityThroughNetworkAndRemoteReplication.Clear();
+        _serverRole.Clear(); _clientRole.Clear();
+        _timingBoundary = default;
         _tick.EnsureCapacity(ticks); _authority.EnsureCapacity(ticks);
         _schedule.EnsureCapacity(ticks); _pump.EnsureCapacity(ticks);
         _serverApplication.EnsureCapacity(ticks); _clientApplication.EnsureCapacity(ticks);
         _networkAndRemoteReplication.EnsureCapacity(ticks);
+        _authorityThroughNetworkAndRemoteReplication.EnsureCapacity(ticks);
         _serverRole.EnsureCapacity(ticks); _clientRole.EnsureCapacity(ticks);
         for (int index = 0; index < _sessions.Length; index++)
         {
@@ -1330,6 +1384,7 @@ internal abstract class P03RemoteProfileAdapter : IDisposable
         Workload = workload; Sessions = sessions; X = x; Z = z; Versions = versions;
     }
     internal abstract void ApplyAuthority(int tick, int movedRecipients);
+    internal virtual ulong PreparedSourcePublicationCount => 0;
     internal abstract void Schedule(ulong step);
     internal abstract bool ProcessServer(int recipient, in NetworkDeliveredMessage message,
         ReadOnlySpan<byte> payload);
@@ -2202,6 +2257,9 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
             "Chunk scheduler missed an authoritative commit.");
     }
 
+    internal override ulong PreparedSourcePublicationCount =>
+        Source.GetPreparedPublicationSnapshot().PreparedSourcePublications;
+
     internal override void Schedule(ulong step)
     {
         Array.Clear(_dueCounts);
@@ -2855,6 +2913,7 @@ internal readonly record struct P03WholeFlowRow(
     int DirtyEntitiesPerTick,
     P03CadenceSummary Cadence,
     P03WholeFlowTiming Timing,
+    P03TimingBoundaryEvidence TimingBoundary,
     P03TransportSummary Transport,
     P03ProfileCounters ProfileCounters,
     string SemanticDigest,
@@ -2927,15 +2986,29 @@ internal readonly record struct P03CadenceSummary(
 
 internal readonly record struct P03WholeFlowTiming(
     P03Metric Tick,
-    P03Metric Authority,
+    P03Metric AuthorityMutation,
     P03Metric GameScheduleAndCodecQueue,
     P03Metric CombinedProtocolPumpWall,
     P03Metric ServerGameProofApply,
     P03Metric ClientGameDecodeApplyAndProofQueue,
     P03Metric NetworkAndRemoteReplication,
+    P03Metric AuthorityThroughNetworkAndRemoteReplication,
     P03Metric ServerRole,
     P03Metric ClientRole,
     P03ProtocolTiming Protocol);
+
+internal readonly record struct P03TimingBoundaryEvidence(
+    bool Captured,
+    int CombinedStartOrder,
+    int AuthorityStartOrder,
+    int PreparedSourceObservedOrder,
+    int AuthorityEndOrder,
+    int NetworkStartOrder,
+    int NetworkEndOrder,
+    int CombinedEndOrder,
+    ulong PreparedSourcePublicationsObserved,
+    bool CombinedFromPerTickRawDurations,
+    bool CombinedFromPhasePercentiles);
 
 internal readonly record struct P03ProtocolTiming(
     P03ProtocolStage Server,
