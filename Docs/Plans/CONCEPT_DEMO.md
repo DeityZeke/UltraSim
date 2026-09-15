@@ -102,8 +102,11 @@ bounded shared immutable prepared publications while retaining recipient-local e
 Rebase. Independent correctness review accepted the replacement. PF5-R2-R1 directly measures from
 before source preparation through the final remote pump and retains a modest 128-recipient
 whole-interval improvement (12.302 ms to 11.961 ms p95), alongside the substantial narrower
-server-owned reduction. Its canonical run then independently reproduced a pre-existing HTTP-host
-shutdown race; PF6 external-human validation remains paused for that separate repair.
+server-owned reduction. PF5-R2-R2 repairs the independently reproduced HTTP-host shutdown races
+and preserves complete unexpected worker-failure reporting. PF5-R3 subsequently selects one
+bounded background native-batch sender per shared UDP listener after complete ciphertext
+construction; no Game, proof, cadence, AOI, compression, aggregation, or wire identity changes.
+PF6 external-human validation may resume on the verified integrated tree.
 A post-F0.8 defensive UI correction
 also makes
 local shutdown independent from a saturated presentation queue, contains expected view-capacity
@@ -1808,7 +1811,9 @@ then close:
     PF5-R1 replication baseline/history-model audit                     CLOSED (outcome B)
     PF5-R2 shared latest-state publication                              CLOSED (outcome A)
     PF5-R2 independent review + combined timing closure                 CLOSED (timing accepted; outcome D)
-    PF6 external human validation                                       PAUSED — HTTP-host shutdown repair
+    PF5-R2-R2 HTTP shutdown + normalized scaling attribution            CLOSED
+    PF5-R3 bounded background UDP egress                                CLOSED (outcome A)
+    PF6 external human validation                                       READY TO RESUME
 ```
 
 Exact subsystem checkpoint labels should be chosen in the owning plan when the consumer reaches that

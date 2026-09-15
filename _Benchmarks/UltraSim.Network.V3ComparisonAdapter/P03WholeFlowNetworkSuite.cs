@@ -183,6 +183,7 @@ internal static class P03WholeFlowNetworkSuite
         int burstPeriod = ReadInt(args, "--dirty-burst-period", 1);
         bool egressTimingEnabled = !string.Equals(
             ReadText(args, "--egress-timing"), "off", StringComparison.OrdinalIgnoreCase);
+        bool gameDetailedAttribution = args.Contains("--game-detailed", StringComparer.Ordinal);
         int[] populations = ParseOptionalPositiveIntegers(ReadText(args, "--populations")) ??
             [64, 128, 192, 256, 300];
         string output = ReadText(args, "--output") ??
@@ -210,6 +211,7 @@ internal static class P03WholeFlowNetworkSuite
                 CreateWorkload(Math.Min(populations[0], 32)),
                 P03NetworkProfile.ChunkPublication, 2,
                 stageTimingEnabled: false,
+                gameDetailedAttribution: gameDetailedAttribution,
                 compression: RemoteChunkBundleCompressionPolicy.Selected,
                 serverOwnedRemoteTimingEnabled: true,
                 socketIoMode: mode,
@@ -229,6 +231,7 @@ internal static class P03WholeFlowNetworkSuite
             using var harness = new P03WholeFlowHarness(
                 workload, P03NetworkProfile.ChunkPublication, 2,
                 stageTimingEnabled: false,
+                gameDetailedAttribution: gameDetailedAttribution,
                 compression: RemoteChunkBundleCompressionPolicy.Selected,
                 serverOwnedRemoteTimingEnabled: true,
                 socketIoMode: mode,
@@ -289,7 +292,8 @@ internal static class P03WholeFlowNetworkSuite
             "Background byte/count fields are exact measurement-window deltas. Queue latency " +
                 "histogram percentiles are bounded worker-lifetime observations including " +
                 "bootstrap and warmup because production telemetry is cumulative. Detailed " +
-                $"background timing was {(egressTimingEnabled ? "enabled" : "disabled")}.",
+                $"background timing was {(egressTimingEnabled ? "enabled" : "disabled")}; " +
+                $"Game detailed attribution was {(gameDetailedAttribution ? "enabled" : "disabled")}.",
             rows.OrderBy(row => row.Recipients)
                 .ThenBy(row => (int)Enum.Parse<SharedUdpSocketIoMode>(row.SocketIoMode))
                 .ToArray());
@@ -2846,11 +2850,13 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
         ChunkPublicationWorkSchedulerSnapshot scheduler = _scheduler.GetSnapshot();
         ChunkPublicationStoreSnapshot source = Source.GetSnapshot();
         P03CompressionCounters compression = default;
+        P03ProofHealth proofHealth = default;
         for (int index = 0; index < _servers.Length; index++)
         {
-            RemoteChunkCompressionCensusSnapshot value =
-                _servers[index].GetTimingSnapshot().Knowledge.Compression;
-            compression = compression.Add(value);
+            RemoteChunkKnowledgeCensusSnapshot knowledge =
+                _servers[index].GetTimingSnapshot().Knowledge;
+            compression = compression.Add(knowledge.Compression);
+            proofHealth = proofHealth.Add(knowledge);
         }
         return base.GetCounters() with
         {
@@ -2883,6 +2889,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
                 _deltaRangeRecordInstances, _uniqueDeltaRangeRecords,
                 _reusableDeltaRangeRecords, _censusSourceDeltaReads),
             Compression = compression,
+            ProofHealth = proofHealth,
             HistoryAudit = _historyAuditEnabled ? Source.GetHistoryAuditSnapshot() : null,
             PreparedPublication = DifferencePreparedPublication(
                 Source.GetPreparedPublicationSnapshot(), _preparedBaseline),
@@ -3737,6 +3744,7 @@ internal readonly record struct P03ProfileCounters(
     P03ChunkCpuAttribution ChunkCpu = default,
     P03DeltaRangeReuseCensus DeltaRangeReuse = default,
     P03CompressionCounters Compression = default,
+    P03ProofHealth ProofHealth = default,
     ChunkPublicationHistoryAuditSnapshot? HistoryAudit = null,
     PreparedChunkPublicationSnapshot PreparedPublication = default);
 
@@ -3765,6 +3773,38 @@ internal readonly record struct P03CompressionCounters(
         Add(DirectBytesSaved, value.DirectBytesSaved),
         Add(CompressionStopwatchTicks, value.Compression.TotalStopwatchTicks),
         Math.Max(MaximumCompressionMicroseconds, value.Compression.MaximumMicroseconds));
+
+    private static ulong Add(ulong left, ulong right) =>
+        ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
+}
+
+internal readonly record struct P03ProofHealth(
+    ulong ProofEntries,
+    ulong AppliedEntries,
+    ulong DeliveryAgeP95UpperBoundAuthoritySteps,
+    long DeliveryQueuedToProofP95Microseconds,
+    ulong SourceToProofP95UpperBoundAuthoritySteps,
+    int OutstandingHighWater)
+{
+    internal P03ProofHealth Add(in RemoteChunkKnowledgeCensusSnapshot knowledge)
+    {
+        UltraSim.Game.Replication.RemoteChunkProofCensusSnapshot proof = knowledge.Proof;
+        RemoteChunkFreshnessCensusSnapshot freshness = knowledge.Freshness;
+        return new(
+            Add(ProofEntries, proof.EntriesReceived),
+            Add(AppliedEntries, proof.AppliedEntries),
+            Math.Max(DeliveryAgeP95UpperBoundAuthoritySteps,
+                proof.DeliveryAgeAuthoritySteps.WholeWindowP95UpperBound),
+            Math.Max(DeliveryQueuedToProofP95Microseconds,
+                proof.DeliveryQueuedToProofProcessed.WholeWindowP95Microseconds),
+            Math.Max(SourceToProofP95UpperBoundAuthoritySteps,
+                Math.Max(
+                    freshness.Immediate.SourceToProofSteps.WholeWindowP95UpperBound,
+                    Math.Max(
+                        freshness.Near.SourceToProofSteps.WholeWindowP95UpperBound,
+                        freshness.Far.SourceToProofSteps.WholeWindowP95UpperBound))),
+            Math.Max(OutstandingHighWater, knowledge.Outstanding.HighWater));
+    }
 
     private static ulong Add(ulong left, ulong right) =>
         ulong.MaxValue - left < right ? ulong.MaxValue : left + right;

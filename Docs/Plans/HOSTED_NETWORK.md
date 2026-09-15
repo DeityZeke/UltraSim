@@ -1,7 +1,8 @@
 # Hosted Network H0: accepted external UDP lifecycle
 
 Status: **H0.0-H0.5 accepted / localhost deployment gate closed**, with Hosted
-role packaging reconciled and the 2026-09-09 defensive lifetime correction closed.
+role packaging reconciled, the 2026-09-09 defensive lifetime correction closed, and PF5-R3's
+bounded listener-owned background egress selected on 2026-09-15.
 
 Hosted H0 is the Network-generic lifecycle between an unknown external UDP path and
 an authenticated UltraSim protocol session. It is not a replication profile, does
@@ -294,6 +295,13 @@ independent client processes
 The listener remains Network-generic. Promotion constructs the secure peer and
 application adapter on the selected owner thread. Owner-produced secure/path-control
 datagrams return through the exclusive H0.4 slab.
+
+PF5-R3 adds one later physical boundary. Established-session ciphertext accepted from the
+listener/owner path is copied into one fixed-capacity slab per shared listener and drained by one
+persistent sender. The worker owns no connection protocol, Game, proof, security-epoch mutation,
+or application state. Path generations fence queued datagrams across rebind/retirement; shutdown
+stops admission, drains for the existing bounded transport interval, joins the worker, then
+disposes socket/storage. Linux uses `sendmmsg`; scalar submission is the portable fallback.
 
 A key composition bug was found and permanently fixed during H0.5: an owner queue is
 shared by all connections assigned to that owner, so one peer may not drain/discard

@@ -63,8 +63,11 @@ above 4 ms at the first tested point. The prepared server-owned narrow clock pas
 in the fresh run; these remain synthetic rated recipients, not CCU. Introduction/Rebase remain
 complete current-state costs and retention
 exhaustion still rebases safely. Independent correctness review and the timing closure are
-complete. The canonical closure run independently reproduced a pre-existing HTTP-host shutdown
-race, so PF6 remains paused for that separate repair and a clean full verification.
+complete. PF5-R2-R2 repaired the pre-existing HTTP-host shutdown races, retained all unexpected
+worker failures, and passed repeated Release/export closure. PF5-R3 then selected one bounded
+background native-batch UDP sender per shared listener after a four-mode real-socket comparison;
+it changes only physical submission after complete encrypted datagram construction. PF6 may
+resume on the integrated post-PF5-R3 candidate after canonical closure.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -2256,11 +2259,11 @@ repair it.
 
 ## PF6 — external human validation
 
-**Status: PAUSED — HTTP-host shutdown repair.** Independent adversarial review accepted candidate
-`992fc541460f18534da9036c73cb711277de11ce`, and PF5-R2-R1 directly closed the remaining combined
-timing boundary without a replication production change. Its full canonical run exposed the
-pre-existing `StaticContentHttpHost.Dispose` shutdown race, which must be repaired and followed by
-a clean Release/export verifier before PF6 starts.
+**Status: READY TO RESUME after PF5-R3 canonical closure.** PF5-R2-R2 repaired the HTTP-host
+shutdown race and retained complete unexpected-worker-failure reporting. PF5-R3 leaves Game,
+replication, proof, wire, cadence, AOI, compression, aggregation, and participant policy exact;
+its selected physical egress is covered by focused lifecycle, external Hosted, and full export
+verification.
 
 Close when:
 
@@ -2413,12 +2416,14 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 28. Design/prove explicit Introduction/Rebase plus shared latest-source preparation and exact
     recipient proof/absence semantics. **CLOSED — PF5-R2 outcome A**
 29. Independently review the PF5-R2 correctness candidate and close its combined timing boundary.
-    **TIMING CLOSED — PF5-R2-R1 overall outcome D; repair HTTP-host shutdown before PF6**
-30. Choose/document the default deployment-performance policy. **CLOSED — PF5 retains selected v29 defaults**
-31. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5**
-32. Full exact-tree verifier and export closure.
-33. Freeze/tag the Concept Demo baseline.
-34. Begin the separate extraction/genericization/ecosystem roadmap.
+    **CLOSED — PF5-R2-R1 timing plus PF5-R2-R2 HTTP/attribution closure**
+30. Test bounded background physical UDP egress without moving protocol or Game ownership.
+    **CLOSED — PF5-R3 outcome A; background native batching selected**
+31. Choose/document the default deployment-performance policy. **CLOSED — v29 plus PF5-R3 egress**
+32. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5/PF5-R3**
+33. Full exact-tree verifier and export closure.
+34. Freeze/tag the Concept Demo baseline.
+35. Begin the separate extraction/genericization/ecosystem roadmap.
 ```
 
 The intended outcome is not merely a demo that works.

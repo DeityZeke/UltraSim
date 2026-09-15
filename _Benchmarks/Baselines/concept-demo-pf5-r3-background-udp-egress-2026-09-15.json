@@ -1,0 +1,202 @@
+{
+  "schema": "ultrasim-concept-demo-pf5-r3-background-udp-egress-v1",
+  "checkpoint": "PF5-R3",
+  "date": "2026-09-15",
+  "outcome": "A",
+  "startingHead": "ed04e08310fc79b6eadc9cd185dcdc5ab6abd758",
+  "experimentalImplementationCommit": "8ce6d5f7",
+  "selectedPolicyCommit": "f2940afa18d69bb83df291215dcb6903938ee3c2",
+  "replicationSemanticCandidate": "992fc541460f18534da9036c73cb711277de11ce",
+  "priorIntegratedCorrectnessCandidate": "89f26f8bbaa1003b15ddf52d61d6ce2567694b74",
+  "integratedCorrectnessCandidate": "f2940afa18d69bb83df291215dcb6903938ee3c2",
+  "productionSelection": "BackgroundPlatformBatch",
+  "productionBaselineBefore": "Scalar",
+  "gameManifest": 29,
+  "transportRevision": 2,
+  "machine": {
+    "runtime": "8.0.29",
+    "os": "Linux / Unix 7.1.5.1",
+    "logicalProcessors": 16,
+    "stopwatchFrequency": 1000000000,
+    "nativeSendmmsgActive": true
+  },
+  "ownership": {
+    "senderThreadsPerSharedListener": 1,
+    "producerConsumer": "one listener owner / one persistent sender",
+    "handoff": "stable copy of complete encrypted datagram",
+    "acceptedMeaning": "bounded local egress ownership, not physical send or remote delivery",
+    "queueRefusal": "before peer PacketNumber/reliable-flight commit",
+    "pathFence": "endpoint egress-path generation",
+    "shutdown": "stop enqueue; bounded drain; join sender; then dispose socket/storage"
+  },
+  "selectedDefault64Reservation": {
+    "capacityDatagrams": 2048,
+    "capacityPayloadBytes": 3014656,
+    "reservedBytes": 3097864
+  },
+  "ratedWorkload": {
+    "authoritativeEntities": 1000,
+    "dirtyRowsPerTick": 20,
+    "dirtyChunksPerTick": 8,
+    "warmupTicks": 60,
+    "measuredTicks": 270,
+    "cadence": "1/2/4",
+    "bundle": "message129WhenBeneficial",
+    "compression": "message148 LZ4 canonical>=384 netSaving>=32",
+    "aggregation": "CrossLane cap 2 no delay",
+    "transport": "real secure loopback UDP",
+    "configuredSocketBufferBytes": 8388608,
+    "actualSocketBufferBytes": 16777216,
+    "heavyDiagnostics": false
+  },
+  "ratedRows": [
+    {"r":64,"mode":"InlineScalar","remoteMeanMs":1.249,"remoteP95Ms":1.444,"remoteP99Ms":1.470,"processCpuMs":1360,"senderActiveWallMs":0,"queueHighWater":0,"queueP99Ms":0,"udpDatagrams":34930,"udpBytes":20613620,"sendSyscalls":17465},
+    {"r":64,"mode":"InlineBatched","remoteMeanMs":1.210,"remoteP95Ms":1.404,"remoteP99Ms":1.428,"processCpuMs":1360,"senderActiveWallMs":0,"queueHighWater":0,"queueP99Ms":0,"udpDatagrams":34930,"udpBytes":20619348,"sendSyscalls":546},
+    {"r":64,"mode":"BackgroundScalar","remoteMeanMs":1.087,"remoteP95Ms":1.333,"remoteP99Ms":1.371,"processCpuMs":1400,"senderActiveWallMs":73.407,"queueHighWater":56,"queueP99Ms":0.252,"udpDatagrams":34930,"udpBytes":20619536,"sendSyscalls":17465},
+    {"r":64,"mode":"BackgroundBatched","remoteMeanMs":1.083,"remoteP95Ms":1.275,"remoteP99Ms":1.305,"processCpuMs":1390,"senderActiveWallMs":57.644,"queueHighWater":64,"queueP99Ms":0.217,"udpDatagrams":34930,"udpBytes":20618209,"sendSyscalls":878},
+    {"r":128,"mode":"InlineScalar","remoteMeanMs":2.495,"remoteP95Ms":2.801,"remoteP99Ms":2.858,"processCpuMs":2790,"senderActiveWallMs":0,"queueHighWater":0,"queueP99Ms":0,"udpDatagrams":69644,"udpBytes":40814841,"sendSyscalls":34822},
+    {"r":128,"mode":"InlineBatched","remoteMeanMs":2.422,"remoteP95Ms":2.726,"remoteP99Ms":2.803,"processCpuMs":2780,"senderActiveWallMs":0,"queueHighWater":0,"queueP99Ms":0,"udpDatagrams":69644,"udpBytes":40808484,"sendSyscalls":1089},
+    {"r":128,"mode":"BackgroundScalar","remoteMeanMs":2.171,"remoteP95Ms":2.524,"remoteP99Ms":2.661,"processCpuMs":2860,"senderActiveWallMs":143.060,"queueHighWater":104,"queueP99Ms":0.498,"udpDatagrams":69644,"udpBytes":40761523,"sendSyscalls":34822},
+    {"r":128,"mode":"BackgroundBatched","remoteMeanMs":2.171,"remoteP95Ms":2.486,"remoteP99Ms":2.565,"processCpuMs":2830,"senderActiveWallMs":112.896,"queueHighWater":118,"queueP99Ms":0.388,"udpDatagrams":69644,"udpBytes":40811091,"sendSyscalls":1389},
+    {"r":192,"mode":"InlineScalar","remoteMeanMs":3.886,"remoteP95Ms":4.467,"remoteP99Ms":4.655,"processCpuMs":4410,"senderActiveWallMs":0,"queueHighWater":0,"queueP99Ms":0,"udpDatagrams":104608,"udpBytes":61246077,"sendSyscalls":52208},
+    {"r":192,"mode":"InlineBatched","remoteMeanMs":3.661,"remoteP95Ms":4.055,"remoteP99Ms":4.233,"processCpuMs":4240,"senderActiveWallMs":0,"queueHighWater":0,"queueP99Ms":0,"udpDatagrams":104608,"udpBytes":61327821,"sendSyscalls":1632},
+    {"r":192,"mode":"BackgroundScalar","remoteMeanMs":3.325,"remoteP95Ms":3.770,"remoteP99Ms":4.034,"processCpuMs":4410,"senderActiveWallMs":189.627,"queueHighWater":153,"queueP99Ms":1.049,"udpDatagrams":104608,"udpBytes":61264297,"sendSyscalls":52208},
+    {"r":192,"mode":"BackgroundBatched","remoteMeanMs":3.265,"remoteP95Ms":3.642,"remoteP99Ms":3.813,"processCpuMs":4290,"senderActiveWallMs":154.638,"queueHighWater":159,"queueP99Ms":0.505,"udpDatagrams":104608,"udpBytes":61305876,"sendSyscalls":2187},
+    {"r":256,"mode":"InlineScalar","remoteMeanMs":5.079,"remoteP95Ms":5.641,"remoteP99Ms":5.918,"processCpuMs":5810,"senderActiveWallMs":0,"queueHighWater":0,"queueP99Ms":0,"udpDatagrams":139582,"udpBytes":81916171,"sendSyscalls":69663},
+    {"r":256,"mode":"InlineBatched","remoteMeanMs":4.948,"remoteP95Ms":5.458,"remoteP99Ms":5.604,"processCpuMs":5760,"senderActiveWallMs":0,"queueHighWater":0,"queueP99Ms":0,"udpDatagrams":139582,"udpBytes":81904808,"sendSyscalls":2178},
+    {"r":256,"mode":"BackgroundScalar","remoteMeanMs":4.391,"remoteP95Ms":4.982,"remoteP99Ms":5.124,"processCpuMs":5840,"senderActiveWallMs":265.817,"queueHighWater":201,"queueP99Ms":0.852,"udpDatagrams":139582,"udpBytes":81877232,"sendSyscalls":69663},
+    {"r":256,"mode":"BackgroundBatched","remoteMeanMs":4.397,"remoteP95Ms":4.901,"remoteP99Ms":5.142,"processCpuMs":5810,"senderActiveWallMs":205.312,"queueHighWater":201,"queueP99Ms":0.610,"udpDatagrams":139582,"udpBytes":81965758,"sendSyscalls":2604},
+    {"r":300,"mode":"InlineScalar","remoteMeanMs":6.149,"remoteP95Ms":6.872,"remoteP99Ms":7.329,"processCpuMs":7040,"senderActiveWallMs":0,"queueHighWater":0,"queueP99Ms":0,"udpDatagrams":163796,"udpBytes":95609677,"sendSyscalls":81598},
+    {"r":300,"mode":"InlineBatched","remoteMeanMs":5.841,"remoteP95Ms":6.429,"remoteP99Ms":6.608,"processCpuMs":6810,"senderActiveWallMs":0,"queueHighWater":0,"queueP99Ms":0,"udpDatagrams":163796,"udpBytes":95935242,"sendSyscalls":2721},
+    {"r":300,"mode":"BackgroundScalar","remoteMeanMs":5.158,"remoteP95Ms":5.794,"remoteP99Ms":5.976,"processCpuMs":6890,"senderActiveWallMs":307.608,"queueHighWater":229,"queueP99Ms":0.989,"udpDatagrams":163796,"udpBytes":95899721,"sendSyscalls":81598},
+    {"r":300,"mode":"BackgroundBatched","remoteMeanMs":5.143,"remoteP95Ms":5.691,"remoteP99Ms":5.967,"processCpuMs":6820,"senderActiveWallMs":245.588,"queueHighWater":226,"queueP99Ms":0.722,"udpDatagrams":163796,"udpBytes":95866672,"sendSyscalls":2968}
+  ],
+  "selectedVersusInlineBatchPercent": [
+    {"r":64,"p95Reduction":9.188,"p99Reduction":8.619,"processCpuChange":2.206},
+    {"r":128,"p95Reduction":8.782,"p99Reduction":8.464,"processCpuChange":1.799},
+    {"r":192,"p95Reduction":10.195,"p99Reduction":9.923,"processCpuChange":1.179},
+    {"r":256,"p95Reduction":10.199,"p99Reduction":8.245,"processCpuChange":0.868},
+    {"r":300,"p95Reduction":11.483,"p99Reduction":9.699,"processCpuChange":0.147}
+  ],
+  "firstTestedOverFourMilliseconds": {
+    "inlineScalar": 192,
+    "inlineBatched": 192,
+    "backgroundScalar": 256,
+    "backgroundBatched": 256
+  },
+  "detailedProof192": {
+    "allModesProofEntries": 414720,
+    "allModesAppliedEntries": 414720,
+    "backgroundBatchedSourceToProofP95UpperBoundSteps": 2,
+    "backgroundBatchedQueuedToProofP95Microseconds": 19592,
+    "backgroundBatchedOutstandingHighWater": 11,
+    "sourceSnapshotFallbacks": 0,
+    "rebases": 0
+  },
+  "detailedProofByPopulationAndMode": [
+    {"r":64,"mode":"InlineScalar","queuedToProofP95Microseconds":6340,"sourceToProofP95AuthoritySteps":2,"outstandingHighWater":10},
+    {"r":64,"mode":"InlineBatched","queuedToProofP95Microseconds":6284,"sourceToProofP95AuthoritySteps":2,"outstandingHighWater":10},
+    {"r":64,"mode":"BackgroundScalar","queuedToProofP95Microseconds":8154,"sourceToProofP95AuthoritySteps":3,"outstandingHighWater":19},
+    {"r":64,"mode":"BackgroundBatched","queuedToProofP95Microseconds":6996,"sourceToProofP95AuthoritySteps":2,"outstandingHighWater":16},
+    {"r":128,"mode":"InlineScalar","queuedToProofP95Microseconds":12920,"sourceToProofP95AuthoritySteps":2,"outstandingHighWater":11},
+    {"r":128,"mode":"InlineBatched","queuedToProofP95Microseconds":13452,"sourceToProofP95AuthoritySteps":2,"outstandingHighWater":11},
+    {"r":128,"mode":"BackgroundScalar","queuedToProofP95Microseconds":16383,"sourceToProofP95AuthoritySteps":3,"outstandingHighWater":19},
+    {"r":128,"mode":"BackgroundBatched","queuedToProofP95Microseconds":12564,"sourceToProofP95AuthoritySteps":2,"outstandingHighWater":11},
+    {"r":192,"mode":"InlineScalar","queuedToProofP95Microseconds":24026,"sourceToProofP95AuthoritySteps":2,"outstandingHighWater":11},
+    {"r":192,"mode":"InlineBatched","queuedToProofP95Microseconds":20832,"sourceToProofP95AuthoritySteps":2,"outstandingHighWater":11},
+    {"r":192,"mode":"BackgroundScalar","queuedToProofP95Microseconds":23225,"sourceToProofP95AuthoritySteps":3,"outstandingHighWater":19},
+    {"r":192,"mode":"BackgroundBatched","queuedToProofP95Microseconds":19322,"sourceToProofP95AuthoritySteps":2,"outstandingHighWater":11},
+    {"r":256,"mode":"InlineScalar","queuedToProofP95Microseconds":32767,"sourceToProofP95AuthoritySteps":2,"outstandingHighWater":11},
+    {"r":256,"mode":"InlineBatched","queuedToProofP95Microseconds":26965,"sourceToProofP95AuthoritySteps":2,"outstandingHighWater":11},
+    {"r":256,"mode":"BackgroundScalar","queuedToProofP95Microseconds":30077,"sourceToProofP95AuthoritySteps":3,"outstandingHighWater":19},
+    {"r":256,"mode":"BackgroundBatched","queuedToProofP95Microseconds":27056,"sourceToProofP95AuthoritySteps":2,"outstandingHighWater":11},
+    {"r":300,"mode":"InlineScalar","queuedToProofP95Microseconds":32767,"sourceToProofP95AuthoritySteps":2,"outstandingHighWater":11},
+    {"r":300,"mode":"InlineBatched","queuedToProofP95Microseconds":30967,"sourceToProofP95AuthoritySteps":2,"outstandingHighWater":11},
+    {"r":300,"mode":"BackgroundScalar","queuedToProofP95Microseconds":32767,"sourceToProofP95AuthoritySteps":3,"outstandingHighWater":17},
+    {"r":300,"mode":"BackgroundBatched","queuedToProofP95Microseconds":30162,"sourceToProofP95AuthoritySteps":2,"outstandingHighWater":11}
+  ],
+  "burst192": {
+    "shape": "80 dirty rows every fourth tick; same average as 20/tick",
+    "inlineBatchedP95Ms": 6.698,
+    "inlineBatchedP99Ms": 6.933,
+    "backgroundBatchedP95Ms": 6.010,
+    "backgroundBatchedP99Ms": 6.322,
+    "queueHighWater": 268,
+    "queueP99Ms": 0.862,
+    "capacityRefusals": 0,
+    "finalQueue": 0,
+    "publicationsAndProofs": 368640,
+    "gameMessages": 63234
+  },
+  "hostedDedicated64": {
+    "topology": "one server process; 64 independent client processes; eight owner threads",
+    "allModesCompletedApplications": 64,
+    "allModesChunkProofs": 3904,
+    "allModesEventProofs": 3840,
+    "allModesRebinds": 64,
+    "inlineBatchedServerTransportMs": 1224.597,
+    "inlineBatchedServerCpuMs": 1450,
+    "backgroundBatchedServerTransportMs": 1102.350,
+    "backgroundBatchedServerCpuMs": 1390,
+    "backgroundBatchedQueueHighWater": 262,
+    "backgroundBatchedCapacityRefusals": 0
+  },
+  "pressure": {
+    "realSmallSocketBuffer": {
+      "requestedSendBytes": 1472,
+      "clients": 192,
+      "queueHighWater": 383,
+      "queueP99Ms": 1.049,
+      "wouldBlock": 0,
+      "noBufferSpace": 0,
+      "capacityRefusals": 0,
+      "converged": true,
+      "note": "Linux kernel minimum prevented real loopback WouldBlock"
+    },
+    "deterministicSlowSender": {
+      "capacityDatagrams": 1,
+      "accepted": 1,
+      "refused": 1,
+      "packetNumberAdvancedOnRefusal": false,
+      "reliableWorkConsumedOnRefusal": false,
+      "drainedAfterRelease": true
+    },
+    "scriptedNativeSequence": {
+      "requestedBatchCounts": [3,3,2],
+      "wouldBlock": 1,
+      "partialPrefix": 1,
+      "suffixRetained": true
+    }
+  },
+  "instrumentationTax": {
+    "backgroundBatched192TimingOnP95Ms": 3.642,
+    "backgroundBatched192TimingOffP95Ms": 3.781,
+    "conclusion": "no positive tax distinguishable; disabled control was 3.8% slower within run noise"
+  },
+  "senderAccounting": {
+    "threadCpuAvailable": false,
+    "reportedMetric": "worker service wall time",
+    "aggregateAccounting": "matched process CPU contains producer and sender work",
+    "percentilesCombined": false
+  },
+  "correctness": {
+    "semanticDigestEqual": true,
+    "logicalMessagesEqual": true,
+    "proofCountsEqual": true,
+    "secureDataDatagramCountsEqual": true,
+    "udpDatagramCountsEqual": true,
+    "maximumPayloadByteVariationPercent": 0.34,
+    "byteVariationExplanation": "asynchronous proof timing changes valid latest-state range/bundle composition without changing format or final truth",
+    "warmedProducerManagedBytes": 0,
+    "workerFaultObservable": true,
+    "boundedShutdown": true,
+    "pathAndRetirementFenced": true,
+    "physicalReliableLossRetransmits": true
+  },
+  "verification": {
+    "networkTests": "passed",
+    "pf5R3Focused": "passed before selected-default commit; repeated in final closure",
+    "canonicalRelease": "pending final closure",
+    "exportComposition": "pending final closure"
+  }
+}

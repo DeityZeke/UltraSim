@@ -6,10 +6,11 @@ PF4A quiet publication-work suppression, PF4B chunk-knowledge census, PF4C selec
 bundling, the PF4C-R1 singleton MTU repair, PF4D unreliable Network-frame aggregation, PF4E
 dense/distributed fanout plus remaining-cost attribution, PF4E-R1 rated scaling reconciliation,
 PF4E-R2 direct ChunkPublication staging, PF4F bounded selective message-129 compression,
-the PF5-R1 replication baseline/history-model audit, PF5-R2 shared latest-state publication, and
-PF5-R2-R1 combined timing-boundary closure,
+the PF5-R1 replication baseline/history-model audit, PF5-R2 shared latest-state publication,
+PF5-R2-R1 combined timing-boundary closure, PF5-R2-R2 normalized scaling attribution, and PF5-R3
+bounded background UDP egress,
 as of
-2026-09-14.
+2026-09-15.
 
 Network N0, Terrain/World T0, N1.0-N1.4, Hosted H0.0-H0.5, the five-profile
 comparison program through P0.4, and the first real remote public-actor consumer
@@ -608,6 +609,34 @@ removing that duplication is a future memory refinement.
 See the [PF5-R1 audit](../../_Benchmarks/Baselines/concept-demo-pf5-r1-replication-baseline-history-audit-2026-09-14.md)
 and [PF5-R2 closure](../../_Benchmarks/Baselines/concept-demo-pf5-r2-shared-latest-state-publication-2026-09-14.md),
 plus the [PF5-R2-R1 timing closure](../../_Benchmarks/Baselines/concept-demo-pf5-r2-r1-timing-boundary-closure-2026-09-14.md).
+
+### PF5-R3 selected physical egress
+
+PF5-R3 changes only ownership of a complete encrypted established-session datagram after
+`NetworkProtocolPeer` has selected lanes, allocated packet/security identity, encoded, and
+encrypted it. `SharedUdpProtocolLimits.Default` now selects
+`BackgroundPlatformBatch`: one fixed-capacity SPSC slab and one persistent sender per shared
+listener. Linux uses bounded `sendmmsg`; unsupported platforms use scalar sends under the same
+background ownership. Unknown-path admission and immediate handshake traffic remain inline.
+
+`DatagramSendStatus.Accepted` means the listener's bounded egress storage took ownership of a
+stable ciphertext copy. It does not mean remote delivery or kernel acceptance. Queue refusal
+therefore occurs before the peer commits PacketNumber/reliable-flight state. Once accepted,
+reliable recovery remains the protocol's responsibility; WorldState remains unreliable. A
+path-generation fence prevents queued ciphertext from escaping after rebind or retirement.
+
+The current v29 production-shaped real-UDP matrix measured 64/128/192/256/300 recipients with
+identical publications, proofs, bundle entries, and semantic digests. Relative to inline native
+send batching, background native batching reduced the server-owned remote p95 by 8.8–11.5% and
+p99 by 8.2–9.9%; the first tested point over 4 ms moved from 192 to 256. Queue p99 remained below
+0.73 ms, every queue drained to zero, and there were no capacity refusals, `WouldBlock`,
+`NoBufferSpace`, or physical send failures. Matched-window total-process CPU changed by +0.1% to
++2.2%. This is a synthetic architecture curve, not product CCU.
+
+The external H0.5 dedicated-server / independent-client 64-session matrix preserved all 3,904
+chunk proofs, 3,840 event proofs, rebinds, and clean retirement. Bounded slow-sender, queue-full,
+partial-`sendmmsg`, physical-loss/retransmit, rebind, worker-fault, and shutdown tests retain the
+failure contract. See the [PF5-R3 evidence](../../_Benchmarks/Baselines/concept-demo-pf5-r3-background-udp-egress-2026-09-15.md).
 
 ### Snapshot / delta / absence
 
