@@ -2723,7 +2723,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
                     _dueWorks.AsSpan(baseIndex + offset, count - offset), step,
                     _dueStatuses.AsSpan(baseIndex + offset, count - offset),
                     out int messagesQueued, out int applicationBytesQueued,
-                    out int bundlesQueued);
+                    out int bundlesQueued, out int bundleEntriesQueued);
                 P03WholeFlowHarness.Require(consumed > 0,
                     "Chunk selected-profile bundle pass made no progress.");
                 _gameMessagesQueued += checked((ulong)messagesQueued);
@@ -2773,8 +2773,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
                         throw new InvalidOperationException(
                             $"Chunk remote schedule returned {status}.");
                 }
-                if (bundlesQueued != 0)
-                    _bundleEntries += checked((ulong)successful);
+                _bundleEntries += checked((ulong)bundleEntriesQueued);
                 offset += consumed;
             }
             for (int index = offset; index < count; index++)

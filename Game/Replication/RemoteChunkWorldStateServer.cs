@@ -985,6 +985,18 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         out int gameMessagesQueued,
         out int applicationBytesQueued,
         out int bundlesQueued)
+        => TryScheduleDueBundle(
+            works, cadenceStep, statuses, out gameMessagesQueued,
+            out applicationBytesQueued, out bundlesQueued, out _);
+
+    public int TryScheduleDueBundle(
+        ReadOnlySpan<ChunkPublicationWork> works,
+        ulong cadenceStep,
+        Span<RemoteChunkWorldStateScheduleStatus> statuses,
+        out int gameMessagesQueued,
+        out int applicationBytesQueued,
+        out int bundlesQueued,
+        out int bundleEntriesQueued)
     {
         EnsureOwner();
         if (statuses.Length < works.Length) throw new ArgumentException(
@@ -992,6 +1004,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         gameMessagesQueued = 0;
         applicationBytesQueued = 0;
         bundlesQueued = 0;
+        bundleEntriesQueued = 0;
         if (works.IsEmpty) return 0;
         _lastServiceStep = Math.Max(_lastServiceStep, cadenceStep);
         long timing = _scheduleTiming.StartDetailed();
@@ -999,7 +1012,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         {
             return TryScheduleDueBundleCore(
                 works, cadenceStep, statuses, out gameMessagesQueued,
-                out applicationBytesQueued, out bundlesQueued);
+                out applicationBytesQueued, out bundlesQueued, out bundleEntriesQueued);
         }
         finally { _scheduleTiming.RecordDetailed(timing); }
     }
@@ -1010,11 +1023,13 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         Span<RemoteChunkWorldStateScheduleStatus> statuses,
         out int gameMessagesQueued,
         out int applicationBytesQueued,
-        out int bundlesQueued)
+        out int bundlesQueued,
+        out int bundleEntriesQueued)
     {
         gameMessagesQueued = 0;
         applicationBytesQueued = 0;
         bundlesQueued = 0;
+        bundleEntriesQueued = 0;
         int consumedTotal = 0;
         PreparedCandidate carried = default;
         Span<RemoteChunkDeltaRecord> carriedRecords = stackalloc RemoteChunkDeltaRecord[
@@ -1024,7 +1039,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             int consumed = TryScheduleOneDueBundleCore(
                 works[consumedTotal..], cadenceStep, statuses[consumedTotal..],
                 ref carried, carriedRecords,
-                out int messages, out int bytes, out int bundles);
+                out int messages, out int bytes, out int bundles, out int bundleEntries);
             if (consumed <= 0)
                 throw new InvalidOperationException(
                     "A nonempty selected-profile scheduling pass made no finite progress.");
@@ -1032,6 +1047,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             gameMessagesQueued = checked(gameMessagesQueued + messages);
             applicationBytesQueued = checked(applicationBytesQueued + bytes);
             bundlesQueued = checked(bundlesQueued + bundles);
+            bundleEntriesQueued = checked(bundleEntriesQueued + bundleEntries);
 
             bool blocked = false;
             int statusStart = consumedTotal - consumed;
@@ -1060,11 +1076,13 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         Span<RemoteChunkDeltaRecord> carriedRecords,
         out int gameMessagesQueued,
         out int applicationBytesQueued,
-        out int bundlesQueued)
+        out int bundlesQueued,
+        out int bundleEntriesQueued)
     {
         gameMessagesQueued = 0;
         applicationBytesQueued = 0;
         bundlesQueued = 0;
+        bundleEntriesQueued = 0;
         int processed = 0;
         int staged = 0;
         int deltaRecords = 0;
@@ -1408,6 +1426,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         gameMessagesQueued = 1;
         applicationBytesQueued = written;
         bundlesQueued = bundled ? 1 : 0;
+        bundleEntriesQueued = bundled ? staged : 0;
         if (bundled) RecordBundleQueued(
             staged, canonicalBundleBytes, standaloneBytes, fullByByteLimit);
         else if (_telemetryLevel == GameTelemetryLevel.Detailed)
