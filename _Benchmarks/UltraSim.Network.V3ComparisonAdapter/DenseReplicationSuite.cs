@@ -19,6 +19,7 @@ internal static class DenseReplicationSuite
         int ticks = ReadInt(args, "--ticks", 120);
         int warmup = ReadInt(args, "--warmup", 30);
         int dirtyPercent = ReadInt(args, "--dirty-percent", 2);
+        int dirtyBurstPeriod = ReadInt(args, "--dirty-burst-period", 1);
         string requestedTraffic = ReadText(args, "--replication-traffic") ?? "full";
         bool tailDiagnostics = ReadBool(args, "--tail-diagnostics", false);
         bool phaseAttribution = ReadBool(args, "--phase-attribution", false) || tailDiagnostics;
@@ -29,17 +30,20 @@ internal static class DenseReplicationSuite
         string output = ReadText(args, "--output") ??
             "_Benchmarks/Baselines/network-v3-spread-dense-acceptance.json";
         if (clients <= 0 || clients > 1_024 || ticks < 30 || warmup < 1 ||
-            dirtyPercent is <= 0 or > 100)
+            dirtyPercent is <= 0 or > 100 || dirtyBurstPeriod is <= 0 or > 64 ||
+            (long)dirtyPercent * dirtyBurstPeriod > 100)
             throw new ArgumentOutOfRangeException(nameof(args));
 
         ReplicationWorkload[] baseProfiles = requested.ToLowerInvariant() switch
         {
-            "spread_mix" => [ReplicationWorkload.Spread(clients, ticks, warmup, dirtyPercent)],
-            "dense_mix" => [ReplicationWorkload.Dense(clients, ticks, warmup, dirtyPercent)],
+            "spread_mix" => [ReplicationWorkload.Spread(
+                clients, ticks, warmup, dirtyPercent, dirtyBurstPeriod)],
+            "dense_mix" => [ReplicationWorkload.Dense(
+                clients, ticks, warmup, dirtyPercent, dirtyBurstPeriod)],
             "all" =>
             [
-                ReplicationWorkload.Dense(clients, ticks, warmup, dirtyPercent),
-                ReplicationWorkload.Spread(clients, ticks, warmup, dirtyPercent),
+                ReplicationWorkload.Dense(clients, ticks, warmup, dirtyPercent, dirtyBurstPeriod),
+                ReplicationWorkload.Spread(clients, ticks, warmup, dirtyPercent, dirtyBurstPeriod),
             ],
             _ => throw new ArgumentException($"Unknown replication profile '{requested}'."),
         };
@@ -140,6 +144,9 @@ internal static class DenseReplicationSuite
                 SharedUdpSocketIoMode.PlatformBatch,
             "platform-send-receive-batch" or "native-send-receive-batch" =>
                 SharedUdpSocketIoMode.PlatformSendReceiveBatch,
+            "background-scalar" => SharedUdpSocketIoMode.BackgroundScalar,
+            "background-platform-batch" or "background-native-send-batch" =>
+                SharedUdpSocketIoMode.BackgroundPlatformBatch,
             "scalar" => SharedUdpSocketIoMode.Scalar,
             _ => throw new ArgumentException($"Unsupported shared socket I/O mode '{value}'."),
         };
@@ -635,7 +642,11 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         _tickClientApplicationTicks = 0;
         _tickProtocolPumpTicks = 0;
         long phaseStarted = Stopwatch.GetTimestamp();
-        int dirty = Math.Max(1, _profile.Entities * _profile.DirtyPercent / 100);
+        int steadyDirty = Math.Max(1, _profile.Entities * _profile.DirtyPercent / 100);
+        int dirty = _profile.DirtyBurstPeriod == 1 ||
+            tick % _profile.DirtyBurstPeriod == 0
+            ? checked(steadyDirty * _profile.DirtyBurstPeriod)
+            : 0;
         for (int offset = 0; offset < dirty; offset++)
         {
             int entity = (_dirtyCursor + offset) % _profile.Entities;
@@ -1950,16 +1961,21 @@ internal sealed record ReplicationWorkload(
     int Ticks,
     int WarmupTicks,
     int DirtyPercent,
+    int DirtyBurstPeriod,
     int SpacingMillimeters,
     string SpatialShape,
     ReplicationTraffic Traffic = ReplicationTraffic.Full)
 {
-    internal static ReplicationWorkload Dense(int clients, int ticks, int warmup, int dirty) =>
-        new("dense_mix", clients, 1_000, ticks, warmup, dirty, 4_000,
+    internal static ReplicationWorkload Dense(
+        int clients, int ticks, int warmup, int dirty, int dirtyBurstPeriod = 1) =>
+        new(dirtyBurstPeriod == 1 ? "dense_mix" : $"dense_mix/burst-{dirtyBurstPeriod}",
+            clients, 1_000, ticks, warmup, dirty, dirtyBurstPeriod, 4_000,
             "One 126 m hotspot; all recipients distributed through the hotspot; every entity lies inside the 192 m Far envelope.");
 
-    internal static ReplicationWorkload Spread(int clients, int ticks, int warmup, int dirty) =>
-        new("spread_mix", clients, 5_000, ticks, warmup, dirty, 12_000,
+    internal static ReplicationWorkload Spread(
+        int clients, int ticks, int warmup, int dirty, int dirtyBurstPeriod = 1) =>
+        new(dirtyBurstPeriod == 1 ? "spread_mix" : $"spread_mix/burst-{dirtyBurstPeriod}",
+            clients, 5_000, ticks, warmup, dirty, dirtyBurstPeriod, 12_000,
             "One 768 m distributed grid; recipients are distributed through the world; maintained relations follow local 192 m envelopes.");
 
     internal ReplicationWorkload WithTraffic(ReplicationTraffic traffic) => this with

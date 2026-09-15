@@ -21,6 +21,16 @@ public enum SharedUdpSocketIoMode : byte
     /// batching drains only datagrams already available at the current pump.
     /// </summary>
     PlatformSendReceiveBatch = 2,
+    /// <summary>
+    /// Copy finalized established-session datagrams into one bounded
+    /// listener-owned queue drained by one persistent scalar sender.
+    /// </summary>
+    BackgroundScalar = 3,
+    /// <summary>
+    /// Copy finalized established-session datagrams into one bounded
+    /// listener-owned queue drained with native batching where supported.
+    /// </summary>
+    BackgroundPlatformBatch = 4,
 }
 
 /// <summary>Fixed ownership and routing bounds for one shared UDP server socket.</summary>
@@ -101,13 +111,18 @@ public readonly record struct SharedUdpProtocolLimits(
         => EstimateReservedPayloadBytes(
             udp,
             SocketIoMode is SharedUdpSocketIoMode.PlatformBatch or
-                SharedUdpSocketIoMode.PlatformSendReceiveBatch,
-            SocketIoMode == SharedUdpSocketIoMode.PlatformSendReceiveBatch);
+                SharedUdpSocketIoMode.PlatformSendReceiveBatch or
+                SharedUdpSocketIoMode.BackgroundScalar or
+                SharedUdpSocketIoMode.BackgroundPlatformBatch,
+            SocketIoMode == SharedUdpSocketIoMode.PlatformSendReceiveBatch,
+            SocketIoMode is SharedUdpSocketIoMode.BackgroundScalar or
+                SharedUdpSocketIoMode.BackgroundPlatformBatch);
 
     internal long EstimateReservedPayloadBytes(
         UdpProtocolLimits udp,
         bool includeOutboundBatch,
-        bool includeInboundBatch = false)
+        bool includeInboundBatch = false,
+        bool includeBackgroundMetadata = false)
     {
         Validate(udp);
         int routeCapacity = checked((int)BitOperations.RoundUpToPowerOf2(
@@ -125,6 +140,13 @@ public readonly record struct SharedUdpProtocolLimits(
                 (long)outbound * udp.MaximumDatagramBytes +
                 (long)outbound * (sizeof(int) + 16 + IntPtr.Size) +
                 (long)(MaximumNativeSendBatchDatagrams + 1) * sizeof(ulong));
+        }
+        if (includeBackgroundMetadata)
+        {
+            int outbound = checked(MaximumSessions * MaximumQueuedDatagramsPerSession);
+            bytes = checked(bytes +
+                (long)outbound * (sizeof(int) + sizeof(long)) +
+                2L * 64 * sizeof(long));
         }
         if (includeInboundBatch)
             bytes = checked(bytes +
@@ -169,7 +191,8 @@ public readonly record struct SharedUdpListenerSnapshot(
     long ReservedBytes,
     long ConfiguredSocketBufferBytes,
     long ActualSocketBufferBytes,
-    SharedUdpReceiveCensusSnapshot ReceiveCensus);
+    SharedUdpReceiveCensusSnapshot ReceiveCensus,
+    SharedUdpBackgroundEgressSnapshot BackgroundEgress);
 
 /// <summary>
 /// Opt-in, no-wait receive-drain evidence for one shared server listener.
@@ -238,8 +261,10 @@ internal sealed class SharedUdpServerListener : IDisposable
     private readonly int[] _freeEndpoints;
     private readonly ulong[] _routeKeys;
     private readonly int[] _routeSlots;
+    private readonly object _egressPathGate = new();
     private readonly bool _usesNativeSendBatching;
     private readonly bool _usesNativeReceiveBatching;
+    private readonly SharedUdpBackgroundEgress? _backgroundEgress;
     private readonly int _maximumNativeSendBatchDatagrams;
     private readonly int _maximumNativeReceiveBatchDatagrams;
     private readonly byte[] _outboundPayloads;
@@ -311,7 +336,8 @@ internal sealed class SharedUdpServerListener : IDisposable
         UdpProtocolLimits udp,
         SharedUdpProtocolLimits shared,
         IPEndPoint bindEndPoint,
-        ISharedUdpUnknownDatagramHandler? unknownDatagramHandler)
+        ISharedUdpUnknownDatagramHandler? unknownDatagramHandler,
+        ISharedUdpBackgroundEgressTestHook? backgroundEgressTestHook = null)
     {
         ArgumentNullException.ThrowIfNull(bindEndPoint);
         if (bindEndPoint.AddressFamily != AddressFamily.InterNetwork)
@@ -377,14 +403,35 @@ internal sealed class SharedUdpServerListener : IDisposable
             listenerLimits.SocketReceiveBufferBytes);
         _socket = UdpDatagramEndpoint.CreateSocket(listenerLimits);
         _actualSocketBufferBytes = checked((long)_socket.SendBufferSize + _socket.ReceiveBufferSize);
-        _socketDescriptor = _usesNativeSendBatching || _usesNativeReceiveBatching
+        bool usesBackgroundEgress = shared.SocketIoMode is
+            SharedUdpSocketIoMode.BackgroundScalar or
+            SharedUdpSocketIoMode.BackgroundPlatformBatch;
+        bool usesBackgroundNativeBatching =
+            shared.SocketIoMode == SharedUdpSocketIoMode.BackgroundPlatformBatch &&
+            LinuxUdpBatch.IsSupported;
+        _socketDescriptor = _usesNativeSendBatching || _usesNativeReceiveBatching ||
+            usesBackgroundNativeBatching
             ? _socket.SafeHandle.DangerousGetHandle().ToInt32()
             : -1;
         _socket.Bind(bindEndPoint);
         _socket.Blocking = false;
         LocalEndPoint = (IPEndPoint)_socket.LocalEndPoint!;
+        if (usesBackgroundEgress)
+        {
+            _backgroundEgress = new SharedUdpBackgroundEgress(
+                _socket,
+                _socketDescriptor,
+                _maximumDatagramBytes,
+                checked(shared.MaximumSessions * shared.MaximumQueuedDatagramsPerSession),
+                shared.MaximumNativeSendBatchDatagrams,
+                udp.DrainTimeoutMilliseconds,
+                usesBackgroundNativeBatching,
+                _egressPathGate,
+                backgroundEgressTestHook);
+        }
         ReservedBytes = shared.EstimateReservedPayloadBytes(
-            udp, _usesNativeSendBatching, _usesNativeReceiveBatching);
+            udp, _usesNativeSendBatching || usesBackgroundEgress,
+            _usesNativeReceiveBatching, usesBackgroundEgress);
     }
 
     internal IPEndPoint LocalEndPoint { get; }
@@ -453,7 +500,11 @@ internal sealed class SharedUdpServerListener : IDisposable
         _routeSlots[newIndex] = endpoint.Slot;
         _routeKeys[oldIndex] = Tombstone;
         _routeSlots[oldIndex] = -1;
-        endpoint.ApplyRemote(remote, address, binding);
+        lock (_egressPathGate)
+        {
+            endpoint.AdvanceEgressPathGeneration();
+            endpoint.ApplyRemote(remote, address, binding);
+        }
         return true;
     }
 
@@ -702,6 +753,13 @@ internal sealed class SharedUdpServerListener : IDisposable
             _rejected = SaturatingIncrement(_rejected);
             return DatagramSendStatus.DatagramTooLarge;
         }
+        if (_backgroundEgress is not null && allowBatch)
+        {
+            DatagramSendStatus status = _backgroundEgress.TryEnqueue(endpoint, datagram);
+            if (status == DatagramSendStatus.CapacityExceeded)
+                _capacityDrops = SaturatingIncrement(_capacityDrops);
+            return status;
+        }
         if (_usesNativeSendBatching && allowBatch)
         {
             if (_outboundCount == _outboundLengths.Length)
@@ -726,6 +784,7 @@ internal sealed class SharedUdpServerListener : IDisposable
     internal void PumpOutbound()
     {
         EnsureOperational();
+        _backgroundEgress?.ThrowIfFaulted();
         if (!_usesNativeSendBatching || _outboundCount == 0) return;
 
         DiscardInvalidOutboundHead();
@@ -880,6 +939,8 @@ internal sealed class SharedUdpServerListener : IDisposable
             index = (index + 1) & mask;
         }
         DiscardEndpointOutbound(endpoint);
+        lock (_egressPathGate)
+            endpoint.AdvanceEgressPathGeneration();
         _endpoints[endpoint.Slot] = null;
         _freeEndpoints[_freeCount++] = endpoint.Slot;
         _registered--;
@@ -927,21 +988,45 @@ internal sealed class SharedUdpServerListener : IDisposable
     internal SharedUdpListenerSnapshot GetSnapshot()
     {
         EnsureOperational();
+        SharedUdpBackgroundEgressSnapshot background = _backgroundEgress?.GetSnapshot() ?? default;
         int p50 = BatchPercentile(_nativeSendBatchHistogram, 0.50, _maximumNativeSendBatch);
         int p95 = BatchPercentile(_nativeSendBatchHistogram, 0.95, _maximumNativeSendBatch);
+        if (background.UsesNativeBatching)
+        {
+            p50 = background.DrainBatchP50;
+            p95 = background.DrainBatchP95;
+        }
         int receiveP50 = BatchPercentile(
             _nativeReceiveBatchHistogram, 0.50, _maximumNativeReceiveBatch);
         int receiveP95 = BatchPercentile(
             _nativeReceiveBatchHistogram, 0.95, _maximumNativeReceiveBatch);
-        return new(_sent, _received, _sentBytes, _receivedBytes,
-            _unknownPaths, _capacityDrops, _rejected, _sendCalls, _receivePollCalls,
-            _receiveCalls, _wouldBlockEvents, _usesNativeSendBatching,
-            _nativeSendCalls, _nativeSentDatagrams, _partialNativeSendCalls,
-            _nativeSendWouldBlockEvents, p50, p95, _maximumNativeSendBatch,
-            _maximumOutboundQueued, _sendSystemCallTicks, _receivePollTicks,
-            _receiveSystemCallTicks, _maximumSentDatagramBytes,
+        return new(SaturatingAdd(_sent, background.PhysicallySentDatagrams), _received,
+            SaturatingAdd(_sentBytes, background.PhysicallySentBytes), _receivedBytes,
+            _unknownPaths, _capacityDrops, SaturatingAdd(_rejected, background.PhysicalSendFailures),
+            SaturatingAdd(_sendCalls, SaturatingAdd(background.ScalarSendCalls,
+                background.NativeSendCalls)), _receivePollCalls,
+            _receiveCalls, SaturatingAdd(_wouldBlockEvents,
+                SaturatingAdd(background.WouldBlockEvents, background.NoBufferEvents)),
+            _usesNativeSendBatching || background.UsesNativeBatching,
+            SaturatingAdd(_nativeSendCalls, background.NativeSendCalls),
+            SaturatingAdd(_nativeSentDatagrams,
+                background.UsesNativeBatching ? background.PhysicallySentDatagrams : 0),
+            SaturatingAdd(_partialNativeSendCalls, background.PartialNativeSendCalls),
+            SaturatingAdd(_nativeSendWouldBlockEvents,
+                SaturatingAdd(background.WouldBlockEvents, background.NoBufferEvents)),
+            p50, p95, Math.Max(_maximumNativeSendBatch, background.MaximumBatch),
+            Math.Max(_maximumOutboundQueued, background.HighWaterDatagrams),
+            SaturatingAdd(_sendSystemCallTicks,
+                background.PhysicalSendSystemCallStopwatchTicks),
+            _receivePollTicks,
+            _receiveSystemCallTicks, Math.Max(_maximumSentDatagramBytes,
+                background.MaximumPhysicallySentDatagramBytes),
             _maximumReceivedDatagramBytes, _registered,
-            _maximumQueued, true, _lastError, ReservedBytes,
+            _maximumQueued, true,
+            background.LastSocketError == SocketError.Success
+                ? _lastError
+                : background.LastSocketError,
+            ReservedBytes,
             _configuredSocketBufferBytes, _actualSocketBufferBytes,
             new SharedUdpReceiveCensusSnapshot(
                 _receivePumpCalls,
@@ -965,7 +1050,8 @@ internal sealed class SharedUdpServerListener : IDisposable
                 _nativeReceiveWouldBlockEvents,
                 receiveP50,
                 receiveP95,
-                _maximumNativeReceiveBatch));
+                _maximumNativeReceiveBatch),
+            background);
     }
 
     internal void ResetStageTiming(bool enabled)
@@ -1040,15 +1126,29 @@ internal sealed class SharedUdpServerListener : IDisposable
         EnsureOwnerThread();
         if (_disposed) return;
         _disposed = true;
-        _socket.Dispose();
-        CryptographicOperations.ZeroMemory(_receiveScratch);
-        CryptographicOperations.ZeroMemory(_outboundPayloads);
-        CryptographicOperations.ZeroMemory(_outboundAddresses);
-        CryptographicOperations.ZeroMemory(_nativeReceivePayloads);
-        CryptographicOperations.ZeroMemory(_nativeReceiveAddresses);
-        Array.Clear(_outboundLengths);
-        Array.Clear(_outboundEndpoints);
-        Array.Clear(_nativeReceiveLengths);
+        Exception? failure = null;
+        try
+        {
+            _backgroundEgress?.Dispose();
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
+        }
+        finally
+        {
+            _socket.Dispose();
+            CryptographicOperations.ZeroMemory(_receiveScratch);
+            CryptographicOperations.ZeroMemory(_outboundPayloads);
+            CryptographicOperations.ZeroMemory(_outboundAddresses);
+            CryptographicOperations.ZeroMemory(_nativeReceivePayloads);
+            CryptographicOperations.ZeroMemory(_nativeReceiveAddresses);
+            Array.Clear(_outboundLengths);
+            Array.Clear(_outboundEndpoints);
+            Array.Clear(_nativeReceiveLengths);
+        }
+        if (failure is not null)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
     }
 
     private int FindInsertion(ulong key)
@@ -1183,13 +1283,14 @@ internal sealed class SharedUdpServerEndpoint : INetworkDatagramEndpoint, IDispo
     private int _count;
     private ConnectionId _connection;
     private ISharedUdpKnownDatagramHandler? _knownDatagramHandler;
-    private ulong _sent;
+    private long _sent;
     private ulong _received;
-    private ulong _sentBytes;
+    private long _sentBytes;
     private ulong _receivedBytes;
     private ulong _capacityDrops;
     private ulong _rejected;
     private int _maximumSentDatagramBytes;
+    private int _egressPathGeneration = 1;
     private int _maximumReceivedDatagramBytes;
     private bool _disposed;
 
@@ -1217,6 +1318,20 @@ internal sealed class SharedUdpServerEndpoint : INetworkDatagramEndpoint, IDispo
     internal int QueuedDatagrams => _count;
     internal bool IsDisposed => _disposed;
     internal ConnectionId Connection => _connection;
+
+    internal int CaptureEgressPathGeneration() => Volatile.Read(ref _egressPathGeneration);
+
+    internal bool IsEgressPathGenerationCurrent(int generation) =>
+        !Volatile.Read(ref _disposed) &&
+        generation == Volatile.Read(ref _egressPathGeneration);
+
+    internal void AdvanceEgressPathGeneration()
+    {
+        EnsureOwnerThread();
+        if (_egressPathGeneration == int.MaxValue)
+            throw new InvalidOperationException("The shared UDP endpoint path generation is exhausted.");
+        Volatile.Write(ref _egressPathGeneration, _egressPathGeneration + 1);
+    }
 
     internal void BindConnection(ConnectionId connection)
     {
@@ -1298,11 +1413,16 @@ internal sealed class SharedUdpServerEndpoint : INetworkDatagramEndpoint, IDispo
     internal void RecordPhysicalSent(int datagramBytes)
     {
         EnsureOperational();
+        RecordPhysicalSentFromEgress(datagramBytes);
+    }
+
+    internal void RecordPhysicalSentFromEgress(int datagramBytes)
+    {
         if (datagramBytes < 0 || datagramBytes > _maximumDatagramBytes)
             throw new ArgumentOutOfRangeException(nameof(datagramBytes));
-        _sent = SaturatingIncrement(_sent);
-        _sentBytes = SaturatingAdd(_sentBytes, checked((ulong)datagramBytes));
-        _maximumSentDatagramBytes = Math.Max(_maximumSentDatagramBytes, datagramBytes);
+        SaturatingIncrement(ref _sent);
+        SaturatingAdd(ref _sentBytes, datagramBytes);
+        AtomicMaximum(ref _maximumSentDatagramBytes, datagramBytes);
     }
 
     public bool TryReceive(Span<byte> destination, out int length)
@@ -1327,9 +1447,10 @@ internal sealed class SharedUdpServerEndpoint : INetworkDatagramEndpoint, IDispo
     internal UdpDatagramEndpointSnapshot GetSnapshot()
     {
         EnsureOwnerThread();
-        return new(_sent, _received, _sentBytes, _receivedBytes,
+        return new(checked((ulong)Math.Max(0, Volatile.Read(ref _sent))), _received,
+            checked((ulong)Math.Max(0, Volatile.Read(ref _sentBytes))), _receivedBytes,
             _capacityDrops, _rejected, 0, 0, 0, 0,
-            _maximumSentDatagramBytes, _maximumReceivedDatagramBytes,
+            Volatile.Read(ref _maximumSentDatagramBytes), _maximumReceivedDatagramBytes,
             !_disposed, SocketError.Success);
     }
 
@@ -1349,6 +1470,37 @@ internal sealed class SharedUdpServerEndpoint : INetworkDatagramEndpoint, IDispo
 
     private static ulong SaturatingAdd(ulong left, ulong right) =>
         ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
+
+    private static void SaturatingIncrement(ref long value)
+    {
+        while (true)
+        {
+            long current = Volatile.Read(ref value);
+            if (current == long.MaxValue) return;
+            if (Interlocked.CompareExchange(ref value, current + 1, current) == current) return;
+        }
+    }
+
+    private static void SaturatingAdd(ref long value, int amount)
+    {
+        while (true)
+        {
+            long current = Volatile.Read(ref value);
+            long next = long.MaxValue - current < amount ? long.MaxValue : current + amount;
+            if (Interlocked.CompareExchange(ref value, next, current) == current) return;
+        }
+    }
+
+    private static void AtomicMaximum(ref int target, int candidate)
+    {
+        int current = Volatile.Read(ref target);
+        while (candidate > current)
+        {
+            int observed = Interlocked.CompareExchange(ref target, candidate, current);
+            if (observed == current) return;
+            current = observed;
+        }
+    }
 
     private void EnsureOperational()
     {

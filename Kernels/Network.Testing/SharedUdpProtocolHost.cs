@@ -108,7 +108,8 @@ public sealed class SharedUdpProtocolHost : IDisposable
         NetworkServerIdentity? serverIdentity = null,
         ReadOnlyMemory<byte> trustedServerPublicKey = default,
         NetworkProtocolManifest? serverManifest = null,
-        bool allowSelfTrust = true)
+        bool allowSelfTrust = true,
+        ISharedUdpBackgroundEgressTestHook? backgroundEgressTestHook = null)
     {
         ArgumentNullException.ThrowIfNull(clock);
         sharedLimits.Validate(udpLimits);
@@ -139,7 +140,12 @@ public sealed class SharedUdpProtocolHost : IDisposable
         for (int index = 0; index < _sessionFree.Length; index++)
             _sessionFree[index] = _sessionFree.Length - 1 - index;
         _sessionFreeCount = _sessionFree.Length;
-        _listener = new SharedUdpServerListener(udpLimits, sharedLimits);
+        _listener = new SharedUdpServerListener(
+            udpLimits,
+            sharedLimits,
+            new IPEndPoint(IPAddress.Loopback, 0),
+            unknownDatagramHandler: null,
+            backgroundEgressTestHook);
     }
 
     public int SessionCount

@@ -25,11 +25,111 @@ Console.WriteLine("PASS documentation architecture and links");
 if (options.ArchitectureOnly)
     return 0;
 
+if (options.Pf5R3Only)
+{
+    VerifyPf5R3BackgroundEgress(root, options.Configuration);
+    Console.WriteLine("PASS PF5-R3 focused background-egress verification");
+    return 0;
+}
+
 if (options.Pf5R2R2Only)
 {
     VerifyPf5R2R2ScalingBoundary(root, options.Configuration);
     Console.WriteLine("PASS PF5-R2-R2 focused scaling-boundary verification");
     return 0;
+}
+
+static void VerifyPf5R3BackgroundEgress(string root, string configuration)
+{
+    Run(root, "dotnet",
+    [
+        "run", "--project",
+        "_Tests/UltraSim.Network.Tests/UltraSim.Network.Tests.csproj",
+        "-c", configuration,
+    ]);
+
+    string scope = Path.Combine(Path.GetTempPath(), "ultrasim-repository-verification",
+        Environment.ProcessId.ToString(), "pf5-r3");
+    if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    Directory.CreateDirectory(scope);
+        string[] modes = ["scalar", "platform-batch", "background-scalar",
+            "background-platform-batch"];
+    try
+    {
+        ulong? constructions = null;
+        ulong? eventsPublished = null;
+        foreach (string mode in modes)
+        {
+            string output = Path.Combine(scope, $"dense-{mode}.json");
+            Run(root, "dotnet",
+            [
+                "run", "--project",
+                "_Benchmarks/UltraSim.Network.V3ComparisonAdapter/UltraSim.Network.V3ComparisonAdapter.csproj",
+                "-c", configuration, "--", "--replication-suite",
+                "--replication-profile=dense_mix", "--replication-traffic=full",
+                "--clients=16", "--ticks=30", "--warmup=6", "--dirty-percent=2",
+                $"--shared-socket-io={mode}", $"--output={output}",
+            ]);
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(output));
+            JsonElement result = document.RootElement.GetProperty("results")[0];
+            if (!result.GetProperty("converged").GetBoolean() ||
+                result.GetProperty("capacity_drops").GetUInt64() != 0 ||
+                result.GetProperty("wire_datagrams").GetUInt64() == 0)
+                throw new InvalidOperationException(
+                    $"PF5-R3 {mode} real-UDP control did not converge cleanly.");
+            ulong currentConstructions = result.GetProperty("semantic_constructions").GetUInt64();
+            ulong currentEvents = result.GetProperty("application_events_published").GetUInt64();
+            constructions ??= currentConstructions;
+            eventsPublished ??= currentEvents;
+            if (constructions != currentConstructions || eventsPublished != currentEvents)
+                throw new InvalidOperationException(
+                    "PF5-R3 socket modes changed authoritative Game semantic work.");
+
+            JsonElement background = result.GetProperty("listener_after")
+                .GetProperty("background_egress");
+            bool expectedBackground = mode.StartsWith("background-", StringComparison.Ordinal);
+            if (expectedBackground !=
+                    (background.GetProperty("sender_threads").GetInt32() == 1) ||
+                background.GetProperty("current_datagrams").GetInt32() != 0 ||
+                background.GetProperty("capacity_refusals").GetUInt64() != 0 ||
+                background.GetProperty("has_worker_failure").GetBoolean())
+                throw new InvalidOperationException(
+                    $"PF5-R3 {mode} background ownership was not bounded and quiescent.");
+            if (expectedBackground &&
+                (background.GetProperty("accepted_datagrams").GetUInt64() == 0 ||
+                 background.GetProperty("physically_sent_datagrams").GetUInt64() == 0 ||
+                 background.GetProperty("reserved_bytes").GetInt64() <
+                    background.GetProperty("capacity_bytes").GetInt64()))
+                throw new InvalidOperationException(
+                    $"PF5-R3 {mode} did not expose accepted physical egress and reservation evidence.");
+        }
+
+        string hostedOutput = Path.Combine(scope, "hosted-background.json");
+        Run(root, "dotnet",
+        [
+            "run", "--project",
+            "_Benchmarks/UltraSim.Network.HostedH05/UltraSim.Network.HostedH05.csproj",
+            "-c", configuration, "--", "--clients=4", "--owners=2", "--ticks=12",
+            "--reconnects=1", "--socket-io=background-platform-batch",
+            $"--output={hostedOutput}",
+        ]);
+        using JsonDocument hosted = JsonDocument.Parse(File.ReadAllText(hostedOutput));
+        JsonElement report = hosted.RootElement;
+        JsonElement server = report.GetProperty("Server");
+        JsonElement hostedBackground = server.GetProperty("Listener")
+            .GetProperty("BackgroundEgress");
+        if (report.GetProperty("SocketIoMode").GetInt32() != 4 ||
+            server.GetProperty("CompletedApplications").GetInt32() != 8 ||
+            server.GetProperty("DisclosureViolations").GetUInt64() != 0 ||
+            hostedBackground.GetProperty("PhysicallySentDatagrams").GetUInt64() == 0 ||
+            hostedBackground.GetProperty("HasWorkerFailure").GetBoolean())
+            throw new InvalidOperationException(
+                "PF5-R3 external Hosted UDP background-egress control failed.");
+    }
+    finally
+    {
+        if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    }
 }
 
 if (options.Pf5R2R1Only)
@@ -4901,6 +5001,7 @@ internal sealed record VerificationOptions(
     bool Pf5R2Only,
     bool Pf5R2R1Only,
     bool Pf5R2R2Only,
+    bool Pf5R3Only,
     bool Pf3Only,
     bool Pf3NativeOnly,
     bool Pf25LongNative,
@@ -4923,7 +5024,7 @@ internal sealed record VerificationOptions(
             pf4cOnly = false, pf4dOnly = false, pf4eOnly = false, pf4eR1Only = false,
             pf4eR2Only = false, pf4fOnly = false, pf5Only = false,
             pf5R1Only = false, pf5R2Only = false, pf5R2R1Only = false,
-            pf5R2R2Only = false,
+            pf5R2R2Only = false, pf5R3Only = false,
             pf25LongNative = false,
             allConfigurations = false;
         bool skipGodot = false, noRestore = false;
@@ -4953,6 +5054,7 @@ internal sealed record VerificationOptions(
             else if (argument == "--pf5-r2-only") pf5R2Only = true;
             else if (argument == "--pf5-r2-r1-only") pf5R2R1Only = true;
             else if (argument == "--pf5-r2-r2-only") pf5R2R2Only = true;
+            else if (argument == "--pf5-r3-only") pf5R3Only = true;
             else if (argument == "--pf2.5-long-native") pf25LongNative = true;
             else if (argument == "--all-configurations") allConfigurations = true;
             else if (argument == "--skip-godot") skipGodot = true;
@@ -5061,7 +5163,7 @@ internal sealed record VerificationOptions(
         if ((pf1Only || pf2Only || pf25Only || pf3Only || pf3NativeOnly || pf4aOnly ||
              pf4bOnly || pf4cOnly || pf4dOnly || pf4eOnly || pf4eR1Only || pf4eR2Only ||
              pf4fOnly || pf5Only || pf5R1Only || pf5R2Only || pf5R2R1Only ||
-             pf5R2R2Only) && architectureOnly)
+             pf5R2R2Only || pf5R3Only) && architectureOnly)
             throw new ArgumentException("Focused PF verification cannot be architecture-only.");
         if ((pf1Only ? 1 : 0) + (pf2Only ? 1 : 0) + (pf25Only ? 1 : 0) +
             (pf3Only ? 1 : 0) + (pf3NativeOnly ? 1 : 0) + (pf4aOnly ? 1 : 0) +
@@ -5069,7 +5171,7 @@ internal sealed record VerificationOptions(
             (pf4eOnly ? 1 : 0) + (pf4eR1Only ? 1 : 0) + (pf4eR2Only ? 1 : 0) +
             (pf4fOnly ? 1 : 0) + (pf5Only ? 1 : 0) + (pf5R1Only ? 1 : 0) +
             (pf5R2Only ? 1 : 0) + (pf5R2R1Only ? 1 : 0) +
-            (pf5R2R2Only ? 1 : 0) > 1)
+            (pf5R2R2Only ? 1 : 0) + (pf5R3Only ? 1 : 0) > 1)
             throw new ArgumentException("Choose one focused PF verification mode.");
         if ((pf25LongNative || pf25EvidenceOutputDirectory is not null) && !pf25Only)
             throw new ArgumentException(
@@ -5094,7 +5196,7 @@ internal sealed record VerificationOptions(
             !pf4cOnly && !pf4dOnly && !pf4eOnly && !pf4fOnly && !pf5Only)
             throw new ArgumentException(
                 "Native PF options require --pf3-only, --pf3-native-only, --pf4a-only, --pf4b-only, --pf4c-only, --pf4d-only, --pf4e-only, --pf4f-only, or --pf5-only.");
-        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only, pf4fOnly, pf5Only, pf5R1Only, pf5R2Only, pf5R2R1Only, pf5R2R2Only,
+        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only, pf4fOnly, pf5Only, pf5R1Only, pf5R2Only, pf5R2R1Only, pf5R2R2Only, pf5R3Only,
             pf3Only, pf3NativeOnly,
             pf25LongNative,
             allConfigurations, configuration, skipGodot, noRestore, godot,

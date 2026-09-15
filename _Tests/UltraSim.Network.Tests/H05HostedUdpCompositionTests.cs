@@ -57,6 +57,8 @@ internal static class H05HostedUdpCompositionTests
     internal static void RunAll()
     {
         Run("HostedShardedListenerCarriesSecureApplications", HostedShardedListenerCarriesSecureApplications);
+        Run("HostedBackgroundEgressCarriesSecureApplications",
+            HostedBackgroundEgressCarriesSecureApplications);
         Run("HostedShardedSessionRetirementIsQuiescentAndReusable", HostedShardedSessionRetirementIsQuiescentAndReusable);
         Run("HostedShardedRetirementTimeoutRetainsOwnershipUntilQuiescent",
             HostedShardedRetirementTimeoutRetainsOwnershipUntilQuiescent);
@@ -74,9 +76,20 @@ internal static class H05HostedUdpCompositionTests
     }
 
     private static void HostedShardedListenerCarriesSecureApplications()
+        => AssertHostedListenerCarriesSecureApplications(SharedUdpSocketIoMode.Scalar);
+
+    private static void HostedBackgroundEgressCarriesSecureApplications()
+        => AssertHostedListenerCarriesSecureApplications(
+            LinuxUdpBatch.IsSupported
+                ? SharedUdpSocketIoMode.BackgroundPlatformBatch
+                : SharedUdpSocketIoMode.BackgroundScalar);
+
+    private static void AssertHostedListenerCarriesSecureApplications(
+        SharedUdpSocketIoMode socketIoMode)
     {
         using NetworkServerIdentity identity = NetworkServerIdentity.CreateEphemeral();
-        using var host = CreateHost(identity, maximumOwners: 1);
+        using var host = CreateHost(identity, maximumOwners: 1,
+            socketIoMode: socketIoMode);
         using HostedUdpProtocolClient first = CreateClient(host, identity);
         using HostedUdpProtocolClient second = CreateClient(host, identity);
         PumpUntil(host, [first, second], () =>
@@ -103,6 +116,13 @@ internal static class H05HostedUdpCompositionTests
         True(owners.ApplicationMessages >= 2);
         True(owners.Handoff.IngressAccepted != 0);
         True(owners.Handoff.EgressAccepted != 0);
+        if (socketIoMode is SharedUdpSocketIoMode.BackgroundScalar or
+            SharedUdpSocketIoMode.BackgroundPlatformBatch)
+        {
+            SharedUdpBackgroundEgressSnapshot egress = host.GetSnapshot().Listener.BackgroundEgress;
+            True(egress.SenderThreads == 1 && egress.PhysicallySentDatagrams > 0,
+                "The hosted path did not traverse its listener-owned background sender.");
+        }
         DrainHandoff(host, [first, second]);
         True(host.TryGetSession(first.Connection, out HostedUdpProtocolSession? session));
         Throws<InvalidOperationException>(() => _ = session!.Server.GetSnapshot());
@@ -410,13 +430,14 @@ internal static class H05HostedUdpCompositionTests
         ManualClock? clock = null,
         UdpProtocolLimits? udp = null,
         HostedUdpAdmissionLimits? admission = null,
-        int? ingressTransfersPerPass = null) =>
+        int? ingressTransfersPerPass = null,
+        SharedUdpSocketIoMode socketIoMode = SharedUdpSocketIoMode.Scalar) =>
         clock is null ? new HostedUdpAdmissionHost(
             new IPEndPoint(IPAddress.Loopback, 0),
             identity,
             s_protocol,
             udp ?? s_udp,
-            s_shared,
+            s_shared with { SocketIoMode = socketIoMode },
             admission ?? s_admission,
             s_sharding with
             {
@@ -430,7 +451,7 @@ internal static class H05HostedUdpCompositionTests
             identity,
             s_protocol,
             udp ?? s_udp,
-            s_shared,
+            s_shared with { SocketIoMode = socketIoMode },
             admission ?? s_admission,
             s_sharding with
             {

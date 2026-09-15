@@ -38,6 +38,8 @@ void RunCoordinator(string[] values)
     int ticks = ReadInt(values, "--ticks=", 24);
     int reconnects = ReadInt(values, "--reconnects=", 1);
     int owners = ReadInt(values, "--owners=", Math.Min(2, clients));
+    SharedUdpSocketIoMode socketIoMode = ParseSocketIoMode(
+        ReadString(values, "--socket-io="));
     string output = ReadString(values, "--output=") ?? Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory, "../../../../results/network-hosted-h0.5.json"));
     if (clients <= 0 || clients > 64 || ticks <= 0 || reconnects < 0 ||
@@ -59,6 +61,7 @@ void RunCoordinator(string[] values)
             $"--ticks={ticks}",
             $"--reconnects={reconnects}",
             $"--owners={owners}",
+            $"--socket-io={SocketIoModeName(socketIoMode)}",
             $"--ready={readyPath}",
             $"--result={serverResultPath}");
         children.Add(server);
@@ -102,6 +105,7 @@ void RunCoordinator(string[] values)
             GCSettings.IsServerGC,
             clients,
             owners,
+            socketIoMode,
             ticks,
             reconnects,
             serverEvidence,
@@ -156,6 +160,8 @@ void RunServer(string[] values)
     int ticks = ReadInt(values, "--ticks=", 24);
     int reconnects = ReadInt(values, "--reconnects=", 1);
     int owners = ReadInt(values, "--owners=", Math.Min(2, clients));
+    SharedUdpSocketIoMode socketIoMode = ParseSocketIoMode(
+        ReadString(values, "--socket-io="));
     string readyPath = RequiredString(values, "--ready=");
     string resultPath = RequiredString(values, "--result=");
     int expectedApplications = checked(clients * (reconnects + 1));
@@ -170,7 +176,7 @@ void RunServer(string[] values)
         MaximumSessions: maximumSessions,
         MaximumQueuedDatagramsPerSession: 64,
         MaximumInboundDatagramsPerPump: 4_096,
-        SocketIoMode: SharedUdpSocketIoMode.PlatformSendReceiveBatch,
+        SocketIoMode: socketIoMode,
         AggregateSocketSendBufferBytes: 4 * 1024 * 1024,
         AggregateSocketReceiveBufferBytes: 4 * 1024 * 1024,
         MaximumNativeSendBatchDatagrams: 64,
@@ -268,6 +274,7 @@ void RunServer(string[] values)
         ownerSnapshot.ReservedBytes,
         hosted.Listener.NativeSendCalls,
         hosted.Listener.ReceiveCensus.NativeReceiveCalls,
+        hosted.Listener,
         ownerSnapshot);
     File.WriteAllText(resultPath,
         JsonSerializer.Serialize(result, JsonOptions()) + Environment.NewLine);
@@ -547,7 +554,9 @@ sealed class ServerApplication : IHostedUdpSessionApplication
                 _initialScheduled = true;
             }
             if (_initialScheduled && _observedChunkProofs != 0 &&
-                _published < _controls && _published < _targetTicks)
+                _published < _controls && _published < _targetTicks &&
+                !_chunks.GetSnapshot().SnapshotTransferActive &&
+                (_published == 0 || PublishedRevisionIsApplied()))
                 PublishNext();
             if (_published != 0 && HasAppliedPublicationCursor() &&
                 !PublishedRevisionIsApplied() &&
@@ -1104,6 +1113,25 @@ internal static EcsWorld CreateEcs(out ArchetypeHandle empty)
     ReadString(values, prefix) ??
     throw new ArgumentException($"Missing H0.5 argument {prefix}", nameof(values));
 
+    internal static SharedUdpSocketIoMode ParseSocketIoMode(string? value) =>
+        value?.ToLowerInvariant() switch
+        {
+            null or "platform-batch" => SharedUdpSocketIoMode.PlatformBatch,
+            "scalar" => SharedUdpSocketIoMode.Scalar,
+            "background-scalar" => SharedUdpSocketIoMode.BackgroundScalar,
+            "background-platform-batch" => SharedUdpSocketIoMode.BackgroundPlatformBatch,
+            _ => throw new ArgumentException($"Unsupported H0.5 socket I/O mode '{value}'."),
+        };
+
+    internal static string SocketIoModeName(SharedUdpSocketIoMode mode) => mode switch
+    {
+        SharedUdpSocketIoMode.Scalar => "scalar",
+        SharedUdpSocketIoMode.PlatformBatch => "platform-batch",
+        SharedUdpSocketIoMode.BackgroundScalar => "background-scalar",
+        SharedUdpSocketIoMode.BackgroundPlatformBatch => "background-platform-batch",
+        _ => throw new ArgumentOutOfRangeException(nameof(mode)),
+    };
+
     internal static double Milliseconds(long stopwatchTicks) =>
     stopwatchTicks * 1_000d / Stopwatch.Frequency;
 
@@ -1157,6 +1185,7 @@ readonly record struct ServerEvidence(
     long OwnerRuntimeReservedBytes,
     ulong NativeSendCalls,
     ulong NativeReceiveCalls,
+    SharedUdpListenerSnapshot Listener,
     HostedUdpConnectionOwnerRuntimeSnapshot OwnerRuntime);
 
 readonly record struct ClientEvidence(
@@ -1199,6 +1228,7 @@ readonly record struct H05Report(
     bool ServerGc,
     int ClientWorkers,
     int ConnectionOwners,
+    SharedUdpSocketIoMode SocketIoMode,
     int TicksPerPhase,
     int ReconnectsPerClient,
     ServerEvidence Server,
