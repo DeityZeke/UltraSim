@@ -20,6 +20,7 @@ internal static class DenseReplicationSuite
         int warmup = ReadInt(args, "--warmup", 30);
         int dirtyPercent = ReadInt(args, "--dirty-percent", 2);
         int dirtyBurstPeriod = ReadInt(args, "--dirty-burst-period", 1);
+        int socketSendBufferBytes = ReadInt(args, "--socket-send-buffer-bytes", 0);
         string requestedTraffic = ReadText(args, "--replication-traffic") ?? "full";
         bool tailDiagnostics = ReadBool(args, "--tail-diagnostics", false);
         bool phaseAttribution = ReadBool(args, "--phase-attribution", false) || tailDiagnostics;
@@ -31,7 +32,9 @@ internal static class DenseReplicationSuite
             "_Benchmarks/Baselines/network-v3-spread-dense-acceptance.json";
         if (clients <= 0 || clients > 1_024 || ticks < 30 || warmup < 1 ||
             dirtyPercent is <= 0 or > 100 || dirtyBurstPeriod is <= 0 or > 64 ||
-            (long)dirtyPercent * dirtyBurstPeriod > 100)
+            (long)dirtyPercent * dirtyBurstPeriod > 100 ||
+            (socketSendBufferBytes != 0 &&
+             socketSendBufferBytes is < 1_472 or > 64 * 1024 * 1024))
             throw new ArgumentOutOfRangeException(nameof(args));
 
         ReplicationWorkload[] baseProfiles = requested.ToLowerInvariant() switch
@@ -68,7 +71,8 @@ internal static class DenseReplicationSuite
             Console.WriteLine($"REPLICATION {profile.Id}: constructing {profile.Clients} clients, " +
                 $"{profile.Entities} entities...");
             using var harness = new ReplicationWorkloadHarness(
-                profile, phaseAttribution, worldStateAttribution, socketIoMode, tailDiagnostics);
+                profile, phaseAttribution, worldStateAttribution, socketIoMode, tailDiagnostics,
+                socketSendBufferBytes);
             ReplicationWorkloadResult result = harness.Run();
             Validate(result);
             results.Add(result);
@@ -240,7 +244,8 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         bool phaseAttribution,
         bool worldStateAttribution = false,
         SharedUdpSocketIoMode socketIoMode = SharedUdpSocketIoMode.PlatformBatch,
-        bool tailDiagnostics = false)
+        bool tailDiagnostics = false,
+        int socketSendBufferBytes = 0)
     {
         _profile = profile;
         _phaseAttribution = phaseAttribution;
@@ -365,9 +370,12 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
             MaximumInboundDatagramsPerPump: Math.Max(4_096, profile.Clients * 32),
             SocketIoMode: socketIoMode,
             MaximumNativeSendBatchDatagrams: 32,
-            MaximumNativeReceiveBatchDatagrams: 32);
+            MaximumNativeReceiveBatchDatagrams: 32,
+            AggregateSocketSendBufferBytes: socketSendBufferBytes);
         _host = SharedUdpProtocolHost.CreateSelfTrustedLoopback(
-            _protocolLimits, s_udpLimits, sharedLimits,
+            _protocolLimits,
+            s_udpLimits,
+            sharedLimits,
             UltraSim.Game.Protocol.UltraSimGameProtocol.Manifest);
         _bots = new ReplicationBot[profile.Clients];
         ulong eventFloor = baseline.Frame.ApplicationEventNextSequence;
