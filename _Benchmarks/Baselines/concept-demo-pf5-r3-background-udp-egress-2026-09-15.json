@@ -195,8 +195,11 @@
   },
   "verification": {
     "networkTests": "passed",
-    "pf5R3Focused": "passed before selected-default commit; repeated in final closure",
-    "canonicalRelease": "pending final closure",
-    "exportComposition": "pending final closure"
+    "networkStressRuns": 3,
+    "pf5R3Focused": "passed on selected BackgroundPlatformBatch default",
+    "canonicalRelease": "passed",
+    "canonicalReleaseCommit": "352e414ae9ad9e606f66786077dbd5b9caa26953",
+    "exportComposition": "passed: ServerOnly, ClientOnly, Full, SinglePlayer, Online, Complete, Contentless Online, Complete-hosted",
+    "note": "the final child commit changes closure evidence only"
   }
 }

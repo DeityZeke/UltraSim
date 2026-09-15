@@ -137,3 +137,13 @@ integrated production candidate `f2940afa18d69bb83df291215dcb6903938ee3c2`.
 PF5-R3 does not authorize moving encryption, scheduling, proof, or Game work off-owner. A later
 performance checkpoint is warranted only by new external-product evidence, not by a desire to add
 more worker stages.
+
+## Verification closure
+
+The PF5-R3 focused verifier passed on the selected default. The complete canonical Release verifier
+then passed at source/evidence commit `352e414ae9ad9e606f66786077dbd5b9caa26953`, including all
+Network/replication tests, ServerOnly/ClientOnly/Full physical composition, Contentless Online
+cold/warm, SinglePlayer/Online/Complete exported products, the exported PF1/PF2 mixed swarms,
+Complete-hosted parity, and F0.7 lifecycle retirement. The complete Network suite also passed three
+additional consecutive shutdown/retirement stress runs. The final child commit changes only these
+closure records.
