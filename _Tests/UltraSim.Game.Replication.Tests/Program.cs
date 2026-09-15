@@ -160,6 +160,7 @@ var tests = new (string Name, Action Body)[]
     ("PF4CSelectedProfileBundleEntriesApplyAndProveIndependently", N1OfflineDirectChunkTests.SelectedProfileBundleEntriesApplyAndProveIndependently),
     ("PF4CCandidateCadenceTracksLatestCoalescedTruth", N1OfflineDirectChunkTests.CandidateCadenceTracksLatestCoalescedTruth),
     ("PF4CSelectedProfileBundleWarmedPathAllocatesZero", N1OfflineDirectChunkTests.SelectedProfileBundleWarmedPathAllocatesZero),
+    ("PF5R4PacketBoundaryCandidateIsPreparedOnce", N1OfflineDirectChunkTests.PacketBoundaryCandidateIsPreparedOnce),
     ("PF4ER2PreparedBundleEncodingIsCanonicalAndBounded", N1OfflineDirectChunkTests.PreparedBundleEncodingIsCanonicalAndBounded),
     ("PF4FCompressedBundleCodecIsExactBoundedHostileSafeAndAllocationFree", N1OfflineDirectChunkTests.CompressedBundleCodecIsExactBoundedHostileSafeAndAllocationFree),
     ("PF4FSelectedCompressionPreservesQueueTransactionAndProofs", N1OfflineDirectChunkTests.SelectedCompressionPreservesQueueTransactionAndProofs),

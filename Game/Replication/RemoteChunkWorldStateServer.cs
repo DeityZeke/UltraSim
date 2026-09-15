@@ -85,6 +85,12 @@ public readonly record struct RemoteChunkReplicationTimingSnapshot(
 /// </summary>
 public readonly record struct RemoteChunkCpuAttributionSnapshot(
     bool Enabled,
+    ulong PreparedCandidateRequests,
+    ulong PreparedCandidateBuilds,
+    ulong PreparedCandidateLocalReuses,
+    ulong PreparedCandidatePacketBoundaryCarries,
+    ulong PreparedCandidateInvalidations,
+    ulong PreparedCandidateRebuildsAfterInvalidation,
     ulong SubscriptionLookupCalls,
     ulong SubscriptionLookupComparisons,
     ulong SubscriptionLookupTicks,
@@ -429,6 +435,12 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     private TierFreshnessWindow? _nearFreshness;
     private TierFreshnessWindow? _farFreshness;
     private ulong _attributionSubscriptionLookupCalls;
+    private ulong _attributionPreparedCandidateRequests;
+    private ulong _attributionPreparedCandidateBuilds;
+    private ulong _attributionPreparedCandidateLocalReuses;
+    private ulong _attributionPreparedCandidatePacketBoundaryCarries;
+    private ulong _attributionPreparedCandidateInvalidations;
+    private ulong _attributionPreparedCandidateRebuildsAfterInvalidation;
     private ulong _attributionSubscriptionLookupComparisons;
     private ulong _attributionSubscriptionLookupTicks;
     private ulong _attributionCanonicalReparseCalls;
@@ -652,6 +664,12 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
 
     private void ResetCpuAttribution()
     {
+        _attributionPreparedCandidateRequests = 0;
+        _attributionPreparedCandidateBuilds = 0;
+        _attributionPreparedCandidateLocalReuses = 0;
+        _attributionPreparedCandidatePacketBoundaryCarries = 0;
+        _attributionPreparedCandidateInvalidations = 0;
+        _attributionPreparedCandidateRebuildsAfterInvalidation = 0;
         _attributionSubscriptionLookupCalls = 0;
         _attributionSubscriptionLookupComparisons = 0;
         _attributionSubscriptionLookupTicks = 0;
@@ -678,6 +696,12 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
 
     private RemoteChunkCpuAttributionSnapshot CaptureCpuAttribution() => new(
         CpuAttributionEnabled,
+        _attributionPreparedCandidateRequests,
+        _attributionPreparedCandidateBuilds,
+        _attributionPreparedCandidateLocalReuses,
+        _attributionPreparedCandidatePacketBoundaryCarries,
+        _attributionPreparedCandidateInvalidations,
+        _attributionPreparedCandidateRebuildsAfterInvalidation,
         _attributionSubscriptionLookupCalls,
         _attributionSubscriptionLookupComparisons,
         _attributionSubscriptionLookupTicks,
@@ -991,6 +1015,56 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         gameMessagesQueued = 0;
         applicationBytesQueued = 0;
         bundlesQueued = 0;
+        int consumedTotal = 0;
+        PreparedCandidate carried = default;
+        Span<RemoteChunkDeltaRecord> carriedRecords = stackalloc RemoteChunkDeltaRecord[
+            UltraSimGameProtocol.MaximumChunkPublicationRecords];
+        while (consumedTotal < works.Length)
+        {
+            int consumed = TryScheduleOneDueBundleCore(
+                works[consumedTotal..], cadenceStep, statuses[consumedTotal..],
+                ref carried, carriedRecords,
+                out int messages, out int bytes, out int bundles);
+            if (consumed <= 0)
+                throw new InvalidOperationException(
+                    "A nonempty selected-profile scheduling pass made no finite progress.");
+            consumedTotal += consumed;
+            gameMessagesQueued = checked(gameMessagesQueued + messages);
+            applicationBytesQueued = checked(applicationBytesQueued + bytes);
+            bundlesQueued = checked(bundlesQueued + bundles);
+
+            bool blocked = false;
+            int statusStart = consumedTotal - consumed;
+            for (int index = statusStart; index < consumedTotal; index++)
+                blocked |= IsTransient(statuses[index]) ||
+                    statuses[index] is RemoteChunkWorldStateScheduleStatus.SnapshotTransferStarted;
+            if (blocked)
+            {
+                if (carried.Valid)
+                {
+                    RecordPreparedCandidateInvalidation(in carried);
+                    carried = default;
+                    carriedRecords.Clear();
+                }
+                break;
+            }
+        }
+        return consumedTotal;
+    }
+
+    private int TryScheduleOneDueBundleCore(
+        ReadOnlySpan<ChunkPublicationWork> works,
+        ulong cadenceStep,
+        Span<RemoteChunkWorldStateScheduleStatus> statuses,
+        ref PreparedCandidate carried,
+        Span<RemoteChunkDeltaRecord> carriedRecords,
+        out int gameMessagesQueued,
+        out int applicationBytesQueued,
+        out int bundlesQueued)
+    {
+        gameMessagesQueued = 0;
+        applicationBytesQueued = 0;
+        bundlesQueued = 0;
         int processed = 0;
         int staged = 0;
         int deltaRecords = 0;
@@ -1002,9 +1076,68 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             _outstanding.Length - _outstandingCount);
         if (maximumEntries == 0)
         {
+            if (carried.Valid)
+            {
+                RecordPreparedCandidateInvalidation(in carried);
+                carried = default;
+                carriedRecords.Clear();
+            }
             statuses[0] = RemoteChunkWorldStateScheduleStatus.CapacityExceeded;
             RecordScheduleResult(FindSubscription(works[0].Key), statuses[0]);
             return 1;
+        }
+
+        if (carried.Valid)
+        {
+            ref readonly ChunkPublicationWork carriedWork = ref works[0];
+            int carriedSubscription = FindSubscription(carriedWork.Key);
+            OfflineDirectChunkSubscription currentSubscription = carriedSubscription >= 0
+                ? _recipient.Subscriptions[carriedSubscription]
+                : default;
+            bool baselineMatches = carried.Result.Kind switch
+            {
+                RemoteChunkPublicationKind.Delta =>
+                    currentSubscription.Cursor.IsValid &&
+                    currentSubscription.Cursor.Epoch == carried.Result.Ticket.SourceEpoch &&
+                    currentSubscription.Cursor.Key == carried.Result.Ticket.Key &&
+                    currentSubscription.Cursor.Revision.Value == carried.Result.BaseRevision,
+                RemoteChunkPublicationKind.Absence => true,
+                _ => false,
+            };
+            bool valid = carriedSubscription == carried.SubscriptionIndex &&
+                carried.Work.Key == carriedWork.Key &&
+                carried.Result.Ticket.SourceEpoch == _source.Epoch &&
+                carried.Result.Ticket.Key == carriedWork.Key &&
+                carried.Result.Ticket.DeliveryId == _nextDeliveryId &&
+                baselineMatches;
+            if (!valid)
+            {
+                RecordPreparedCandidateInvalidation(in carried);
+                carried = default;
+                carriedRecords.Clear();
+                if (CpuAttributionEnabled)
+                    SaturatingIncrement(ref _attributionPreparedCandidateRebuildsAfterInvalidation);
+            }
+            else
+            {
+                OfflineDirectChunkWireEncodeResult carriedResult = carried.Result;
+                StagePreparedCandidate(
+                    in carriedResult,
+                    carriedRecords[..carriedResult.RecordCount],
+                    in carriedWork,
+                    carriedSubscription,
+                    workPosition: 0,
+                    ref staged,
+                    ref deltaRecords,
+                    ref bundleBytes,
+                    ref standaloneBytes,
+                    carried.EntryBytes);
+                if (CpuAttributionEnabled)
+                    SaturatingIncrement(ref _attributionPreparedCandidateLocalReuses);
+                carried = default;
+                carriedRecords.Clear();
+                processed = 1;
+            }
         }
 
         while (processed < works.Length && staged < maximumEntries)
@@ -1028,9 +1161,15 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             }
 
             ulong deliveryId = _nextDeliveryId + (ulong)staged;
+            if (CpuAttributionEnabled)
+                SaturatingIncrement(ref _attributionPreparedCandidateRequests);
             OfflineDirectChunkWireEncodeStatus encoded = _encoder.TryPrepareForRepresentation(
                 _recipient, _source, subscriptionIndex, cadenceStep, deliveryId,
                 _messageScratch, out OfflineDirectChunkWireEncodeResult result);
+            if (CpuAttributionEnabled && encoded is
+                OfflineDirectChunkWireEncodeStatus.Delta or
+                OfflineDirectChunkWireEncodeStatus.Absence)
+                SaturatingIncrement(ref _attributionPreparedCandidateBuilds);
             RemoteChunkWorldStateScheduleStatus mapped = Map(encoded);
             if (encoded == OfflineDirectChunkWireEncodeStatus.Snapshot)
             {
@@ -1084,50 +1223,29 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                 if (staged != 0)
                 {
                     fullByByteLimit = true;
+                    carried = new PreparedCandidate(
+                        result, work, subscriptionIndex, entryBytes, Valid: true);
+                    if (result.Kind == RemoteChunkPublicationKind.Delta)
+                        _encoder.PreparedDeltaRecords(result.RecordCount).CopyTo(carriedRecords);
+                    if (CpuAttributionEnabled)
+                        SaturatingIncrement(ref _attributionPreparedCandidatePacketBoundaryCarries);
                     break;
                 }
             }
 
-            int recordOffset = deltaRecords;
-            if (result.Kind == RemoteChunkPublicationKind.Delta)
-            {
-                if (deltaRecords + result.RecordCount > _bundleDeltaRecords.Length)
-                    throw new InvalidOperationException(
-                        "A validated selected-profile delta exceeded bundle staging.");
-                _encoder.PreparedDeltaRecords(result.RecordCount).CopyTo(
-                    _bundleDeltaRecords.AsSpan(deltaRecords));
-                deltaRecords += result.RecordCount;
-            }
-
-            long stagingStarted = CpuTimestamp();
-            if (CpuAttributionEnabled)
-                SaturatingIncrement(ref _attributionBundleStagingCalls);
-            _bundleEntries[staged] = new RemoteDirtyChunkBundleEntry(
-                result.Kind,
-                result.Ticket.DeliveryId,
-                result.Ticket.Key.Space.Value,
-                result.Ticket.Key.Coord.X,
-                result.Ticket.Key.Coord.Z,
-                result.BaseRevision,
-                result.CurrentRevision,
-                result.HistoryFloor,
-                result.ContentHash,
-                checked((ushort)result.RecordCount),
-                result.Kind == RemoteChunkPublicationKind.Delta ? recordOffset : 0);
-            _bundleResults[staged] = result;
-            _bundleTiers[staged] = work.Tier;
-            _bundleSourceSteps[staged] = work.LatestSourceStep;
-            _bundleDueSteps[staged] = work.FirstDueStep;
-            _bundleStandaloneBytes[staged] = result.Written;
-            _bundleWorkPositions[staged] = processed;
-            _bundleSubscriptionIndices[staged] = subscriptionIndex;
-            if (CpuAttributionEnabled)
-                SaturatingAdd(ref _attributionBundleStagingRecords,
-                    checked((ulong)result.RecordCount));
-            CpuElapsed(ref _attributionBundleStagingTicks, stagingStarted);
-            bundleBytes += entryBytes;
-            standaloneBytes = checked(standaloneBytes + result.Written);
-            staged++;
+            StagePreparedCandidate(
+                in result,
+                result.Kind == RemoteChunkPublicationKind.Delta
+                    ? _encoder.PreparedDeltaRecords(result.RecordCount)
+                    : [],
+                in work,
+                subscriptionIndex,
+                processed,
+                ref staged,
+                ref deltaRecords,
+                ref bundleBytes,
+                ref standaloneBytes,
+                entryBytes);
             processed++;
         }
 
@@ -2516,6 +2634,71 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         _bundleDeltaRecords.AsSpan(0, deltaRecords).Clear();
     }
 
+    private void StagePreparedCandidate(
+        in OfflineDirectChunkWireEncodeResult result,
+        ReadOnlySpan<RemoteChunkDeltaRecord> records,
+        in ChunkPublicationWork work,
+        int subscriptionIndex,
+        int workPosition,
+        ref int staged,
+        ref int deltaRecords,
+        ref int bundleBytes,
+        ref int standaloneBytes,
+        int entryBytes)
+    {
+        int recordOffset = deltaRecords;
+        if (result.Kind == RemoteChunkPublicationKind.Delta)
+        {
+            if (records.Length != result.RecordCount ||
+                deltaRecords + result.RecordCount > _bundleDeltaRecords.Length)
+                throw new InvalidOperationException(
+                    "A validated selected-profile delta exceeded bundle staging.");
+            records.CopyTo(_bundleDeltaRecords.AsSpan(deltaRecords));
+            deltaRecords += result.RecordCount;
+        }
+        else if (!records.IsEmpty || result.RecordCount != 0)
+        {
+            throw new InvalidOperationException(
+                "A validated absence candidate retained unexpected records.");
+        }
+
+        long stagingStarted = CpuTimestamp();
+        if (CpuAttributionEnabled)
+            SaturatingIncrement(ref _attributionBundleStagingCalls);
+        _bundleEntries[staged] = new RemoteDirtyChunkBundleEntry(
+            result.Kind,
+            result.Ticket.DeliveryId,
+            result.Ticket.Key.Space.Value,
+            result.Ticket.Key.Coord.X,
+            result.Ticket.Key.Coord.Z,
+            result.BaseRevision,
+            result.CurrentRevision,
+            result.HistoryFloor,
+            result.ContentHash,
+            checked((ushort)result.RecordCount),
+            result.Kind == RemoteChunkPublicationKind.Delta ? recordOffset : 0);
+        _bundleResults[staged] = result;
+        _bundleTiers[staged] = work.Tier;
+        _bundleSourceSteps[staged] = work.LatestSourceStep;
+        _bundleDueSteps[staged] = work.FirstDueStep;
+        _bundleStandaloneBytes[staged] = result.Written;
+        _bundleWorkPositions[staged] = workPosition;
+        _bundleSubscriptionIndices[staged] = subscriptionIndex;
+        if (CpuAttributionEnabled)
+            SaturatingAdd(ref _attributionBundleStagingRecords,
+                checked((ulong)result.RecordCount));
+        CpuElapsed(ref _attributionBundleStagingTicks, stagingStarted);
+        bundleBytes = checked(bundleBytes + entryBytes);
+        standaloneBytes = checked(standaloneBytes + result.Written);
+        staged++;
+    }
+
+    private void RecordPreparedCandidateInvalidation(in PreparedCandidate candidate)
+    {
+        if (!candidate.Valid || !CpuAttributionEnabled) return;
+        SaturatingIncrement(ref _attributionPreparedCandidateInvalidations);
+    }
+
     private void RecordBundleQueued(
         int entries,
         int bytes,
@@ -2604,6 +2787,17 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         if (Environment.CurrentManagedThreadId != _ownerThreadId)
             throw new InvalidOperationException("The remote chunk WorldState server is owner-thread bound.");
     }
+
+    /// <summary>
+    /// One stack-scoped preparation artifact carried only between adjacent message admissions in
+    /// a single owner-thread service call. It is CPU scratch, never delivery or client knowledge.
+    /// </summary>
+    private readonly record struct PreparedCandidate(
+        OfflineDirectChunkWireEncodeResult Result,
+        ChunkPublicationWork Work,
+        int SubscriptionIndex,
+        int EntryBytes,
+        bool Valid);
 
     private readonly struct OutstandingDelivery
     {

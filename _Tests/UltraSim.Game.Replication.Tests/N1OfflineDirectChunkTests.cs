@@ -2297,6 +2297,110 @@ internal static class N1OfflineDirectChunkTests
             "bounds_alias_invalid_hash_offset_delivery=rejected");
     }
 
+    internal static void PacketBoundaryCandidateIsPreparedOnce()
+    {
+        const int chunkCount = 6;
+        const int recordsPerChunk = 30;
+        using var fixture = new Fixture(
+            historyCapacity: 512, entityCount: chunkCount * recordsPerChunk);
+        (int X, int Z)[] coordinates =
+            [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0)];
+        for (int chunk = 0; chunk < chunkCount; chunk++)
+        for (int record = 0; record < recordsPerChunk; record++)
+        {
+            int entity = chunk * recordsPerChunk + record;
+            fixture.Present(entity,
+                Position(coordinates[chunk].X, coordinates[chunk].Z,
+                    checked((ushort)(500 + record * 300)),
+                    checked((ushort)(700 + record * 250))),
+                GameWorldPublicPrefabIds.Character);
+        }
+
+        using ProtocolLoopback loopback = CreateLoopback(default);
+        var recipient = Recipient(maximumRecords: 64);
+        var cache = new ClientWorldSemanticCache(
+            fixture.Bound, new ClientWorldSemanticCacheLimits(64, 32, 16, 64, 256));
+        Span<OfflineDirectChunkSubscriptionChange> initialChanges =
+            stackalloc OfflineDirectChunkSubscriptionChange[64];
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace,
+                Position(0, 0, 8_000, 8_000), initialChanges, out _));
+        for (int subscription = 0; subscription < recipient.Subscriptions.Length; subscription++)
+        {
+            OfflineDirectChunkReadStatus initial = recipient.TryBeginRead(
+                fixture.Store, subscription, 0, out OfflineDirectChunkRead read);
+            if (initial == OfflineDirectChunkReadStatus.Snapshot)
+            {
+                if (!cache.TryRequest(read.Batch.Key,
+                        out ClientSemanticChunkHandle handle, out var request))
+                    throw new InvalidOperationException($"PF5-R4 cache request failed: {request}.");
+                if (!cache.TryStageFromBaseWorld(
+                        handle, read.Snapshot, read.Batch.Cursor, out var stage))
+                    throw new InvalidOperationException($"PF5-R4 cache stage failed: {stage}.");
+                if (!cache.TryPublish(handle, out var publish))
+                    throw new InvalidOperationException($"PF5-R4 cache publish failed: {publish}.");
+            }
+            else
+            {
+                Equal(OfflineDirectChunkReadStatus.ChunkAbsent, initial);
+            }
+            recipient.CommitRead();
+        }
+        for (int chunk = 0; chunk < chunkCount; chunk++)
+        for (int record = 0; record < recordsPerChunk; record++)
+        {
+            int entity = chunk * recordsPerChunk + record;
+            fixture.Present(entity,
+                Position(coordinates[chunk].X, coordinates[chunk].Z,
+                    checked((ushort)(600 + record * 300)),
+                    checked((ushort)(700 + record * 250))),
+                GameWorldPublicPrefabIds.Character);
+        }
+
+        var server = new RemoteChunkWorldStateServer(
+            loopback.Server, recipient, fixture.Store, 0xF5_0401,
+            new RemoteChunkWorldStateTransportLimits(64));
+        var client = new RemoteChunkWorldStateClient(
+            loopback.Client, cache, 0xF5_0401, maximumDeltaRecords: 64,
+            maximumPendingProofs: 64);
+        server.ConfigureTelemetry(GameTelemetryLevel.Detailed);
+        var works = new ChunkPublicationWork[chunkCount];
+        var statuses = new RemoteChunkWorldStateScheduleStatus[chunkCount];
+        for (int chunk = 0; chunk < chunkCount; chunk++)
+            works[chunk] = new(default, Key(coordinates[chunk].X, coordinates[chunk].Z),
+                ChunkInterestTier.Immediate, ChunkPublicationWorkKind.Dirty, 1, 1);
+
+        Equal(chunkCount, server.TryScheduleDueBundle(
+            works, 1, statuses, out int messages, out int bytes, out int bundles));
+        Equal(chunkCount, messages);
+        Equal(0, bundles);
+        Equal(chunkCount * UltraSimGameProtocol.GetChunkDeltaEncodedBytes(recordsPerChunk), bytes);
+        for (int index = 0; index < statuses.Length; index++)
+            Equal(RemoteChunkWorldStateScheduleStatus.QueuedDelta, statuses[index]);
+        Equal(chunkCount, server.GetSnapshot().OutstandingDeliveries);
+        Equal(checked((ulong)chunkCount + 1), server.GetSnapshot().NextDeliveryId);
+
+        RemoteChunkCpuAttributionSnapshot cpu = server.GetTimingSnapshot().Cpu;
+        Equal((ulong)chunkCount, cpu.PreparedCandidateRequests);
+        Equal((ulong)chunkCount, cpu.PreparedCandidateBuilds);
+        Equal((ulong)(chunkCount - 1), cpu.PreparedCandidatePacketBoundaryCarries);
+        Equal((ulong)(chunkCount - 1), cpu.PreparedCandidateLocalReuses);
+        Equal(0UL, cpu.PreparedCandidateInvalidations);
+        Equal(0UL, cpu.PreparedCandidateRebuildsAfterInvalidation);
+        Equal((ulong)chunkCount, cpu.Encoder.PreparedValidationHashCalls);
+        Equal((ulong)(chunkCount * recordsPerChunk), cpu.Encoder.PreparedRecordsValidated);
+        Equal((ulong)chunkCount, cpu.Encoder.PreparedStandaloneWrites);
+
+        Drive(loopback, server, client,
+            () => server.GetSnapshot().AppliedProofs == chunkCount);
+        Equal(0, server.GetSnapshot().OutstandingDeliveries);
+        Equal((ulong)chunkCount, client.GetSnapshot().AppliedDeltas);
+        Console.WriteLine($"EVIDENCE PF5-R4 candidates={chunkCount} builds=" +
+            $"{cpu.PreparedCandidateBuilds} carries=" +
+            $"{cpu.PreparedCandidatePacketBoundaryCarries} reuses=" +
+            $"{cpu.PreparedCandidateLocalReuses} messages={messages} proofs={chunkCount}");
+    }
+
     internal static void CompressedBundleCodecIsExactBoundedHostileSafeAndAllocationFree()
     {
         CreatePf4fCanonicalBundle(out byte[] canonical, out int canonicalBytes);
