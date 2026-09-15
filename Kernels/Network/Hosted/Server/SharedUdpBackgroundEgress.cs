@@ -21,6 +21,7 @@ public enum SharedUdpBackgroundEgressState : byte
 public readonly record struct SharedUdpBackgroundEgressSnapshot(
     SharedUdpBackgroundEgressState State,
     bool UsesNativeBatching,
+    bool TimingEnabled,
     int SenderThreads,
     int CapacityDatagrams,
     long CapacityBytes,
@@ -80,6 +81,7 @@ internal sealed class SharedUdpBackgroundEgress : IDisposable
     private readonly int _maximumBatch;
     private readonly int _drainTimeoutMilliseconds;
     private readonly bool _usesNativeBatching;
+    private readonly bool _timingEnabled;
     private readonly object _pathGate;
     private readonly ISharedUdpBackgroundEgressTestHook? _testHook;
     private readonly byte[] _payloads;
@@ -138,6 +140,7 @@ internal sealed class SharedUdpBackgroundEgress : IDisposable
         int drainTimeoutMilliseconds,
         bool usesNativeBatching,
         object pathGate,
+        bool timingEnabled,
         ISharedUdpBackgroundEgressTestHook? testHook)
     {
         ArgumentNullException.ThrowIfNull(socket);
@@ -153,6 +156,7 @@ internal sealed class SharedUdpBackgroundEgress : IDisposable
         _maximumBatch = maximumBatch;
         _drainTimeoutMilliseconds = drainTimeoutMilliseconds;
         _usesNativeBatching = usesNativeBatching;
+        _timingEnabled = timingEnabled;
         _pathGate = pathGate;
         _testHook = testHook;
         _payloads = new byte[checked(capacityDatagrams * maximumDatagramBytes)];
@@ -183,7 +187,7 @@ internal sealed class SharedUdpBackgroundEgress : IDisposable
         ReadOnlySpan<byte> datagram)
     {
         ThrowIfFaulted();
-        long started = Stopwatch.GetTimestamp();
+        long started = _timingEnabled ? Stopwatch.GetTimestamp() : 0;
         if (Volatile.Read(ref _state) != Running ||
             Volatile.Read(ref _count) == _lengths.Length)
         {
@@ -200,7 +204,7 @@ internal sealed class SharedUdpBackgroundEgress : IDisposable
         _lengths[slot] = datagram.Length;
         _endpoints[slot] = endpoint;
         _pathGenerations[slot] = endpoint.CaptureEgressPathGeneration();
-        _enqueuedAt[slot] = Stopwatch.GetTimestamp();
+        _enqueuedAt[slot] = _timingEnabled ? Stopwatch.GetTimestamp() : 0;
         _tail = (slot + 1) % _lengths.Length;
         Interlocked.Add(ref _currentBytes, datagram.Length);
         int count = Interlocked.Increment(ref _count);
@@ -208,12 +212,13 @@ internal sealed class SharedUdpBackgroundEgress : IDisposable
         AtomicMaximum(ref _highWaterBytes, Volatile.Read(ref _currentBytes));
         SaturatingIncrement(ref _acceptedDatagrams);
         SaturatingAdd(ref _acceptedBytes, datagram.Length);
-        RecordDistribution(
-            Stopwatch.GetTimestamp() - started,
-            _enqueueBuckets,
-            ref _enqueueCount,
-            ref _enqueueTotal,
-            ref _enqueueMaximum);
+        if (_timingEnabled)
+            RecordDistribution(
+                Stopwatch.GetTimestamp() - started,
+                _enqueueBuckets,
+                ref _enqueueCount,
+                ref _enqueueTotal,
+                ref _enqueueMaximum);
         if (count == 1) _wake.Set();
         return DatagramSendStatus.Accepted;
     }
@@ -222,7 +227,7 @@ internal sealed class SharedUdpBackgroundEgress : IDisposable
     {
         int count = Volatile.Read(ref _count);
         ulong oldest = 0;
-        if (count > 0)
+        if (_timingEnabled && count > 0)
         {
             long enqueued = Volatile.Read(ref _enqueuedAt[Volatile.Read(ref _head)]);
             long age = Stopwatch.GetTimestamp() - enqueued;
@@ -231,6 +236,7 @@ internal sealed class SharedUdpBackgroundEgress : IDisposable
         return new(
             MapState(Volatile.Read(ref _state)),
             _usesNativeBatching,
+            _timingEnabled,
             Volatile.Read(ref _state) is Running or Stopping ? 1 : 0,
             _lengths.Length,
             CapacityBytes,
@@ -305,12 +311,13 @@ internal sealed class SharedUdpBackgroundEgress : IDisposable
                     continue;
                 }
 
-                long started = Stopwatch.GetTimestamp();
+                long started = _timingEnabled ? Stopwatch.GetTimestamp() : 0;
                 SaturatingIncrement(ref _drainPasses);
                 bool madeProgress = _usesNativeBatching
                     ? DrainNative()
                     : DrainScalar();
-                SaturatingAdd(ref _workerServiceTicks, Stopwatch.GetTimestamp() - started);
+                if (_timingEnabled)
+                    SaturatingAdd(ref _workerServiceTicks, Stopwatch.GetTimestamp() - started);
                 if (!madeProgress) _wake.WaitOne(1);
             }
             Volatile.Write(ref _state, Disposed);
@@ -349,7 +356,7 @@ internal sealed class SharedUdpBackgroundEgress : IDisposable
             {
                 for (int index = 0; index < 16; index++)
                     _scalarAddress[index] = _addresses[slot * 16 + index];
-                long sendStarted = Stopwatch.GetTimestamp();
+                long sendStarted = _timingEnabled ? Stopwatch.GetTimestamp() : 0;
                 try
                 {
                     SaturatingIncrement(ref _scalarSendCalls);
@@ -364,8 +371,9 @@ internal sealed class SharedUdpBackgroundEgress : IDisposable
                     sent = -1;
                     error = (int)exception.SocketErrorCode;
                 }
-                SaturatingAdd(ref _physicalSendSystemCallTicks,
-                    Stopwatch.GetTimestamp() - sendStarted);
+                if (_timingEnabled)
+                    SaturatingAdd(ref _physicalSendSystemCallTicks,
+                        Stopwatch.GetTimestamp() - sendStarted);
             }
         }
         if (sent == _lengths[slot])
@@ -412,7 +420,7 @@ internal sealed class SharedUdpBackgroundEgress : IDisposable
             if (_testHook?.TryOverrideSend(requested, out sent, out error) != true)
             {
                 SaturatingIncrement(ref _nativeSendCalls);
-                long sendStarted = Stopwatch.GetTimestamp();
+                long sendStarted = _timingEnabled ? Stopwatch.GetTimestamp() : 0;
                 sent = LinuxUdpBatch.Send(
                     _socketDescriptor,
                     _payloads,
@@ -424,8 +432,9 @@ internal sealed class SharedUdpBackgroundEgress : IDisposable
                     _lengths.Length,
                     requested,
                     out error);
-                SaturatingAdd(ref _physicalSendSystemCallTicks,
-                    Stopwatch.GetTimestamp() - sendStarted);
+                if (_timingEnabled)
+                    SaturatingAdd(ref _physicalSendSystemCallTicks,
+                        Stopwatch.GetTimestamp() - sendStarted);
             }
         }
         if (sent > 0)
@@ -476,7 +485,8 @@ internal sealed class SharedUdpBackgroundEgress : IDisposable
                 SaturatingIncrement(ref _physicallySentDatagrams);
                 SaturatingAdd(ref _physicallySentBytes, length);
             }
-            RecordDelay(Stopwatch.GetTimestamp() - _enqueuedAt[slot]);
+            if (_timingEnabled)
+                RecordDelay(Stopwatch.GetTimestamp() - _enqueuedAt[slot]);
             CryptographicOperations.ZeroMemory(
                 _payloads.AsSpan(slot * _maximumDatagramBytes, length));
             _addresses.AsSpan(slot * 16, 16).Clear();

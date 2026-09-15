@@ -181,6 +181,8 @@ internal static class P03WholeFlowNetworkSuite
         int ticks = ReadInt(args, "--ticks", 270);
         int tickMilliseconds = ReadInt(args, "--server-tick-milliseconds", 16);
         int burstPeriod = ReadInt(args, "--dirty-burst-period", 1);
+        bool egressTimingEnabled = !string.Equals(
+            ReadText(args, "--egress-timing"), "off", StringComparison.OrdinalIgnoreCase);
         int[] populations = ParseOptionalPositiveIntegers(ReadText(args, "--populations")) ??
             [64, 128, 192, 256, 300];
         string output = ReadText(args, "--output") ??
@@ -210,7 +212,8 @@ internal static class P03WholeFlowNetworkSuite
                 stageTimingEnabled: false,
                 compression: RemoteChunkBundleCompressionPolicy.Selected,
                 serverOwnedRemoteTimingEnabled: true,
-                socketIoMode: mode);
+                socketIoMode: mode,
+                backgroundEgressTimingEnabled: egressTimingEnabled);
             _ = prime.Run(Math.Max(30, warmup), 10);
         }
 
@@ -228,7 +231,8 @@ internal static class P03WholeFlowNetworkSuite
                 stageTimingEnabled: false,
                 compression: RemoteChunkBundleCompressionPolicy.Selected,
                 serverOwnedRemoteTimingEnabled: true,
-                socketIoMode: mode);
+                socketIoMode: mode,
+                backgroundEgressTimingEnabled: egressTimingEnabled);
             P03WholeFlowRow row = harness.Run(warmup, ticks) with
             {
                 ExecutionOrder = executionOrder,
@@ -284,7 +288,8 @@ internal static class P03WholeFlowNetworkSuite
                 "send time and client work are excluded from that main-thread metric.",
             "Background byte/count fields are exact measurement-window deltas. Queue latency " +
                 "histogram percentiles are bounded worker-lifetime observations including " +
-                "bootstrap and warmup because production telemetry is cumulative.",
+                "bootstrap and warmup because production telemetry is cumulative. Detailed " +
+                $"background timing was {(egressTimingEnabled ? "enabled" : "disabled")}.",
             rows.OrderBy(row => row.Recipients)
                 .ThenBy(row => (int)Enum.Parse<SharedUdpSocketIoMode>(row.SocketIoMode))
                 .ToArray());
@@ -1246,7 +1251,8 @@ internal sealed class P03WholeFlowHarness : IDisposable
         PreparedChunkPublicationReadModel chunkReadModel =
             PreparedChunkPublicationReadModel.PreparedLatestState,
         SharedUdpSocketIoMode socketIoMode =
-            SharedUdpSocketIoMode.PlatformSendReceiveBatch)
+            SharedUdpSocketIoMode.PlatformSendReceiveBatch,
+        bool backgroundEgressTimingEnabled = true)
     {
         _workload = workload;
         _profile = profile;
@@ -1281,7 +1287,8 @@ internal sealed class P03WholeFlowHarness : IDisposable
             MaximumUnreliableFramesPerDatagram: frameCap);
         var shared = new SharedUdpProtocolLimits(
             workload.Recipients, 32, Math.Max(8_192, workload.Recipients * 64),
-            socketIoMode, 32, 32);
+            socketIoMode, 32, 32,
+            BackgroundEgressTimingEnabled: backgroundEgressTimingEnabled);
         _host = SharedUdpProtocolHost.CreateSelfTrustedLoopback(
             _protocolLimits, s_udp, shared, manifest);
         _sessions = new SharedUdpProtocolSession[workload.Recipients];
@@ -3385,6 +3392,7 @@ internal readonly record struct Pf5R3BackgroundEgressReport(
 internal readonly record struct P03BackgroundEgressSummary(
     string State,
     bool UsesNativeBatching,
+    bool TimingEnabled,
     int SenderThreads,
     int CapacityDatagrams,
     long CapacityBytes,
@@ -3423,6 +3431,7 @@ internal readonly record struct P03BackgroundEgressSummary(
         in SharedUdpBackgroundEgressSnapshot before) => new(
         after.State.ToString(),
         after.UsesNativeBatching,
+        after.TimingEnabled,
         after.SenderThreads,
         after.CapacityDatagrams,
         after.CapacityBytes,

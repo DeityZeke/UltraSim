@@ -40,6 +40,7 @@ internal static class N010SharedUdpListenerTests
         Run("SharedUdpNativeReceiveBatchBackpressureRemainsPerSession", SharedUdpNativeReceiveBatchBackpressureRemainsPerSession);
         Run("WarmedSharedUdpNativeReceiveBatchAllocatesZero", WarmedSharedUdpNativeReceiveBatchAllocatesZero);
         Run("SharedUdpBackgroundScalarCopiesAndSendsIndependentDatagrams", SharedUdpBackgroundScalarCopiesAndSendsIndependentDatagrams);
+        Run("SharedUdpDefaultUsesSelectedBackgroundEgress", SharedUdpDefaultUsesSelectedBackgroundEgress);
         Run("SharedUdpBackgroundNativeBatchCopiesAndSendsIndependentDatagrams", SharedUdpBackgroundNativeBatchCopiesAndSendsIndependentDatagrams);
         Run("SharedUdpBackgroundModesPreserveSecureSessions", SharedUdpBackgroundModesPreserveSecureSessions);
         Run("SharedUdpBackgroundQueueRefusalIsBounded", SharedUdpBackgroundQueueRefusalIsBounded);
@@ -571,6 +572,10 @@ internal static class N010SharedUdpListenerTests
 
     private static void SharedUdpBackgroundScalarCopiesAndSendsIndependentDatagrams() =>
         AssertBackgroundCopiesAndSends(SharedUdpSocketIoMode.BackgroundScalar);
+
+    private static void SharedUdpDefaultUsesSelectedBackgroundEgress() =>
+        Equal(SharedUdpSocketIoMode.BackgroundPlatformBatch,
+            SharedUdpProtocolLimits.Default.SocketIoMode);
 
     private static void SharedUdpBackgroundNativeBatchCopiesAndSendsIndependentDatagrams()
     {

@@ -42,7 +42,10 @@ public readonly record struct SharedUdpProtocolHostSnapshot(
 /// datagrams in one native call; it does not batch protocol frames or wait for
 /// additional work. A separately selected platform receive-batch path drains
 /// only datagrams already readable at the current pump into fixed listener
-/// storage before applying the same per-datagram routing/admission contract.
+/// storage before applying the same per-datagram routing/admission contract. The
+/// selected hosted-server profile may instead transfer already-finalized outbound
+/// datagrams to one fixed-capacity listener-owned background sender; protocol peer,
+/// security, reliability, and application ownership remain on their existing owners.
 ///
 /// The current public constructor creates loopback clients for controlled
 /// topology and benchmark evidence. A public Internet-facing acceptor remains

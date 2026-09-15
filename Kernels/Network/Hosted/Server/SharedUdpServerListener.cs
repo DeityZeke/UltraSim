@@ -38,7 +38,10 @@ public enum SharedUdpSocketIoMode : byte
 /// By default the listener requests aggregate socket-buffer capacity equal to
 /// admitted per-session server capacity. Explicit aggregate send/receive values
 /// decouple kernel buffering from maximum CCU when deployment evidence earns a
-/// smaller or larger shared budget.
+/// smaller or larger shared budget. The selected server profile hands complete
+/// encrypted established-session datagrams to one bounded listener-owned sender;
+/// platforms without native <c>sendmmsg</c> retain the same background ownership
+/// while using scalar socket submission.
 /// </remarks>
 public readonly record struct SharedUdpProtocolLimits(
     int MaximumSessions = 256,
@@ -48,17 +51,19 @@ public readonly record struct SharedUdpProtocolLimits(
     int MaximumNativeSendBatchDatagrams = 32,
     int MaximumNativeReceiveBatchDatagrams = 32,
     int AggregateSocketSendBufferBytes = 0,
-    int AggregateSocketReceiveBufferBytes = 0)
+    int AggregateSocketReceiveBufferBytes = 0,
+    bool BackgroundEgressTimingEnabled = true)
 {
     public static SharedUdpProtocolLimits Default => new(
         MaximumSessions: 256,
         MaximumQueuedDatagramsPerSession: 8,
         MaximumInboundDatagramsPerPump: 4_096,
-        SocketIoMode: SharedUdpSocketIoMode.Scalar,
+        SocketIoMode: SharedUdpSocketIoMode.BackgroundPlatformBatch,
         MaximumNativeSendBatchDatagrams: 32,
         MaximumNativeReceiveBatchDatagrams: 32,
         AggregateSocketSendBufferBytes: 0,
-        AggregateSocketReceiveBufferBytes: 0);
+        AggregateSocketReceiveBufferBytes: 0,
+        BackgroundEgressTimingEnabled: true);
 
     internal void Validate(UdpProtocolLimits udp)
     {
@@ -427,6 +432,7 @@ internal sealed class SharedUdpServerListener : IDisposable
                 udp.DrainTimeoutMilliseconds,
                 usesBackgroundNativeBatching,
                 _egressPathGate,
+                shared.BackgroundEgressTimingEnabled,
                 backgroundEgressTestHook);
         }
         ReservedBytes = shared.EstimateReservedPayloadBytes(
