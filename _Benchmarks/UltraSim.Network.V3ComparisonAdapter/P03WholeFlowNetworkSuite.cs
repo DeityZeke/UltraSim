@@ -180,12 +180,14 @@ internal static class P03WholeFlowNetworkSuite
         int warmup = ReadInt(args, "--warmup", 60);
         int ticks = ReadInt(args, "--ticks", 270);
         int tickMilliseconds = ReadInt(args, "--server-tick-milliseconds", 16);
+        int burstPeriod = ReadInt(args, "--dirty-burst-period", 1);
         int[] populations = ParseOptionalPositiveIntegers(ReadText(args, "--populations")) ??
             [64, 128, 192, 256, 300];
         string output = ReadText(args, "--output") ??
             "_Benchmarks/results/network-pf5-r3-background-egress.json";
         SharedUdpSocketIoMode[] modes = ParsePf5R3SocketModes(ReadText(args, "--socket-modes"));
-        if (warmup < 1 || ticks < 10 || tickMilliseconds <= 0)
+        if (warmup < 1 || ticks < 10 || tickMilliseconds <= 0 ||
+            burstPeriod is < 1 or > 16)
             throw new ArgumentOutOfRangeException(nameof(args));
 
         var cases = new List<(int Population, SharedUdpSocketIoMode Mode)>(
@@ -203,9 +205,7 @@ internal static class P03WholeFlowNetworkSuite
         foreach (SharedUdpSocketIoMode mode in modes)
         {
             using var prime = new P03WholeFlowHarness(
-                P03NetworkWorkload.ChunkProductionDense(Math.Min(populations[0], 32))
-                    .WithServerTickAndAoICadence(tickMilliseconds,
-                        P03AoICadencePolicy.Selected124),
+                CreateWorkload(Math.Min(populations[0], 32)),
                 P03NetworkProfile.ChunkPublication, 2,
                 stageTimingEnabled: false,
                 compression: RemoteChunkBundleCompressionPolicy.Selected,
@@ -218,9 +218,7 @@ internal static class P03WholeFlowNetworkSuite
         for (int executionOrder = 0; executionOrder < cases.Count; executionOrder++)
         {
             (int population, SharedUdpSocketIoMode mode) = cases[executionOrder];
-            P03NetworkWorkload workload = P03NetworkWorkload.ChunkProductionDense(population)
-                .WithServerTickAndAoICadence(tickMilliseconds,
-                    P03AoICadencePolicy.Selected124);
+            P03NetworkWorkload workload = CreateWorkload(population);
             Console.WriteLine($"PF5-R3 {mode}/{population}: constructing...");
             GC.Collect();
             GC.WaitForPendingFinalizers();
@@ -276,9 +274,10 @@ internal static class P03WholeFlowNetworkSuite
             ExecutionSeed,
             warmup,
             ticks,
-            "Current PF5-R2 shared prepared-latest-state ChunkPublication; message 129 when " +
+                "Current PF5-R2 shared prepared-latest-state ChunkPublication; message 129 when " +
                 "beneficial; selective message-148 LZ4 at 384/32; Immediate/Near/Far 1/2/4; " +
-                "CrossLane unreliable aggregation cap two; real secure loopback UDP.",
+                "CrossLane unreliable aggregation cap two; real secure loopback UDP; " +
+                $"dirty burst period {burstPeriod} (equal long-window source-row rate).",
             "ServerOwnedRemoteReplicationBudget is the per-tick sum of shared publication " +
                 "preparation, recipient commit observation, Game scheduling/encoding/proof, " +
                 "Network protocol work, and listener submission. Background worker physical " +
@@ -293,6 +292,14 @@ internal static class P03WholeFlowNetworkSuite
         File.WriteAllText(output, JsonSerializer.Serialize(report,
             new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
         Console.WriteLine(Path.GetFullPath(output));
+
+        P03NetworkWorkload CreateWorkload(int population)
+        {
+            P03NetworkWorkload workload = P03NetworkWorkload.ChunkProductionDense(population)
+                .WithServerTickAndAoICadence(tickMilliseconds,
+                    P03AoICadencePolicy.Selected124);
+            return burstPeriod == 1 ? workload : workload.WithDirtyBurst(burstPeriod);
+        }
     }
 
     private static SharedUdpSocketIoMode[] ParsePf5R3SocketModes(string? text)
@@ -897,6 +904,7 @@ internal enum P03MutationPattern : byte
     ActiveDistributed = 4,
     FixedPrefix = 5,
     MatchedDistributedPrefix = 6,
+    BurstChunkStripe = 7,
 }
 
 internal readonly record struct P03NetworkWorkload(
@@ -913,7 +921,8 @@ internal readonly record struct P03NetworkWorkload(
     P03MutationPattern MutationPattern = P03MutationPattern.Sequential,
     int ActiveEntities = 0,
     int InputIntervalTicks = 1,
-    string SemanticFamilies = "public-world-latest-state")
+    string SemanticFamilies = "public-world-latest-state",
+    int MutationPeriodTicks = 1)
 {
     internal static P03NetworkWorkload Dense(int recipients, int entities) => new(
         $"dense-{recipients}", recipients, entities, Math.Max(1, entities * 2 / 100), false,
@@ -946,6 +955,19 @@ internal readonly record struct P03NetworkWorkload(
             EntityLayout = P03EntityLayout.TwentyEntitiesPerChunk,
             MutationPattern = P03MutationPattern.EightChunkStripe,
         };
+
+    internal P03NetworkWorkload WithDirtyBurst(int period)
+    {
+        if (period is < 2 or > 16 || DirtyEntitiesPerTick > Entities / period)
+            throw new ArgumentOutOfRangeException(nameof(period));
+        return this with
+        {
+            Id = $"{Id}-burst{period}",
+            DirtyEntitiesPerTick = checked(DirtyEntitiesPerTick * period),
+            MutationPattern = P03MutationPattern.BurstChunkStripe,
+            MutationPeriodTicks = period,
+        };
+    }
 
     internal static P03NetworkWorkload ChunkV2Shaped(
         int recipients,
@@ -1040,6 +1062,27 @@ internal readonly record struct P03NetworkWorkload(
                     int round = offset / chunksPerStripe;
                     int chunk = (startChunk + stripeChunk) % chunkCount;
                     int row = (tick + stripeChunk + round * chunksPerStripe) % entitiesPerChunk;
+                    selected[offset] = chunk * entitiesPerChunk + row;
+                }
+                break;
+            }
+            case P03MutationPattern.BurstChunkStripe:
+            {
+                const int entitiesPerChunk = 20;
+                int chunkCount = Entities / entitiesPerChunk;
+                int chunksPerBurst = Math.Min(chunkCount, checked(8 * MutationPeriodTicks));
+                if (Entities % entitiesPerChunk != 0 ||
+                    DirtyEntitiesPerTick > checked(chunksPerBurst * entitiesPerChunk))
+                    throw new InvalidOperationException(
+                        "The burst chunk workload exceeds its complete-row stripe.");
+                int burst = (tick - 1) / MutationPeriodTicks;
+                int startChunk = checked(burst * chunksPerBurst % chunkCount);
+                for (int offset = 0; offset < selected.Length; offset++)
+                {
+                    int stripeChunk = offset % chunksPerBurst;
+                    int round = offset / chunksPerBurst;
+                    int chunk = (startChunk + stripeChunk) % chunkCount;
+                    int row = (burst + stripeChunk + round * chunksPerBurst) % entitiesPerChunk;
                     selected[offset] = chunk * entitiesPerChunk + row;
                 }
                 break;
@@ -1459,6 +1502,9 @@ internal sealed class P03WholeFlowHarness : IDisposable
 
     private void Mutate(int tick)
     {
+        if (_workload.MutationPeriodTicks > 1 &&
+            (tick - 1) % _workload.MutationPeriodTicks != 0)
+            return;
         Span<int> dirty = stackalloc int[_workload.DirtyEntitiesPerTick];
         _workload.CopyDirtyEntityIndices(tick, dirty);
         for (int offset = 0; offset < dirty.Length; offset++)
