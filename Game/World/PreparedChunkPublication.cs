@@ -434,6 +434,21 @@ public sealed partial class ChunkPublicationStore
     private void SortPreparedIndices(Span<int> indices)
     {
         if (indices.Length <= 1) return;
+        if (indices.Length <= 8)
+        {
+            for (int index = 1; index < indices.Length; index++)
+            {
+                int value = indices[index];
+                int position = index;
+                while (position > 0 && ComparePreparedIndex(indices[position - 1], value) > 0)
+                {
+                    indices[position] = indices[position - 1];
+                    position--;
+                }
+                indices[position] = value;
+            }
+            return;
+        }
         for (int root = indices.Length / 2 - 1; root >= 0; root--)
             SiftDownPreparedIndices(indices, root, indices.Length);
         for (int end = indices.Length - 1; end > 0; end--)
