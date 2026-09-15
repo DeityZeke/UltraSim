@@ -42,6 +42,10 @@ public readonly record struct PreparedChunkPublicationSnapshot(
     ulong RecipientCollapseTicks,
     ulong RecipientMaterializationTicks,
     ulong RecipientSortTicks,
+    ulong RecipientSortCalls,
+    ulong RecipientIndicesSorted,
+    ulong RecipientTrivialSorts,
+    ulong RecipientRecordsConstructed,
     int CoveragePublicationHighWater,
     long ReservedBytes);
 
@@ -82,6 +86,10 @@ public sealed partial class ChunkPublicationStore
     private ulong _preparedRecipientCollapseTicks;
     private ulong _preparedRecipientMaterializationTicks;
     private ulong _preparedRecipientSortTicks;
+    private ulong _preparedRecipientSortCalls;
+    private ulong _preparedRecipientIndicesSorted;
+    private ulong _preparedRecipientTrivialSorts;
+    private ulong _preparedRecipientRecordsConstructed;
     private bool _preparedSourceAttributionEnabled;
     private bool _preparedRecipientAttributionEnabled;
     private int _preparedCoveragePublicationHighWater;
@@ -151,6 +159,10 @@ public sealed partial class ChunkPublicationStore
             _preparedRecipientCollapseTicks,
             _preparedRecipientMaterializationTicks,
             _preparedRecipientSortTicks,
+            _preparedRecipientSortCalls,
+            _preparedRecipientIndicesSorted,
+            _preparedRecipientTrivialSorts,
+            _preparedRecipientRecordsConstructed,
             _preparedCoveragePublicationHighWater,
             CalculatePreparedPublicationReservedBytes());
     }
@@ -180,6 +192,10 @@ public sealed partial class ChunkPublicationStore
         _preparedRecipientCollapseTicks = 0;
         _preparedRecipientMaterializationTicks = 0;
         _preparedRecipientSortTicks = 0;
+        _preparedRecipientSortCalls = 0;
+        _preparedRecipientIndicesSorted = 0;
+        _preparedRecipientTrivialSorts = 0;
+        _preparedRecipientRecordsConstructed = 0;
     }
 
     public ulong GetLastPreparedSourcePreparationTicks()
@@ -376,6 +392,21 @@ public sealed partial class ChunkPublicationStore
             return ChunkPublicationReadStatus.DestinationTooSmall;
         }
 
+        // Canonical order is by public identity. Sort the compact source indices first so each
+        // 72-byte WorldPublicDeltaRecord is constructed exactly once in its final position.
+        // The prior implementation materialized first and heapsorted the full records.
+        long sortStarted = PreparedRecipientAttributionTimestamp();
+        if (_preparedRecipientAttributionEnabled)
+        {
+            SaturatingIncrement(ref _preparedRecipientSortCalls);
+            SaturatingAdd(ref _preparedRecipientIndicesSorted, checked((ulong)count));
+            if (count <= 1) SaturatingIncrement(ref _preparedRecipientTrivialSorts);
+        }
+        SortPreparedIndices(_queryIndices.AsSpan(0, count));
+        if (_preparedRecipientAttributionEnabled)
+            SaturatingAdd(ref _preparedRecipientSortTicks,
+                checked((ulong)(Stopwatch.GetTimestamp() - sortStarted)));
+
         long materializationStarted = PreparedRecipientAttributionTimestamp();
         for (int result = 0; result < count; result++)
         {
@@ -388,14 +419,10 @@ public sealed partial class ChunkPublicationStore
                 entry.Operation, entry.Fields, entry.Id, entry.EntityVersion, current);
         }
         if (_preparedRecipientAttributionEnabled)
+        {
+            SaturatingAdd(ref _preparedRecipientRecordsConstructed, checked((ulong)count));
             SaturatingAdd(ref _preparedRecipientMaterializationTicks,
                 checked((ulong)(Stopwatch.GetTimestamp() - materializationStarted)));
-        long sortStarted = PreparedRecipientAttributionTimestamp();
-        SortRecords(destination[..count]);
-        if (_preparedRecipientAttributionEnabled)
-        {
-            SaturatingAdd(ref _preparedRecipientSortTicks,
-                checked((ulong)(Stopwatch.GetTimestamp() - sortStarted)));
             SaturatingAdd(ref _preparedRecipientPreparationTicks,
                 checked((ulong)(Stopwatch.GetTimestamp() - preparationStarted)));
         }
@@ -403,6 +430,36 @@ public sealed partial class ChunkPublicationStore
         batch = CreateBatch(ChunkPublicationReadStatus.Delta, key, chunk, count, count);
         return ChunkPublicationReadStatus.Delta;
     }
+
+    private void SortPreparedIndices(Span<int> indices)
+    {
+        if (indices.Length <= 1) return;
+        for (int root = indices.Length / 2 - 1; root >= 0; root--)
+            SiftDownPreparedIndices(indices, root, indices.Length);
+        for (int end = indices.Length - 1; end > 0; end--)
+        {
+            (indices[0], indices[end]) = (indices[end], indices[0]);
+            SiftDownPreparedIndices(indices, 0, end);
+        }
+    }
+
+    private void SiftDownPreparedIndices(Span<int> indices, int root, int count)
+    {
+        while (true)
+        {
+            int child = checked(root * 2 + 1);
+            if (child >= count) return;
+            if (child + 1 < count && ComparePreparedIndex(
+                    indices[child], indices[child + 1]) < 0)
+                child++;
+            if (ComparePreparedIndex(indices[root], indices[child]) >= 0) return;
+            (indices[root], indices[child]) = (indices[child], indices[root]);
+            root = child;
+        }
+    }
+
+    private int ComparePreparedIndex(int left, int right) =>
+        _queryLatest[left].Id.CompareTo(_queryLatest[right].Id);
 
     private ChunkPublicationReadStatus PreparedRebase(
         SpatialChunkKey key,

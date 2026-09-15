@@ -426,6 +426,8 @@ internal static class N1OfflineDirectChunkTests
         var snapshots = new WorldPublicRecord[8];
         Equal(ChunkPublicationReadStatus.Snapshot,
             fixture.Store.TryCopySnapshot(key, snapshots, out ChunkPublicationBatch baseline));
+        fixture.Store.ConfigurePreparedPublicationAttribution(
+            sourceEnabled: false, recipientEnabled: true);
 
         fixture.Present(0, Position(0, 0, 2_100, 2_000),
             GameWorldPublicPrefabIds.Character);
@@ -473,6 +475,10 @@ internal static class N1OfflineDirectChunkTests
         Equal(1UL, census.RecipientRangeReads);
         Equal(4UL, census.ReferencedSourcePublications);
         Equal(1UL, census.HistoryDerivedSteadyStateCalls); // explicit comparison only
+        Equal(1UL, census.RecipientSortCalls);
+        Equal((ulong)preparedBatch.Count, census.RecipientIndicesSorted);
+        Equal((ulong)preparedBatch.Count, census.RecipientRecordsConstructed);
+        Equal(preparedBatch.Count <= 1 ? 1UL : 0UL, census.RecipientTrivialSorts);
 
         static void MaterializeRemote(
             ReadOnlySpan<WorldPublicDeltaRecord> source,
