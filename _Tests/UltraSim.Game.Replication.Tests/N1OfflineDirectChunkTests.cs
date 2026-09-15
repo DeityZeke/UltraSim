@@ -2401,6 +2401,90 @@ internal static class N1OfflineDirectChunkTests
             $"{cpu.PreparedCandidateLocalReuses} messages={messages} proofs={chunkCount}");
     }
 
+    internal static void PacketBoundaryQueueRefusalIsTransactional()
+    {
+        const int recordsPerChunk = 30;
+        using var fixture = new Fixture(historyCapacity: 256, entityCount: 60);
+        for (int entity = 0; entity < 60; entity++)
+        {
+            int chunk = entity / recordsPerChunk;
+            int record = entity % recordsPerChunk;
+            fixture.Present(entity, Position(chunk, 0,
+                500 + record * 300, 700 + record * 250),
+                GameWorldPublicPrefabIds.Character);
+        }
+        NetworkProtocolLimits constrained = NetworkProtocolLimits.Default with
+        {
+            MaximumIndependentUnreliableMessages = 1,
+        };
+        using ProtocolLoopback loopback = CreateLoopback(default, constrained);
+        var recipient = Recipient(maximumRecords: 64);
+        var cache = Cache(fixture, maximumPublicRecords: 64);
+        ReconcileAndStageInitial(fixture, recipient, cache, Position(0, 0, 8_000, 8_000));
+        ulong[] baselines =
+        [
+            recipient.Subscriptions[FindSubscription(recipient, Key(0, 0))].Cursor.Revision.Value,
+            recipient.Subscriptions[FindSubscription(recipient, Key(1, 0))].Cursor.Revision.Value,
+        ];
+        for (int entity = 0; entity < 60; entity++)
+        {
+            int chunk = entity / recordsPerChunk;
+            int record = entity % recordsPerChunk;
+            fixture.Present(entity, Position(chunk, 0,
+                600 + record * 300, 700 + record * 250),
+                GameWorldPublicPrefabIds.Character);
+        }
+        var server = new RemoteChunkWorldStateServer(
+            loopback.Server, recipient, fixture.Store, 0xF5_0402,
+            new RemoteChunkWorldStateTransportLimits(16));
+        var client = new RemoteChunkWorldStateClient(
+            loopback.Client, cache, 0xF5_0402, maximumDeltaRecords: 64,
+            maximumPendingProofs: 16);
+        server.ConfigureTelemetry(GameTelemetryLevel.Detailed);
+        ChunkPublicationWork[] works =
+        [
+            new(default, Key(0, 0), ChunkInterestTier.Immediate,
+                ChunkPublicationWorkKind.Dirty, 1, 1),
+            new(default, Key(1, 0), ChunkInterestTier.Immediate,
+                ChunkPublicationWorkKind.Dirty, 1, 1),
+        ];
+        var statuses = new RemoteChunkWorldStateScheduleStatus[2];
+
+        Equal(NetworkQueueStatus.Accepted, loopback.Server.TryQueue(
+            RemoteChunkDeltaHeaderCodec.Descriptor.Id, new byte[] { 1 }));
+        Equal(1, server.TryScheduleDueBundle(works, 1, statuses,
+            out int refusedMessages, out _, out _));
+        Equal(0, refusedMessages);
+        Equal(RemoteChunkWorldStateScheduleStatus.TransportNotAccepting, statuses[0]);
+        Equal(0, server.GetSnapshot().OutstandingDeliveries);
+        Equal(1UL, server.GetSnapshot().NextDeliveryId);
+        Equal(baselines[0], recipient.Subscriptions[
+            FindSubscription(recipient, Key(0, 0))].Cursor.Revision.Value);
+        Equal(baselines[1], recipient.Subscriptions[
+            FindSubscription(recipient, Key(1, 0))].Cursor.Revision.Value);
+        RemoteChunkCpuAttributionSnapshot refusal = server.GetTimingSnapshot().Cpu;
+        Equal(2UL, refusal.PreparedCandidateBuilds);
+        Equal(1UL, refusal.PreparedCandidatePacketBoundaryCarries);
+        Equal(0UL, refusal.PreparedCandidateLocalReuses);
+        Equal(1UL, refusal.PreparedCandidateInvalidations);
+
+        for (int pump = 0; pump < 8 && loopback.Client.ReceivedQueued == 0; pump++)
+            loopback.Pump();
+        True(loopback.Client.TryConsumeReceived());
+        Equal(2, server.TryScheduleDueBundle(works, 2, statuses,
+            out int partialMessages, out _, out _));
+        Equal(1, partialMessages);
+        Equal(RemoteChunkWorldStateScheduleStatus.QueuedDelta, statuses[0]);
+        Equal(RemoteChunkWorldStateScheduleStatus.TransportNotAccepting, statuses[1]);
+        Drive(loopback, server, client, () => server.GetSnapshot().AppliedProofs == 1);
+        Equal(1, server.TryScheduleDueBundle(works.AsSpan(1), 3, statuses.AsSpan(1),
+            out int retryMessages, out _, out _));
+        Equal(1, retryMessages);
+        Drive(loopback, server, client, () => server.GetSnapshot().AppliedProofs == 2);
+        Equal(0, server.GetSnapshot().OutstandingDeliveries);
+        Equal(3UL, server.GetSnapshot().NextDeliveryId);
+    }
+
     internal static void CompressedBundleCodecIsExactBoundedHostileSafeAndAllocationFree()
     {
         CreatePf4fCanonicalBundle(out byte[] canonical, out int canonicalBytes);
