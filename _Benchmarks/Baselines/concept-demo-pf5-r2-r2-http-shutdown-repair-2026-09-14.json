@@ -1,0 +1,44 @@
+{
+  "Schema": "ultrasim-concept-demo-pf5-r2-r2-http-shutdown-repair-v1",
+  "Date": "2026-09-14",
+  "StartingHead": "8472038eb01e39f10a78e200f85d19f5b7e37ad4",
+  "ReplicationSemanticCandidate": "992fc541460f18534da9036c73cb711277de11ce",
+  "RepairCommit": "389fb3a0de274fcba0c9d4f64e686b94818f9c71",
+  "IntegratedCorrectnessCandidate": "389fb3a0de274fcba0c9d4f64e686b94818f9c71",
+  "ReplicationProductionSemanticsChanged": false,
+  "ReproducedFailures": [
+    "Response initialization/submission InvalidOperationException escaped through Dispose",
+    "GetContextAsync shutdown ObjectDisposedException or exact listener-not-started InvalidOperationException escaped through Dispose",
+    "Initial repair ordering allowed response close to race HttpListener.Stop and exposed runtime FormatHeaders NullReferenceException"
+  ],
+  "AcceptedLifecycle": [
+    "Running-to-Stopping published once",
+    "service cancellation and pending-writer completion",
+    "active response abort and response-worker join",
+    "queued-context retirement",
+    "serialized listener stop/close",
+    "accept-worker join and final drain",
+    "cancellation-source disposal",
+    "Disposed publication and concurrent-disposer release"
+  ],
+  "UnexpectedWorkerErrorsPreserved": true,
+  "IdempotentDispose": true,
+  "ConcurrentDispose": true,
+  "FocusedHostingTests": 21,
+  "TargetedStressCyclesPerRun": 128,
+  "ConsecutiveFocusedHttpStressRuns": 4,
+  "TotalCleanTargetedStressCycles": 512,
+  "CanonicalReleaseCommand": "./verify.sh --configuration=Release",
+  "ConsecutiveCanonicalReleasePasses": 3,
+  "CanonicalReleaseIncluded": [
+    "Server Hosting",
+    "Contentless Online",
+    "physical composition",
+    "Godot exports",
+    "F0.7 mixed-session lifecycle",
+    "F0.8 final composition parity"
+  ],
+  "CanonicalReleaseResult": "PASS repository verification",
+  "Pf6MayResume": true,
+  "Outcome": "Phase A accepted"
+}
