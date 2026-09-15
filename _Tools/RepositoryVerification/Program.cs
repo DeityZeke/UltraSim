@@ -58,28 +58,34 @@ static void VerifyPf5R2R2ScalingBoundary(string root, string configuration)
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(output));
         JsonElement report = document.RootElement;
         if (report.GetProperty("Schema").GetString() !=
-            "ultrasim-concept-demo-pf5-r2-r2-v2-v3-scaling-v1")
+            "ultrasim-concept-demo-pf5-r2-r2-v2-v3-scaling-v2")
             throw new InvalidOperationException("PF5-R2-R2 scaling schema was not canonical.");
         JsonElement[] rows = report.GetProperty("RatedRows").EnumerateArray()
             .Select(static value => value.Clone()).ToArray();
         JsonElement[] detailed = report.GetProperty("DetailedAttributionRows").EnumerateArray()
             .Select(static value => value.Clone()).ToArray();
-        if (rows.Length != 4 || detailed.Length != 4)
+        JsonElement[] matched = report.GetProperty("MatchedControlRows").EnumerateArray()
+            .Select(static value => value.Clone()).ToArray();
+        if (rows.Length != 4 || detailed.Length != 4 || matched.Length != 3)
             throw new InvalidOperationException("PF5-R2-R2 focused workload matrix was incomplete.");
-        foreach (JsonElement row in rows.Concat(detailed))
+        foreach (JsonElement row in rows.Concat(detailed).Concat(matched))
         {
             JsonElement flow = row.GetProperty("Flow");
             JsonElement timing = flow.GetProperty("Timing");
             JsonElement preparation = timing.GetProperty("RemotePublicationPreparation");
+            JsonElement wakeup = timing.GetProperty("RecipientCommitObservation");
             JsonElement network = timing.GetProperty("NetworkAndRemoteReplication");
             JsonElement budget = timing.GetProperty("ServerOwnedRemoteReplicationBudget");
             int expected = row.GetProperty("DetailedAttribution").GetBoolean() ? 16 : 24;
             if (preparation.GetProperty("Samples").GetInt32() != expected ||
+                wakeup.GetProperty("Samples").GetInt32() != expected ||
                 network.GetProperty("Samples").GetInt32() != expected ||
                 budget.GetProperty("Samples").GetInt32() != expected ||
                 Math.Abs(preparation.GetProperty("Mean").GetDouble() +
+                    wakeup.GetProperty("Mean").GetDouble() +
                     network.GetProperty("Mean").GetDouble() -
                     budget.GetProperty("Mean").GetDouble()) > 0.000_001 ||
+                wakeup.GetProperty("Mean").GetDouble() <= 0 ||
                 !flow.GetProperty("Converged").GetBoolean())
                 throw new InvalidOperationException(
                     "PF5-R2-R2 per-tick server-owned timing did not reconcile.");
@@ -95,6 +101,13 @@ static void VerifyPf5R2R2ScalingBoundary(string root, string configuration)
                      .GetProperty("Enabled").GetBoolean()))
                 throw new InvalidOperationException(
                     "PF5-R2-R2 detailed stage attribution was not active.");
+            JsonElement boundary = flow.GetProperty("TimingBoundary");
+            if (boundary.GetProperty("RecipientWakeupObservedOrder").GetInt32() <=
+                    boundary.GetProperty("PreparedSourceObservedOrder").GetInt32() ||
+                boundary.GetProperty("RecipientWakeupObservedOrder").GetInt32() >=
+                    boundary.GetProperty("AuthorityEndOrder").GetInt32())
+                throw new InvalidOperationException(
+                    "PF5-R2-R2 recipient wakeup escaped the authority-side budget boundary.");
         }
     }
     finally

@@ -744,6 +744,8 @@ internal enum P03MutationPattern : byte
     OneChunkGroup = 2,
     EightChunkStripe = 3,
     ActiveDistributed = 4,
+    FixedPrefix = 5,
+    MatchedDistributedPrefix = 6,
 }
 
 internal readonly record struct P03NetworkWorkload(
@@ -828,6 +830,24 @@ internal readonly record struct P03NetworkWorkload(
             "V3 unified public-world latest-state; V2 comparison had movement, visual, bulk, and ordered-event families");
     }
 
+    internal static P03NetworkWorkload ChunkMatchedControl(
+        int recipients,
+        int entities,
+        int dirtyEntitiesPerTick)
+    {
+        if (dirtyEntitiesPerTick < 1 || dirtyEntitiesPerTick > entities)
+            throw new ArgumentOutOfRangeException(nameof(dirtyEntitiesPerTick));
+        P03NetworkWorkload basis = ChunkV2Shaped(
+            recipients, entities, v2Activity: false);
+        return basis with
+        {
+            Id = $"matched-e{entities}-r{recipients}-dirty{dirtyEntitiesPerTick}",
+            DirtyEntitiesPerTick = dirtyEntitiesPerTick,
+            MutationPattern = P03MutationPattern.MatchedDistributedPrefix,
+            ActiveEntities = recipients,
+        };
+    }
+
     internal void CopyDirtyEntityIndices(int tick, Span<int> destination)
     {
         if (destination.Length < DirtyEntitiesPerTick)
@@ -881,6 +901,43 @@ internal readonly record struct P03NetworkWorkload(
                         "The V2-shaped distributed-active workload has invalid activity bounds.");
                 for (int offset = 0; offset < selected.Length; offset++)
                     selected[offset] = checked((int)((long)offset * Entities / ActiveEntities));
+                break;
+            }
+            case P03MutationPattern.FixedPrefix:
+            {
+                for (int offset = 0; offset < selected.Length; offset++)
+                    selected[offset] = offset;
+                break;
+            }
+            case P03MutationPattern.MatchedDistributedPrefix:
+            {
+                if (ActiveEntities <= 0 || ActiveEntities > Entities ||
+                    DirtyEntitiesPerTick > ActiveEntities)
+                    throw new InvalidOperationException(
+                        "The matched distributed-prefix workload has invalid bounds.");
+                int domain = 1;
+                int bits = 0;
+                while (domain < ActiveEntities)
+                {
+                    domain = checked(domain * 2);
+                    bits++;
+                }
+                int written = 0;
+                for (int candidate = 0; candidate < domain && written < selected.Length;
+                    candidate++)
+                {
+                    int value = candidate;
+                    int reversed = 0;
+                    for (int bit = 0; bit < bits; bit++)
+                    {
+                        reversed = (reversed << 1) | (value & 1);
+                        value >>= 1;
+                    }
+                    if (reversed < ActiveEntities) selected[written++] = reversed;
+                }
+                if (written != selected.Length)
+                    throw new InvalidOperationException(
+                        "The matched distributed-prefix workload did not fill its selection.");
                 break;
             }
             default:
@@ -952,7 +1009,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
     private readonly bool _stageTimingEnabled;
     private readonly bool _gameDetailedAttribution;
     private readonly bool _authorityThroughNetworkTimingEnabled;
-    private readonly bool _serverOwnedSourceTimingEnabled;
+    private readonly bool _serverOwnedRemoteTimingEnabled;
     private readonly NetworkProtocolLimits _protocolLimits;
     private readonly SharedUdpProtocolHost _host;
     private readonly SharedUdpProtocolSession[] _sessions;
@@ -964,6 +1021,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
     private readonly List<double> _authority = new();
     private readonly List<double> _baseAuthoritativeMutation = new();
     private readonly List<double> _remotePublicationPreparation = new();
+    private readonly List<double> _recipientCommitObservation = new();
     private readonly List<double> _schedule = new();
     private readonly List<double> _pump = new();
     private readonly List<double> _serverApplication = new();
@@ -989,7 +1047,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
         bool historyAudit = false,
         bool legacyRangeCensus = true,
         bool authorityThroughNetworkTimingEnabled = true,
-        bool serverOwnedSourceTimingEnabled = false,
+        bool serverOwnedRemoteTimingEnabled = false,
         PreparedChunkPublicationReadModel chunkReadModel =
             PreparedChunkPublicationReadModel.PreparedLatestState)
     {
@@ -999,7 +1057,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
         _stageTimingEnabled = stageTimingEnabled;
         _gameDetailedAttribution = gameDetailedAttribution;
         _authorityThroughNetworkTimingEnabled = authorityThroughNetworkTimingEnabled;
-        _serverOwnedSourceTimingEnabled = serverOwnedSourceTimingEnabled;
+        _serverOwnedRemoteTimingEnabled = serverOwnedRemoteTimingEnabled;
         _x = new long[workload.Entities];
         _z = new long[workload.Entities];
         _versions = new ulong[workload.Entities];
@@ -1053,7 +1111,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
         _adapter.ConfigureTelemetry(gameDetailedAttribution
             ? GameTelemetryLevel.Detailed
             : GameTelemetryLevel.Off);
-        _adapter.ConfigurePreparedSourceTiming(serverOwnedSourceTimingEnabled);
+        _adapter.ConfigureServerOwnedRemoteTiming(serverOwnedRemoteTimingEnabled);
     }
 
     internal P03WholeFlowRow Run(int warmup, int ticks)
@@ -1104,6 +1162,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
                 P03Metric.From(_tick), P03Metric.From(_authority),
                 P03Metric.From(_baseAuthoritativeMutation),
                 P03Metric.From(_remotePublicationPreparation),
+                P03Metric.From(_recipientCommitObservation),
                 P03Metric.From(_schedule),
                 P03Metric.From(_pump), P03Metric.From(_serverApplication),
                 P03Metric.From(_clientApplication),
@@ -1142,15 +1201,22 @@ internal sealed class P03WholeFlowHarness : IDisposable
             ? Stopwatch.GetTimestamp() - preparationStarted
             : 0;
         long authorityTicks = measure ? mutationTicks + applyAuthorityTicks : 0;
-        long publicationPreparationTicks = measure && _serverOwnedSourceTimingEnabled
+        long publicationPreparationTicks = measure && _serverOwnedRemoteTimingEnabled
             ? checked((long)_adapter.LastPreparedSourcePreparationTicks)
             : applyAuthorityTicks;
-        long baseAuthoritativeTicks = Math.Max(0, authorityTicks - publicationPreparationTicks);
+        long recipientWakeupTicks = measure && _serverOwnedRemoteTimingEnabled
+            ? checked((long)_adapter.LastRecipientCommitObservationTicks)
+            : 0;
+        long baseAuthoritativeTicks = Math.Max(
+            0, authorityTicks - publicationPreparationTicks - recipientWakeupTicks);
         double authority = ToMilliseconds(authorityTicks);
         ulong preparedAfter = captureBoundary
             ? _adapter.PreparedSourcePublicationCount
             : 0;
         int preparedSourceObservedOrder = captureBoundary && preparedAfter > preparedBefore
+            ? ++boundaryOrder
+            : 0;
+        int recipientWakeupObservedOrder = captureBoundary && recipientWakeupTicks > 0
             ? ++boundaryOrder
             : 0;
         int authorityEndOrder = captureBoundary ? ++boundaryOrder : 0;
@@ -1181,13 +1247,15 @@ internal sealed class P03WholeFlowHarness : IDisposable
         _authority.Add(authority);
         _baseAuthoritativeMutation.Add(ToMilliseconds(baseAuthoritativeTicks));
         _remotePublicationPreparation.Add(ToMilliseconds(publicationPreparationTicks));
+        _recipientCommitObservation.Add(ToMilliseconds(recipientWakeupTicks));
         _schedule.Add(schedule);
         _pump.Add(pump);
         _serverApplication.Add(serverApp);
         _clientApplication.Add(clientApp);
         _networkAndRemoteReplication.Add(ToMilliseconds(networkReplicationTicks));
         _serverOwnedRemoteReplicationBudget.Add(
-            ToMilliseconds(publicationPreparationTicks + networkReplicationTicks));
+            ToMilliseconds(publicationPreparationTicks + recipientWakeupTicks +
+                networkReplicationTicks));
         if (_authorityThroughNetworkTimingEnabled)
             _authorityThroughNetworkAndRemoteReplication.Add(
                 ToMilliseconds(authorityThroughNetworkTicks));
@@ -1198,6 +1266,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
                 combinedStartOrder,
                 authorityStartOrder,
                 preparedSourceObservedOrder,
+                recipientWakeupObservedOrder,
                 authorityEndOrder,
                 networkStartOrder,
                 networkEndOrder,
@@ -1293,6 +1362,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
     {
         _tick.Clear(); _authority.Clear(); _schedule.Clear(); _pump.Clear();
         _baseAuthoritativeMutation.Clear(); _remotePublicationPreparation.Clear();
+        _recipientCommitObservation.Clear();
         _serverApplication.Clear(); _clientApplication.Clear();
         _networkAndRemoteReplication.Clear();
         _serverOwnedRemoteReplicationBudget.Clear();
@@ -1302,6 +1372,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
         _tick.EnsureCapacity(ticks); _authority.EnsureCapacity(ticks);
         _baseAuthoritativeMutation.EnsureCapacity(ticks);
         _remotePublicationPreparation.EnsureCapacity(ticks);
+        _recipientCommitObservation.EnsureCapacity(ticks);
         _schedule.EnsureCapacity(ticks); _pump.EnsureCapacity(ticks);
         _serverApplication.EnsureCapacity(ticks); _clientApplication.EnsureCapacity(ticks);
         _networkAndRemoteReplication.EnsureCapacity(ticks);
@@ -1480,6 +1551,7 @@ internal abstract class P03RemoteProfileAdapter : IDisposable
     internal abstract void ApplyAuthority(int tick, int movedRecipients);
     internal virtual ulong PreparedSourcePublicationCount => 0;
     internal virtual ulong LastPreparedSourcePreparationTicks => 0;
+    internal virtual ulong LastRecipientCommitObservationTicks => 0;
     internal abstract void Schedule(ulong step);
     internal abstract bool ProcessServer(int recipient, in NetworkDeliveredMessage message,
         ReadOnlySpan<byte> payload);
@@ -1487,7 +1559,7 @@ internal abstract class P03RemoteProfileAdapter : IDisposable
         ReadOnlySpan<byte> payload);
     internal virtual void ProgressServers() { }
     internal virtual void ConfigureTelemetry(GameTelemetryLevel level) { }
-    internal virtual void ConfigurePreparedSourceTiming(bool enabled) { }
+    internal virtual void ConfigureServerOwnedRemoteTiming(bool enabled) { }
     internal abstract void ProgressClient(int recipient);
     internal abstract bool IsConverged { get; }
     internal abstract void Validate();
@@ -2239,6 +2311,8 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
     private ChunkPublicationStoreSnapshot _sourceBaseline;
     private PreparedChunkPublicationSnapshot _preparedBaseline;
     private GameTelemetryLevel _telemetryLevel;
+    private bool _serverOwnedRemoteTimingEnabled;
+    private ulong _lastRecipientCommitObservationTicks;
     private ulong _deltaRangeRequests;
     private ulong _uniqueDeltaRanges;
     private ulong _reusableDeltaRangeRequests;
@@ -2320,10 +2394,13 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
             _servers[index].ConfigureTelemetry(level);
     }
 
-    internal override void ConfigurePreparedSourceTiming(bool enabled) =>
+    internal override void ConfigureServerOwnedRemoteTiming(bool enabled)
+    {
+        _serverOwnedRemoteTimingEnabled = enabled;
         Source.ConfigurePreparedPublicationAttribution(
             sourceEnabled: enabled || _telemetryLevel == GameTelemetryLevel.Detailed,
             recipientEnabled: _telemetryLevel == GameTelemetryLevel.Detailed);
+    }
 
     private void Bootstrap(int recipientIndex)
     {
@@ -2356,7 +2433,12 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
                 "Chunk scheduler movement reconciliation failed.");
         }
         CommitMutation(tick);
-        P03WholeFlowHarness.Require(_scheduler.ObserveCommit(Source) ==
+        long wakeupStarted = _serverOwnedRemoteTimingEnabled ? Stopwatch.GetTimestamp() : 0;
+        ChunkPublicationCommitObservationStatus observation = _scheduler.ObserveCommit(Source);
+        _lastRecipientCommitObservationTicks = _serverOwnedRemoteTimingEnabled
+            ? checked((ulong)(Stopwatch.GetTimestamp() - wakeupStarted))
+            : 0;
+        P03WholeFlowHarness.Require(observation ==
             ChunkPublicationCommitObservationStatus.Observed,
             "Chunk scheduler missed an authoritative commit.");
     }
@@ -2366,6 +2448,9 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
 
     internal override ulong LastPreparedSourcePreparationTicks =>
         Source.GetLastPreparedSourcePreparationTicks();
+
+    internal override ulong LastRecipientCommitObservationTicks =>
+        _lastRecipientCommitObservationTicks;
 
     internal override void Schedule(ulong step)
     {
@@ -3106,6 +3191,7 @@ internal readonly record struct P03WholeFlowTiming(
     P03Metric AuthorityMutation,
     P03Metric BaseAuthoritativeMutation,
     P03Metric RemotePublicationPreparation,
+    P03Metric RecipientCommitObservation,
     P03Metric GameScheduleAndCodecQueue,
     P03Metric CombinedProtocolPumpWall,
     P03Metric ServerGameProofApply,
@@ -3122,6 +3208,7 @@ internal readonly record struct P03TimingBoundaryEvidence(
     int CombinedStartOrder,
     int AuthorityStartOrder,
     int PreparedSourceObservedOrder,
+    int RecipientWakeupObservedOrder,
     int AuthorityEndOrder,
     int NetworkStartOrder,
     int NetworkEndOrder,

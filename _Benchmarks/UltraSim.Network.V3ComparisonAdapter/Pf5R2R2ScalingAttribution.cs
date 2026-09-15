@@ -8,12 +8,15 @@ using UltraSim.Game.World;
 internal static class Pf5R2R2ScalingAttribution
 {
     private const string MeasurementBase =
-        "389fb3a0de274fcba0c9d4f64e686b94818f9c71";
+        "89f26f8bbaa1003b15ddf52d61d6ce2567694b74";
     private const string ReplicationCandidate =
         "992fc541460f18534da9036c73cb711277de11ce";
     private const string V2Artifact =
         "_Archive/_V2/_Benchmarks/results/dense_hotspot_v1_shape_linux_4families_gc_pooled/" +
         "network_bot_harness_20260428_023430.json";
+    private const string V2ShardedArtifact =
+        "_Archive/_V2/_Benchmarks/results/dense_hotspot_new_runner_4families_60s/" +
+        "sharded_20260428_031706/aggregate.json";
 
     internal static void Run(string[] args)
     {
@@ -30,9 +33,12 @@ internal static class Pf5R2R2ScalingAttribution
         string output = ReadText(args, "--output") ??
             "_Benchmarks/results/pf5-r2-r2-v2-v3-normalized-scaling.json";
         V2HistoricalEvidence historical = ReadHistoricalV2(V2Artifact);
+        V2ShardedHistoricalEvidence shardedHistorical =
+            ReadShardedHistoricalV2(V2ShardedArtifact);
 
         Prime();
         var rows = new List<Pf5R2R2ScalingRow>(checked(populations.Length * 4));
+        var matchedRows = new List<Pf5R2R2ScalingRow>(checked(populations.Length * 3));
         foreach (int population in populations)
         {
             RunRated(Pf5R2R2Shape.V2PopulationV2Activity,
@@ -44,6 +50,21 @@ internal static class Pf5R2R2ScalingAttribution
             RunRated(Pf5R2R2Shape.CurrentProductionDense,
                 P03NetworkWorkload.ChunkProductionDense(population)
                     .WithServerTickAndAoICadence(16, P03AoICadencePolicy.Selected124));
+
+            int lowDirty = Math.Min(20, population);
+            int highDirty = Math.Max(lowDirty,
+                (int)Math.Round(population * .35, MidpointRounding.AwayFromZero));
+            P03NetworkWorkload matchedPopulation =
+                P03NetworkWorkload.ChunkMatchedControl(population, population, lowDirty);
+            P03NetworkWorkload matchedThousandLow =
+                P03NetworkWorkload.ChunkMatchedControl(population, 1_000, lowDirty);
+            P03NetworkWorkload matchedThousandHigh =
+                P03NetworkWorkload.ChunkMatchedControl(population, 1_000, highDirty);
+            ValidateMatchedControls(
+                matchedPopulation, matchedThousandLow, matchedThousandHigh);
+            RunMatched(Pf5R2R2Shape.MatchedRecipientPopulation, matchedPopulation);
+            RunMatched(Pf5R2R2Shape.MatchedThousandLowMutation, matchedThousandLow);
+            RunMatched(Pf5R2R2Shape.MatchedThousandHighMutation, matchedThousandHigh);
         }
 
         int attributionPopulation = focused ? populations[0] :
@@ -63,7 +84,7 @@ internal static class Pf5R2R2ScalingAttribution
                 .WithServerTickAndAoICadence(16, P03AoICadencePolicy.Selected124));
 
         var report = new Pf5R2R2ScalingReport(
-            "ultrasim-concept-demo-pf5-r2-r2-v2-v3-scaling-v1",
+            "ultrasim-concept-demo-pf5-r2-r2-v2-v3-scaling-v2",
             DateTimeOffset.UtcNow,
             MeasurementBase,
             ReadGitSha(),
@@ -84,12 +105,15 @@ internal static class Pf5R2R2ScalingAttribution
                 "ordinary public-world commit/reconciliation and is not charged wholesale " +
                 "to the remote budget.",
             "ServerOwnedRemoteReplicationBudget is formed for every tick by summing that " +
-                "tick's non-overlapping RemotePublicationPreparation ticks and that same " +
-                "tick's NetworkAndRemoteReplication ticks, then calculating distributions " +
-                "over the resulting samples. No phase percentiles are added.",
+                "tick's non-overlapping RemotePublicationPreparation, " +
+                "RecipientCommitObservation, and NetworkAndRemoteReplication ticks, then " +
+                "calculating distributions over the resulting samples. No phase percentiles " +
+                "are added.",
             "The V3 normalized replication fixture applies equivalent authoritative movement " +
-                "mutations directly. It does not emit input-command messages; modeled input " +
-                "counts are labels, not measured V3 transport work.",
+                "mutations directly. V2 reapplied held movement intent every server tick, so " +
+                "the 35-percent active mutation shape is appropriate even though new inputs " +
+                "arrived at 20 Hz. V3 does not emit input-command messages here; modeled input " +
+                "counts remain labels, not measured V3 transport work.",
             "V3's current public-world record is one unified latest-state family. The historical " +
                 "V2 run independently published movement, visual, bulk, and ordered-event " +
                 "families. Exact semantic-family parity is therefore unavailable without " +
@@ -102,6 +126,7 @@ internal static class Pf5R2R2ScalingAttribution
                 "active ratio across that grid because concentrating them can create one " +
                 "canonical per-chunk delta larger than the production Game-message limit.",
             historical,
+            shardedHistorical,
             new V2ContemporaryControl(
                 "UnavailableUnchanged",
                 "dotnet build _Archive/_V2/_Benchmarks/UltraSim.Network.BotHarness/" +
@@ -111,7 +136,14 @@ internal static class Pf5R2R2ScalingAttribution
                     "producing duplicate TargetFramework and assembly attributes. No V2 " +
                     "source or project file was modified to obtain a contemporary number."),
             rows.ToArray(),
-            attribution.ToArray());
+            attribution.ToArray(),
+            "Matched controls use the same two-metre/20-column positions, V2 AOI, cadence " +
+                "1/2/3, a common bounded distributed-prefix mutation placement, and production " +
+                "protocol. The population " +
+                "pair varies only E=R versus E=1000 at the same 20 common mutations; the " +
+                "activity pair varies only 20 versus round(35% of R) common-prefix mutations " +
+                "at E=1000.",
+            matchedRows.ToArray());
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
         File.WriteAllText(output, JsonSerializer.Serialize(report,
             new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
@@ -143,6 +175,53 @@ internal static class Pf5R2R2ScalingAttribution
                 "Prepared source attribution was not observed.");
             attribution.Add(new Pf5R2R2ScalingRow(shape, true, flow));
         }
+
+        void RunMatched(Pf5R2R2Shape shape, P03NetworkWorkload workload)
+        {
+            Console.WriteLine($"PF5-R2-R2 {shape} R={workload.Recipients} " +
+                $"E={workload.Entities} dirty={workload.DirtyEntitiesPerTick}: matched");
+            P03WholeFlowRow flow = RunHarness(workload, warmup, ticks, detailed: false);
+            VerifyServerBudget(flow, ticks);
+            matchedRows.Add(new Pf5R2R2ScalingRow(shape, false, flow));
+            Console.WriteLine($"  game={flow.Timing.GameScheduleAndCodecQueue.P95:F3}ms " +
+                $"server-budget={flow.Timing.ServerOwnedRemoteReplicationBudget.P95:F3}ms " +
+                $"whole={flow.Timing.Tick.P95:F3}ms pubs=" +
+                $"{flow.ProfileCounters.SuccessfulSemanticPublications:N0}");
+        }
+    }
+
+    private static void ValidateMatchedControls(
+        in P03NetworkWorkload population,
+        in P03NetworkWorkload thousandLow,
+        in P03NetworkWorkload thousandHigh)
+    {
+        Require(population.Recipients == thousandLow.Recipients &&
+                thousandLow.Recipients == thousandHigh.Recipients &&
+                population.DirtyEntitiesPerTick == thousandLow.DirtyEntitiesPerTick &&
+                thousandLow.Entities == thousandHigh.Entities &&
+                population.EntityLayout == thousandLow.EntityLayout &&
+                thousandLow.EntityLayout == thousandHigh.EntityLayout &&
+                population.MutationPattern == P03MutationPattern.MatchedDistributedPrefix &&
+                thousandLow.MutationPattern == P03MutationPattern.MatchedDistributedPrefix &&
+                thousandHigh.MutationPattern == P03MutationPattern.MatchedDistributedPrefix &&
+                population.EntityInterest == thousandLow.EntityInterest &&
+                thousandLow.EntityInterest == thousandHigh.EntityInterest &&
+                population.ChunkInterest == thousandLow.ChunkInterest &&
+                thousandLow.ChunkInterest == thousandHigh.ChunkInterest &&
+                population.ChunkCadence == thousandLow.ChunkCadence &&
+                thousandLow.ChunkCadence == thousandHigh.ChunkCadence,
+            "PF5-R2-R2 matched-control invariants diverged.");
+        Span<int> populationSelection = stackalloc int[population.DirtyEntitiesPerTick];
+        Span<int> thousandSelection = stackalloc int[thousandLow.DirtyEntitiesPerTick];
+        population.CopyDirtyEntityIndices(17, populationSelection);
+        thousandLow.CopyDirtyEntityIndices(17, thousandSelection);
+        Require(populationSelection.SequenceEqual(thousandSelection),
+            "PF5-R2-R2 population control did not mutate the same common entities.");
+        Span<int> highSelection = stackalloc int[thousandHigh.DirtyEntitiesPerTick];
+        thousandHigh.CopyDirtyEntityIndices(17, highSelection);
+        for (int index = 0; index < populationSelection.Length; index++)
+            Require(highSelection.BinarySearch(populationSelection[index]) >= 0,
+                "PF5-R2-R2 activity control did not preserve the low-mutation prefix.");
     }
 
     private static P03WholeFlowRow RunHarness(
@@ -164,7 +243,7 @@ internal static class Pf5R2R2ScalingAttribution
             historyAudit: false,
             legacyRangeCensus: false,
             authorityThroughNetworkTimingEnabled: true,
-            serverOwnedSourceTimingEnabled: true,
+            serverOwnedRemoteTimingEnabled: true,
             chunkReadModel: PreparedChunkPublicationReadModel.PreparedLatestState);
         P03WholeFlowRow flow = harness.Run(warmup, ticks);
         PreparedChunkPublicationSnapshot prepared = flow.ProfileCounters.PreparedPublication;
@@ -179,18 +258,22 @@ internal static class Pf5R2R2ScalingAttribution
     {
         P03WholeFlowTiming timing = flow.Timing;
         Require(timing.RemotePublicationPreparation.Samples == ticks &&
+                timing.RecipientCommitObservation.Samples == ticks &&
                 timing.NetworkAndRemoteReplication.Samples == ticks &&
                 timing.ServerOwnedRemoteReplicationBudget.Samples == ticks,
             "Server-owned timing sample cardinality diverged.");
         double expectedMean = timing.RemotePublicationPreparation.Mean +
+            timing.RecipientCommitObservation.Mean +
             timing.NetworkAndRemoteReplication.Mean;
         Require(Math.Abs(expectedMean - timing.ServerOwnedRemoteReplicationBudget.Mean) < .000_001,
             "Server-owned budget was not formed from paired per-tick phase samples.");
         Require(timing.ServerOwnedRemoteReplicationBudget.P95 >=
                 timing.NetworkAndRemoteReplication.P95 &&
                 timing.ServerOwnedRemoteReplicationBudget.P95 >=
-                timing.RemotePublicationPreparation.P95,
-            "Server-owned p95 does not include both non-overlapping owned phases.");
+                timing.RemotePublicationPreparation.P95 &&
+                timing.ServerOwnedRemoteReplicationBudget.P95 >=
+                timing.RecipientCommitObservation.P95,
+            "Server-owned p95 does not include every non-overlapping owned phase.");
     }
 
     private static void Prime()
@@ -247,6 +330,21 @@ internal static class Pf5R2R2ScalingAttribution
             stages);
     }
 
+    private static V2ShardedHistoricalEvidence ReadShardedHistoricalV2(string path)
+    {
+        byte[] bytes = File.ReadAllBytes(path);
+        using JsonDocument document = JsonDocument.Parse(bytes);
+        JsonElement root = document.RootElement;
+        return new V2ShardedHistoricalEvidence(
+            path,
+            Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+            root.GetProperty("timestamp_utc").GetString() ?? "unknown",
+            root.GetProperty("workers").GetInt32(),
+            "Dedicated server process plus four client worker processes. Server tick and " +
+                "previous background send are independent distributions and are not added.",
+            root.GetProperty("stages").Clone());
+    }
+
     private static int ReadInt(string[] args, string name, int fallback)
     {
         string? text = ReadText(args, name);
@@ -301,6 +399,9 @@ internal enum Pf5R2R2Shape : byte
     V2PopulationCurrentActivity = 2,
     ThousandEntitiesV2Activity = 3,
     CurrentProductionDense = 4,
+    MatchedRecipientPopulation = 5,
+    MatchedThousandLowMutation = 6,
+    MatchedThousandHighMutation = 7,
 }
 
 internal sealed record Pf5R2R2ScalingReport(
@@ -323,9 +424,12 @@ internal sealed record Pf5R2R2ScalingReport(
     string SemanticFamilyNormalizationLimitation,
     string SpatialDensityNormalizationLimitation,
     V2HistoricalEvidence HistoricalV2,
+    V2ShardedHistoricalEvidence HistoricalV2Sharded,
     V2ContemporaryControl ContemporaryV2,
     Pf5R2R2ScalingRow[] RatedRows,
-    Pf5R2R2ScalingRow[] DetailedAttributionRows);
+    Pf5R2R2ScalingRow[] DetailedAttributionRows,
+    string MatchedControlDefinition,
+    Pf5R2R2ScalingRow[] MatchedControlRows);
 
 internal sealed record Pf5R2R2ScalingRow(
     Pf5R2R2Shape Shape,
@@ -362,6 +466,14 @@ internal sealed record V2HistoricalStage(
     long ReplicationWireDatagrams,
     long ObserverFramesReceived,
     long ObserverEventsReceived);
+
+internal sealed record V2ShardedHistoricalEvidence(
+    string Artifact,
+    string Sha256,
+    string CapturedAtUtc,
+    int ClientWorkerProcesses,
+    string TimingBoundary,
+    JsonElement Stages);
 
 internal sealed record V2ContemporaryControl(
     string Status,
