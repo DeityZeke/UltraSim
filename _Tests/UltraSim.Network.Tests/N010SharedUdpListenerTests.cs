@@ -50,6 +50,7 @@ internal static class N010SharedUdpListenerTests
         Run("SharedUdpBackgroundSecurityEpochRotationPreservesQueueOrder", SharedUdpBackgroundSecurityEpochRotationPreservesQueueOrder);
         Run("WarmedSharedUdpBackgroundProducerAllocatesZero", WarmedSharedUdpBackgroundProducerAllocatesZero);
         Run("SharedUdpBackgroundNativePartialAndWouldBlockRetainSuffix", SharedUdpBackgroundNativePartialAndWouldBlockRetainSuffix);
+        Run("SharedUdpBackgroundNativeNoBufferRetainsWork", SharedUdpBackgroundNativeNoBufferRetainsWork);
         Run("SharedUdpBackgroundPhysicalReliableLossRetransmits", SharedUdpBackgroundPhysicalReliableLossRetransmits);
         Run("SharedUdpBackgroundShutdownDrainsAndIsIdempotent", SharedUdpBackgroundShutdownDrainsAndIsIdempotent);
         Run("SharedUdpBackgroundWorkerFailureSurvivesCleanup", SharedUdpBackgroundWorkerFailureSurvivesCleanup);
@@ -882,6 +883,39 @@ internal static class N010SharedUdpListenerTests
         Equal(3, hook.GetRequested(1));
         Equal(2, hook.GetRequested(2),
             "A partial native send did not retain the unsent suffix as the next batch.");
+        endpoint!.Dispose();
+    }
+
+    private static void SharedUdpBackgroundNativeNoBufferRetainsWork()
+    {
+        if (!LinuxUdpBatch.IsSupported) return;
+        using var remote = CreateBoundSocket();
+        using var hook = new ScriptedEgressHook(
+            new SendResult(-1, 105),
+            new SendResult(int.MaxValue, 0));
+        using var listener = new SharedUdpServerListener(
+            s_udp,
+            new SharedUdpProtocolLimits(1, 4, 16,
+                SharedUdpSocketIoMode.BackgroundPlatformBatch, 8),
+            new IPEndPoint(IPAddress.Loopback, 0), null, hook);
+        True(listener.TryRegister((IPEndPoint)remote.LocalEndPoint!, out SharedUdpServerEndpoint? endpoint));
+        hook.Block();
+        Span<byte> payload = stackalloc byte[1];
+        for (byte value = 1; value <= 2; value++)
+        {
+            payload[0] = value;
+            Equal(DatagramSendStatus.Accepted,
+                listener.TrySend(endpoint!.Slot, payload));
+        }
+        hook.Release();
+        SpinUntil(() => listener.GetSnapshot().BackgroundEgress.CurrentDatagrams == 0);
+        SharedUdpBackgroundEgressSnapshot snapshot = listener.GetSnapshot().BackgroundEgress;
+        Equal(1UL, snapshot.NoBufferEvents);
+        Equal(2UL, snapshot.PhysicallySentDatagrams);
+        True(hook.RequestCount >= 2);
+        Equal(2, hook.GetRequested(0));
+        Equal(2, hook.GetRequested(1),
+            "NoBufferSpace removed queued work before a later physical retry.");
         endpoint!.Dispose();
     }
 

@@ -113,8 +113,9 @@ could not force genuine kernel backpressure. The deterministic sender hook there
 portable pressure gate: capacity one accepts one datagram, refuses the second without advancing
 PacketNumber or consuming reliable work, exposes nonzero oldest age, and drains after release.
 
-The scripted native test observes requests 3,3,2 across `WouldBlock`, one-prefix partial success,
-and suffix retry. A deliberate physical reliable-send failure is retained by reliable flight and
+The scripted native tests observe requests 3,3,2 across `WouldBlock`, one-prefix partial success,
+and suffix retry, plus requests 2,2 across `NoBufferSpace` and later success without losing the
+queued work. A deliberate physical reliable-send failure is retained by reliable flight and
 retransmits successfully. Security-epoch FIFO, path rebind, retirement, worker-fault propagation,
 bounded drain, repeated dispose, and warmed zero producer allocation are permanent tests.
 
@@ -145,5 +146,6 @@ then passed at source/evidence commit `352e414ae9ad9e606f66786077dbd5b9caa26953`
 Network/replication tests, ServerOnly/ClientOnly/Full physical composition, Contentless Online
 cold/warm, SinglePlayer/Online/Complete exported products, the exported PF1/PF2 mixed swarms,
 Complete-hosted parity, and F0.7 lifecycle retirement. The complete Network suite also passed three
-additional consecutive shutdown/retirement stress runs. The final child commit changes only these
-closure records.
+additional consecutive shutdown/retirement stress runs. A final test-only child adds deterministic
+`NoBufferSpace` retention coverage and repeats the focused PF5-R3 gate; it does not change
+production code.

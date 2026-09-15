@@ -166,6 +166,12 @@
       "wouldBlock": 1,
       "partialPrefix": 1,
       "suffixRetained": true
+    },
+    "scriptedNoBufferSequence": {
+      "requestedBatchCounts": [2,2],
+      "noBufferSpace": 1,
+      "queuedWorkRetained": true,
+      "laterPhysicalSendSucceeded": true
     }
   },
   "instrumentationTax": {
@@ -200,6 +206,6 @@
     "canonicalRelease": "passed",
     "canonicalReleaseCommit": "352e414ae9ad9e606f66786077dbd5b9caa26953",
     "exportComposition": "passed: ServerOnly, ClientOnly, Full, SinglePlayer, Online, Complete, Contentless Online, Complete-hosted",
-    "note": "the final child commit changes closure evidence only"
+    "note": "later child adds deterministic NoBufferSpace retention coverage; production source remains exact"
   }
 }
