@@ -23,7 +23,10 @@ Introduction/Rebase now surrounds bounded immutable per-dirty-chunk publications
 session, exact applied proof, cursor, retry, and absence obligations remain recipient-local.
 Ordinary selected steady state makes zero raw-history reconstruction calls. This is not a return to
 the old alternative profile identities and does not authorize runtime cross-profile ownership.
-PF6 remains paused only for independent review of the new PF5-R2 correctness candidate.
+Independent review accepted the PF5-R2 correctness candidate. PF5-R2-R1 then directly measured the
+same-tick authority-through-Network boundary and retained a material prepared-path improvement, so
+the replication/timing blocker is closed. Its canonical run independently reproduced a pre-existing
+HTTP-host shutdown race; PF6 remains paused for that separate repair and a clean full verification.
 
 The result that should reopen this decision is a real post-freeze consumer—such as a materially
 larger actor population, housing/mutable structural overlays, or another independently addressable

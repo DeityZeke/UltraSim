@@ -96,7 +96,14 @@ while Network transport revision 2, cadence, AOI, proof semantics, MTU, aggregat
 Inventory/action, vertical, reconnect/churn, three external impairment profiles, mixed exported
 Online clients, and a clean 30-minute 64-client soak. The selected v29 policy remains unchanged.
 Its synthetic 4 ms subsystem crossing between tested 160 and 192 rated recipients is explicitly
-not a CCU claim; the actual product remains capped at 64. External-human validation remains open.
+not a CCU claim; the actual product remains capped at 64. PF5-R1 then rejects recipient-specific
+raw-history reconstruction as the steady-state latest-state model, and PF5-R2 replaces it with
+bounded shared immutable prepared publications while retaining recipient-local exact proof and
+Rebase. Independent correctness review accepted the replacement. PF5-R2-R1 directly measures from
+before source preparation through the final remote pump and retains a modest 128-recipient
+whole-interval improvement (12.302 ms to 11.961 ms p95), alongside the substantial narrower
+server-owned reduction. Its canonical run then independently reproduced a pre-existing HTTP-host
+shutdown race; PF6 external-human validation remains paused for that separate repair.
 A post-F0.8 defensive UI correction
 also makes
 local shutdown independent from a saturated presentation queue, contains expected view-capacity
@@ -1800,8 +1807,8 @@ then close:
     PF5 product swarm/scaling/failure characterization                   CLOSED
     PF5-R1 replication baseline/history-model audit                     CLOSED (outcome B)
     PF5-R2 shared latest-state publication                              CLOSED (outcome A)
-    PF5-R2 independent correctness-candidate review                     NEXT
-    PF6 external human validation                                       PAUSED pending review
+    PF5-R2 independent review + combined timing closure                 CLOSED (timing accepted; outcome D)
+    PF6 external human validation                                       PAUSED — HTTP-host shutdown repair
 ```
 
 Exact subsystem checkpoint labels should be chosen in the owning plan when the consumer reaches that

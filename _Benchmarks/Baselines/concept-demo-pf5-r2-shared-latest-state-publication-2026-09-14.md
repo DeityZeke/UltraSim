@@ -195,7 +195,7 @@ This R2 implementation deliberately retains the old bounded `HistoryEntry`/link 
 linkage and comparison scaffolding, so prepared record storage is additive. Removing that duplicate
 storage is a future bounded-memory refinement, not required for semantic or CPU closure.
 
-## Complete-path performance
+## Network-and-remote-replication performance
 
 Measurements used fresh harnesses, unrecorded priming for both implementations, 30 warmup ticks,
 270 measured ticks, alternating A/B order, three samples through 128, and detailed stage clocks
@@ -210,9 +210,14 @@ off. Values through 128 are the median of the three sample percentiles.
 | 128 | history | 1.836 / 2.274 / 2.486 / 2.529 | 2.723 / 3.220 / 3.377 / 3.435 |
 | 128 | prepared | 1.447 / 1.729 / 1.832 / 1.939 | 2.336 / 2.658 / 2.806 / 2.855 |
 
-At 128, schedule p95 falls **23.96%** and inclusive Network+replication p95 falls **17.46%**, leaving
-1.342 ms of headroom under the 4.000 ms engineering budget. This is a measured complete-path gain,
-not the PF5-R1 oracle ceiling.
+At 128, schedule p95 falls **23.96%** and the retained `NetworkAndRemoteReplication` p95 falls
+**17.46%**, leaving 1.342 ms of headroom under that metric's 4.000 ms engineering budget. This
+historical metric begins after authoritative mutation/source publication preparation; it must not
+be described as the total replacement cost. PF5-R2-R1 subsequently added a direct same-tick
+`AuthorityThroughNetworkAndRemoteReplication` distribution and measured 12.302 ms old versus
+11.961 ms prepared at 128 (**2.77% lower p95; 2.40% lower mean**). The broader interval includes
+the interleaved client transport/application/proof work required to reach the same endpoint. See the
+[timing-boundary closure](concept-demo-pf5-r2-r1-timing-boundary-closure-2026-09-14.md).
 
 Dense single-sample scaling was:
 
@@ -270,7 +275,8 @@ The subsequent PF5 product verifier passed on the measurement lineage:
 The central PF5-R2 question is answered **yes**: source truth is now prepared once and safely serves
 independently lagging/proven recipients without sharing their proof, absence, or coverage state.
 
-**Exact next checkpoint:** independent adversarial review of correctness candidate
-`992fc541460f18534da9036c73cb711277de11ce`, with emphasis on cumulative coverage, removals/public
-slot reuse, eviction/rebase, and fixed lookup deletion. If that review closes without unresolved
-correctness findings, PF6 external human validation may resume.
+The independent adversarial review accepted correctness candidate
+`992fc541460f18534da9036c73cb711277de11ce`. PF5-R2-R1 then corrected its remaining timing-reporting
+boundary without changing replication production code or semantics. Its canonical closure run
+independently exposed a pre-existing `StaticContentHttpHost.Dispose` shutdown race, so PF6 remains
+paused for that unrelated repair and a clean full Release verification.

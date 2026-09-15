@@ -2740,8 +2740,8 @@ PF4F bounded selective message-129 compression                              CLOS
 PF5 product swarm/scaling/failure characterization                           CLOSED
 PF5-R1 replication baseline/history-model audit                             CLOSED (outcome B)
 PF5-R2 shared latest-state publication                                       CLOSED (outcome A)
-PF5-R2 independent correctness-candidate review                              NEXT
-PF6 external human validation                                                PAUSED pending review
+PF5-R2 independent review + combined timing closure                          CLOSED (PF5-R2-R1 timing accepted; outcome D)
+PF6 external human validation                                                PAUSED — HTTP-host shutdown repair
         |
         v
 repository generalization / extraction readiness

@@ -6,7 +6,8 @@ PF4A quiet publication-work suppression, PF4B chunk-knowledge census, PF4C selec
 bundling, the PF4C-R1 singleton MTU repair, PF4D unreliable Network-frame aggregation, PF4E
 dense/distributed fanout plus remaining-cost attribution, PF4E-R1 rated scaling reconciliation,
 PF4E-R2 direct ChunkPublication staging, PF4F bounded selective message-129 compression,
-the PF5-R1 replication baseline/history-model audit, and PF5-R2 shared latest-state publication,
+the PF5-R1 replication baseline/history-model audit, PF5-R2 shared latest-state publication, and
+PF5-R2-R1 combined timing-boundary closure,
 as of
 2026-09-14.
 
@@ -592,14 +593,21 @@ The diagnostic API is cold, bounded, off by default, and never serves publicatio
 shadow table records hashes/costs only; production still executes every real source read. PF5-R2's
 direct equivalence test compares every logical record and canonical Delta-120 byte. At the
 production-shaped 128 point, 2,160 prepared source publications served 284,861 recipient reads;
-selected old-history calls were zero. Inclusive Network+replication p95 improved from 3.220 ms to
-2.658 ms, retaining 1.342 ms headroom under the 4 ms budget. The old tested crossing was 160 rated
-recipients; the prepared path first crossed at 192. These are synthetic architecture points, not
-CCU. Prepared storage adds a fixed 13,766,560-byte reservation in that fixture while the retained
-comparison/link pool remains; removing that duplication is a future memory refinement.
+selected old-history calls were zero. The post-authority Network+replication p95 improved from 3.220 ms to
+2.658 ms on the historical clock which begins after authoritative mutation/source preparation.
+PF5-R2-R1 directly retains the missing same-tick combined boundary: at 128,
+the direct authority-through-final-pump p95 improves from 12.302 ms to 11.961 ms (-2.77%) and mean
+from 11.066 ms to 10.800 ms (-2.40%). This broader clock includes interleaved benchmark-client
+work and is above 4 ms at the first tested point. The old server-owned 4 ms boundary passes at 160
+and fails at 192; the prepared path passes at 192 and fails at 256. These are architecture points,
+not CCU.
+Prepared storage adds a fixed
+13,766,560-byte reservation in that fixture while the retained comparison/link pool remains;
+removing that duplication is a future memory refinement.
 
 See the [PF5-R1 audit](../../_Benchmarks/Baselines/concept-demo-pf5-r1-replication-baseline-history-audit-2026-09-14.md)
-and [PF5-R2 closure](../../_Benchmarks/Baselines/concept-demo-pf5-r2-shared-latest-state-publication-2026-09-14.md).
+and [PF5-R2 closure](../../_Benchmarks/Baselines/concept-demo-pf5-r2-shared-latest-state-publication-2026-09-14.md),
+plus the [PF5-R2-R1 timing closure](../../_Benchmarks/Baselines/concept-demo-pf5-r2-r1-timing-boundary-closure-2026-09-14.md).
 
 ### Snapshot / delta / absence
 

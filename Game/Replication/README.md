@@ -994,8 +994,14 @@ Delivery ID, application session/generation, queue admission, proof ticket, appl
 cadence, retry, recovery, and negative debt remain independently recipient-owned. The old
 history-derived reader is a friend-only test/benchmark comparison. At the production-shaped 128
 point, 2,160 source preparations served 284,861 prepared recipient reads with zero selected history
-calls; inclusive Network-plus-replication p95 improved from 3.220 ms to 2.658 ms. The fixed source
+calls; the historical post-authority `NetworkAndRemoteReplication` p95 improved from 3.220 ms to
+2.658 ms. PF5-R2-R1 adds one direct elapsed interval from before authoritative mutation through the
+final remote transport/application/proof pump: at 128 its p95 improves from 12.302 ms to 11.961 ms
+and its mean from 11.066 ms to 10.800 ms. The broader clock includes interleaved client work; the
+4 ms server-owned subsystem budget continues to apply to the narrow clock. The fixed source
 reservation increased by 13,766,560 bytes in that fixture while old comparison/linkage storage is
 still retained. See the
 [PF5-R2 baseline](../../_Benchmarks/Baselines/concept-demo-pf5-r2-shared-latest-state-publication-2026-09-14.md)
-for equivalence, divergence, bounded eviction/Rebase, and product/export evidence.
+for equivalence, divergence, bounded eviction/Rebase, and product/export evidence, and the
+[PF5-R2-R1 timing closure](../../_Benchmarks/Baselines/concept-demo-pf5-r2-r1-timing-boundary-closure-2026-09-14.md)
+for the exact timer boundary and direct combined distribution.

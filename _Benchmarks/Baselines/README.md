@@ -26,6 +26,13 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `concept-demo-pf5-r2-r1-timing-boundary-closure-2026-09-14.json` — direct per-tick
+  `AuthorityMutation`, post-authority `NetworkAndRemoteReplication`, and combined
+  `AuthorityThroughNetworkAndRemoteReplication` distributions; structural source-preparation
+  boundary gate; timing-overhead bracket; matched old-history/prepared 64/96/128 A/B; synthetic
+  128/160/192/256 crossing; semantic/delivery/proof/message/datagram equality; and outcome D after
+  canonical verification independently reproduced a pre-existing HTTP-host shutdown race. The
+  replication candidate remains unchanged, but PF6 stays paused pending that repair;
 - `concept-demo-pf5-product-swarm-failure-characterization-2026-09-13.json` — selected-v29
   16/32/48/64 real-product population curve, bounded realized density/topology, grouped and
   convergence/dispersal workloads, Chat/Inventory/vertical/reconnect/churn conservation, explicit

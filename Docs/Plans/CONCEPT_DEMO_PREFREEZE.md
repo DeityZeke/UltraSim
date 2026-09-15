@@ -53,11 +53,18 @@ closes the selected replacement as **Outcome A**. Each authoritative dirty-chunk
 prepared once as bounded immutable source truth; independently lagging recipients retain their own
 delivery IDs, queue admission, exact applied proof, cursors, retry/recovery, and removal obligations.
 At the production-shaped 128 point, 2,160 source preparations served 284,861 recipient reads with
-zero selected history-reconstruction calls. Inclusive Network-plus-replication p95 improved from
-3.220 ms to 2.658 ms, and the tested 4 ms crossing moved from 160 to 192 synthetic rated recipients.
-Introduction/Rebase remain complete current-state costs and retention exhaustion still rebases
-safely. PF6 remains paused only for independent review of the new correctness candidate, not for
-another implementation checkpoint.
+zero selected history-reconstruction calls. The historical post-authority
+`NetworkAndRemoteReplication` p95 improved from 3.220 ms to 2.658 ms. PF5-R2-R1 now closes the
+remaining reporting boundary: the directly retained start-to-stop
+`AuthorityThroughNetworkAndRemoteReplication` p95 is 12.302 ms old versus 11.961 ms prepared
+(-2.77%), while its mean is 11.066 ms versus 10.800 ms (-2.40%). This broader clock includes the
+interleaved client transport/application/proof work needed to reach the final pump endpoint and is
+above 4 ms at the first tested point. The prepared server-owned narrow clock passes at 192 and fails at 256
+in the fresh run; these remain synthetic rated recipients, not CCU. Introduction/Rebase remain
+complete current-state costs and retention
+exhaustion still rebases safely. Independent correctness review and the timing closure are
+complete. The canonical closure run independently reproduced a pre-existing HTTP-host shutdown
+race, so PF6 remains paused for that separate repair and a clean full verification.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -2059,8 +2066,8 @@ Permanent evidence is in
 `_Benchmarks/Baselines/concept-demo-pf5-product-swarm-failure-characterization-2026-09-13.json`.
 PF5 keeps the selected 1/2/4 cadence, message 129, selective 148 compression, cross-lane cap two,
 manifest v29, transport revision 2, and participant cap 64. PF5-R1 is the intervening architecture
-audit; PF5-R2 closes its shared-publication follow-up. External human validation remains paused for
-independent review of the new correctness candidate.
+audit; PF5-R2 closes its shared-publication follow-up, and PF5-R2-R1 closes independent review plus
+the corrected authority-through-Network timing boundary. External human validation may resume.
 
 Closure gates were:
 
@@ -2216,12 +2223,44 @@ Online clients passed with exact retirement. Permanent evidence is in
 `_Benchmarks/Baselines/concept-demo-pf5-r2-shared-latest-state-publication-2026-09-14.json`, its raw
 companion, and its concise report.
 
+## PF5-R2-R1 — timing boundary and closure evidence
+
+**Status: CLOSED AS TIMING EVIDENCE — overall Outcome D.** Starting HEAD
+`76a2659fcad02a7ca8bcbd16c6f3a7aca497d893` contained the accepted independent correctness review
+and no intervening production replication change. The timing implementation is
+`74d889bf768012d5ff69621ac4578f92c90710a3`; it changes benchmark/test/reporting code only, so
+production correctness candidate `992fc541460f18534da9036c73cb711277de11ce` remains exact.
+
+The prior `NetworkAndRemoteReplication` clock begins after `ApplyAuthority`, so it excludes the
+authoritative mutation and prepared-source publication creation performed there. The new
+`AuthorityThroughNetworkAndRemoteReplication` value is one direct elapsed interval per tick, from
+immediately before authoritative mutation through the final remote transport/application/proof
+pump. Its p95 is never constructed from phase durations or by adding phase percentiles. A
+structural boundary gate proves prepared-source creation falls between combined start/end and
+authority start/end, but before the narrow Network clock begins.
+
+At 128 synthetic recipients, the prepared path reduces authority-mutation p95 from 0.0554 ms to
+0.0387 ms and the later Network/replication p95 from 3.0518 ms to 2.6345 ms. The direct combined
+p95 improves from 12.3021 ms to 11.9609 ms (-2.77%); combined mean improves from 11.0658 ms to
+10.8002 ms (-2.40%). Semantic digest, deliveries, proofs, Game-message count, datagram count, and
+policy remain equal. Timing bracketing found no measurable narrow-clock tax (-0.402% observed,
+inside the spread between disabled controls).
+
+Permanent evidence is in
+`_Benchmarks/Baselines/concept-demo-pf5-r2-r1-timing-boundary-closure-2026-09-14.json` and its
+human-readable companion. The historical fanout-attribution matrix remains useful but is not a PF6
+prerequisite. Canonical Release verification independently reproduced a pre-existing
+`StaticContentHttpHost.Dispose` submitted-response race twice in four runs. Hosting production/test
+source is unchanged from the checkpoint's starting HEAD, and this measurement-only task does not
+repair it.
+
 ## PF6 — external human validation
 
-**Status: PAUSED for independent PF5-R2 candidate review.** PF5-R2 has preserved the complete
-PF0-PF5 correctness/product matrix and removed the selected architectural blocker. Resume after an
-independent adversarial review of candidate `992fc541460f18534da9036c73cb711277de11ce`, particularly
-prepared coverage chains, removals/public-slot reuse, eviction/Rebase, and lookup deletion.
+**Status: PAUSED — HTTP-host shutdown repair.** Independent adversarial review accepted candidate
+`992fc541460f18534da9036c73cb711277de11ce`, and PF5-R2-R1 directly closed the remaining combined
+timing boundary without a replication production change. Its full canonical run exposed the
+pre-existing `StaticContentHttpHost.Dispose` shutdown race, which must be repaired and followed by
+a clean Release/export verifier before PF6 starts.
 
 Close when:
 
@@ -2373,8 +2412,8 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 27. Audit baseline/history ownership before human validation. **CLOSED — PF5-R1 outcome B**
 28. Design/prove explicit Introduction/Rebase plus shared latest-source preparation and exact
     recipient proof/absence semantics. **CLOSED — PF5-R2 outcome A**
-29. Independently review the PF5-R2 correctness candidate, then run external human Concept Demo
-    validation. **PAUSED — review first, then PF6**
+29. Independently review the PF5-R2 correctness candidate and close its combined timing boundary.
+    **TIMING CLOSED — PF5-R2-R1 overall outcome D; repair HTTP-host shutdown before PF6**
 30. Choose/document the default deployment-performance policy. **CLOSED — PF5 retains selected v29 defaults**
 31. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5**
 32. Full exact-tree verifier and export closure.
