@@ -1097,8 +1097,8 @@ internal sealed class P03WholeFlowHarness : IDisposable
             if (measure) pumpTicks += Stopwatch.GetTimestamp() - pumpStarted;
         }
         if (!measure) return;
-        long authorityThroughNetworkTicks = Stopwatch.GetTimestamp() - totalStarted;
         int networkEndOrder = captureBoundary ? ++boundaryOrder : 0;
+        long authorityThroughNetworkTicks = Stopwatch.GetTimestamp() - totalStarted;
         int combinedEndOrder = captureBoundary ? ++boundaryOrder : 0;
         double serverApp = ToMilliseconds(_tickServerApplication);
         double clientApp = ToMilliseconds(_tickClientApplication);
