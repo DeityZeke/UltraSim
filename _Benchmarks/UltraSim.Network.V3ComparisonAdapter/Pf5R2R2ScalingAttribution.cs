@@ -21,6 +21,8 @@ internal static class Pf5R2R2ScalingAttribution
     internal static void Run(string[] args)
     {
         bool focused = args.Contains("--focused", StringComparer.Ordinal);
+        bool matchedOnly = args.Contains("--matched-only", StringComparer.Ordinal);
+        bool matchedDetailed = args.Contains("--matched-detailed", StringComparer.Ordinal);
         int warmup = ReadInt(args, "--warmup", focused ? 8 : 30);
         int ticks = ReadInt(args, "--ticks", focused ? 24 : 270);
         int attributionTicks = ReadInt(args, "--attribution-ticks", focused ? 16 : 90);
@@ -41,15 +43,18 @@ internal static class Pf5R2R2ScalingAttribution
         var matchedRows = new List<Pf5R2R2ScalingRow>(checked(populations.Length * 3));
         foreach (int population in populations)
         {
-            RunRated(Pf5R2R2Shape.V2PopulationV2Activity,
-                P03NetworkWorkload.ChunkV2Shaped(population, population, v2Activity: true));
-            RunRated(Pf5R2R2Shape.V2PopulationCurrentActivity,
-                P03NetworkWorkload.ChunkV2Shaped(population, population, v2Activity: false));
-            RunRated(Pf5R2R2Shape.ThousandEntitiesV2Activity,
-                P03NetworkWorkload.ChunkV2Shaped(population, 1_000, v2Activity: true));
-            RunRated(Pf5R2R2Shape.CurrentProductionDense,
-                P03NetworkWorkload.ChunkProductionDense(population)
-                    .WithServerTickAndAoICadence(16, P03AoICadencePolicy.Selected124));
+            if (!matchedOnly)
+            {
+                RunRated(Pf5R2R2Shape.V2PopulationV2Activity,
+                    P03NetworkWorkload.ChunkV2Shaped(population, population, v2Activity: true));
+                RunRated(Pf5R2R2Shape.V2PopulationCurrentActivity,
+                    P03NetworkWorkload.ChunkV2Shaped(population, population, v2Activity: false));
+                RunRated(Pf5R2R2Shape.ThousandEntitiesV2Activity,
+                    P03NetworkWorkload.ChunkV2Shaped(population, 1_000, v2Activity: true));
+                RunRated(Pf5R2R2Shape.CurrentProductionDense,
+                    P03NetworkWorkload.ChunkProductionDense(population)
+                        .WithServerTickAndAoICadence(16, P03AoICadencePolicy.Selected124));
+            }
 
             int lowDirty = Math.Min(20, population);
             int highDirty = Math.Max(lowDirty,
@@ -70,18 +75,21 @@ internal static class Pf5R2R2ScalingAttribution
         int attributionPopulation = focused ? populations[0] :
             populations.Contains(300) ? 300 : populations[^1];
         var attribution = new List<Pf5R2R2ScalingRow>(4);
-        RunAttribution(Pf5R2R2Shape.V2PopulationV2Activity,
-            P03NetworkWorkload.ChunkV2Shaped(
-                attributionPopulation, attributionPopulation, v2Activity: true));
-        RunAttribution(Pf5R2R2Shape.V2PopulationCurrentActivity,
-            P03NetworkWorkload.ChunkV2Shaped(
-                attributionPopulation, attributionPopulation, v2Activity: false));
-        RunAttribution(Pf5R2R2Shape.ThousandEntitiesV2Activity,
-            P03NetworkWorkload.ChunkV2Shaped(
-                attributionPopulation, 1_000, v2Activity: true));
-        RunAttribution(Pf5R2R2Shape.CurrentProductionDense,
-            P03NetworkWorkload.ChunkProductionDense(attributionPopulation)
-                .WithServerTickAndAoICadence(16, P03AoICadencePolicy.Selected124));
+        if (!matchedOnly)
+        {
+            RunAttribution(Pf5R2R2Shape.V2PopulationV2Activity,
+                P03NetworkWorkload.ChunkV2Shaped(
+                    attributionPopulation, attributionPopulation, v2Activity: true));
+            RunAttribution(Pf5R2R2Shape.V2PopulationCurrentActivity,
+                P03NetworkWorkload.ChunkV2Shaped(
+                    attributionPopulation, attributionPopulation, v2Activity: false));
+            RunAttribution(Pf5R2R2Shape.ThousandEntitiesV2Activity,
+                P03NetworkWorkload.ChunkV2Shaped(
+                    attributionPopulation, 1_000, v2Activity: true));
+            RunAttribution(Pf5R2R2Shape.CurrentProductionDense,
+                P03NetworkWorkload.ChunkProductionDense(attributionPopulation)
+                    .WithServerTickAndAoICadence(16, P03AoICadencePolicy.Selected124));
+        }
 
         var report = new Pf5R2R2ScalingReport(
             "ultrasim-concept-demo-pf5-r2-r2-v2-v3-scaling-v2",
@@ -180,9 +188,10 @@ internal static class Pf5R2R2ScalingAttribution
         {
             Console.WriteLine($"PF5-R2-R2 {shape} R={workload.Recipients} " +
                 $"E={workload.Entities} dirty={workload.DirtyEntitiesPerTick}: matched");
-            P03WholeFlowRow flow = RunHarness(workload, warmup, ticks, detailed: false);
+            P03WholeFlowRow flow = RunHarness(
+                workload, warmup, ticks, detailed: matchedDetailed);
             VerifyServerBudget(flow, ticks);
-            matchedRows.Add(new Pf5R2R2ScalingRow(shape, false, flow));
+            matchedRows.Add(new Pf5R2R2ScalingRow(shape, matchedDetailed, flow));
             Console.WriteLine($"  game={flow.Timing.GameScheduleAndCodecQueue.P95:F3}ms " +
                 $"server-budget={flow.Timing.ServerOwnedRemoteReplicationBudget.P95:F3}ms " +
                 $"whole={flow.Timing.Tick.P95:F3}ms pubs=" +

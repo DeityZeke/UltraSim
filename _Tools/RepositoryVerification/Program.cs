@@ -25,6 +25,120 @@ Console.WriteLine("PASS documentation architecture and links");
 if (options.ArchitectureOnly)
     return 0;
 
+if (options.Pf5R4Only)
+{
+    VerifyPf5R4RecipientFlattening(root, options.Configuration);
+    Console.WriteLine("PASS PF5-R4 focused recipient-preparation verification");
+    return 0;
+}
+
+static void VerifyPf5R4RecipientFlattening(string root, string configuration)
+{
+    Run(root, "dotnet",
+    [
+        "run", "--project",
+        "_Tests/UltraSim.Game.Replication.Tests/UltraSim.Game.Replication.Tests.csproj",
+        "-c", configuration,
+    ]);
+
+    string scope = Path.Combine(Path.GetTempPath(), "ultrasim-repository-verification",
+        Environment.ProcessId.ToString(), "pf5-r4");
+    if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    Directory.CreateDirectory(scope);
+    try
+    {
+        string microOutput = Path.Combine(scope, "sort-micro.json");
+        Run(root, "dotnet",
+        [
+            "run", "--project",
+            "_Benchmarks/UltraSim.Network.V3ComparisonAdapter/UltraSim.Network.V3ComparisonAdapter.csproj",
+            "-c", configuration, "--", "--pf5-r4-sort-micro",
+            "--iterations=2000", "--samples=7", $"--output={microOutput}",
+        ]);
+        using (JsonDocument micro = JsonDocument.Parse(File.ReadAllText(microOutput)))
+        {
+            JsonElement[] rows = micro.RootElement.GetProperty("Rows").EnumerateArray()
+                .Select(static value => value.Clone()).ToArray();
+            if (micro.RootElement.GetProperty("Schema").GetString() !=
+                    "ultrasim-pf5-r4-index-sort-v1" ||
+                rows.Length != 5 ||
+                rows.Any(static row => row.GetProperty("OldAllocationBytes").GetInt64() != 0 ||
+                    row.GetProperty("NewAllocationBytes").GetInt64() != 0))
+                throw new InvalidOperationException(
+                    "PF5-R4 compact-index sort microbenchmark was incomplete or allocated.");
+        }
+
+        string matchedOutput = Path.Combine(scope, "matched.json");
+        Run(root, "dotnet",
+        [
+            "run", "--project",
+            "_Benchmarks/UltraSim.Network.V3ComparisonAdapter/UltraSim.Network.V3ComparisonAdapter.csproj",
+            "-c", configuration, "--", "--pf5-r2-r2-scaling", "--matched-only",
+            "--matched-detailed", "--populations=128", "--warmup=8", "--ticks=24",
+            "--attribution-ticks=16", $"--output={matchedOutput}",
+        ]);
+        using (JsonDocument matched = JsonDocument.Parse(File.ReadAllText(matchedOutput)))
+        {
+            JsonElement[] rows = matched.RootElement.GetProperty("MatchedControlRows")
+                .EnumerateArray().Where(static value => value.GetProperty("Flow")
+                    .GetProperty("Entities").GetInt32() == 1_000)
+                .Select(static value => value.Clone()).ToArray();
+            if (rows.Length != 2)
+                throw new InvalidOperationException("PF5-R4 matched controls were incomplete.");
+            JsonElement high = rows.MaxBy(static row => row.GetProperty("Flow")
+                .GetProperty("DirtyEntitiesPerTick").GetInt32());
+            JsonElement flow = high.GetProperty("Flow");
+            JsonElement cpu = flow.GetProperty("ProfileCounters").GetProperty("ChunkCpu");
+            JsonElement prepared = flow.GetProperty("ProfileCounters")
+                .GetProperty("PreparedPublication");
+            ulong requests = cpu.GetProperty("PreparedCandidateRequests").GetUInt64();
+            ulong builds = cpu.GetProperty("PreparedCandidateBuilds").GetUInt64();
+            if (!flow.GetProperty("Converged").GetBoolean() ||
+                !cpu.GetProperty("Enabled").GetBoolean() || requests == 0 || builds != requests ||
+                cpu.GetProperty("PreparedCandidatePacketBoundaryCarries").GetUInt64() == 0 ||
+                cpu.GetProperty("PreparedCandidateLocalReuses").GetUInt64() == 0 ||
+                cpu.GetProperty("PreparedCandidateInvalidations").GetUInt64() != 0 ||
+                cpu.GetProperty("PreparedValidationHashCalls").GetUInt64() != builds ||
+                prepared.GetProperty("RecipientSortCalls").GetUInt64() == 0 ||
+                prepared.GetProperty("RecipientIndicesSorted").GetUInt64() !=
+                    prepared.GetProperty("RecipientRecordsConstructed").GetUInt64())
+                throw new InvalidOperationException(
+                    "PF5-R4 matched control retained redundant candidate, validation, or sort work.");
+        }
+
+        string udpOutput = Path.Combine(scope, "real-udp.json");
+        Run(root, "dotnet",
+        [
+            "run", "--project",
+            "_Benchmarks/UltraSim.Network.V3ComparisonAdapter/UltraSim.Network.V3ComparisonAdapter.csproj",
+            "-c", configuration, "--", "--p03-whole-flow",
+            "--pf5-r3-background-egress", "--socket-modes=platform-batch,background-platform-batch",
+            "--populations=16", "--warmup=6", "--ticks=30", "--egress-timing=off",
+            $"--output={udpOutput}",
+        ]);
+        using (JsonDocument udp = JsonDocument.Parse(File.ReadAllText(udpOutput)))
+        {
+            JsonElement[] rows = udp.RootElement.GetProperty("Rows").EnumerateArray()
+                .Select(static value => value.Clone()).ToArray();
+            if (rows.Length != 2 || rows[0].GetProperty("SocketIoMode").GetString() !=
+                    "PlatformBatch" ||
+                rows[1].GetProperty("SocketIoMode").GetString() != "BackgroundPlatformBatch" ||
+                rows.Any(static row => !row.GetProperty("Converged").GetBoolean()) ||
+                rows[0].GetProperty("SemanticDigest").GetString() !=
+                    rows[1].GetProperty("SemanticDigest").GetString() ||
+                rows[0].GetProperty("ProfileCounters").GetProperty("SuccessfulSemanticPublications")
+                    .GetUInt64() != rows[1].GetProperty("ProfileCounters")
+                    .GetProperty("SuccessfulSemanticPublications").GetUInt64())
+                throw new InvalidOperationException(
+                    "PF5-R4 Inline/Background PlatformBatch real-UDP parity failed.");
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    }
+}
+
 if (options.Pf5R3Only)
 {
     VerifyPf5R3BackgroundEgress(root, options.Configuration);
@@ -5052,6 +5166,7 @@ internal sealed record VerificationOptions(
     bool Pf5R2R1Only,
     bool Pf5R2R2Only,
     bool Pf5R3Only,
+    bool Pf5R4Only,
     bool Pf3Only,
     bool Pf3NativeOnly,
     bool Pf25LongNative,
@@ -5074,7 +5189,7 @@ internal sealed record VerificationOptions(
             pf4cOnly = false, pf4dOnly = false, pf4eOnly = false, pf4eR1Only = false,
             pf4eR2Only = false, pf4fOnly = false, pf5Only = false,
             pf5R1Only = false, pf5R2Only = false, pf5R2R1Only = false,
-            pf5R2R2Only = false, pf5R3Only = false,
+            pf5R2R2Only = false, pf5R3Only = false, pf5R4Only = false,
             pf25LongNative = false,
             allConfigurations = false;
         bool skipGodot = false, noRestore = false;
@@ -5105,6 +5220,7 @@ internal sealed record VerificationOptions(
             else if (argument == "--pf5-r2-r1-only") pf5R2R1Only = true;
             else if (argument == "--pf5-r2-r2-only") pf5R2R2Only = true;
             else if (argument == "--pf5-r3-only") pf5R3Only = true;
+            else if (argument == "--pf5-r4-only") pf5R4Only = true;
             else if (argument == "--pf2.5-long-native") pf25LongNative = true;
             else if (argument == "--all-configurations") allConfigurations = true;
             else if (argument == "--skip-godot") skipGodot = true;
@@ -5213,7 +5329,7 @@ internal sealed record VerificationOptions(
         if ((pf1Only || pf2Only || pf25Only || pf3Only || pf3NativeOnly || pf4aOnly ||
              pf4bOnly || pf4cOnly || pf4dOnly || pf4eOnly || pf4eR1Only || pf4eR2Only ||
              pf4fOnly || pf5Only || pf5R1Only || pf5R2Only || pf5R2R1Only ||
-             pf5R2R2Only || pf5R3Only) && architectureOnly)
+             pf5R2R2Only || pf5R3Only || pf5R4Only) && architectureOnly)
             throw new ArgumentException("Focused PF verification cannot be architecture-only.");
         if ((pf1Only ? 1 : 0) + (pf2Only ? 1 : 0) + (pf25Only ? 1 : 0) +
             (pf3Only ? 1 : 0) + (pf3NativeOnly ? 1 : 0) + (pf4aOnly ? 1 : 0) +
@@ -5221,7 +5337,8 @@ internal sealed record VerificationOptions(
             (pf4eOnly ? 1 : 0) + (pf4eR1Only ? 1 : 0) + (pf4eR2Only ? 1 : 0) +
             (pf4fOnly ? 1 : 0) + (pf5Only ? 1 : 0) + (pf5R1Only ? 1 : 0) +
             (pf5R2Only ? 1 : 0) + (pf5R2R1Only ? 1 : 0) +
-            (pf5R2R2Only ? 1 : 0) + (pf5R3Only ? 1 : 0) > 1)
+            (pf5R2R2Only ? 1 : 0) + (pf5R3Only ? 1 : 0) +
+            (pf5R4Only ? 1 : 0) > 1)
             throw new ArgumentException("Choose one focused PF verification mode.");
         if ((pf25LongNative || pf25EvidenceOutputDirectory is not null) && !pf25Only)
             throw new ArgumentException(
@@ -5246,7 +5363,7 @@ internal sealed record VerificationOptions(
             !pf4cOnly && !pf4dOnly && !pf4eOnly && !pf4fOnly && !pf5Only)
             throw new ArgumentException(
                 "Native PF options require --pf3-only, --pf3-native-only, --pf4a-only, --pf4b-only, --pf4c-only, --pf4d-only, --pf4e-only, --pf4f-only, or --pf5-only.");
-        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only, pf4fOnly, pf5Only, pf5R1Only, pf5R2Only, pf5R2R1Only, pf5R2R2Only, pf5R3Only,
+        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only, pf4fOnly, pf5Only, pf5R1Only, pf5R2Only, pf5R2R1Only, pf5R2R2Only, pf5R3Only, pf5R4Only,
             pf3Only, pf3NativeOnly,
             pf25LongNative,
             allConfigurations, configuration, skipGodot, noRestore, godot,

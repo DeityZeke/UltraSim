@@ -27,6 +27,12 @@ if (args.Contains("--pf5-r2-r2-scaling", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--pf5-r4-sort-micro", StringComparer.Ordinal))
+{
+    Pf5R4SortMicrobenchmark.Run(args);
+    return;
+}
+
 AdapterOptions options = AdapterOptions.Parse(args);
 if (options.CadenceSuite)
 {

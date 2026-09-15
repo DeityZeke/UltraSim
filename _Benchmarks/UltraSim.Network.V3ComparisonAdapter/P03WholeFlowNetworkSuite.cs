@@ -2947,6 +2947,11 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
             Difference(after.RecipientMaterializationTicks,
                 before.RecipientMaterializationTicks),
             Difference(after.RecipientSortTicks, before.RecipientSortTicks),
+            Difference(after.RecipientSortCalls, before.RecipientSortCalls),
+            Difference(after.RecipientIndicesSorted, before.RecipientIndicesSorted),
+            Difference(after.RecipientTrivialSorts, before.RecipientTrivialSorts),
+            Difference(after.RecipientRecordsConstructed,
+                before.RecipientRecordsConstructed),
             after.CoveragePublicationHighWater,
             after.ReservedBytes);
 
@@ -3832,6 +3837,12 @@ internal readonly record struct P03ChunkCpuAttribution(
     ulong ReadinessSelectionTicks,
     ulong SchedulerCadenceCheckCalls,
     ulong SchedulerCadenceCheckTicks,
+    ulong PreparedCandidateRequests,
+    ulong PreparedCandidateBuilds,
+    ulong PreparedCandidateLocalReuses,
+    ulong PreparedCandidatePacketBoundaryCarries,
+    ulong PreparedCandidateInvalidations,
+    ulong PreparedCandidateRebuildsAfterInvalidation,
     ulong SubscriptionLookupCalls,
     ulong SubscriptionLookupComparisons,
     ulong SubscriptionLookupTicks,
@@ -3845,9 +3856,14 @@ internal readonly record struct P03ChunkCpuAttribution(
     ulong DeltaMaterializationCalls,
     ulong DeltaMaterializationTicks,
     ulong DeltaRecordsMaterialized,
+    ulong PreparedValidationHashCalls,
+    ulong PreparedValidationHashTicks,
+    ulong PreparedRecordsValidated,
+    ulong PreparedContentHashCalls,
     ulong CanonicalStandaloneEncodeCalls,
     ulong CanonicalStandaloneEncodeTicks,
     ulong CanonicalStandaloneBytes,
+    ulong PreparedStandaloneWrites,
     ulong CanonicalReparseCalls,
     ulong CanonicalReparseRecords,
     ulong CanonicalReparseTicks,
@@ -3888,6 +3904,12 @@ internal sealed class P03ChunkCpuAttributionAccumulator
     internal ulong ReadinessSelectionTicks;
     internal ulong SchedulerCadenceCheckCalls;
     internal ulong SchedulerCadenceCheckTicks;
+    internal ulong PreparedCandidateRequests;
+    internal ulong PreparedCandidateBuilds;
+    internal ulong PreparedCandidateLocalReuses;
+    internal ulong PreparedCandidatePacketBoundaryCarries;
+    internal ulong PreparedCandidateInvalidations;
+    internal ulong PreparedCandidateRebuildsAfterInvalidation;
     internal ulong SubscriptionLookupCalls;
     internal ulong SubscriptionLookupComparisons;
     internal ulong SubscriptionLookupTicks;
@@ -3901,9 +3923,14 @@ internal sealed class P03ChunkCpuAttributionAccumulator
     internal ulong DeltaMaterializationCalls;
     internal ulong DeltaMaterializationTicks;
     internal ulong DeltaRecordsMaterialized;
+    internal ulong PreparedValidationHashCalls;
+    internal ulong PreparedValidationHashTicks;
+    internal ulong PreparedRecordsValidated;
+    internal ulong PreparedContentHashCalls;
     internal ulong CanonicalStandaloneEncodeCalls;
     internal ulong CanonicalStandaloneEncodeTicks;
     internal ulong CanonicalStandaloneBytes;
+    internal ulong PreparedStandaloneWrites;
     internal ulong CanonicalReparseCalls;
     internal ulong CanonicalReparseRecords;
     internal ulong CanonicalReparseTicks;
@@ -3938,6 +3965,13 @@ internal sealed class P03ChunkCpuAttributionAccumulator
     internal void Add(in RemoteChunkCpuAttributionSnapshot value)
     {
         Enabled |= value.Enabled;
+        PreparedCandidateRequests += value.PreparedCandidateRequests;
+        PreparedCandidateBuilds += value.PreparedCandidateBuilds;
+        PreparedCandidateLocalReuses += value.PreparedCandidateLocalReuses;
+        PreparedCandidatePacketBoundaryCarries += value.PreparedCandidatePacketBoundaryCarries;
+        PreparedCandidateInvalidations += value.PreparedCandidateInvalidations;
+        PreparedCandidateRebuildsAfterInvalidation +=
+            value.PreparedCandidateRebuildsAfterInvalidation;
         SubscriptionLookupCalls += value.SubscriptionLookupCalls;
         SubscriptionLookupComparisons += value.SubscriptionLookupComparisons;
         SubscriptionLookupTicks += value.SubscriptionLookupTicks;
@@ -3951,9 +3985,14 @@ internal sealed class P03ChunkCpuAttributionAccumulator
         DeltaMaterializationCalls += value.Encoder.DeltaMaterializationCalls;
         DeltaMaterializationTicks += value.Encoder.DeltaMaterializationTicks;
         DeltaRecordsMaterialized += value.Encoder.DeltaRecordsMaterialized;
+        PreparedValidationHashCalls += value.Encoder.PreparedValidationHashCalls;
+        PreparedValidationHashTicks += value.Encoder.PreparedValidationHashTicks;
+        PreparedRecordsValidated += value.Encoder.PreparedRecordsValidated;
+        PreparedContentHashCalls += value.Encoder.PreparedContentHashCalls;
         CanonicalStandaloneEncodeCalls += value.Encoder.CanonicalStandaloneEncodeCalls;
         CanonicalStandaloneEncodeTicks += value.Encoder.CanonicalStandaloneEncodeTicks;
         CanonicalStandaloneBytes += value.Encoder.CanonicalStandaloneBytes;
+        PreparedStandaloneWrites += value.Encoder.PreparedStandaloneWrites;
         CanonicalReparseCalls += value.CanonicalReparseCalls;
         CanonicalReparseRecords += value.CanonicalReparseRecords;
         CanonicalReparseTicks += value.CanonicalReparseTicks;
@@ -3990,13 +4029,18 @@ internal sealed class P03ChunkCpuAttributionAccumulator
         Enabled, ScheduleTotalTicks, ProofTotalTicks,
         ReadinessSelectionCalls, ReadinessSelectionTicks,
         SchedulerCadenceCheckCalls, SchedulerCadenceCheckTicks,
+        PreparedCandidateRequests, PreparedCandidateBuilds,
+        PreparedCandidateLocalReuses, PreparedCandidatePacketBoundaryCarries,
+        PreparedCandidateInvalidations, PreparedCandidateRebuildsAfterInvalidation,
         SubscriptionLookupCalls, SubscriptionLookupComparisons, SubscriptionLookupTicks,
         SourceReadCalls, SourceReadTicks,
         RecipientCadenceCheckCalls, RecipientCadenceCheckTicks,
         DeltaCopyCalls, DeltaCopyTicks, DeltaRecordsCopied,
         DeltaMaterializationCalls, DeltaMaterializationTicks, DeltaRecordsMaterialized,
+        PreparedValidationHashCalls, PreparedValidationHashTicks,
+        PreparedRecordsValidated, PreparedContentHashCalls,
         CanonicalStandaloneEncodeCalls, CanonicalStandaloneEncodeTicks,
-        CanonicalStandaloneBytes,
+        CanonicalStandaloneBytes, PreparedStandaloneWrites,
         CanonicalReparseCalls, CanonicalReparseRecords, CanonicalReparseTicks,
         BundlePreflightCalls, BundlePreflightTicks,
         BundleStagingCalls, BundleStagingRecords, BundleStagingTicks,
