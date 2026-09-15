@@ -1277,9 +1277,17 @@ internal sealed class P03WholeFlowHarness : IDisposable
         ResetMeasurement(ticks);
         P03TransportTotals before = CaptureTransport();
         SharedUdpListenerSnapshot listenerBefore = _host.GetSnapshot().Listener;
+        using Process measuredProcess = Process.GetCurrentProcess();
+        TimeSpan processCpuBefore = measuredProcess.TotalProcessorTime;
+        long processWallStarted = Stopwatch.GetTimestamp();
         long allocatedBefore = GC.GetTotalAllocatedBytes(true);
         for (int tick = 1; tick <= ticks; tick++) RunTick(warmup + tick, measure: true);
         DrainToConvergence(checked((ulong)(warmup + ticks + 1)), 4_096);
+        double processWallMilliseconds = Stopwatch.GetElapsedTime(processWallStarted)
+            .TotalMilliseconds;
+        double processCpuMilliseconds =
+            (measuredProcess.TotalProcessorTime - processCpuBefore).TotalMilliseconds;
+        long processPeakWorkingSetBytes = measuredProcess.PeakWorkingSet64;
         long allocated = GC.GetTotalAllocatedBytes(false) - allocatedBefore;
         P03TransportTotals after = CaptureTransport();
         SharedUdpListenerSnapshot listenerAfter = _host.GetSnapshot().Listener;
@@ -1334,7 +1342,17 @@ internal sealed class P03WholeFlowHarness : IDisposable
             hostSnapshot.KnownClientReservedBytes,
             _adapter.IsConverged, "", normalized,
             P03BackgroundEgressSummary.Delta(
-                listenerAfter.BackgroundEgress, listenerBefore.BackgroundEgress));
+                listenerAfter.BackgroundEgress, listenerBefore.BackgroundEgress),
+            new P03ProcessWindowSummary(
+                processWallMilliseconds,
+                processCpuMilliseconds,
+                processWallMilliseconds <= 0 ? 0 :
+                    processCpuMilliseconds / processWallMilliseconds,
+                processPeakWorkingSetBytes),
+            new P03ListenerConfigurationSummary(
+                listenerAfter.ConfiguredSocketBufferBytes,
+                listenerAfter.ActualSocketBufferBytes,
+                listenerAfter.ReservedBytes));
     }
 
     private void RunTick(int tick, bool measure)
@@ -3287,7 +3305,20 @@ internal readonly record struct P03WholeFlowRow(
     bool Converged,
     string Curve,
     P03NormalizedCost Normalized,
-    P03BackgroundEgressSummary BackgroundEgress);
+    P03BackgroundEgressSummary BackgroundEgress,
+    P03ProcessWindowSummary ProcessWindow,
+    P03ListenerConfigurationSummary ListenerConfiguration);
+
+internal readonly record struct P03ProcessWindowSummary(
+    double WallMilliseconds,
+    double CpuMilliseconds,
+    double CpuCores,
+    long PeakWorkingSetBytes);
+
+internal readonly record struct P03ListenerConfigurationSummary(
+    long ConfiguredSocketBufferBytes,
+    long ActualSocketBufferBytes,
+    long ReservedBytes);
 
 internal readonly record struct Pf5R3BackgroundEgressReport(
     string Schema,
