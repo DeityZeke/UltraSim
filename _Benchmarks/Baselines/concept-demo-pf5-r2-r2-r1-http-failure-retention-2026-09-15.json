@@ -1,0 +1,37 @@
+{
+  "schema": "ultrasim-concept-demo-pf5-r2-r2-r1-http-failure-retention-v1",
+  "completedUtc": "2026-09-15T13:15:01Z",
+  "startingHead": "1808aeae17e727b86b4a14a81607995828d4e80b",
+  "replicationSemanticCandidate": "992fc541460f18534da9036c73cb711277de11ce",
+  "httpRepairCommit": "89f26f8bbaa1003b15ddf52d61d6ce2567694b74",
+  "integratedCorrectnessCandidate": "89f26f8bbaa1003b15ddf52d61d6ce2567694b74",
+  "productionFilesChanged": [
+    "Server/Hosting/StaticContentHttpHost.cs"
+  ],
+  "replicationProductionChanged": false,
+  "baselineReproductions": {
+    "preStoppingAcceptFaultWasLost": true,
+    "twoResponseWorkerFailuresWereIncomplete": true,
+    "cleanupCompletedInBoth": true
+  },
+  "repair": {
+    "expectedShutdownOutcomesContainedAtOrigin": true,
+    "workerJoinExceptionTypeFilteringRemoved": true,
+    "responseWorkersJoinedIndividually": true,
+    "allConstituentFailuresRetained": true,
+    "sameFailureSetForConcurrentAndRepeatedDispose": true
+  },
+  "focusedVerification": {
+    "serverHostingTestsPerRun": 23,
+    "consecutiveRuns": 3,
+    "shutdownStressCyclesPerRun": 128,
+    "shutdownStressCycles": 384,
+    "failures": 0
+  },
+  "canonicalRelease": {
+    "consecutivePasses": 3,
+    "exportsAndCompositionsIncluded": true,
+    "result": "pass"
+  },
+  "outcome": "Accepted"
+}
