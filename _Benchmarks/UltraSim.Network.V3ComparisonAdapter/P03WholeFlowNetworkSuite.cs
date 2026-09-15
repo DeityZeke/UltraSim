@@ -30,6 +30,11 @@ internal static class P03WholeFlowNetworkSuite
             Pf5R2R1TimingBoundaryClosure.Run(args);
             return;
         }
+        if (args.Contains("--pf5-r3-background-egress", StringComparer.Ordinal))
+        {
+            RunPf5R3BackgroundEgress(args);
+            return;
+        }
         if (args.Contains("--pf5-r2-shared-publication", StringComparer.Ordinal))
         {
             Pf5R2SharedPublicationAudit.Run(args);
@@ -168,6 +173,152 @@ internal static class P03WholeFlowNetworkSuite
             : overrideTickCadence
                 ? workload.WithTickDuration(tickMilliseconds)
                 : workload;
+    }
+
+    private static void RunPf5R3BackgroundEgress(string[] args)
+    {
+        int warmup = ReadInt(args, "--warmup", 60);
+        int ticks = ReadInt(args, "--ticks", 270);
+        int tickMilliseconds = ReadInt(args, "--server-tick-milliseconds", 16);
+        int[] populations = ParseOptionalPositiveIntegers(ReadText(args, "--populations")) ??
+            [64, 128, 192, 256, 300];
+        string output = ReadText(args, "--output") ??
+            "_Benchmarks/results/network-pf5-r3-background-egress.json";
+        SharedUdpSocketIoMode[] modes = ParsePf5R3SocketModes(ReadText(args, "--socket-modes"));
+        if (warmup < 1 || ticks < 10 || tickMilliseconds <= 0)
+            throw new ArgumentOutOfRangeException(nameof(args));
+
+        var cases = new List<(int Population, SharedUdpSocketIoMode Mode)>(
+            checked(populations.Length * modes.Length));
+        foreach (int population in populations)
+        foreach (SharedUdpSocketIoMode mode in modes)
+            cases.Add((population, mode));
+        var random = new Random(ExecutionSeed ^ 0x5F3E_6001);
+        for (int index = cases.Count - 1; index > 0; index--)
+        {
+            int other = random.Next(index + 1);
+            (cases[index], cases[other]) = (cases[other], cases[index]);
+        }
+
+        foreach (SharedUdpSocketIoMode mode in modes)
+        {
+            using var prime = new P03WholeFlowHarness(
+                P03NetworkWorkload.ChunkProductionDense(Math.Min(populations[0], 32))
+                    .WithServerTickAndAoICadence(tickMilliseconds,
+                        P03AoICadencePolicy.Selected124),
+                P03NetworkProfile.ChunkPublication, 2,
+                stageTimingEnabled: false,
+                compression: RemoteChunkBundleCompressionPolicy.Selected,
+                serverOwnedRemoteTimingEnabled: true,
+                socketIoMode: mode);
+            _ = prime.Run(Math.Max(30, warmup), 10);
+        }
+
+        var rows = new List<P03WholeFlowRow>(cases.Count);
+        for (int executionOrder = 0; executionOrder < cases.Count; executionOrder++)
+        {
+            (int population, SharedUdpSocketIoMode mode) = cases[executionOrder];
+            P03NetworkWorkload workload = P03NetworkWorkload.ChunkProductionDense(population)
+                .WithServerTickAndAoICadence(tickMilliseconds,
+                    P03AoICadencePolicy.Selected124);
+            Console.WriteLine($"PF5-R3 {mode}/{population}: constructing...");
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            using var harness = new P03WholeFlowHarness(
+                workload, P03NetworkProfile.ChunkPublication, 2,
+                stageTimingEnabled: false,
+                compression: RemoteChunkBundleCompressionPolicy.Selected,
+                serverOwnedRemoteTimingEnabled: true,
+                socketIoMode: mode);
+            P03WholeFlowRow row = harness.Run(warmup, ticks) with
+            {
+                ExecutionOrder = executionOrder,
+                Curve = "pf5-r3-production-shaped",
+            };
+            rows.Add(row);
+            Console.WriteLine($"PF5-R3 {mode}/{population}: remote-budget p95 " +
+                $"{row.Timing.ServerOwnedRemoteReplicationBudget.P95:F3} ms, " +
+                $"p99 {row.Timing.ServerOwnedRemoteReplicationBudget.P99:F3} ms, " +
+                $"queue-high-water {row.BackgroundEgress.HighWaterDatagrams:N0}, " +
+                $"wire {row.Transport.WireBytes / 1048576d:F2} MiB");
+        }
+
+        foreach (IGrouping<int, P03WholeFlowRow> populationRows in
+                 rows.GroupBy(row => row.Recipients))
+        {
+            P03WholeFlowRow first = populationRows.First();
+            foreach (P03WholeFlowRow row in populationRows.Skip(1))
+            {
+                P03WholeFlowHarness.Require(
+                    StringComparer.Ordinal.Equals(first.SemanticDigest, row.SemanticDigest),
+                    "PF5-R3 socket modes changed the authoritative semantic digest.");
+                P03WholeFlowHarness.Require(
+                    first.ProfileCounters.SuccessfulSemanticPublications ==
+                        row.ProfileCounters.SuccessfulSemanticPublications &&
+                    first.ProfileCounters.ProofEntries == row.ProfileCounters.ProofEntries &&
+                    first.ProfileCounters.GameMessagesQueued ==
+                        row.ProfileCounters.GameMessagesQueued &&
+                    first.ProfileCounters.ChunkBundleEntries ==
+                        row.ProfileCounters.ChunkBundleEntries,
+                    "PF5-R3 socket modes changed semantic publication/proof work.");
+            }
+        }
+
+        var report = new Pf5R3BackgroundEgressReport(
+            "ultrasim-network-pf5-r3-background-egress-v1",
+            DateTimeOffset.UtcNow,
+            ReadGitSha(),
+            Environment.Version.ToString(),
+            Environment.OSVersion.VersionString,
+            Environment.ProcessorCount,
+            Stopwatch.Frequency,
+            ExecutionSeed,
+            warmup,
+            ticks,
+            "Current PF5-R2 shared prepared-latest-state ChunkPublication; message 129 when " +
+                "beneficial; selective message-148 LZ4 at 384/32; Immediate/Near/Far 1/2/4; " +
+                "CrossLane unreliable aggregation cap two; real secure loopback UDP.",
+            "ServerOwnedRemoteReplicationBudget is the per-tick sum of shared publication " +
+                "preparation, recipient commit observation, Game scheduling/encoding/proof, " +
+                "Network protocol work, and listener submission. Background worker physical " +
+                "send time and client work are excluded from that main-thread metric.",
+            "Background byte/count fields are exact measurement-window deltas. Queue latency " +
+                "histogram percentiles are bounded worker-lifetime observations including " +
+                "bootstrap and warmup because production telemetry is cumulative.",
+            rows.OrderBy(row => row.Recipients)
+                .ThenBy(row => (int)Enum.Parse<SharedUdpSocketIoMode>(row.SocketIoMode))
+                .ToArray());
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
+        File.WriteAllText(output, JsonSerializer.Serialize(report,
+            new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
+        Console.WriteLine(Path.GetFullPath(output));
+    }
+
+    private static SharedUdpSocketIoMode[] ParsePf5R3SocketModes(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text) ||
+            text.Equals("all", StringComparison.OrdinalIgnoreCase))
+            return
+            [
+                SharedUdpSocketIoMode.Scalar,
+                SharedUdpSocketIoMode.PlatformBatch,
+                SharedUdpSocketIoMode.BackgroundScalar,
+                SharedUdpSocketIoMode.BackgroundPlatformBatch,
+            ];
+        return text.Split(',', StringSplitOptions.RemoveEmptyEntries |
+                StringSplitOptions.TrimEntries)
+            .Select(value => value.ToLowerInvariant() switch
+            {
+                "scalar" or "inline-scalar" => SharedUdpSocketIoMode.Scalar,
+                "platform-batch" or "inline-batched" => SharedUdpSocketIoMode.PlatformBatch,
+                "background-scalar" => SharedUdpSocketIoMode.BackgroundScalar,
+                "background-platform-batch" or "background-batched" =>
+                    SharedUdpSocketIoMode.BackgroundPlatformBatch,
+                _ => throw new ArgumentException($"Unknown PF5-R3 socket mode '{value}'."),
+            })
+            .Distinct()
+            .ToArray();
     }
 
     private static void RunChunkStagingMicrobenchmark(string[] args)
@@ -1010,6 +1161,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
     private readonly bool _gameDetailedAttribution;
     private readonly bool _authorityThroughNetworkTimingEnabled;
     private readonly bool _serverOwnedRemoteTimingEnabled;
+    private readonly SharedUdpSocketIoMode _socketIoMode;
     private readonly NetworkProtocolLimits _protocolLimits;
     private readonly SharedUdpProtocolHost _host;
     private readonly SharedUdpProtocolSession[] _sessions;
@@ -1049,7 +1201,9 @@ internal sealed class P03WholeFlowHarness : IDisposable
         bool authorityThroughNetworkTimingEnabled = true,
         bool serverOwnedRemoteTimingEnabled = false,
         PreparedChunkPublicationReadModel chunkReadModel =
-            PreparedChunkPublicationReadModel.PreparedLatestState)
+            PreparedChunkPublicationReadModel.PreparedLatestState,
+        SharedUdpSocketIoMode socketIoMode =
+            SharedUdpSocketIoMode.PlatformSendReceiveBatch)
     {
         _workload = workload;
         _profile = profile;
@@ -1058,6 +1212,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
         _gameDetailedAttribution = gameDetailedAttribution;
         _authorityThroughNetworkTimingEnabled = authorityThroughNetworkTimingEnabled;
         _serverOwnedRemoteTimingEnabled = serverOwnedRemoteTimingEnabled;
+        _socketIoMode = socketIoMode;
         _x = new long[workload.Entities];
         _z = new long[workload.Entities];
         _versions = new ulong[workload.Entities];
@@ -1083,7 +1238,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
             MaximumUnreliableFramesPerDatagram: frameCap);
         var shared = new SharedUdpProtocolLimits(
             workload.Recipients, 32, Math.Max(8_192, workload.Recipients * 64),
-            SharedUdpSocketIoMode.PlatformSendReceiveBatch, 32, 32);
+            socketIoMode, 32, 32);
         _host = SharedUdpProtocolHost.CreateSelfTrustedLoopback(
             _protocolLimits, s_udp, shared, manifest);
         _sessions = new SharedUdpProtocolSession[workload.Recipients];
@@ -1140,7 +1295,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
             _workload.Recipients, ticks, _networkAndRemoteReplication, _serverRole,
             transport, profile);
         return new P03WholeFlowRow(
-            0, _workload.Id, _profile.ToString(), _frameCap,
+            0, _workload.Id, _profile.ToString(), _frameCap, _socketIoMode.ToString(),
             _workload.Recipients, _workload.Entities, _workload.DirtyEntitiesPerTick,
             _workload.ActiveEntities,
             _workload.InputIntervalTicks,
@@ -1177,7 +1332,9 @@ internal sealed class P03WholeFlowHarness : IDisposable
             profileServerReserved, profileClientReserved,
             hostSnapshot.KnownReservedBytes, hostSnapshot.KnownServerReservedBytes,
             hostSnapshot.KnownClientReservedBytes,
-            _adapter.IsConverged, "", normalized);
+            _adapter.IsConverged, "", normalized,
+            P03BackgroundEgressSummary.Delta(
+                listenerAfter.BackgroundEgress, listenerBefore.BackgroundEgress));
     }
 
     private void RunTick(int tick, bool measure)
@@ -3106,6 +3263,7 @@ internal readonly record struct P03WholeFlowRow(
     string Workload,
     string Profile,
     int MaximumUnreliableFramesPerDatagram,
+    string SocketIoMode,
     int Recipients,
     int Entities,
     int DirtyEntitiesPerTick,
@@ -3128,7 +3286,103 @@ internal readonly record struct P03WholeFlowRow(
     long NetworkClientReservedBytes,
     bool Converged,
     string Curve,
-    P03NormalizedCost Normalized);
+    P03NormalizedCost Normalized,
+    P03BackgroundEgressSummary BackgroundEgress);
+
+internal readonly record struct Pf5R3BackgroundEgressReport(
+    string Schema,
+    DateTimeOffset CapturedAtUtc,
+    string GitSha,
+    string Runtime,
+    string OperatingSystem,
+    int ProcessorCount,
+    long StopwatchFrequency,
+    int ExecutionSeed,
+    int WarmupTicks,
+    int MeasuredTicks,
+    string ProductionPolicy,
+    string MainThreadMetric,
+    string TelemetryScope,
+    P03WholeFlowRow[] Rows);
+
+internal readonly record struct P03BackgroundEgressSummary(
+    string State,
+    bool UsesNativeBatching,
+    int SenderThreads,
+    int CapacityDatagrams,
+    long CapacityBytes,
+    long ReservedBytes,
+    int CurrentDatagrams,
+    long CurrentBytes,
+    int HighWaterDatagrams,
+    long HighWaterBytes,
+    ulong AcceptedDatagrams,
+    ulong AcceptedBytes,
+    ulong PhysicallySentDatagrams,
+    ulong PhysicallySentBytes,
+    ulong StalePathDrops,
+    ulong PhysicalSendFailures,
+    ulong CapacityRefusals,
+    ulong WorkerWakeups,
+    ulong DrainPasses,
+    ulong ScalarSendCalls,
+    ulong NativeSendCalls,
+    ulong PartialNativeSendCalls,
+    ulong WouldBlockEvents,
+    ulong NoBufferEvents,
+    int DrainBatchP50,
+    int DrainBatchP95,
+    int MaximumBatch,
+    NetworkTimingDistribution ProducerEnqueue,
+    NetworkTimingDistribution QueueResidence,
+    double OldestQueuedMilliseconds,
+    double PhysicalSendSystemCallMilliseconds,
+    double WorkerServiceMilliseconds,
+    bool HasWorkerFailure,
+    string LastSocketError)
+{
+    internal static P03BackgroundEgressSummary Delta(
+        in SharedUdpBackgroundEgressSnapshot after,
+        in SharedUdpBackgroundEgressSnapshot before) => new(
+        after.State.ToString(),
+        after.UsesNativeBatching,
+        after.SenderThreads,
+        after.CapacityDatagrams,
+        after.CapacityBytes,
+        after.ReservedBytes,
+        after.CurrentDatagrams,
+        after.CurrentBytes,
+        after.HighWaterDatagrams,
+        after.HighWaterBytes,
+        D(after.AcceptedDatagrams, before.AcceptedDatagrams),
+        D(after.AcceptedBytes, before.AcceptedBytes),
+        D(after.PhysicallySentDatagrams, before.PhysicallySentDatagrams),
+        D(after.PhysicallySentBytes, before.PhysicallySentBytes),
+        D(after.StalePathDrops, before.StalePathDrops),
+        D(after.PhysicalSendFailures, before.PhysicalSendFailures),
+        D(after.CapacityRefusals, before.CapacityRefusals),
+        D(after.WorkerWakeups, before.WorkerWakeups),
+        D(after.DrainPasses, before.DrainPasses),
+        D(after.ScalarSendCalls, before.ScalarSendCalls),
+        D(after.NativeSendCalls, before.NativeSendCalls),
+        D(after.PartialNativeSendCalls, before.PartialNativeSendCalls),
+        D(after.WouldBlockEvents, before.WouldBlockEvents),
+        D(after.NoBufferEvents, before.NoBufferEvents),
+        after.DrainBatchP50,
+        after.DrainBatchP95,
+        after.MaximumBatch,
+        after.ProducerEnqueue,
+        after.QueueResidence,
+        after.OldestQueuedStopwatchTicks * 1_000d / Stopwatch.Frequency,
+        D(after.PhysicalSendSystemCallStopwatchTicks,
+            before.PhysicalSendSystemCallStopwatchTicks) * 1_000d / Stopwatch.Frequency,
+        D(after.WorkerServiceStopwatchTicks,
+            before.WorkerServiceStopwatchTicks) * 1_000d / Stopwatch.Frequency,
+        after.HasWorkerFailure,
+        after.LastSocketError.ToString());
+
+    private static ulong D(ulong after, ulong before) => after >= before ? after - before : 0;
+}
 
 internal readonly record struct P03NormalizedCost(
     double LegacyServerRoleP95MicrosecondsPerRecipientTick,
