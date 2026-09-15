@@ -871,6 +871,62 @@ public static partial class UltraSimGameProtocol
             records.Length > MaximumChunkPublicationRecords ||
             !ValidateDeltaRecords(records, baseRevision, currentRevision))
             return false;
+        ulong contentHash = ComputeDeltaHash(publicationEpoch, spatialSpaceId, chunkX, chunkZ,
+            baseRevision, currentRevision, historyFloor, records);
+        return TryWriteChunkDeltaValidated(
+            destination, applicationSessionEpoch, publicationEpoch, deliveryId, spatialSpaceId,
+            chunkX, chunkZ, baseRevision, currentRevision, historyFloor, contentHash, records,
+            out written);
+    }
+
+    /// <summary>
+    /// Writes a Game-owned delta already validated and content-hashed by
+    /// <see cref="TryGetChunkDeltaContentHash"/>. This internal friend seam is deliberately not a
+    /// public protocol-input shortcut: decoded/untrusted data continues through full validation.
+    /// </summary>
+    internal static bool TryWritePreparedChunkDelta(
+        Span<byte> destination,
+        ulong applicationSessionEpoch,
+        ulong publicationEpoch,
+        ulong deliveryId,
+        ulong spatialSpaceId,
+        int chunkX,
+        int chunkZ,
+        ulong baseRevision,
+        ulong currentRevision,
+        ulong historyFloor,
+        ulong contentHash,
+        ReadOnlySpan<RemoteChunkDeltaRecord> records,
+        out int written)
+    {
+        written = 0;
+        if (!ValidLineage(applicationSessionEpoch, publicationEpoch, deliveryId, spatialSpaceId) ||
+            baseRevision == 0 || currentRevision <= baseRevision || historyFloor == 0 ||
+            historyFloor > baseRevision || contentHash == 0 || records.IsEmpty ||
+            records.Length > MaximumChunkPublicationRecords)
+            return false;
+        return TryWriteChunkDeltaValidated(
+            destination, applicationSessionEpoch, publicationEpoch, deliveryId, spatialSpaceId,
+            chunkX, chunkZ, baseRevision, currentRevision, historyFloor, contentHash, records,
+            out written);
+    }
+
+    private static bool TryWriteChunkDeltaValidated(
+        Span<byte> destination,
+        ulong applicationSessionEpoch,
+        ulong publicationEpoch,
+        ulong deliveryId,
+        ulong spatialSpaceId,
+        int chunkX,
+        int chunkZ,
+        ulong baseRevision,
+        ulong currentRevision,
+        ulong historyFloor,
+        ulong contentHash,
+        ReadOnlySpan<RemoteChunkDeltaRecord> records,
+        out int written)
+    {
+        written = 0;
         int required = GetChunkDeltaEncodedBytes(records.Length);
         if (destination.Length < required || MemoryMarshal.AsBytes(records).Overlaps(destination))
             return false;
@@ -886,8 +942,7 @@ public static partial class UltraSimGameProtocol
             BaseRevision = baseRevision,
             CurrentRevision = currentRevision,
             HistoryFloor = historyFloor,
-            ContentHash = ComputeDeltaHash(publicationEpoch, spatialSpaceId, chunkX, chunkZ,
-                baseRevision, currentRevision, historyFloor, records),
+            ContentHash = contentHash,
             RecordCount = checked((ushort)records.Length),
         };
         var writer = new NetworkPacketWriter(destination[..required]);

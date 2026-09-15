@@ -39,9 +39,14 @@ public readonly record struct OfflineDirectChunkWireEncoderAttribution(
     ulong DeltaMaterializationCalls,
     ulong DeltaMaterializationTicks,
     ulong DeltaRecordsMaterialized,
+    ulong PreparedValidationHashCalls,
+    ulong PreparedValidationHashTicks,
+    ulong PreparedRecordsValidated,
+    ulong PreparedContentHashCalls,
     ulong CanonicalStandaloneEncodeCalls,
     ulong CanonicalStandaloneEncodeTicks,
     ulong CanonicalStandaloneBytes,
+    ulong PreparedStandaloneWrites,
     ulong ProofValidationCalls,
     ulong ProofValidationTicks,
     ulong CursorAdvancementCalls,
@@ -64,9 +69,14 @@ public sealed class OfflineDirectChunkWireEncoder
     private ulong _deltaMaterializationCalls;
     private ulong _deltaMaterializationTicks;
     private ulong _deltaRecordsMaterialized;
+    private ulong _preparedValidationHashCalls;
+    private ulong _preparedValidationHashTicks;
+    private ulong _preparedRecordsValidated;
+    private ulong _preparedContentHashCalls;
     private ulong _canonicalStandaloneEncodeCalls;
     private ulong _canonicalStandaloneEncodeTicks;
     private ulong _canonicalStandaloneBytes;
+    private ulong _preparedStandaloneWrites;
     private ulong _proofValidationCalls;
     private ulong _proofValidationTicks;
     private ulong _cursorAdvancementCalls;
@@ -89,8 +99,11 @@ public sealed class OfflineDirectChunkWireEncoder
         _sourceReadCalls = _sourceReadTicks = 0;
         _deltaMaterializationCalls = _deltaMaterializationTicks = 0;
         _deltaRecordsMaterialized = 0;
+        _preparedValidationHashCalls = _preparedValidationHashTicks = 0;
+        _preparedRecordsValidated = _preparedContentHashCalls = 0;
         _canonicalStandaloneEncodeCalls = _canonicalStandaloneEncodeTicks = 0;
         _canonicalStandaloneBytes = 0;
+        _preparedStandaloneWrites = 0;
         _proofValidationCalls = _proofValidationTicks = 0;
         _cursorAdvancementCalls = _cursorAdvancementTicks = 0;
     }
@@ -105,9 +118,14 @@ public sealed class OfflineDirectChunkWireEncoder
             _deltaMaterializationCalls,
             _deltaMaterializationTicks,
             _deltaRecordsMaterialized,
+            _preparedValidationHashCalls,
+            _preparedValidationHashTicks,
+            _preparedRecordsValidated,
+            _preparedContentHashCalls,
             _canonicalStandaloneEncodeCalls,
             _canonicalStandaloneEncodeTicks,
             _canonicalStandaloneBytes,
+            _preparedStandaloneWrites,
             _proofValidationCalls,
             _proofValidationTicks,
             _cursorAdvancementCalls,
@@ -247,12 +265,12 @@ public sealed class OfflineDirectChunkWireEncoder
         bool encoded = result.Kind switch
         {
             RemoteChunkPublicationKind.Delta when deltaRecords.Length == result.RecordCount =>
-                UltraSimGameProtocol.TryWriteChunkDelta(
+                UltraSimGameProtocol.TryWritePreparedChunkDelta(
                     destination, _applicationSessionEpoch, result.Ticket.SourceEpoch.Value,
                     result.Ticket.DeliveryId, result.Ticket.Key.Space.Value,
                     result.Ticket.Key.Coord.X, result.Ticket.Key.Coord.Z,
                     result.BaseRevision, result.CurrentRevision, result.HistoryFloor,
-                    deltaRecords, out written),
+                    result.ContentHash, deltaRecords, out written),
             RemoteChunkPublicationKind.Absence when result.RecordCount == 0 && deltaRecords.IsEmpty =>
                 UltraSimGameProtocol.TryWriteChunkAbsence(
                     destination, _applicationSessionEpoch, result.Ticket.SourceEpoch.Value,
@@ -262,7 +280,11 @@ public sealed class OfflineDirectChunkWireEncoder
         };
         AttributeElapsed(ref _canonicalStandaloneEncodeTicks, encodeStarted);
         if (_attributionEnabled && encoded)
+        {
             SaturatingAdd(ref _canonicalStandaloneBytes, checked((ulong)written));
+            if (result.Kind == RemoteChunkPublicationKind.Delta)
+                SaturatingIncrement(ref _preparedStandaloneWrites);
+        }
         return encoded && written == result.Written;
     }
 
@@ -443,11 +465,20 @@ public sealed class OfflineDirectChunkWireEncoder
             SaturatingAdd(ref _deltaRecordsMaterialized, checked((ulong)read.Deltas.Length));
         AttributeElapsed(ref _deltaMaterializationTicks, materializationStarted);
         ReadOnlySpan<RemoteChunkDeltaRecord> records = _deltaRecords.AsSpan(0, read.Deltas.Length);
-        if (!UltraSimGameProtocol.TryGetChunkDeltaContentHash(
+        long validationHashStarted = AttributionTimestamp();
+        if (_attributionEnabled)
+        {
+            SaturatingIncrement(ref _preparedValidationHashCalls);
+            SaturatingIncrement(ref _preparedContentHashCalls);
+            SaturatingAdd(ref _preparedRecordsValidated, checked((ulong)records.Length));
+        }
+        bool valid = UltraSimGameProtocol.TryGetChunkDeltaContentHash(
                 read.SourceEpoch.Value, read.Batch.Key.Space.Value,
                 read.Batch.Key.Coord.X, read.Batch.Key.Coord.Z,
                 baseRevision.Value, read.Batch.Cursor.Revision.Value,
-                read.Batch.HistoryFloor.Value, records, out ulong contentHash))
+                read.Batch.HistoryFloor.Value, records, out ulong contentHash);
+        AttributeElapsed(ref _preparedValidationHashTicks, validationHashStarted);
+        if (!valid)
             return Cancel(recipient, OfflineDirectChunkWireEncodeStatus.EncodingFailed, out result);
         OfflineDirectChunkDeliveryTicket ticket = recipient.ReleaseReadForRemote(deliveryId);
         result = new(OfflineDirectChunkWireEncodeStatus.Delta,

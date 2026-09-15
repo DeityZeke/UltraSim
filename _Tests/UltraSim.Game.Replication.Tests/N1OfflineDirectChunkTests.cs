@@ -2238,8 +2238,63 @@ internal static class N1OfflineDirectChunkTests
         False(UltraSimGameProtocol.TryWritePreparedDirtyChunkBundle(
             prepared, applicationEpoch, publicationEpoch, 1, entries, records, out _));
 
+        // The trusted standalone seam must be a byte-identical encoder, not an alternate wire
+        // format. Exercise positive, removal, mixed-mask, small, and near-MTU record sets.
+        foreach (int recordCount in new[] { 1, 2, 30 })
+        {
+            var standaloneRecords = new RemoteChunkDeltaRecord[recordCount];
+            for (int index = 0; index < recordCount; index++)
+            {
+                bool removal = index == recordCount - 1 && recordCount > 1;
+                standaloneRecords[index] = removal
+                    ? new RemoteChunkDeltaRecord(
+                        RemoteChunkPublicOperation.Remove, RemoteChunkPublicFieldMask.None,
+                        checked((uint)index + 1), 2, checked((ulong)index + 4),
+                        0, 0, 0, 0, 0, 0, 0)
+                    : new RemoteChunkDeltaRecord(
+                        RemoteChunkPublicOperation.Present,
+                        index == 0 ? RemoteChunkPublicFieldMask.Complete :
+                            RemoteChunkPublicFieldMask.Transform,
+                        checked((uint)index + 1), 2, checked((ulong)index + 4),
+                        GameWorldPublicPrefabIds.Character, checked((ushort)(index * 3)),
+                        checked((ushort)(index * 4)),
+                        index * 5, checked((ushort)index),
+                        (ushort)WorldPublicStateFlags.Visible, checked((ulong)index + 2));
+            }
+            ulong currentRevision = checked((ulong)recordCount + 8);
+            True(UltraSimGameProtocol.TryGetChunkDeltaContentHash(
+                publicationEpoch, space, -7, 9, 1, currentRevision, 1,
+                standaloneRecords, out ulong standaloneHash));
+            Array.Clear(canonical);
+            Array.Clear(prepared);
+            True(UltraSimGameProtocol.TryWriteChunkDelta(
+                canonical, applicationEpoch, publicationEpoch, 44, space, -7, 9,
+                1, currentRevision, 1, standaloneRecords, out canonicalWritten));
+            True(UltraSimGameProtocol.TryWritePreparedChunkDelta(
+                prepared, applicationEpoch, publicationEpoch, 44, space, -7, 9,
+                1, currentRevision, 1, standaloneHash, standaloneRecords,
+                out preparedWritten));
+            Equal(canonicalWritten, preparedWritten);
+            True(canonical.AsSpan(0, canonicalWritten)
+                .SequenceEqual(prepared.AsSpan(0, preparedWritten)));
+            False(UltraSimGameProtocol.TryWritePreparedChunkDelta(
+                prepared.AsSpan(0, preparedWritten - 1), applicationEpoch, publicationEpoch,
+                44, space, -7, 9, 1, currentRevision, 1, standaloneHash,
+                standaloneRecords, out _));
+
+            byte[] aliased = new byte[Math.Max(preparedWritten,
+                recordCount * Marshal.SizeOf<RemoteChunkDeltaRecord>())];
+            Span<RemoteChunkDeltaRecord> overlappingRecords =
+                MemoryMarshal.Cast<byte, RemoteChunkDeltaRecord>(aliased)[..recordCount];
+            standaloneRecords.CopyTo(overlappingRecords);
+            False(UltraSimGameProtocol.TryWritePreparedChunkDelta(
+                aliased, applicationEpoch, publicationEpoch, 44, space, -7, 9,
+                1, currentRevision, 1, standaloneHash, overlappingRecords, out _));
+        }
+
         Console.WriteLine($"EVIDENCE PF4E-R2 prepared_bundle_bytes={preparedWritten} " +
-            "canonical_equal=true invalid_hash_offset_delivery=rejected");
+            "prepared_standalone_counts=1,2,30 canonical_equal=true " +
+            "bounds_alias_invalid_hash_offset_delivery=rejected");
     }
 
     internal static void CompressedBundleCodecIsExactBoundedHostileSafeAndAllocationFree()
