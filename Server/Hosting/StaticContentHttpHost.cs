@@ -226,7 +226,7 @@ public sealed class StaticContentHttpHost : IDisposable
             TryCleanup(_stopping.Cancel, ref failures);
             _pending.Writer.TryComplete();
             AbortActiveResponses(ref failures);
-            TryJoin(Task.WhenAll(_responseWorkers), ref failures);
+            TryJoinAll(_responseWorkers, ref failures);
             DrainPending(ref failures);
             lock (_listenerLifecycleGate)
             {
@@ -510,8 +510,23 @@ public sealed class StaticContentHttpHost : IDisposable
     private static void TryJoin(Task worker, ref List<Exception>? failures)
     {
         try { worker.GetAwaiter().GetResult(); }
-        catch (Exception exception) when (IsExpectedWorkerShutdownException(exception)) { }
-        catch (Exception exception) { AddFailure(ref failures, exception); }
+        catch (Exception observed)
+        {
+            if (worker.Exception is AggregateException aggregate)
+            {
+                foreach (Exception exception in aggregate.Flatten().InnerExceptions)
+                    AddFailure(ref failures, exception);
+            }
+            else
+            {
+                AddFailure(ref failures, observed);
+            }
+        }
+    }
+
+    private static void TryJoinAll(Task[] workers, ref List<Exception>? failures)
+    {
+        foreach (Task worker in workers) TryJoin(worker, ref failures);
     }
 
     private static void TryCleanup(
@@ -523,9 +538,6 @@ public sealed class StaticContentHttpHost : IDisposable
         catch (Exception exception) when (expected?.Invoke(exception) == true) { }
         catch (Exception exception) { AddFailure(ref failures, exception); }
     }
-
-    private static bool IsExpectedWorkerShutdownException(Exception exception) =>
-        exception is OperationCanceledException or HttpListenerException or ObjectDisposedException;
 
     private static bool IsExpectedListenerShutdownException(Exception exception) =>
         exception is HttpListenerException or ObjectDisposedException;

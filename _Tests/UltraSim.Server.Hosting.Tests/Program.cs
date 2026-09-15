@@ -31,6 +31,10 @@ var tests = new (string Name, Action Body)[]
         StaticContentHttpHostConcurrentDisposeIsIdempotent),
     ("StaticContentHttpHostShutdownPreservesUnexpectedWorkerFault",
         StaticContentHttpHostShutdownPreservesUnexpectedWorkerFault),
+    ("StaticContentHttpHostShutdownPreservesEveryResponseWorkerFault",
+        StaticContentHttpHostShutdownPreservesEveryResponseWorkerFault),
+    ("StaticContentHttpHostShutdownPreservesPreStoppingAcceptFault",
+        StaticContentHttpHostShutdownPreservesPreStoppingAcceptFault),
     ("StaticContentHttpHostShutdownStressIsBounded",
         StaticContentHttpHostShutdownStressIsBounded),
 };
@@ -423,6 +427,100 @@ static void StaticContentHttpHostShutdownPreservesUnexpectedWorkerFault()
     }
 }
 
+static void StaticContentHttpHostShutdownPreservesPreStoppingAcceptFault()
+{
+    using var entered = new ManualResetEventSlim();
+    var host = CreateHttpHost(new StaticContentHttpHostTestHooks
+    {
+        BeforeAcceptWait = () =>
+        {
+            entered.Set();
+            throw new ObjectDisposedException("injected accept ownership");
+        },
+    });
+    try
+    {
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(2)));
+        WaitUntil(() => host.GetLifecycleSnapshotForTesting().AcceptWorkerCompleted,
+            TimeSpan.FromSeconds(1), "Injected accept fault did not retire its worker.");
+        Assert.Throws<ObjectDisposedException>(host.Dispose);
+        AssertHttpHostRetired(host);
+        Assert.Throws<ObjectDisposedException>(host.Dispose);
+    }
+    finally
+    {
+        try { host.Dispose(); }
+        catch (ObjectDisposedException) { }
+    }
+}
+
+static void StaticContentHttpHostShutdownPreservesEveryResponseWorkerFault()
+{
+    using var bothEntered = new CountdownEvent(2);
+    int nextWorker = 0;
+    var host = CreateHttpHost(new StaticContentHttpHostTestHooks
+    {
+        BeforeResponseInitialization = () =>
+        {
+            int worker = Interlocked.Increment(ref nextWorker);
+            bothEntered.Signal();
+            Assert.True(bothEntered.Wait(TimeSpan.FromSeconds(2)));
+            throw new InjectedHttpResponseException(worker);
+        },
+    }, maximumConcurrentResponses: 2, maximumQueuedResponses: 2);
+    using var firstClient = new TcpClient();
+    using var secondClient = new TcpClient();
+    try
+    {
+        firstClient.Connect(IPAddress.Loopback, host.BaseUri.Port);
+        secondClient.Connect(IPAddress.Loopback, host.BaseUri.Port);
+        SendRawGet(firstClient, "/content/test.uspkg");
+        SendRawGet(secondClient, "/content/test.uspkg");
+        Assert.True(bothEntered.Wait(TimeSpan.FromSeconds(2)));
+        WaitUntil(() => host.GetLifecycleSnapshotForTesting().ResponseWorkersCompleted,
+            TimeSpan.FromSeconds(1), "Injected response faults did not retire both workers.");
+
+        Task<Exception?> firstDispose = Task.Run(() => CaptureFailure(host.Dispose));
+        Task<Exception?> secondDispose = Task.Run(() => CaptureFailure(host.Dispose));
+        Assert.True(Task.WhenAll(firstDispose, secondDispose).Wait(TimeSpan.FromSeconds(2)));
+        AssertCompleteResponseFailureSet(firstDispose.Result);
+        AssertCompleteResponseFailureSet(secondDispose.Result);
+        Assert.True(ReferenceEquals(firstDispose.Result, secondDispose.Result));
+        AssertHttpHostRetired(host);
+        Exception? repeated = CaptureFailure(host.Dispose);
+        AssertCompleteResponseFailureSet(repeated);
+        Assert.True(ReferenceEquals(firstDispose.Result, repeated));
+    }
+    finally
+    {
+        _ = CaptureFailure(host.Dispose);
+    }
+}
+
+static Exception? CaptureFailure(Action action)
+{
+    try
+    {
+        action();
+        return null;
+    }
+    catch (Exception exception)
+    {
+        return exception;
+    }
+}
+
+static void AssertCompleteResponseFailureSet(Exception? failure)
+{
+    Assert.True(failure is AggregateException);
+    int[] workers = ((AggregateException)failure!).Flatten().InnerExceptions
+        .OfType<InjectedHttpResponseException>()
+        .Select(static exception => exception.Worker)
+        .Order()
+        .ToArray();
+    Assert.True(workers.AsSpan().SequenceEqual([1, 2]));
+}
+
 static void StaticContentHttpHostShutdownStressIsBounded()
 {
     const int cycles = 128;
@@ -474,7 +572,9 @@ static void RunGatedShutdown(
 
 static StaticContentHttpHost CreateHttpHost(
     StaticContentHttpHostTestHooks? hooks = null,
-    int responseBytes = 8)
+    int responseBytes = 8,
+    int maximumConcurrentResponses = 1,
+    int maximumQueuedResponses = 1)
 {
     byte[] bytes = responseBytes == 8
         ? "response"u8.ToArray()
@@ -482,7 +582,8 @@ static StaticContentHttpHost CreateHttpHost(
     return new StaticContentHttpHost(
         new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()),
         [new StaticContentHttpResource("/content/test.uspkg", bytes)],
-        new StaticContentHttpHostLimits(1, bytes.Length, 1, 1, 10_000),
+        new StaticContentHttpHostLimits(
+            1, bytes.Length, maximumConcurrentResponses, maximumQueuedResponses, 10_000),
         hooks);
 }
 
@@ -830,6 +931,14 @@ sealed class ThrowingLogSink : IHostLogSink
 
 sealed class InjectedHttpResponseException : Exception
 {
+    internal InjectedHttpResponseException()
+    {
+    }
+
+    internal InjectedHttpResponseException(int worker)
+        : base($"Injected response-worker failure {worker}.") => Worker = worker;
+
+    internal int Worker { get; }
 }
 
 sealed class FixtureComposition : IServerComposition
