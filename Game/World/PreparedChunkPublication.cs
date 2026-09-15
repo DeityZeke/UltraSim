@@ -38,6 +38,10 @@ public readonly record struct PreparedChunkPublicationSnapshot(
     ulong RebaseRequirements,
     ulong SourcePreparationTicks,
     ulong RecipientRangePreparationTicks,
+    ulong RecipientChainTraversalTicks,
+    ulong RecipientCollapseTicks,
+    ulong RecipientMaterializationTicks,
+    ulong RecipientSortTicks,
     int CoveragePublicationHighWater,
     long ReservedBytes);
 
@@ -72,8 +76,14 @@ public sealed partial class ChunkPublicationStore
     private ulong _preparedPressureEvictions;
     private ulong _preparedRebaseRequirements;
     private ulong _preparedSourcePreparationTicks;
+    private ulong _preparedLastSourcePreparationTicks;
     private ulong _preparedRecipientPreparationTicks;
-    private bool _preparedAttributionEnabled;
+    private ulong _preparedRecipientChainTraversalTicks;
+    private ulong _preparedRecipientCollapseTicks;
+    private ulong _preparedRecipientMaterializationTicks;
+    private ulong _preparedRecipientSortTicks;
+    private bool _preparedSourceAttributionEnabled;
+    private bool _preparedRecipientAttributionEnabled;
     private int _preparedCoveragePublicationHighWater;
 
     private void InitializePreparedPublicationStorage(
@@ -137,6 +147,10 @@ public sealed partial class ChunkPublicationStore
             _preparedRebaseRequirements,
             _preparedSourcePreparationTicks,
             _preparedRecipientPreparationTicks,
+            _preparedRecipientChainTraversalTicks,
+            _preparedRecipientCollapseTicks,
+            _preparedRecipientMaterializationTicks,
+            _preparedRecipientSortTicks,
             _preparedCoveragePublicationHighWater,
             CalculatePreparedPublicationReservedBytes());
     }
@@ -145,22 +159,47 @@ public sealed partial class ChunkPublicationStore
     /// Enables cold PF5-R2 stage attribution. It never changes source or recipient semantics and
     /// is disabled by default so ordinary publication does not read a clock.
     /// </summary>
-    public void ConfigurePreparedPublicationAttribution(bool enabled)
+    public void ConfigurePreparedPublicationAttribution(bool enabled) =>
+        ConfigurePreparedPublicationAttribution(enabled, enabled);
+
+    /// <summary>
+    /// Independently enables source and recipient clocks so a benchmark can charge shared
+    /// publication preparation without enabling the colder per-recipient waterfall.
+    /// </summary>
+    public void ConfigurePreparedPublicationAttribution(
+        bool sourceEnabled,
+        bool recipientEnabled)
     {
         EnsureOwner();
-        _preparedAttributionEnabled = enabled;
+        _preparedSourceAttributionEnabled = sourceEnabled;
+        _preparedRecipientAttributionEnabled = recipientEnabled;
         _preparedSourcePreparationTicks = 0;
+        _preparedLastSourcePreparationTicks = 0;
         _preparedRecipientPreparationTicks = 0;
+        _preparedRecipientChainTraversalTicks = 0;
+        _preparedRecipientCollapseTicks = 0;
+        _preparedRecipientMaterializationTicks = 0;
+        _preparedRecipientSortTicks = 0;
     }
 
-    private long PreparedAttributionTimestamp() =>
-        _preparedAttributionEnabled ? Stopwatch.GetTimestamp() : 0;
+    public ulong GetLastPreparedSourcePreparationTicks()
+    {
+        EnsureOwner();
+        return _preparedLastSourcePreparationTicks;
+    }
+
+    private long PreparedSourceAttributionTimestamp() =>
+        _preparedSourceAttributionEnabled ? Stopwatch.GetTimestamp() : 0;
+
+    private long PreparedRecipientAttributionTimestamp() =>
+        _preparedRecipientAttributionEnabled ? Stopwatch.GetTimestamp() : 0;
 
     private void AttributePreparedSource(long started)
     {
-        if (_preparedAttributionEnabled)
-            SaturatingAdd(ref _preparedSourcePreparationTicks,
-                checked((ulong)(Stopwatch.GetTimestamp() - started)));
+        if (!_preparedSourceAttributionEnabled) return;
+        ulong elapsed = checked((ulong)(Stopwatch.GetTimestamp() - started));
+        SaturatingAdd(ref _preparedSourcePreparationTicks, elapsed);
+        SaturatingAdd(ref _preparedLastSourcePreparationTicks, elapsed);
     }
 
     private int BeginPreparedPublication(
@@ -267,7 +306,7 @@ public sealed partial class ChunkPublicationStore
         if (cursor.Revision.Value < chunk.HistoryFloor)
             return PreparedRebase(key, in chunk, out batch);
 
-        long preparationStarted = PreparedAttributionTimestamp();
+        long preparationStarted = PreparedRecipientAttributionTimestamp();
         uint stamp = NextQueryStamp();
         int count = 0;
         int referencedPublications = 0;
@@ -275,6 +314,7 @@ public sealed partial class ChunkPublicationStore
         ulong fromRevision = cursor.Revision.Value;
         while (fromRevision < chunk.Revision)
         {
+            long chainStarted = PreparedRecipientAttributionTimestamp();
             int publicationSlot = FindPreparedPublication(key, fromRevision);
             if (publicationSlot < 0)
                 return PreparedRebase(key, in chunk, out batch);
@@ -283,7 +323,11 @@ public sealed partial class ChunkPublicationStore
                 publication.ToRevision > chunk.Revision ||
                 publication.WrittenRecords != publication.ExpectedRecords)
                 throw new InvalidOperationException("Prepared publication coverage chain is corrupt.");
+            if (_preparedRecipientAttributionEnabled)
+                SaturatingAdd(ref _preparedRecipientChainTraversalTicks,
+                    checked((ulong)(Stopwatch.GetTimestamp() - chainStarted)));
 
+            long collapseStarted = PreparedRecipientAttributionTimestamp();
             int node = publication.FirstRecordNode;
             for (int record = 0; record < publication.ExpectedRecords; record++)
             {
@@ -312,6 +356,9 @@ public sealed partial class ChunkPublicationStore
                 node = entry.NextChunk;
                 referencedRecords++;
             }
+            if (_preparedRecipientAttributionEnabled)
+                SaturatingAdd(ref _preparedRecipientCollapseTicks,
+                    checked((ulong)(Stopwatch.GetTimestamp() - collapseStarted)));
             fromRevision = publication.ToRevision;
             referencedPublications++;
         }
@@ -329,6 +376,7 @@ public sealed partial class ChunkPublicationStore
             return ChunkPublicationReadStatus.DestinationTooSmall;
         }
 
+        long materializationStarted = PreparedRecipientAttributionTimestamp();
         for (int result = 0; result < count; result++)
         {
             int publicIndex = _queryIndices[result];
@@ -339,10 +387,18 @@ public sealed partial class ChunkPublicationStore
             destination[result] = new WorldPublicDeltaRecord(
                 entry.Operation, entry.Fields, entry.Id, entry.EntityVersion, current);
         }
+        if (_preparedRecipientAttributionEnabled)
+            SaturatingAdd(ref _preparedRecipientMaterializationTicks,
+                checked((ulong)(Stopwatch.GetTimestamp() - materializationStarted)));
+        long sortStarted = PreparedRecipientAttributionTimestamp();
         SortRecords(destination[..count]);
-        if (_preparedAttributionEnabled)
+        if (_preparedRecipientAttributionEnabled)
+        {
+            SaturatingAdd(ref _preparedRecipientSortTicks,
+                checked((ulong)(Stopwatch.GetTimestamp() - sortStarted)));
             SaturatingAdd(ref _preparedRecipientPreparationTicks,
                 checked((ulong)(Stopwatch.GetTimestamp() - preparationStarted)));
+        }
         _deltaReads++;
         batch = CreateBatch(ChunkPublicationReadStatus.Delta, key, chunk, count, count);
         return ChunkPublicationReadStatus.Delta;

@@ -735,6 +735,7 @@ internal enum P03EntityLayout : byte
 {
     GridFourMeters = 1,
     TwentyEntitiesPerChunk = 2,
+    V2DenseClosestTwoMeterGrid = 3,
 }
 
 internal enum P03MutationPattern : byte
@@ -742,6 +743,7 @@ internal enum P03MutationPattern : byte
     Sequential = 1,
     OneChunkGroup = 2,
     EightChunkStripe = 3,
+    ActiveDistributed = 4,
 }
 
 internal readonly record struct P03NetworkWorkload(
@@ -755,7 +757,10 @@ internal readonly record struct P03NetworkWorkload(
     OfflineDirectChunkCadence ChunkCadence,
     int TickDurationMilliseconds,
     P03EntityLayout EntityLayout = P03EntityLayout.GridFourMeters,
-    P03MutationPattern MutationPattern = P03MutationPattern.Sequential)
+    P03MutationPattern MutationPattern = P03MutationPattern.Sequential,
+    int ActiveEntities = 0,
+    int InputIntervalTicks = 1,
+    string SemanticFamilies = "public-world-latest-state")
 {
     internal static P03NetworkWorkload Dense(int recipients, int entities) => new(
         $"dense-{recipients}", recipients, entities, Math.Max(1, entities * 2 / 100), false,
@@ -788,6 +793,40 @@ internal readonly record struct P03NetworkWorkload(
             EntityLayout = P03EntityLayout.TwentyEntitiesPerChunk,
             MutationPattern = P03MutationPattern.EightChunkStripe,
         };
+
+    internal static P03NetworkWorkload ChunkV2Shaped(
+        int recipients,
+        int entities,
+        bool v2Activity)
+    {
+        int active = Math.Max(1,
+            (int)Math.Round(entities * .35, MidpointRounding.AwayFromZero));
+        int dirty = v2Activity ? active : Math.Min(20, entities);
+        var entityInterest = new GameInterestProfile(
+            16_000, 7_500, 7_500, 23_500, 39_500,
+            32, 48, 100, 2_000)
+        {
+            ImmediateIntervalMilliseconds = 16,
+        };
+        var chunkInterest = new ChunkInterestProfile(
+            7_500, 7_500, 23_500, 23_500, 39_500, 39_500);
+        return new P03NetworkWorkload(
+            $"v2-shaped-e{entities}-r{recipients}-" +
+                (v2Activity ? "v2-activity" : "current-activity"),
+            recipients,
+            entities,
+            dirty,
+            false,
+            entityInterest,
+            chunkInterest,
+            new OfflineDirectChunkCadence(1, 2, 3),
+            16,
+            P03EntityLayout.V2DenseClosestTwoMeterGrid,
+            v2Activity ? P03MutationPattern.ActiveDistributed : P03MutationPattern.Sequential,
+            active,
+            3,
+            "V3 unified public-world latest-state; V2 comparison had movement, visual, bulk, and ordered-event families");
+    }
 
     internal void CopyDirtyEntityIndices(int tick, Span<int> destination)
     {
@@ -832,6 +871,16 @@ internal readonly record struct P03NetworkWorkload(
                     int row = (tick + stripeChunk + round * chunksPerStripe) % entitiesPerChunk;
                     selected[offset] = chunk * entitiesPerChunk + row;
                 }
+                break;
+            }
+            case P03MutationPattern.ActiveDistributed:
+            {
+                if (ActiveEntities <= 0 || DirtyEntitiesPerTick != ActiveEntities ||
+                    ActiveEntities > Entities)
+                    throw new InvalidOperationException(
+                        "The V2-shaped distributed-active workload has invalid activity bounds.");
+                for (int offset = 0; offset < selected.Length; offset++)
+                    selected[offset] = checked((int)((long)offset * Entities / ActiveEntities));
                 break;
             }
             default:
@@ -903,6 +952,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
     private readonly bool _stageTimingEnabled;
     private readonly bool _gameDetailedAttribution;
     private readonly bool _authorityThroughNetworkTimingEnabled;
+    private readonly bool _serverOwnedSourceTimingEnabled;
     private readonly NetworkProtocolLimits _protocolLimits;
     private readonly SharedUdpProtocolHost _host;
     private readonly SharedUdpProtocolSession[] _sessions;
@@ -912,11 +962,14 @@ internal sealed class P03WholeFlowHarness : IDisposable
     private readonly ulong[] _versions;
     private readonly List<double> _tick = new();
     private readonly List<double> _authority = new();
+    private readonly List<double> _baseAuthoritativeMutation = new();
+    private readonly List<double> _remotePublicationPreparation = new();
     private readonly List<double> _schedule = new();
     private readonly List<double> _pump = new();
     private readonly List<double> _serverApplication = new();
     private readonly List<double> _clientApplication = new();
     private readonly List<double> _networkAndRemoteReplication = new();
+    private readonly List<double> _serverOwnedRemoteReplicationBudget = new();
     private readonly List<double> _authorityThroughNetworkAndRemoteReplication = new();
     private readonly List<double> _serverRole = new();
     private readonly List<double> _clientRole = new();
@@ -936,6 +989,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
         bool historyAudit = false,
         bool legacyRangeCensus = true,
         bool authorityThroughNetworkTimingEnabled = true,
+        bool serverOwnedSourceTimingEnabled = false,
         PreparedChunkPublicationReadModel chunkReadModel =
             PreparedChunkPublicationReadModel.PreparedLatestState)
     {
@@ -945,6 +999,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
         _stageTimingEnabled = stageTimingEnabled;
         _gameDetailedAttribution = gameDetailedAttribution;
         _authorityThroughNetworkTimingEnabled = authorityThroughNetworkTimingEnabled;
+        _serverOwnedSourceTimingEnabled = serverOwnedSourceTimingEnabled;
         _x = new long[workload.Entities];
         _z = new long[workload.Entities];
         _versions = new ulong[workload.Entities];
@@ -998,6 +1053,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
         _adapter.ConfigureTelemetry(gameDetailedAttribution
             ? GameTelemetryLevel.Detailed
             : GameTelemetryLevel.Off);
+        _adapter.ConfigurePreparedSourceTiming(serverOwnedSourceTimingEnabled);
     }
 
     internal P03WholeFlowRow Run(int warmup, int ticks)
@@ -1028,6 +1084,11 @@ internal sealed class P03WholeFlowHarness : IDisposable
         return new P03WholeFlowRow(
             0, _workload.Id, _profile.ToString(), _frameCap,
             _workload.Recipients, _workload.Entities, _workload.DirtyEntitiesPerTick,
+            _workload.ActiveEntities,
+            _workload.InputIntervalTicks,
+            _workload.InputIntervalTicks <= 0 ? 0 :
+                _workload.ActiveEntities / (double)_workload.InputIntervalTicks,
+            _workload.SemanticFamilies,
             new P03CadenceSummary(
                 $"{_workload.ChunkCadence.ImmediateSteps - 1}/" +
                 $"{_workload.ChunkCadence.NearSteps - 1}/" +
@@ -1040,10 +1101,14 @@ internal sealed class P03WholeFlowHarness : IDisposable
                 _workload.ChunkCadence.NearSteps,
                 _workload.ChunkCadence.FarSteps),
             new P03WholeFlowTiming(
-                P03Metric.From(_tick), P03Metric.From(_authority), P03Metric.From(_schedule),
+                P03Metric.From(_tick), P03Metric.From(_authority),
+                P03Metric.From(_baseAuthoritativeMutation),
+                P03Metric.From(_remotePublicationPreparation),
+                P03Metric.From(_schedule),
                 P03Metric.From(_pump), P03Metric.From(_serverApplication),
                 P03Metric.From(_clientApplication),
                 P03Metric.From(_networkAndRemoteReplication),
+                P03Metric.From(_serverOwnedRemoteReplicationBudget),
                 P03Metric.From(_authorityThroughNetworkAndRemoteReplication),
                 P03Metric.From(_serverRole),
                 P03Metric.From(_clientRole), protocol),
@@ -1070,8 +1135,17 @@ internal sealed class P03WholeFlowHarness : IDisposable
             : 0;
         long started = measure ? Stopwatch.GetTimestamp() : 0;
         Mutate(tick);
+        long mutationTicks = measure ? Stopwatch.GetTimestamp() - started : 0;
+        long preparationStarted = measure ? Stopwatch.GetTimestamp() : 0;
         _adapter.ApplyAuthority(tick, _workload.MoveRecipients ? _workload.DirtyEntitiesPerTick : 0);
-        long authorityTicks = measure ? Stopwatch.GetTimestamp() - started : 0;
+        long applyAuthorityTicks = measure
+            ? Stopwatch.GetTimestamp() - preparationStarted
+            : 0;
+        long authorityTicks = measure ? mutationTicks + applyAuthorityTicks : 0;
+        long publicationPreparationTicks = measure && _serverOwnedSourceTimingEnabled
+            ? checked((long)_adapter.LastPreparedSourcePreparationTicks)
+            : applyAuthorityTicks;
+        long baseAuthoritativeTicks = Math.Max(0, authorityTicks - publicationPreparationTicks);
         double authority = ToMilliseconds(authorityTicks);
         ulong preparedAfter = captureBoundary
             ? _adapter.PreparedSourcePublicationCount
@@ -1105,11 +1179,15 @@ internal sealed class P03WholeFlowHarness : IDisposable
         double pump = ToMilliseconds(pumpTicks);
         _tick.Add(ToMilliseconds(authorityThroughNetworkTicks));
         _authority.Add(authority);
+        _baseAuthoritativeMutation.Add(ToMilliseconds(baseAuthoritativeTicks));
+        _remotePublicationPreparation.Add(ToMilliseconds(publicationPreparationTicks));
         _schedule.Add(schedule);
         _pump.Add(pump);
         _serverApplication.Add(serverApp);
         _clientApplication.Add(clientApp);
         _networkAndRemoteReplication.Add(ToMilliseconds(networkReplicationTicks));
+        _serverOwnedRemoteReplicationBudget.Add(
+            ToMilliseconds(publicationPreparationTicks + networkReplicationTicks));
         if (_authorityThroughNetworkTimingEnabled)
             _authorityThroughNetworkAndRemoteReplication.Add(
                 ToMilliseconds(authorityThroughNetworkTicks));
@@ -1214,15 +1292,20 @@ internal sealed class P03WholeFlowHarness : IDisposable
     private void ResetMeasurement(int ticks)
     {
         _tick.Clear(); _authority.Clear(); _schedule.Clear(); _pump.Clear();
+        _baseAuthoritativeMutation.Clear(); _remotePublicationPreparation.Clear();
         _serverApplication.Clear(); _clientApplication.Clear();
         _networkAndRemoteReplication.Clear();
+        _serverOwnedRemoteReplicationBudget.Clear();
         _authorityThroughNetworkAndRemoteReplication.Clear();
         _serverRole.Clear(); _clientRole.Clear();
         _timingBoundary = default;
         _tick.EnsureCapacity(ticks); _authority.EnsureCapacity(ticks);
+        _baseAuthoritativeMutation.EnsureCapacity(ticks);
+        _remotePublicationPreparation.EnsureCapacity(ticks);
         _schedule.EnsureCapacity(ticks); _pump.EnsureCapacity(ticks);
         _serverApplication.EnsureCapacity(ticks); _clientApplication.EnsureCapacity(ticks);
         _networkAndRemoteReplication.EnsureCapacity(ticks);
+        _serverOwnedRemoteReplicationBudget.EnsureCapacity(ticks);
         _authorityThroughNetworkAndRemoteReplication.EnsureCapacity(ticks);
         _serverRole.EnsureCapacity(ticks); _clientRole.EnsureCapacity(ticks);
         for (int index = 0; index < _sessions.Length; index++)
@@ -1265,7 +1348,17 @@ internal sealed class P03WholeFlowHarness : IDisposable
 
     private void InitializePositions()
     {
-        if (_workload.EntityLayout == P03EntityLayout.TwentyEntitiesPerChunk)
+        if (_workload.EntityLayout == P03EntityLayout.V2DenseClosestTwoMeterGrid)
+        {
+            const int width = 20;
+            for (int index = 0; index < _workload.Entities; index++)
+            {
+                _x[index] = checked(1_000L + index % width * 2_000L);
+                _z[index] = checked(1_000L + index / width * 2_000L);
+                _versions[index] = 1;
+            }
+        }
+        else if (_workload.EntityLayout == P03EntityLayout.TwentyEntitiesPerChunk)
         {
             const int entitiesPerChunk = 20;
             const int chunkWidth = 10;
@@ -1386,6 +1479,7 @@ internal abstract class P03RemoteProfileAdapter : IDisposable
     }
     internal abstract void ApplyAuthority(int tick, int movedRecipients);
     internal virtual ulong PreparedSourcePublicationCount => 0;
+    internal virtual ulong LastPreparedSourcePreparationTicks => 0;
     internal abstract void Schedule(ulong step);
     internal abstract bool ProcessServer(int recipient, in NetworkDeliveredMessage message,
         ReadOnlySpan<byte> payload);
@@ -1393,6 +1487,7 @@ internal abstract class P03RemoteProfileAdapter : IDisposable
         ReadOnlySpan<byte> payload);
     internal virtual void ProgressServers() { }
     internal virtual void ConfigureTelemetry(GameTelemetryLevel level) { }
+    internal virtual void ConfigurePreparedSourceTiming(bool enabled) { }
     internal abstract void ProgressClient(int recipient);
     internal abstract bool IsConverged { get; }
     internal abstract void Validate();
@@ -2217,10 +2312,18 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
     internal override void ConfigureTelemetry(GameTelemetryLevel level)
     {
         _telemetryLevel = level;
+        Source.ConfigurePreparedPublicationAttribution(
+            sourceEnabled: level == GameTelemetryLevel.Detailed,
+            recipientEnabled: level == GameTelemetryLevel.Detailed);
         _scheduler.ConfigureTelemetry(level);
         for (int index = 0; index < _servers.Length; index++)
             _servers[index].ConfigureTelemetry(level);
     }
+
+    internal override void ConfigurePreparedSourceTiming(bool enabled) =>
+        Source.ConfigurePreparedPublicationAttribution(
+            sourceEnabled: enabled || _telemetryLevel == GameTelemetryLevel.Detailed,
+            recipientEnabled: _telemetryLevel == GameTelemetryLevel.Detailed);
 
     private void Bootstrap(int recipientIndex)
     {
@@ -2260,6 +2363,9 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
 
     internal override ulong PreparedSourcePublicationCount =>
         Source.GetPreparedPublicationSnapshot().PreparedSourcePublications;
+
+    internal override ulong LastPreparedSourcePreparationTicks =>
+        Source.GetLastPreparedSourcePreparationTicks();
 
     internal override void Schedule(ulong step)
     {
@@ -2515,6 +2621,12 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
             Difference(after.SourcePreparationTicks, before.SourcePreparationTicks),
             Difference(after.RecipientRangePreparationTicks,
                 before.RecipientRangePreparationTicks),
+            Difference(after.RecipientChainTraversalTicks,
+                before.RecipientChainTraversalTicks),
+            Difference(after.RecipientCollapseTicks, before.RecipientCollapseTicks),
+            Difference(after.RecipientMaterializationTicks,
+                before.RecipientMaterializationTicks),
+            Difference(after.RecipientSortTicks, before.RecipientSortTicks),
             after.CoveragePublicationHighWater,
             after.ReservedBytes);
 
@@ -2912,6 +3024,10 @@ internal readonly record struct P03WholeFlowRow(
     int Recipients,
     int Entities,
     int DirtyEntitiesPerTick,
+    int ActiveEntities,
+    int InputIntervalTicks,
+    double ModeledInputCommandsPerTick,
+    string SemanticFamilies,
     P03CadenceSummary Cadence,
     P03WholeFlowTiming Timing,
     P03TimingBoundaryEvidence TimingBoundary,
@@ -2988,11 +3104,14 @@ internal readonly record struct P03CadenceSummary(
 internal readonly record struct P03WholeFlowTiming(
     P03Metric Tick,
     P03Metric AuthorityMutation,
+    P03Metric BaseAuthoritativeMutation,
+    P03Metric RemotePublicationPreparation,
     P03Metric GameScheduleAndCodecQueue,
     P03Metric CombinedProtocolPumpWall,
     P03Metric ServerGameProofApply,
     P03Metric ClientGameDecodeApplyAndProofQueue,
     P03Metric NetworkAndRemoteReplication,
+    P03Metric ServerOwnedRemoteReplicationBudget,
     P03Metric AuthorityThroughNetworkAndRemoteReplication,
     P03Metric ServerRole,
     P03Metric ClientRole,

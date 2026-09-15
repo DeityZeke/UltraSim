@@ -21,6 +21,12 @@ if (args.Contains("--p03-whole-flow", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--pf5-r2-r2-scaling", StringComparer.Ordinal))
+{
+    Pf5R2R2ScalingAttribution.Run(args);
+    return;
+}
+
 AdapterOptions options = AdapterOptions.Parse(args);
 if (options.CadenceSuite)
 {

@@ -1037,6 +1037,7 @@ public sealed partial class ChunkPublicationStore
 
     private void CommitHistory(int pendingCount)
     {
+        _preparedLastSourcePreparationTicks = 0;
         _largestDirtyCommit = Math.Max(_largestDirtyCommit, pendingCount);
         _historyAudit?.RecordCommit(_commitSequence + 1, pendingCount, affectedChunks: _activeAffectedCount);
         if (pendingCount > _history.Length)
@@ -1055,7 +1056,7 @@ public sealed partial class ChunkPublicationStore
         int index = 0;
         while (index < pendingCount)
         {
-            long preparedStarted = PreparedAttributionTimestamp();
+            long preparedStarted = PreparedSourceAttributionTimestamp();
             SpatialChunkKey key = _pendingDirty[index].Key;
             int end = index + 1;
             while (end < pendingCount && _pendingDirty[end].Key == key) end++;
