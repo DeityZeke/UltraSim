@@ -1,4 +1,5 @@
 using System.Net;
+using System.Runtime.ExceptionServices;
 using System.Threading.Channels;
 
 namespace UltraSim.Server.Hosting;
@@ -67,6 +68,24 @@ public readonly record struct StaticContentHttpHostSnapshot(
     int MaximumConcurrentResponses,
     int MaximumQueuedResponses);
 
+internal sealed class StaticContentHttpHostTestHooks
+{
+    internal Action? BeforeAcceptWait { get; init; }
+    internal Action? AfterAccept { get; init; }
+    internal Action? BeforeResponseInitialization { get; init; }
+    internal Action? BeforeResponseWrite { get; init; }
+    internal Action? AfterResponseWrite { get; init; }
+}
+
+internal readonly record struct StaticContentHttpHostLifecycleSnapshot(
+    int State,
+    bool AcceptWorkerCompleted,
+    bool ResponseWorkersCompleted,
+    int PendingResponses,
+    int ActiveResponses,
+    bool ListenerClosed,
+    bool CancellationDisposed);
+
 /// <summary>
 /// Small bounded immutable-byte HTTP host. It runs independently from authority/Network pumps and
 /// knows nothing about packages, manifests, realms, or Game semantics.
@@ -83,18 +102,35 @@ public sealed class StaticContentHttpHost : IDisposable
     private readonly int _maximumQueuedResponses;
     private readonly int _responseTimeoutMilliseconds;
     private readonly long _reservedResourceBytes;
+    private readonly object _disposeGate = new();
+    private readonly object _listenerLifecycleGate = new();
+    private readonly object _responseOwnershipGate = new();
+    private readonly StaticContentHttpHostTestHooks? _testHooks;
+    private readonly HttpListenerContext?[] _activeContexts;
     private long _requests;
     private long _served;
     private long _rejected;
     private long _bytesServed;
     private int _activeResponses;
     private int _peakActiveResponses;
-    private bool _disposed;
+    private int _lifecycle;
+    private bool _listenerClosed;
+    private bool _cancellationDisposed;
+    private ExceptionDispatchInfo? _disposeFailure;
 
     public StaticContentHttpHost(
         IPEndPoint endpoint,
         IEnumerable<StaticContentHttpResource> resources,
         StaticContentHttpHostLimits limits = default)
+        : this(endpoint, resources, limits, null)
+    {
+    }
+
+    internal StaticContentHttpHost(
+        IPEndPoint endpoint,
+        IEnumerable<StaticContentHttpResource> resources,
+        StaticContentHttpHostLimits limits,
+        StaticContentHttpHostTestHooks? testHooks)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
         ArgumentNullException.ThrowIfNull(resources);
@@ -120,6 +156,7 @@ public sealed class StaticContentHttpHost : IDisposable
         _reservedResourceBytes = reserved;
         _maximumQueuedResponses = limits.MaximumQueuedResponses;
         _responseTimeoutMilliseconds = limits.ResponseTimeoutMilliseconds;
+        _testHooks = testHooks;
         _pending = Channel.CreateBounded<HttpListenerContext>(new BoundedChannelOptions(
             limits.MaximumQueuedResponses)
         {
@@ -135,8 +172,12 @@ public sealed class StaticContentHttpHost : IDisposable
         _listener.Start();
         BaseUri = new Uri(prefix, UriKind.Absolute);
         _responseWorkers = new Task[limits.MaximumConcurrentResponses];
+        _activeContexts = new HttpListenerContext?[limits.MaximumConcurrentResponses];
         for (int index = 0; index < _responseWorkers.Length; index++)
-            _responseWorkers[index] = Task.Run(RunResponseWorkerAsync);
+        {
+            int workerIndex = index;
+            _responseWorkers[index] = Task.Run(() => RunResponseWorkerAsync(workerIndex));
+        }
         _acceptWorker = Task.Run(RunAcceptAsync);
     }
 
@@ -144,7 +185,7 @@ public sealed class StaticContentHttpHost : IDisposable
 
     public Uri GetUri(string route)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfNotRunning();
         if (!IsValidRoute(route) || !_resources.ContainsKey(route))
             throw new ArgumentException("The route is not one hosted resource.", nameof(route));
         return new Uri(BaseUri, route[1..]);
@@ -152,7 +193,7 @@ public sealed class StaticContentHttpHost : IDisposable
 
     public StaticContentHttpHostSnapshot GetSnapshot()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfNotRunning();
         return new StaticContentHttpHostSnapshot(
             _resources.Count,
             _reservedResourceBytes,
@@ -168,27 +209,63 @@ public sealed class StaticContentHttpHost : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
-        _stopping.Cancel();
-        _listener.Stop();
-        _listener.Close();
-        _pending.Writer.TryComplete();
-        try { _acceptWorker.GetAwaiter().GetResult(); }
-        catch (OperationCanceledException) { }
-        catch (HttpListenerException) { }
-        try { Task.WhenAll(_responseWorkers).GetAwaiter().GetResult(); }
-        catch (OperationCanceledException) { }
-        catch (HttpListenerException) { }
-        while (_pending.Reader.TryRead(out HttpListenerContext? context))
+        lock (_disposeGate)
         {
-            try { context.Response.StatusCode = (int)HttpStatusCode.ServiceUnavailable; }
-            catch (Exception exception) when (exception is HttpListenerException or ObjectDisposedException) { }
-            try { context.Response.Close(); }
-            catch (Exception exception) when (exception is HttpListenerException or ObjectDisposedException) { }
+            while (_lifecycle == 1) Monitor.Wait(_disposeGate);
+            if (_lifecycle == 2)
+            {
+                _disposeFailure?.Throw();
+                return;
+            }
+            _lifecycle = 1;
         }
-        _stopping.Dispose();
+
+        List<Exception>? failures = null;
+        try
+        {
+            TryCleanup(_stopping.Cancel, ref failures);
+            _pending.Writer.TryComplete();
+            AbortActiveResponses(ref failures);
+            TryJoin(Task.WhenAll(_responseWorkers), ref failures);
+            DrainPending(ref failures);
+            lock (_listenerLifecycleGate)
+            {
+                TryCleanup(_listener.Stop, ref failures, IsExpectedListenerShutdownException);
+                TryCleanup(_listener.Close, ref failures, IsExpectedListenerShutdownException);
+                _listenerClosed = true;
+            }
+            TryJoin(_acceptWorker, ref failures);
+            DrainPending(ref failures);
+            TryCleanup(_stopping.Dispose, ref failures);
+            _cancellationDisposed = true;
+        }
+        finally
+        {
+            ExceptionDispatchInfo? failure = failures switch
+            {
+                null or { Count: 0 } => null,
+                { Count: 1 } => ExceptionDispatchInfo.Capture(failures[0]),
+                _ => ExceptionDispatchInfo.Capture(new AggregateException(
+                    "Static content HTTP shutdown encountered multiple unexpected failures.", failures)),
+            };
+            lock (_disposeGate)
+            {
+                _disposeFailure = failure;
+                _lifecycle = 2;
+                Monitor.PulseAll(_disposeGate);
+            }
+        }
+        _disposeFailure?.Throw();
     }
+
+    internal StaticContentHttpHostLifecycleSnapshot GetLifecycleSnapshotForTesting() => new(
+        Volatile.Read(ref _lifecycle),
+        _acceptWorker.IsCompleted,
+        _responseWorkers.All(static worker => worker.IsCompleted),
+        _pending.Reader.CanCount ? _pending.Reader.Count : -1,
+        Volatile.Read(ref _activeResponses),
+        _listenerClosed,
+        _cancellationDisposed);
 
     internal static bool IsValidRoute(string? route)
     {
@@ -207,26 +284,62 @@ public sealed class StaticContentHttpHost : IDisposable
 
     private async Task RunAcceptAsync()
     {
-        while (!_stopping.IsCancellationRequested)
+        try
         {
-            HttpListenerContext context;
-            try { context = await _listener.GetContextAsync().WaitAsync(_stopping.Token).ConfigureAwait(false); }
-            catch (OperationCanceledException) { break; }
-            catch (HttpListenerException) when (_stopping.IsCancellationRequested) { break; }
-            Interlocked.Increment(ref _requests);
-            if (!_pending.Writer.TryWrite(context))
-                RejectOverCapacity(context);
+            while (!_stopping.IsCancellationRequested)
+            {
+                _testHooks?.BeforeAcceptWait?.Invoke();
+                HttpListenerContext context;
+                try
+                {
+                    context = await _listener.GetContextAsync().WaitAsync(_stopping.Token)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (IsStopping) { break; }
+                catch (HttpListenerException) when (IsStopping) { break; }
+                catch (ObjectDisposedException) when (IsStopping) { break; }
+                catch (InvalidOperationException) when (IsStopping) { break; }
+                lock (_listenerLifecycleGate)
+                {
+                    _testHooks?.AfterAccept?.Invoke();
+                    Interlocked.Increment(ref _requests);
+                    if (IsStopping || !_pending.Writer.TryWrite(context))
+                        RejectOverCapacity(context);
+                }
+            }
         }
-        _pending.Writer.TryComplete();
+        finally
+        {
+            _pending.Writer.TryComplete();
+        }
     }
 
-    private async Task RunResponseWorkerAsync()
+    private async Task RunResponseWorkerAsync(int workerIndex)
     {
         try
         {
             while (await _pending.Reader.WaitToReadAsync(_stopping.Token).ConfigureAwait(false))
                 while (_pending.Reader.TryRead(out HttpListenerContext? context))
-                    await HandleBoundedAsync(context).ConfigureAwait(false);
+                {
+                    lock (_responseOwnershipGate)
+                    {
+                        if (IsStopping)
+                        {
+                            RejectOverCapacity(context);
+                            continue;
+                        }
+                        _activeContexts[workerIndex] = context;
+                    }
+                    try
+                    {
+                        await HandleBoundedAsync(context).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        lock (_responseOwnershipGate)
+                            _activeContexts[workerIndex] = null;
+                    }
+                }
         }
         catch (OperationCanceledException) when (_stopping.IsCancellationRequested)
         {
@@ -267,21 +380,38 @@ public sealed class StaticContentHttpHost : IDisposable
     {
         try
         {
+            _testHooks?.BeforeResponseInitialization?.Invoke();
             string route = context.Request.Url?.AbsolutePath ?? string.Empty;
             if (context.Request.HttpMethod != "GET" || context.Request.Url?.Query.Length > 0 ||
                 !_resources.TryGetValue(route, out byte[]? bytes))
             {
                 Interlocked.Increment(ref _rejected);
-                context.Response.StatusCode = (int)HttpStatusCode.NotFound;
-                context.Response.ContentLength64 = 0;
+                try
+                {
+                    context.Response.StatusCode = (int)HttpStatusCode.NotFound;
+                    context.Response.ContentLength64 = 0;
+                }
+                catch (InvalidOperationException) when (IsStopping)
+                {
+                }
                 return;
             }
-            context.Response.StatusCode = (int)HttpStatusCode.OK;
-            context.Response.ContentType = ContentType;
-            context.Response.ContentLength64 = bytes.Length;
-            context.Response.Headers["Cache-Control"] = "public, immutable, max-age=31536000";
+            try
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.OK;
+                context.Response.ContentType = ContentType;
+                context.Response.ContentLength64 = bytes.Length;
+                context.Response.Headers["Cache-Control"] = "public, immutable, max-age=31536000";
+            }
+            catch (InvalidOperationException) when (IsStopping)
+            {
+                Interlocked.Increment(ref _rejected);
+                return;
+            }
+            _testHooks?.BeforeResponseWrite?.Invoke();
             await context.Response.OutputStream.WriteAsync(bytes, cancellation).ConfigureAwait(false);
             cancellation.ThrowIfCancellationRequested();
+            _testHooks?.AfterResponseWrite?.Invoke();
             Interlocked.Increment(ref _served);
             Interlocked.Add(ref _bytesServed, bytes.Length);
         }
@@ -298,7 +428,8 @@ public sealed class StaticContentHttpHost : IDisposable
         finally
         {
             try { context.Response.Close(); }
-            catch (Exception exception) when (exception is HttpListenerException or ObjectDisposedException) { }
+            catch (Exception exception) when (exception is HttpListenerException or
+                ObjectDisposedException || exception is InvalidOperationException && IsStopping) { }
         }
     }
 
@@ -320,15 +451,90 @@ public sealed class StaticContentHttpHost : IDisposable
             context.Response.ContentLength64 = 0;
         }
         catch (Exception exception) when (exception is IOException or HttpListenerException or
-            ObjectDisposedException)
+            ObjectDisposedException || exception is InvalidOperationException && IsStopping)
         {
         }
         finally
         {
             try { context.Response.Close(); }
-            catch (ObjectDisposedException) { }
+            catch (Exception exception) when (exception is HttpListenerException or
+                ObjectDisposedException || exception is InvalidOperationException && IsStopping) { }
         }
     }
+
+    private bool IsStopping => Volatile.Read(ref _lifecycle) != 0;
+
+    private void ThrowIfNotRunning()
+    {
+        if (Volatile.Read(ref _lifecycle) != 0)
+            throw new ObjectDisposedException(nameof(StaticContentHttpHost));
+    }
+
+    private void DrainPending(ref List<Exception>? failures)
+    {
+        while (_pending.Reader.TryRead(out HttpListenerContext? context))
+        {
+            Interlocked.Increment(ref _rejected);
+            try
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.ServiceUnavailable;
+                context.Response.ContentLength64 = 0;
+            }
+            catch (Exception exception) when (exception is HttpListenerException or
+                ObjectDisposedException or InvalidOperationException)
+            {
+            }
+            try { context.Response.Close(); }
+            catch (Exception exception) when (exception is HttpListenerException or
+                ObjectDisposedException or InvalidOperationException)
+            {
+            }
+        }
+    }
+
+    private void AbortActiveResponses(ref List<Exception>? failures)
+    {
+        lock (_responseOwnershipGate)
+        {
+            foreach (HttpListenerContext? context in _activeContexts)
+            {
+                if (context is null) continue;
+                TryCleanup(
+                    () => context.Response.Abort(),
+                    ref failures,
+                    IsExpectedResponseShutdownException);
+            }
+        }
+    }
+
+    private static void TryJoin(Task worker, ref List<Exception>? failures)
+    {
+        try { worker.GetAwaiter().GetResult(); }
+        catch (Exception exception) when (IsExpectedWorkerShutdownException(exception)) { }
+        catch (Exception exception) { AddFailure(ref failures, exception); }
+    }
+
+    private static void TryCleanup(
+        Action cleanup,
+        ref List<Exception>? failures,
+        Func<Exception, bool>? expected = null)
+    {
+        try { cleanup(); }
+        catch (Exception exception) when (expected?.Invoke(exception) == true) { }
+        catch (Exception exception) { AddFailure(ref failures, exception); }
+    }
+
+    private static bool IsExpectedWorkerShutdownException(Exception exception) =>
+        exception is OperationCanceledException or HttpListenerException or ObjectDisposedException;
+
+    private static bool IsExpectedListenerShutdownException(Exception exception) =>
+        exception is HttpListenerException or ObjectDisposedException;
+
+    private static bool IsExpectedResponseShutdownException(Exception exception) =>
+        exception is HttpListenerException or InvalidOperationException or ObjectDisposedException;
+
+    private static void AddFailure(ref List<Exception>? failures, Exception exception) =>
+        (failures ??= []).Add(exception);
 
     private void PublishPeak(int active)
     {

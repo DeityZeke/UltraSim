@@ -25,6 +25,14 @@ var tests = new (string Name, Action Body)[]
     ("ExpiredContentResponseReleasesItsWorker", ExpiredContentResponseReleasesItsWorker),
     ("ContentResponseQueueRejectsOverflowAndShutdownTerminatesActiveWrite",
         ContentResponseQueueRejectsOverflowAndShutdownTerminatesActiveWrite),
+    ("StaticContentHttpHostShutdownInterleavingsRetireEveryOwner",
+        StaticContentHttpHostShutdownInterleavingsRetireEveryOwner),
+    ("StaticContentHttpHostConcurrentDisposeIsIdempotent",
+        StaticContentHttpHostConcurrentDisposeIsIdempotent),
+    ("StaticContentHttpHostShutdownPreservesUnexpectedWorkerFault",
+        StaticContentHttpHostShutdownPreservesUnexpectedWorkerFault),
+    ("StaticContentHttpHostShutdownStressIsBounded",
+        StaticContentHttpHostShutdownStressIsBounded),
 };
 
 foreach ((string name, Action body) in tests)
@@ -275,6 +283,8 @@ static void ContentResponseQueueRejectsOverflowAndShutdownTerminatesActiveWrite(
         long started = Stopwatch.GetTimestamp();
         host.Dispose();
         Assert.True(Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(2));
+        AssertHttpHostRetired(host);
+        host.Dispose();
         try { _ = queued.Wait(TimeSpan.FromSeconds(2)); }
         catch (AggregateException) { }
     }
@@ -282,6 +292,224 @@ static void ContentResponseQueueRejectsOverflowAndShutdownTerminatesActiveWrite(
     {
         host.Dispose();
     }
+}
+
+static void StaticContentHttpHostShutdownInterleavingsRetireEveryOwner()
+{
+    using (var host = CreateHttpHost())
+    {
+        DisposeWithinBound(host);
+        AssertHttpHostRetired(host);
+    }
+
+    RunGatedShutdown(gate => new StaticContentHttpHostTestHooks
+    {
+        BeforeAcceptWait = gate,
+    }, sendRequest: false);
+    RunGatedShutdown(gate => new StaticContentHttpHostTestHooks
+    {
+        AfterAccept = gate,
+    });
+    RunGatedShutdown(gate => new StaticContentHttpHostTestHooks
+    {
+        BeforeResponseInitialization = gate,
+    });
+    RunGatedShutdown(gate => new StaticContentHttpHostTestHooks
+    {
+        BeforeResponseWrite = gate,
+    });
+    RunGatedShutdown(gate => new StaticContentHttpHostTestHooks
+    {
+        AfterResponseWrite = gate,
+    });
+
+    using (var host = CreateHttpHost())
+    using (var client = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }))
+    {
+        byte[] bytes = client.GetByteArrayAsync(host.GetUri("/content/test.uspkg"))
+            .GetAwaiter().GetResult();
+        Assert.True(bytes.AsSpan().SequenceEqual("response"u8));
+        DisposeWithinBound(host);
+        AssertHttpHostRetired(host);
+    }
+
+    using (var entered = new ManualResetEventSlim())
+    using (var release = new ManualResetEventSlim())
+    using (var host = CreateHttpHost(new StaticContentHttpHostTestHooks
+    {
+        BeforeResponseWrite = () =>
+        {
+            entered.Set();
+            Assert.True(release.Wait(TimeSpan.FromSeconds(2)));
+        },
+    }, 8 * 1024 * 1024))
+    {
+        var disconnected = new TcpClient { ReceiveBufferSize = 1_024, NoDelay = true };
+        disconnected.Connect(IPAddress.Loopback, host.BaseUri.Port);
+        SendRawGet(disconnected, "/content/test.uspkg");
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(2)));
+        disconnected.Dispose();
+        Task disposing = Task.Run(host.Dispose);
+        WaitUntil(() => host.GetLifecycleSnapshotForTesting().State == 1,
+            TimeSpan.FromSeconds(1), "HTTP host did not enter Stopping.");
+        release.Set();
+        Assert.True(disposing.Wait(TimeSpan.FromSeconds(2)));
+        disposing.GetAwaiter().GetResult();
+        AssertHttpHostRetired(host);
+    }
+}
+
+static void StaticContentHttpHostConcurrentDisposeIsIdempotent()
+{
+    using var entered = new ManualResetEventSlim();
+    using var release = new ManualResetEventSlim();
+    using var host = CreateHttpHost(new StaticContentHttpHostTestHooks
+    {
+        BeforeResponseWrite = () =>
+        {
+            entered.Set();
+            Assert.True(release.Wait(TimeSpan.FromSeconds(2)));
+        },
+    });
+    using var client = new TcpClient();
+    client.Connect(IPAddress.Loopback, host.BaseUri.Port);
+    SendRawGet(client, "/content/test.uspkg");
+    Assert.True(entered.Wait(TimeSpan.FromSeconds(2)));
+
+    Task first = Task.Run(host.Dispose);
+    WaitUntil(() => host.GetLifecycleSnapshotForTesting().State == 1,
+        TimeSpan.FromSeconds(1), "HTTP host did not enter Stopping.");
+    Task second = Task.Run(host.Dispose);
+    release.Set();
+    Assert.True(Task.WhenAll(first, second).Wait(TimeSpan.FromSeconds(2)));
+    first.GetAwaiter().GetResult();
+    second.GetAwaiter().GetResult();
+    host.Dispose();
+    AssertHttpHostRetired(host);
+}
+
+static void StaticContentHttpHostShutdownPreservesUnexpectedWorkerFault()
+{
+    using var entered = new ManualResetEventSlim();
+    using var release = new ManualResetEventSlim();
+    var host = CreateHttpHost(new StaticContentHttpHostTestHooks
+    {
+        BeforeResponseInitialization = () =>
+        {
+            entered.Set();
+            Assert.True(release.Wait(TimeSpan.FromSeconds(2)));
+            throw new InjectedHttpResponseException();
+        },
+    });
+    using var client = new TcpClient();
+    try
+    {
+        client.Connect(IPAddress.Loopback, host.BaseUri.Port);
+        SendRawGet(client, "/content/test.uspkg");
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(2)));
+        Task disposing = Task.Run(host.Dispose);
+        WaitUntil(() => host.GetLifecycleSnapshotForTesting().State == 1,
+            TimeSpan.FromSeconds(1), "HTTP host did not enter Stopping.");
+        release.Set();
+        Assert.Throws<InjectedHttpResponseException>(() =>
+            disposing.GetAwaiter().GetResult());
+        AssertHttpHostRetired(host);
+        Assert.Throws<InjectedHttpResponseException>(host.Dispose);
+    }
+    finally
+    {
+        try { host.Dispose(); }
+        catch (InjectedHttpResponseException) { }
+    }
+}
+
+static void StaticContentHttpHostShutdownStressIsBounded()
+{
+    const int cycles = 128;
+    for (int cycle = 0; cycle < cycles; cycle++)
+    {
+        using var host = CreateHttpHost();
+        using var client = new TcpClient();
+        if ((cycle & 1) == 0)
+        {
+            client.Connect(IPAddress.Loopback, host.BaseUri.Port);
+            SendRawGet(client, "/content/test.uspkg");
+        }
+        Task first = Task.Run(host.Dispose);
+        Task second = Task.Run(host.Dispose);
+        Assert.True(Task.WhenAll(first, second).Wait(TimeSpan.FromSeconds(2)));
+        first.GetAwaiter().GetResult();
+        second.GetAwaiter().GetResult();
+        AssertHttpHostRetired(host);
+    }
+}
+
+static void RunGatedShutdown(
+    Func<Action, StaticContentHttpHostTestHooks> createHooks,
+    bool sendRequest = true)
+{
+    using var entered = new ManualResetEventSlim();
+    using var release = new ManualResetEventSlim();
+    Action gate = () =>
+    {
+        entered.Set();
+        Assert.True(release.Wait(TimeSpan.FromSeconds(2)));
+    };
+    using var host = CreateHttpHost(createHooks(gate));
+    using var client = new TcpClient();
+    if (sendRequest)
+    {
+        client.Connect(IPAddress.Loopback, host.BaseUri.Port);
+        SendRawGet(client, "/content/test.uspkg");
+    }
+    Assert.True(entered.Wait(TimeSpan.FromSeconds(2)));
+    Task disposing = Task.Run(host.Dispose);
+    WaitUntil(() => host.GetLifecycleSnapshotForTesting().State == 1,
+        TimeSpan.FromSeconds(1), "HTTP host did not enter Stopping.");
+    release.Set();
+    Assert.True(disposing.Wait(TimeSpan.FromSeconds(2)));
+    disposing.GetAwaiter().GetResult();
+    AssertHttpHostRetired(host);
+}
+
+static StaticContentHttpHost CreateHttpHost(
+    StaticContentHttpHostTestHooks? hooks = null,
+    int responseBytes = 8)
+{
+    byte[] bytes = responseBytes == 8
+        ? "response"u8.ToArray()
+        : GC.AllocateUninitializedArray<byte>(responseBytes);
+    return new StaticContentHttpHost(
+        new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()),
+        [new StaticContentHttpResource("/content/test.uspkg", bytes)],
+        new StaticContentHttpHostLimits(1, bytes.Length, 1, 1, 10_000),
+        hooks);
+}
+
+static void SendRawGet(TcpClient client, string route)
+{
+    byte[] request = System.Text.Encoding.ASCII.GetBytes(
+        $"GET {route} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: keep-alive\r\n\r\n");
+    client.GetStream().Write(request);
+}
+
+static void DisposeWithinBound(StaticContentHttpHost host)
+{
+    long started = Stopwatch.GetTimestamp();
+    host.Dispose();
+    Assert.True(Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(2));
+}
+
+static void AssertHttpHostRetired(StaticContentHttpHost host)
+{
+    StaticContentHttpHostLifecycleSnapshot snapshot = host.GetLifecycleSnapshotForTesting();
+    Assert.Equal(2, snapshot.State);
+    Assert.True(snapshot.AcceptWorkerCompleted);
+    Assert.True(snapshot.ResponseWorkersCompleted);
+    Assert.Equal(0, snapshot.PendingResponses);
+    Assert.Equal(0, snapshot.ActiveResponses);
+    Assert.True(snapshot.ListenerClosed);
+    Assert.True(snapshot.CancellationDisposed);
 }
 
 static void WaitUntil(Func<bool> condition, TimeSpan timeout, string failure)
@@ -598,6 +826,10 @@ sealed class ThrowingLogSink : IHostLogSink
 {
     public void Write(HostLogLevel level, string message) =>
         throw new IOException("injected diagnostics failure");
+}
+
+sealed class InjectedHttpResponseException : Exception
+{
 }
 
 sealed class FixtureComposition : IServerComposition
