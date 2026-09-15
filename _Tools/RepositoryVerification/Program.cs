@@ -104,6 +104,56 @@ static void VerifyPf5R3BackgroundEgress(string root, string configuration)
                     $"PF5-R3 {mode} did not expose accepted physical egress and reservation evidence.");
         }
 
+        string currentPathOutput = Path.Combine(scope, "current-chunk-publication.json");
+        Run(root, "dotnet",
+        [
+            "run", "--project",
+            "_Benchmarks/UltraSim.Network.V3ComparisonAdapter/UltraSim.Network.V3ComparisonAdapter.csproj",
+            "-c", configuration, "--", "--p03-whole-flow",
+            "--pf5-r3-background-egress", "--populations=16", "--warmup=6", "--ticks=30",
+            $"--output={currentPathOutput}",
+        ]);
+        using (JsonDocument currentPath = JsonDocument.Parse(
+                   File.ReadAllText(currentPathOutput)))
+        {
+            JsonElement.ArrayEnumerator rows = currentPath.RootElement
+                .GetProperty("Rows").EnumerateArray();
+            int rowCount = 0;
+            string? semanticDigest = null;
+            ulong? publications = null;
+            foreach (JsonElement row in rows)
+            {
+                rowCount++;
+                if (row.GetProperty("Profile").GetString() != "ChunkPublication" ||
+                    !row.GetProperty("Converged").GetBoolean() ||
+                    row.GetProperty("Transport").GetProperty("WireDatagrams").GetUInt64() == 0 ||
+                    row.GetProperty("ProfileCounters").GetProperty("Compression")
+                        .GetProperty("Selected").GetUInt64() == 0)
+                    throw new InvalidOperationException(
+                        "PF5-R3 current ChunkPublication real-UDP control was incomplete.");
+                string currentDigest = row.GetProperty("SemanticDigest").GetString() ?? "";
+                ulong currentPublications = row.GetProperty("ProfileCounters")
+                    .GetProperty("SuccessfulSemanticPublications").GetUInt64();
+                semanticDigest ??= currentDigest;
+                publications ??= currentPublications;
+                if (semanticDigest != currentDigest || publications != currentPublications)
+                    throw new InvalidOperationException(
+                        "PF5-R3 egress modes changed selected-profile semantic work.");
+                JsonElement background = row.GetProperty("BackgroundEgress");
+                bool expectedBackground = row.GetProperty("SocketIoMode").GetString()?
+                    .StartsWith("Background", StringComparison.Ordinal) == true;
+                if (expectedBackground != (background.GetProperty("SenderThreads").GetInt32() == 1) ||
+                    background.GetProperty("CurrentDatagrams").GetInt32() != 0 ||
+                    background.GetProperty("CapacityRefusals").GetUInt64() != 0 ||
+                    background.GetProperty("HasWorkerFailure").GetBoolean())
+                    throw new InvalidOperationException(
+                        "PF5-R3 selected-profile background egress did not retire bounded debt.");
+            }
+            if (rowCount != modes.Length)
+                throw new InvalidOperationException(
+                    "PF5-R3 selected-profile four-mode matrix was incomplete.");
+        }
+
         string hostedOutput = Path.Combine(scope, "hosted-background.json");
         Run(root, "dotnet",
         [
