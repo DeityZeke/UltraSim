@@ -27,6 +27,7 @@ internal static class Pf5R7SpatialTopologyAttribution
 
         Prime();
         var topologyRows = new List<Pf5R7TopologyRow>();
+        var v2ComparisonRows = new List<Pf5R7V2ComparisonRow>();
         var wholeServerRows = new List<Pf5R7WholeServerRow>();
         var authorityOnlyRows = new List<Pf5R7AuthorityOnlyRow>();
         var physicsRows = new List<Pf5R7PhysicsRow>();
@@ -69,6 +70,11 @@ internal static class Pf5R7SpatialTopologyAttribution
             RunTopology(64, 64, 20, 64, "controlled-fanout-64x1");
             RunTopology(64, 64, 20, 8, "extent-small");
             RunTopology(64, 64, 20, 8, "extent-large", inactiveStoredChunks: 4_096);
+            foreach (int population in new[] { 256, 300, 350 })
+            {
+                RunV2Comparison(population, sparse: false);
+                RunV2Comparison(population, sparse: true);
+            }
             RunAuthorityOnly(200);
             RunWholeServerMatrix(200);
             RunCollisionPhysics(200);
@@ -119,6 +125,7 @@ internal static class Pf5R7SpatialTopologyAttribution
                 "current-V3 reconstructions and are not historical V2 measurements.",
             v2,
             topologyRows.ToArray(),
+            v2ComparisonRows.ToArray(),
             wholeServerRows.ToArray(),
             authorityOnlyRows.ToArray(),
             physicsRows.ToArray(),
@@ -160,6 +167,46 @@ internal static class Pf5R7SpatialTopologyAttribution
                 $"memberships={census.ProfileCounters.CurrentMemberships:N0} " +
                 $"bodies={census.ProfileCounters.DeltaBodies.DistinctBodyIdentities:N0} " +
                 $"hit={BodyHitRate(census.ProfileCounters.DeltaBodies):P1}");
+        }
+
+        void RunV2Comparison(int population, bool sparse)
+        {
+            int active = Math.Max(1,
+                (int)Math.Round(population * .35, MidpointRounding.AwayFromZero));
+            P03NetworkWorkload workload = P03NetworkWorkload.ChunkTopology(
+                population, population, active, sparse ? population : 1)
+                .WithServerTickAndAoICadence(16, P03AoICadencePolicy.Selected124);
+            var game = new Pf5R7GameAuthorityWorkload(
+                population, Pf5R7MovementShape.FreeMovement, chatEnabled: false);
+            Console.WriteLine($"PF5-R7 V2-link R={population} " +
+                (sparse ? "sparse" : "dense"));
+            using var harness = new P03WholeFlowHarness(
+                workload,
+                P03NetworkProfile.ChunkPublication,
+                2,
+                stageTimingEnabled: true,
+                gameDetailedAttribution: false,
+                compression: RemoteChunkBundleCompressionPolicy.Selected,
+                singletonDeltaCompression: RemoteChunkSingletonDeltaCompression.Disabled,
+                bodySharing: RemoteChunkDeltaBodySharingMode.Enabled,
+                legacyRangeCensus: false,
+                authorityThroughNetworkTimingEnabled: true,
+                serverOwnedRemoteTimingEnabled: true,
+                chunkReadModel: PreparedChunkPublicationReadModel.PreparedLatestState,
+                socketIoMode: UltraSim.Network.SharedUdpSocketIoMode.PlatformSendReceiveBatch,
+                backgroundEgressTimingEnabled: true,
+                externalServerWorkload: game);
+            P03WholeFlowRow flow = harness.Run(warmup, ticks);
+            Require(flow.Converged && flow.Transport.CapacityDrops == 0,
+                "PF5-R7 V2-link row did not converge.");
+            v2ComparisonRows.Add(new Pf5R7V2ComparisonRow(
+                population,
+                sparse ? "V2ShapedSparseReconstruction" : "DenseHotspot",
+                flow,
+                (Pf5R7GameAuthoritySummary)game.CaptureSummary()));
+            Console.WriteLine($"  server p95={flow.Timing.ServerOwnedTick.P95:F3}ms " +
+                $"remote p95={flow.Timing.ServerOwnedRemoteReplicationBudget.P95:F3}ms " +
+                $"whole-flow p95={flow.Timing.Tick.P95:F3}ms");
         }
 
         void RunWholeServerMatrix(int population)
@@ -439,6 +486,7 @@ internal sealed record Pf5R7SpatialReport(
     string ArchivedSparseFixtureDisposition,
     V2DenseHistory HistoricalV2Dense,
     Pf5R7TopologyRow[] TopologyRows,
+    Pf5R7V2ComparisonRow[] V2ComparisonRows,
     Pf5R7WholeServerRow[] WholeServerRows,
     Pf5R7AuthorityOnlyRow[] AuthorityOnlyRows,
     Pf5R7PhysicsRow[] PhysicsRows,
@@ -456,6 +504,12 @@ internal sealed record Pf5R7WholeServerRow(
     bool NetworkReplication,
     bool MovementAndPhysics,
     bool Chat,
+    P03WholeFlowRow Flow,
+    Pf5R7GameAuthoritySummary Game);
+
+internal sealed record Pf5R7V2ComparisonRow(
+    int Participants,
+    string Layout,
     P03WholeFlowRow Flow,
     Pf5R7GameAuthoritySummary Game);
 
