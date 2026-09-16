@@ -2229,8 +2229,14 @@ internal static class N1OfflineDirectChunkTests
 
         RemoteDirtyChunkBundleEntry original = entries[1];
         entries[1] = original with { ContentHash = 0 };
-        False(UltraSimGameProtocol.TryWritePreparedDirtyChunkBundle(
-            prepared, applicationEpoch, publicationEpoch, 1, entries, records, out _));
+        True(UltraSimGameProtocol.TryWritePreparedDirtyChunkBundle(
+            prepared, applicationEpoch, publicationEpoch, 1, entries, records,
+            out int zeroHashBundleWritten));
+        var zeroHashEntries = new RemoteDirtyChunkBundleEntry[2];
+        var zeroHashRecords = new RemoteChunkDeltaRecord[2];
+        False(UltraSimGameProtocol.TryReadDirtyChunkBundle(
+            prepared.AsSpan(0, zeroHashBundleWritten), out _, zeroHashEntries, [],
+            zeroHashRecords, out _, out _, out _));
         entries[1] = original with { RecordOffset = 0 };
         False(UltraSimGameProtocol.TryWritePreparedDirtyChunkBundle(
             prepared, applicationEpoch, publicationEpoch, 1, entries, records, out _));
@@ -2277,6 +2283,17 @@ internal static class N1OfflineDirectChunkTests
             Equal(canonicalWritten, preparedWritten);
             True(canonical.AsSpan(0, canonicalWritten)
                 .SequenceEqual(prepared.AsSpan(0, preparedWritten)));
+            if (recordCount == 1)
+            {
+                True(UltraSimGameProtocol.TryWritePreparedChunkDelta(
+                    prepared, applicationEpoch, publicationEpoch, 44, space, -7, 9,
+                    1, currentRevision, 1, 0, standaloneRecords,
+                    out int zeroHashStandaloneWritten));
+                var zeroHashDecoded = new RemoteChunkDeltaRecord[1];
+                False(UltraSimGameProtocol.TryReadChunkDelta(
+                    prepared.AsSpan(0, zeroHashStandaloneWritten), out _, zeroHashDecoded,
+                    out _));
+            }
             False(UltraSimGameProtocol.TryWritePreparedChunkDelta(
                 prepared.AsSpan(0, preparedWritten - 1), applicationEpoch, publicationEpoch,
                 44, space, -7, 9, 1, currentRevision, 1, standaloneHash,
@@ -2294,7 +2311,8 @@ internal static class N1OfflineDirectChunkTests
 
         Console.WriteLine($"EVIDENCE PF4E-R2 prepared_bundle_bytes={preparedWritten} " +
             "prepared_standalone_counts=1,2,30 canonical_equal=true " +
-            "bounds_alias_invalid_hash_offset_delivery=rejected");
+            "prepared_zero_hash=accepted decoder_mismatch=rejected " +
+            "bounds_alias_offset_delivery=rejected");
     }
 
     internal static void PacketBoundaryCandidateIsPreparedOnce()

@@ -883,6 +883,8 @@ public static partial class UltraSimGameProtocol
     /// Writes a Game-owned delta already validated and content-hashed by
     /// <see cref="TryGetChunkDeltaContentHash"/>. This internal friend seam is deliberately not a
     /// public protocol-input shortcut: decoded/untrusted data continues through full validation.
+    /// Calling this prepared-only seam is the structural preparation token; every 64-bit hash
+    /// value, including zero, remains a valid computed value and is not used as a sentinel.
     /// </summary>
     internal static bool TryWritePreparedChunkDelta(
         Span<byte> destination,
@@ -902,7 +904,7 @@ public static partial class UltraSimGameProtocol
         written = 0;
         if (!ValidLineage(applicationSessionEpoch, publicationEpoch, deliveryId, spatialSpaceId) ||
             baseRevision == 0 || currentRevision <= baseRevision || historyFloor == 0 ||
-            historyFloor > baseRevision || contentHash == 0 || records.IsEmpty ||
+            historyFloor > baseRevision || records.IsEmpty ||
             records.Length > MaximumChunkPublicationRecords)
             return false;
         return TryWriteChunkDeltaValidated(
@@ -1064,7 +1066,8 @@ public static partial class UltraSimGameProtocol
     /// Encodes Game-owned Delta/Absence entries already validated and content-hashed by
     /// <see cref="TryGetChunkDeltaContentHash"/>. This internal friend seam avoids revalidating
     /// the same immutable records merely to cross the Protocol/remote-composition assembly seam.
-    /// It is intentionally unavailable to clients and never accepts decoded network input.
+    /// It is intentionally unavailable to clients and never accepts decoded network input. The
+    /// prepared-only entry point, rather than a nonzero numeric digest, carries validation state.
     /// </summary>
     internal static bool TryWritePreparedDirtyChunkBundle(
         Span<byte> destination,
@@ -1192,7 +1195,7 @@ public static partial class UltraSimGameProtocol
         if (entry.Kind == RemoteChunkPublicationKind.Delta)
             return entry.RecordOffset == expectedDeltaOffset && entry.BaseRevision != 0 &&
                 entry.CurrentRevision > entry.BaseRevision && entry.HistoryFloor != 0 &&
-                entry.HistoryFloor <= entry.BaseRevision && entry.RecordCount != 0 && hash != 0 &&
+                entry.HistoryFloor <= entry.BaseRevision && entry.RecordCount != 0 &&
                 entry.RecordOffset + entry.RecordCount <= deltaRecords.Length;
         return entry.Kind == RemoteChunkPublicationKind.Absence && entry.RecordOffset == 0 &&
             entry.RecordCount == 0 && entry.BaseRevision == 0 && entry.CurrentRevision == 0 &&
