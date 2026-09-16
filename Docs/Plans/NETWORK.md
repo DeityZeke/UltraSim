@@ -711,10 +711,12 @@ wire format, delivery identity, cursor, or proof state is shared. The byte-only 
 2,887,168 bytes, less than PF5-R6's typed-record store.
 
 Detailed telemetry now stops copying and clearing outstanding-delivery diagnostic slabs when set
-to Off, including a Detailed-to-Off transition with live debt. Proof retirement still has a linear
-unrelated-debt scan, but current evidence measures only 1.653 examined entries per proof and an
-outstanding high-water of five at R300. A delivery/chunk index is therefore deferred; permanent
-operation counters will expose any future debt-shape change. See the
+to Off or Basic, including transitions with live debt. A telemetry-independent test-only observer
+of the actual slab branch makes this guard mutation-testable. Proof retirement still has a linear
+unrelated-debt scan, but current evidence measures only 1.653 obsolete-scan checks per proof and an
+outstanding high-water of five at R300; that ratio excludes separate delivery lookup comparisons.
+A delivery/chunk index is therefore deferred; permanent operation counters will expose any future
+debt-shape change. See the
 [adversarial follow-up evidence](../../_Benchmarks/Baselines/concept-demo-pf5-r7-adversarial-follow-up-2026-09-16.md).
 
 ### Snapshot / delta / absence

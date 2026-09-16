@@ -19,14 +19,18 @@ Public writers and all untrusted decoders retain complete validation. The Game m
 format do not change.
 
 Turning Detailed telemetry Off now stops outstanding-delivery diagnostic slab copies and clears,
-including when live debt existed during the transition. The retained arrays remain reusable and
-Detailed can be enabled again safely.
+including when live debt existed during the transition. The same is true for Basic. The regression
+uses a monotonic test-only observer advanced by the actual slab branch, independently of
+Detailed-only CPU counters. Deliberately removing the production guard makes the test fail with
+three observed retirement operations. The retained arrays remain reusable and Detailed can be
+enabled again safely.
 
 ## Proof-retirement disposition
 
 The unrelated-debt scan is real. A deterministic eight-chunk drain performs 28 unrelated checks
-and no same-chunk checks. The R300 Detailed run, however, measured 249,920 checks for 151,175 proof
-retirements (1.653 checks/proof), zero same-chunk matches, and an outstanding high-water of five.
+and no same-chunk checks. The R300 Detailed run, however, measured 249,920 obsolete-scan checks for
+151,175 proof retirements (1.653 obsolete-scan checks/proof), zero same-chunk matches, and an
+outstanding high-water of five. That ratio excludes the separate `FindDelivery` lookup comparisons.
 Adding a delivery-id index plus chunk-local links would introduce another bounded structure and
 consistency surface for shallow current debt. The operation census remains permanent so this can
 be revisited if delayed-proof or product evidence grows the ledger materially.
@@ -71,4 +75,5 @@ scan operation counts. The focused Game replication suite passes all 176 tests.
 The production implementation is
 `14e729a6ce69179cfbe4b9a3a4c4cdfa21797fa9`. PF5-R2 semantic lineage remains
 `992fc541460f18534da9036c73cb711277de11ce`; selected cadence, AOI, compression, aggregation,
-transport, and participant policy remain unchanged.
+transport, and participant policy remain unchanged. The direct-observation regression hardening is
+`f921ebbdb6080ed765af350c1397bdf4701a545b`.

@@ -4,6 +4,7 @@
   "date": "2026-09-16",
   "startingHead": "4be883250a733110a6a947128f09815e92f00b65",
   "implementationCommit": "14e729a6ce69179cfbe4b9a3a4c4cdfa21797fa9",
+  "testHardeningCommit": "f921ebbdb6080ed765af350c1397bdf4701a545b",
   "replicationSemanticLineage": "992fc541460f18534da9036c73cb711277de11ce",
   "productionSemanticsChanged": false,
   "wireFormatChanged": false,
@@ -40,12 +41,12 @@
     "proofRetirementUnrelatedScan": {
       "verified": true,
       "productionIndexAdded": false,
-      "reason": "The detailed R300 census found 249920 obsolete-entry checks for 151175 proof retirements (1.653 checks/proof), zero same-chunk matches, and outstanding high-water 5. The work pattern is real but current bounded debt does not justify another per-recipient delivery/chunk index.",
+      "reason": "The detailed R300 census found 249920 obsolete-entry checks for 151175 proof retirements (1.653 obsolete-scan checks/proof), zero same-chunk matches, and outstanding high-water 5. This ratio excludes the separate FindDelivery lookup comparisons. The work pattern is real but current bounded debt does not justify another per-recipient delivery/chunk index.",
       "permanentCensusAdded": true
     },
     "telemetryOffSlabWork": {
       "verified": true,
-      "repair": "Outstanding-delivery slab copies and clears now execute only while telemetry is Detailed. Detailed-to-Off retains reusable allocation but performs zero slab maintenance; returning to Detailed reinitializes collection correctly."
+      "repair": "Outstanding-delivery slab copies and clears now execute only while telemetry is Detailed. A monotonic test-only observer advances on the actual slab branch independently of telemetry-gated CPU counters. Detailed-to-Off and Detailed-to-Basic retain reusable allocation but perform zero retirement slab maintenance; returning to Detailed reinitializes collection correctly. Removing the production guard was mutation-tested and failed the regression."
     }
   },
   "detailedR300": [
@@ -117,7 +118,7 @@
     "canonical120And129ByteParity": "pass",
     "historyFloorRebaseWithResidentBody": "pass",
     "independentProofAndQueueRefusal": "pass",
-    "detailedToOffWithLiveDebt": "pass",
+    "detailedToOffAndBasicWithLiveDebt": "pass: direct slab-operation observer unchanged; deliberate guard removal fails 0 versus 3",
     "proofScanOperationCount": "pass: 8 distinct chunks drain with 28 unrelated checks and zero same-chunk checks"
   },
   "rawCaptureHashes": {
