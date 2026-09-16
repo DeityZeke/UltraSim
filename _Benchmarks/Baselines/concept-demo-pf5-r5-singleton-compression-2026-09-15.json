@@ -1,0 +1,144 @@
+{
+  "schema": "ultrasim-concept-demo-pf5-r5-singleton-compression-v1",
+  "checkpoint": "PF5-R5 Singleton Compression Representation Experiment + Prepared-Hash Contract Hardening",
+  "date": "2026-09-15",
+  "startingHead": "f201e1abaf0fdb06ea0750b5f32c0db0f16d6231",
+  "replicationSemanticLineage": "992fc541460f18534da9036c73cb711277de11ce",
+  "pf5R4ProductionCandidate": "15aa839f865db18c1c47b72fb49ff5a6d416beb4",
+  "phaseACommit": "c3768146f0424b62226fd53f7e20f65db646f268",
+  "experimentalCommit": "b2f3d47845e4e6c196861f0a5cbf6e158a013777",
+  "gateCommits": [
+    "06fa99837cfd3abc9a6e9b6fcd552a1df61d0b60",
+    "f775165ea222e87ad0b6cff58985d4c7a4a16e65"
+  ],
+  "outcome": "B",
+  "selectedForProduction": false,
+  "selectedProductionPolicy": {
+    "egress": "BackgroundPlatformBatch",
+    "singletonCompression": "Disabled",
+    "multiEntryCompression": "message148 LZ4, canonical129 >= 384, minimum net saving 32",
+    "cadence": "1/2/4",
+    "aggregation": "CrossLane cap 2, no fill delay",
+    "gameManifest": 29,
+    "transportRevision": 2,
+    "maximumCanonicalDecoded129Bytes": 1405
+  },
+  "phaseA": {
+    "zeroReservedByHashAlgorithm": false,
+    "validityCarrier": "internal prepared-only API seam",
+    "wireChanged": false,
+    "decoderHashValidationChanged": false,
+    "absenceZeroSemanticsChanged": false
+  },
+  "experimentalRule": {
+    "scope": "singleton Delta only",
+    "minimumCanonical129Bytes": 384,
+    "minimumSavingVersusStandalone120Bytes": 32,
+    "rawSingleton129Selected": false,
+    "queueAttemptsPerSemanticAttempt": 1
+  },
+  "measurementSeed": 84111361,
+  "caseOrderSeed": "0x5A532004",
+  "environment": {
+    "os": "Linux x86-64 7.1.5-1-cachyos",
+    "runtime": "8.0.129",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "logicalProcessors": 16,
+    "configuration": "Release",
+    "stopwatchFrequency": 1000000000,
+    "realUdpProcessTopology": "server and clients share one process; server-owned timer excludes client work and background sender"
+  },
+  "rawSha256": {
+    "startSyntheticOff": "cb312bb3fbc7017d895e2c8f031be78466d093eeab8c66823772ccfaba83ce5d",
+    "startOrdinaryRealUdp": "0850461fa0ae3a1cc260df6514f313610a32376de50ac0e4231d2902ccaeeeb1",
+    "finalSyntheticOff": "0aaa29cd3067da5886dbf75b44f7060404120dc9dddd9465aaefbd6f9b56a004",
+    "finalSyntheticOn": "22a129d8749f8e58d77ff155bb1507a127f8cae71f858ec178a88cb8aa29a642",
+    "finalRealUdp": "a40eb715e49eb07c16b520e54b0c11485889c671ca4a73dfbb5b4cda57e89f7a"
+  },
+  "synthetic": {
+    "warmupTicks": 30,
+    "measuredTicks": 270,
+    "entities": 1000,
+    "rows": [
+      {"r":128,"dirty":20,"policy":"off","serverP95Ms":1.951846,"scheduleP95Ms":0.9900,"candidates":2576,"selected":0,"applicationBytes":12476409},
+      {"r":128,"dirty":20,"policy":"on","serverP95Ms":1.921724,"scheduleP95Ms":0.9769,"candidates":2576,"selected":2548,"applicationBytes":11782065},
+      {"r":128,"dirty":45,"policy":"off","serverP95Ms":2.757214,"scheduleP95Ms":1.7899,"candidates":36416,"selected":0,"applicationBytes":42230537},
+      {"r":128,"dirty":45,"policy":"on","serverP95Ms":2.911933,"scheduleP95Ms":1.9408,"candidates":36416,"selected":36416,"applicationBytes":20784419},
+      {"r":192,"dirty":20,"policy":"off","serverP95Ms":3.054943,"scheduleP95Ms":1.5498,"candidates":117,"selected":0,"applicationBytes":22119773},
+      {"r":192,"dirty":20,"policy":"on","serverP95Ms":3.129191,"scheduleP95Ms":1.6153,"candidates":117,"selected":0,"applicationBytes":22119773},
+      {"r":192,"dirty":67,"policy":"off","serverP95Ms":5.993701,"scheduleP95Ms":3.6855,"candidates":57563,"selected":0,"applicationBytes":86472051},
+      {"r":192,"dirty":67,"policy":"on","serverP95Ms":6.395422,"scheduleP95Ms":4.2660,"candidates":57563,"selected":57111,"applicationBytes":47910114},
+      {"r":256,"dirty":20,"policy":"off","serverP95Ms":4.154283,"scheduleP95Ms":2.0250,"candidates":165,"selected":0,"applicationBytes":29838551},
+      {"r":256,"dirty":20,"policy":"on","serverP95Ms":4.197770,"scheduleP95Ms":2.0725,"candidates":165,"selected":0,"applicationBytes":29838551},
+      {"r":256,"dirty":90,"policy":"off","serverP95Ms":10.312462,"scheduleP95Ms":6.0625,"candidates":172060,"selected":0,"applicationBytes":182762775},
+      {"r":256,"dirty":90,"policy":"on","serverP95Ms":10.285359,"scheduleP95Ms":7.0410,"candidates":172060,"selected":172006,"applicationBytes":78487499},
+      {"r":300,"dirty":20,"policy":"off","serverP95Ms":4.847700,"scheduleP95Ms":2.3466,"candidates":182,"selected":0,"applicationBytes":34064744},
+      {"r":300,"dirty":20,"policy":"on","serverP95Ms":4.922202,"scheduleP95Ms":2.3787,"candidates":182,"selected":0,"applicationBytes":34064744},
+      {"r":300,"dirty":105,"policy":"off","serverP95Ms":13.385936,"scheduleP95Ms":7.3927,"candidates":293364,"selected":0,"applicationBytes":276328908},
+      {"r":300,"dirty":105,"policy":"on","serverP95Ms":13.448982,"scheduleP95Ms":9.1523,"candidates":293364,"selected":293364,"applicationBytes":102533259},
+      {"r":350,"dirty":20,"policy":"off","serverP95Ms":6.297680,"scheduleP95Ms":3.0956,"candidates":186,"selected":0,"applicationBytes":41960578},
+      {"r":350,"dirty":20,"policy":"on","serverP95Ms":6.522542,"scheduleP95Ms":3.2011,"candidates":186,"selected":0,"applicationBytes":41960578},
+      {"r":350,"dirty":122,"policy":"off","serverP95Ms":17.630111,"scheduleP95Ms":10.7958,"candidates":239730,"selected":0,"applicationBytes":293100155},
+      {"r":350,"dirty":122,"policy":"on","serverP95Ms":17.400720,"scheduleP95Ms":11.9650,"candidates":239730,"selected":239324,"applicationBytes":135460013}
+    ]
+  },
+  "realUdp": {
+    "warmupTicks": 60,
+    "measuredTicks": 270,
+    "entities": 1000,
+    "socketIoMode": "BackgroundPlatformBatch",
+    "rows": [
+      {"r":64,"dirty":20,"policy":"off","remoteP95Ms":0.770231,"remoteP99Ms":0.798731,"cpuCores":0.991263,"applicationBytes":6090737,"udpBytes":10061889,"udpDatagrams":34592,"singletonSelected":0},
+      {"r":64,"dirty":20,"policy":"on","remoteP95Ms":0.766061,"remoteP99Ms":0.795199,"cpuCores":1.009921,"applicationBytes":5825586,"udpBytes":9796738,"udpDatagrams":34592,"singletonSelected":1088},
+      {"r":64,"dirty":22,"policy":"off","remoteP95Ms":0.788611,"remoteP99Ms":0.864981,"cpuCores":1.033563,"applicationBytes":6448863,"udpBytes":10420015,"udpDatagrams":34592,"singletonSelected":0,"queueP99Ms":0.262143},
+      {"r":64,"dirty":22,"policy":"on","remoteP95Ms":0.816199,"remoteP99Ms":0.855232,"cpuCores":1.162504,"applicationBytes":6191542,"udpBytes":10162694,"udpDatagrams":34592,"singletonSelected":1088,"queueP99Ms":0.198627},
+      {"r":128,"dirty":20,"policy":"off","remoteP95Ms":1.532943,"remoteP99Ms":1.549241,"cpuCores":1.029289,"applicationBytes":12258099,"udpBytes":20227135,"udpDatagrams":69176,"singletonSelected":0},
+      {"r":128,"dirty":20,"policy":"on","remoteP95Ms":1.666873,"remoteP99Ms":1.694020,"cpuCores":0.999695,"applicationBytes":11893286,"udpBytes":19862322,"udpDatagrams":69176,"singletonSelected":1904},
+      {"r":128,"dirty":45,"policy":"off","remoteP95Ms":2.404639,"remoteP99Ms":2.435020,"cpuCores":1.022260,"applicationBytes":42328295,"udpBytes":51334291,"udpDatagrams":80041,"singletonSelected":0,"queueP99Ms":0.524287},
+      {"r":128,"dirty":45,"policy":"on","remoteP95Ms":2.564637,"remoteP99Ms":2.641370,"cpuCores":1.011937,"applicationBytes":20708804,"udpBytes":29236740,"udpDatagrams":69176,"singletonSelected":37004,"queueP99Ms":0.524287},
+      {"r":192,"dirty":20,"policy":"off","remoteP95Ms":2.547172,"remoteP99Ms":2.649560,"cpuCores":0.989383,"applicationBytes":22099484,"udpBytes":37430066,"udpDatagrams":104160,"singletonSelected":0},
+      {"r":192,"dirty":20,"policy":"on","remoteP95Ms":2.475792,"remoteP99Ms":2.552866,"cpuCores":1.012416,"applicationBytes":22096191,"udpBytes":37426773,"udpDatagrams":104160,"singletonSelected":24},
+      {"r":192,"dirty":67,"policy":"off","remoteP95Ms":5.047668,"remoteP99Ms":5.195169,"cpuCores":1.013929,"applicationBytes":84439979,"udpBytes":103358676,"udpDatagrams":144640,"singletonSelected":0,"queueP99Ms":0.872599},
+      {"r":192,"dirty":67,"policy":"on","remoteP95Ms":5.473899,"remoteP99Ms":6.037360,"cpuCores":1.015271,"applicationBytes":47698665,"udpBytes":66067758,"udpDatagrams":132149,"singletonSelected":54656,"queueP99Ms":0.907009},
+      {"r":256,"dirty":20,"policy":"off","remoteP95Ms":3.372292,"remoteP99Ms":3.604997,"cpuCores":1.009206,"applicationBytes":29555398,"udpBytes":50071838,"udpDatagrams":139132,"singletonSelected":0},
+      {"r":256,"dirty":20,"policy":"on","remoteP95Ms":3.404697,"remoteP99Ms":3.458299,"cpuCores":0.997089,"applicationBytes":29782956,"udpBytes":50299396,"udpDatagrams":139132,"singletonSelected":0},
+      {"r":256,"dirty":90,"policy":"off","remoteP95Ms":7.960699,"remoteP99Ms":8.180006,"cpuCores":1.039425,"applicationBytes":182536857,"udpBytes":213015795,"udpDatagrams":279569,"singletonSelected":0,"queueP99Ms":1.443924},
+      {"r":256,"dirty":90,"policy":"on","remoteP95Ms":8.800669,"remoteP99Ms":8.935136,"cpuCores":1.007400,"applicationBytes":78151772,"udpBytes":105202054,"udpDatagrams":201645,"singletonSelected":173035,"queueP99Ms":0.955868},
+      {"r":300,"dirty":20,"policy":"off","remoteP95Ms":4.025484,"remoteP99Ms":4.977012,"cpuCores":1.009486,"applicationBytes":33978586,"udpBytes":57824451,"udpDatagrams":163050,"singletonSelected":0},
+      {"r":300,"dirty":20,"policy":"on","remoteP95Ms":3.925226,"remoteP99Ms":4.008712,"cpuCores":1.008279,"applicationBytes":33988859,"udpBytes":57834724,"udpDatagrams":163050,"singletonSelected":0},
+      {"r":300,"dirty":105,"policy":"off","remoteP95Ms":9.844243,"remoteP99Ms":9.960151,"cpuCores":1.044314,"applicationBytes":273519967,"udpBytes":312107564,"udpDatagrams":376641,"singletonSelected":0,"queueP99Ms":2.097151},
+      {"r":300,"dirty":105,"policy":"on","remoteP95Ms":11.310089,"remoteP99Ms":11.896045,"cpuCores":1.016392,"applicationBytes":102345640,"udpBytes":135592077,"udpDatagrams":255251,"singletonSelected":287862,"queueP99Ms":1.048575},
+      {"r":350,"dirty":20,"policy":"off","remoteP95Ms":5.190454,"remoteP99Ms":5.448255,"cpuCores":1.009104,"applicationBytes":41622838,"udpBytes":72216447,"udpDatagrams":190560,"singletonSelected":0},
+      {"r":350,"dirty":20,"policy":"on","remoteP95Ms":5.227244,"remoteP99Ms":6.417448,"cpuCores":1.010727,"applicationBytes":41600574,"udpBytes":72194183,"udpDatagrams":190560,"singletonSelected":0},
+      {"r":350,"dirty":122,"policy":"off","remoteP95Ms":13.880786,"remoteP99Ms":14.062250,"cpuCores":1.028087,"applicationBytes":292909156,"udpBytes":341268146,"udpDatagrams":411592,"singletonSelected":0,"queueP99Ms":2.097151},
+      {"r":350,"dirty":122,"policy":"on","remoteP95Ms":14.890331,"remoteP99Ms":15.320264,"cpuCores":1.008026,"applicationBytes":133354605,"udpBytes":176688575,"udpDatagrams":297387,"singletonSelected":239538,"queueP99Ms":1.048575}
+    ]
+  },
+  "detailed": {
+    "r128High": {"compressionNanosecondsPerAttempt":1218.646,"proofP95MicrosecondsOff":11054,"proofP95MicrosecondsOn":9115,"outstandingHighWater":3},
+    "r300High": {"compressionNanosecondsPerAttempt":1309.418,"proofP95MicrosecondsOff":39133,"proofP95MicrosecondsOn":39796,"outstandingHighWater":5,"preparedValidationHashTicksOff":451376577,"preparedValidationHashTicksOn":451077028,"singletonCompressionTicksOn":125908444}
+  },
+  "semanticEquality": {
+    "allMatchedPairsConverged": true,
+    "semanticDigestEqual": true,
+    "semanticPublicationsEqual": true,
+    "proofEntriesEqual": true,
+    "capacityDrops": 0,
+    "physicalSendFailures": 0
+  },
+  "focusedTests": {
+    "replicationTests": 172,
+    "standalone120BoundaryBytes": 1372,
+    "oneEntry129BoundaryBytes": 1374,
+    "selected148BoundaryBytes": 361,
+    "poorData": {"standalone120Bytes":383,"canonical129Bytes":385,"compressed148Bytes":374,"selected":false},
+    "impairment": {"sent":33,"received":24,"duplicates":16,"proofs":8,"outstandingDebt":0},
+    "warmedManagedAllocationBytes": 0
+  },
+  "verification": {
+    "pf5R5Only": "pass",
+    "inheritedFocused": "pending closure commit",
+    "canonicalRelease": "pending closure commit"
+  },
+  "recommendedNextInvestigation": "compatible immutable recipient-body materialization/encoding sharing with recipient-local delivery and proof identity"
+}

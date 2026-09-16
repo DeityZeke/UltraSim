@@ -108,7 +108,10 @@ bounded background native-batch sender per shared UDP listener after complete ci
 construction; no Game, proof, cadence, AOI, compression, aggregation, or wire identity changes.
 PF5-R4 then removes packet-split candidate rebuilding, duplicate prepared-standalone
 validation/hash, and full-record sorting while preserving exact semantic and wire output. PF6
-external-human validation may resume on the verified integrated tree.
+external-human validation may resume on the verified integrated tree. PF5-R5 additionally hardens
+the internal prepared-hash contract and rejects default singleton 129/148 compression: the measured
+wire reduction is large under high change, but its recipient-local codec work raises the
+authority-critical p95 enough to retain canonical message 120.
 A post-F0.8 defensive UI correction
 also makes
 local shutdown independent from a saturated presentation queue, contains expected view-capacity
@@ -1816,6 +1819,7 @@ then close:
     PF5-R2-R2 HTTP shutdown + normalized scaling attribution            CLOSED
     PF5-R3 bounded background UDP egress                                CLOSED (outcome A)
     PF5-R4 recipient preparation / encoding flattening                  CLOSED (outcome A)
+    PF5-R5 singleton compression / prepared-hash hardening              CLOSED (outcome B)
     PF6 external human validation                                       READY TO RESUME
 ```
 

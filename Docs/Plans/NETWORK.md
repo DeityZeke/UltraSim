@@ -654,6 +654,25 @@ UDP matrix retains byte-for-byte/count-for-count output and the same 192 inline 
 first-tested 4 ms crossings. No persistent cache or warmed allocation is added. See the
 [PF5-R4 evidence](../../_Benchmarks/Baselines/concept-demo-pf5-r4-recipient-preparation-flattening-2026-09-15.md).
 
+### PF5-R5 singleton-compression experiment
+
+PF5-R5 separates prepared validation from the numeric digest: the internal prepared-only writers
+now admit every `ulong` hash value, including zero, while public writers and network decoders retain
+full hash validation. This changes no wire layout or hash algorithm.
+
+An explicit OFF-by-default policy can encode one already-prepared Delta as canonical message 120 or
+as independently decodable message 148 containing a one-entry canonical 129. It selects 148 only
+for canonical 129 bodies at least 384 bytes, when the complete 148 fits the peer and saves at least
+32 bytes versus the actual 120 fallback. Raw one-entry 129 is never selected, and queue admission
+remains a single transactional attempt.
+
+The experiment closes as **Outcome B**. High-change real-UDP application bytes fall 44–63% and UDP
+payload falls 36–57% across the useful R128–R350 rows, but recipient-local compression increases
+the server-owned p95 by 7–15% at several larger points. `CurrentBundled` therefore keeps singleton
+compression disabled; manifest v29, transport revision 2, selected multi-entry compression,
+cadence, AOI, aggregation, and `BackgroundPlatformBatch` remain unchanged. See the
+[PF5-R5 evidence](../../_Benchmarks/Baselines/concept-demo-pf5-r5-singleton-compression-2026-09-15.md).
+
 ### Snapshot / delta / absence
 
 Ordinary MTU-admissible deltas and absence use independent-unreliable WorldState.
