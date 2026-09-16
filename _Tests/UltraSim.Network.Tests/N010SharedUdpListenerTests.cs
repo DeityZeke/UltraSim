@@ -45,6 +45,7 @@ internal static class N010SharedUdpListenerTests
         Run("SharedUdpBackgroundModesPreserveSecureSessions", SharedUdpBackgroundModesPreserveSecureSessions);
         Run("SharedUdpBackgroundQueueRefusalIsBounded", SharedUdpBackgroundQueueRefusalIsBounded);
         Run("SharedUdpBackgroundQueueRefusalDoesNotAdvanceProtocolSend", SharedUdpBackgroundQueueRefusalDoesNotAdvanceProtocolSend);
+        Run("SharedUdpBackgroundTimingIsIndependentFromPhysicalAccounting", SharedUdpBackgroundTimingIsIndependentFromPhysicalAccounting);
         Run("SharedUdpBackgroundRetirementFencesQueuedPath", SharedUdpBackgroundRetirementFencesQueuedPath);
         Run("SharedUdpBackgroundRebindFencesOldQueuedPath", SharedUdpBackgroundRebindFencesOldQueuedPath);
         Run("SharedUdpBackgroundSecurityEpochRotationPreservesQueueOrder", SharedUdpBackgroundSecurityEpochRotationPreservesQueueOrder);
@@ -682,6 +683,14 @@ internal static class N010SharedUdpListenerTests
             "A stalled sender did not expose queue age.");
         True(full.ReservedBytes >= full.CapacityBytes && full.CapacityBytes == 512,
             "The fixed queue reservation was not reported explicitly.");
+        Equal(1UL, full.ProducerEnqueue.Count);
+        Equal(2UL, full.ProducerEnqueueComplete.Count);
+        Equal(1UL, full.ProducerEnqueueAcceptedComplete.Count);
+        Equal(1UL, full.ProducerEnqueueRefusedComplete.Count);
+        Equal(0UL, full.ProducerEnqueueFaultedComplete.Count);
+        True(full.ProducerEnqueueAcceptedComplete.TotalStopwatchTicks >=
+            full.ProducerEnqueue.TotalStopwatchTicks,
+            "The enclosing enqueue boundary omitted accepted-core diagnostics or the worker wake.");
         gate.Release.Set();
         Span<byte> received = stackalloc byte[8];
         Equal(1, ReceiveBounded(remote, received));
@@ -717,7 +726,9 @@ internal static class N010SharedUdpListenerTests
         session.Server.Emit(1_000);
         NetworkProtocolSnapshot refused = session.Server.GetSnapshot();
         Equal(before.SentPackets, refused.SentPackets,
-            "A refused listener enqueue consumed a protocol packet number.");
+            "A refused listener enqueue was reported as a successful protocol send.");
+        Equal(before.EncryptionInvocations + 1, refused.EncryptionInvocations,
+            "A refused listener enqueue did not consume a unique encryption nonce.");
         Equal(2, refused.ReliableQueued,
             "A refused listener enqueue consumed reliable application work.");
         True(host.GetSnapshot().Listener.BackgroundEgress.CapacityRefusals > 0);
@@ -725,6 +736,33 @@ internal static class N010SharedUdpListenerTests
         Drive(host, () => session.Client.ReceivedQueued == 2);
         AssertReceive(session.Client, stackalloc byte[] { 1 });
         AssertReceive(session.Client, stackalloc byte[] { 2 });
+    }
+
+    private static void SharedUdpBackgroundTimingIsIndependentFromPhysicalAccounting()
+    {
+        using var remote = CreateBoundSocket();
+        using var listener = new SharedUdpServerListener(
+            s_udp,
+            new SharedUdpProtocolLimits(1, 2, 16,
+                SharedUdpSocketIoMode.BackgroundScalar, 8,
+                BackgroundEgressTimingEnabled: false),
+            new IPEndPoint(IPAddress.Loopback, 0), null);
+        True(listener.TryRegister((IPEndPoint)remote.LocalEndPoint!, out SharedUdpServerEndpoint? endpoint));
+        Equal(DatagramSendStatus.Accepted,
+            listener.TrySend(endpoint!.Slot, stackalloc byte[] { 6, 4 }));
+        Span<byte> received = stackalloc byte[8];
+        Equal(2, ReceiveBounded(remote, received));
+        SpinUntil(() => listener.GetSnapshot().BackgroundEgress.CurrentDatagrams == 0);
+        SharedUdpBackgroundEgressSnapshot snapshot = listener.GetSnapshot().BackgroundEgress;
+        False(snapshot.TimingEnabled);
+        Equal(1UL, snapshot.AcceptedDatagrams);
+        Equal(2UL, snapshot.AcceptedBytes);
+        Equal(1UL, snapshot.PhysicallySentDatagrams);
+        Equal(2UL, snapshot.PhysicallySentBytes);
+        Equal(0UL, snapshot.ProducerEnqueue.Count);
+        Equal(0UL, snapshot.ProducerEnqueueComplete.Count);
+        Equal(0UL, snapshot.QueueResidence.Count);
+        endpoint.Dispose();
     }
 
     private static void SharedUdpBackgroundRetirementFencesQueuedPath()
@@ -944,6 +982,18 @@ internal static class N010SharedUdpListenerTests
         }
         True(surfacedDuringService,
             "A failed background sender was not surfaced to ordinary listener service.");
+        bool surfacedDuringSend = false;
+        try
+        {
+            _ = listener.TrySend(endpoint!.Slot, stackalloc byte[] { 5 });
+        }
+        catch (InvalidOperationException exception) when (exception.Message == FaultingEgressHook.Message)
+        {
+            surfacedDuringSend = true;
+        }
+        True(surfacedDuringSend,
+            "A failed background sender was not surfaced to producer admission.");
+        Equal(1UL, listener.GetSnapshot().BackgroundEgress.ProducerEnqueueFaultedComplete.Count);
         bool preserved = false;
         try
         {

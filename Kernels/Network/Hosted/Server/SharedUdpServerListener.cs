@@ -761,7 +761,24 @@ internal sealed class SharedUdpServerListener : IDisposable
         }
         if (_backgroundEgress is not null && allowBatch)
         {
-            DatagramSendStatus status = _backgroundEgress.TryEnqueue(endpoint, datagram);
+            long completeStarted = _backgroundEgress.TimingEnabled
+                ? Stopwatch.GetTimestamp()
+                : 0;
+            DatagramSendStatus status;
+            try
+            {
+                status = _backgroundEgress.TryEnqueue(endpoint, datagram);
+            }
+            catch
+            {
+                if (_backgroundEgress.TimingEnabled)
+                    _backgroundEgress.RecordCompleteEnqueue(
+                        default, Stopwatch.GetTimestamp() - completeStarted, faulted: true);
+                throw;
+            }
+            if (_backgroundEgress.TimingEnabled)
+                _backgroundEgress.RecordCompleteEnqueue(
+                    status, Stopwatch.GetTimestamp() - completeStarted, faulted: false);
             if (status == DatagramSendStatus.CapacityExceeded)
                 _capacityDrops = SaturatingIncrement(_capacityDrops);
             return status;

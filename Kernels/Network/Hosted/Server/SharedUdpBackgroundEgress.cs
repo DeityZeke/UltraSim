@@ -48,7 +48,14 @@ public readonly record struct SharedUdpBackgroundEgressSnapshot(
     int DrainBatchP95,
     int MaximumBatch,
     int MaximumPhysicallySentDatagramBytes,
+    // Accepted-path queue mutation through acceptance accounting. This deliberately excludes
+    // the worker wake and this distribution's own recording work. ProducerEnqueueComplete owns
+    // the enclosing call boundary.
     NetworkTimingDistribution ProducerEnqueue,
+    NetworkTimingDistribution ProducerEnqueueComplete,
+    NetworkTimingDistribution ProducerEnqueueAcceptedComplete,
+    NetworkTimingDistribution ProducerEnqueueRefusedComplete,
+    NetworkTimingDistribution ProducerEnqueueFaultedComplete,
     NetworkTimingDistribution QueueResidence,
     ulong OldestQueuedStopwatchTicks,
     ulong PhysicalSendSystemCallStopwatchTicks,
@@ -92,6 +99,10 @@ internal sealed class SharedUdpBackgroundEgress : IDisposable
     private readonly long[] _enqueuedAt;
     private readonly long[] _delayBuckets = new long[64];
     private readonly long[] _enqueueBuckets = new long[64];
+    private readonly long[] _completeEnqueueBuckets = new long[64];
+    private readonly long[] _acceptedCompleteEnqueueBuckets = new long[64];
+    private readonly long[] _refusedCompleteEnqueueBuckets = new long[64];
+    private readonly long[] _faultedCompleteEnqueueBuckets = new long[64];
     private readonly long[] _batchHistogram;
     private readonly AutoResetEvent _wake = new(false);
     private readonly Thread _worker;
@@ -122,6 +133,18 @@ internal sealed class SharedUdpBackgroundEgress : IDisposable
     private long _enqueueCount;
     private long _enqueueTotal;
     private long _enqueueMaximum;
+    private long _completeEnqueueCount;
+    private long _completeEnqueueTotal;
+    private long _completeEnqueueMaximum;
+    private long _acceptedCompleteEnqueueCount;
+    private long _acceptedCompleteEnqueueTotal;
+    private long _acceptedCompleteEnqueueMaximum;
+    private long _refusedCompleteEnqueueCount;
+    private long _refusedCompleteEnqueueTotal;
+    private long _refusedCompleteEnqueueMaximum;
+    private long _faultedCompleteEnqueueCount;
+    private long _faultedCompleteEnqueueTotal;
+    private long _faultedCompleteEnqueueMaximum;
     private long _delayCount;
     private long _delayTotal;
     private long _delayMaximum;
@@ -175,12 +198,16 @@ internal sealed class SharedUdpBackgroundEgress : IDisposable
     }
 
     internal int CapacityDatagrams => _lengths.Length;
+    internal bool TimingEnabled => _timingEnabled;
     internal long CapacityBytes => checked((long)_lengths.Length * _maximumDatagramBytes);
     internal long ReservedBytes => checked(
         CapacityBytes +
         (long)_lengths.Length * (16 + sizeof(int) + IntPtr.Size + sizeof(int) + sizeof(long)) +
         (long)_batchHistogram.Length * sizeof(long) +
-        (long)(_delayBuckets.Length + _enqueueBuckets.Length) * sizeof(long));
+        (long)(_delayBuckets.Length + _enqueueBuckets.Length +
+            _completeEnqueueBuckets.Length + _acceptedCompleteEnqueueBuckets.Length +
+            _refusedCompleteEnqueueBuckets.Length + _faultedCompleteEnqueueBuckets.Length) *
+            sizeof(long));
 
     internal DatagramSendStatus TryEnqueue(
         SharedUdpServerEndpoint endpoint,
@@ -221,6 +248,40 @@ internal sealed class SharedUdpBackgroundEgress : IDisposable
                 ref _enqueueMaximum);
         if (count == 1) _wake.Set();
         return DatagramSendStatus.Accepted;
+    }
+
+    /// <summary>
+    /// Records an enclosing caller-owned measurement of the complete <see cref="TryEnqueue"/>
+    /// call. The interval includes fault inspection, refusal, accepted queue mutation, the
+    /// accepted-core diagnostic update, and the worker wake. It necessarily excludes this
+    /// colder distribution-recording call itself.
+    /// </summary>
+    internal void RecordCompleteEnqueue(
+        DatagramSendStatus status,
+        long elapsedTicks,
+        bool faulted)
+    {
+        if (!_timingEnabled) return;
+        RecordDistribution(elapsedTicks, _completeEnqueueBuckets,
+            ref _completeEnqueueCount, ref _completeEnqueueTotal,
+            ref _completeEnqueueMaximum);
+        if (faulted)
+        {
+            RecordDistribution(elapsedTicks, _faultedCompleteEnqueueBuckets,
+                ref _faultedCompleteEnqueueCount, ref _faultedCompleteEnqueueTotal,
+                ref _faultedCompleteEnqueueMaximum);
+            return;
+        }
+        if (status == DatagramSendStatus.Accepted)
+        {
+            RecordDistribution(elapsedTicks, _acceptedCompleteEnqueueBuckets,
+                ref _acceptedCompleteEnqueueCount, ref _acceptedCompleteEnqueueTotal,
+                ref _acceptedCompleteEnqueueMaximum);
+            return;
+        }
+        RecordDistribution(elapsedTicks, _refusedCompleteEnqueueBuckets,
+            ref _refusedCompleteEnqueueCount, ref _refusedCompleteEnqueueTotal,
+            ref _refusedCompleteEnqueueMaximum);
     }
 
     internal SharedUdpBackgroundEgressSnapshot GetSnapshot()
@@ -265,6 +326,18 @@ internal sealed class SharedUdpBackgroundEgress : IDisposable
             Volatile.Read(ref _maximumPhysicallySentDatagramBytes),
             SnapshotDistribution(
                 _enqueueBuckets, ref _enqueueCount, ref _enqueueTotal, ref _enqueueMaximum),
+            SnapshotDistribution(
+                _completeEnqueueBuckets, ref _completeEnqueueCount,
+                ref _completeEnqueueTotal, ref _completeEnqueueMaximum),
+            SnapshotDistribution(
+                _acceptedCompleteEnqueueBuckets, ref _acceptedCompleteEnqueueCount,
+                ref _acceptedCompleteEnqueueTotal, ref _acceptedCompleteEnqueueMaximum),
+            SnapshotDistribution(
+                _refusedCompleteEnqueueBuckets, ref _refusedCompleteEnqueueCount,
+                ref _refusedCompleteEnqueueTotal, ref _refusedCompleteEnqueueMaximum),
+            SnapshotDistribution(
+                _faultedCompleteEnqueueBuckets, ref _faultedCompleteEnqueueCount,
+                ref _faultedCompleteEnqueueTotal, ref _faultedCompleteEnqueueMaximum),
             SnapshotDistribution(
                 _delayBuckets, ref _delayCount, ref _delayTotal, ref _delayMaximum),
             oldest,
