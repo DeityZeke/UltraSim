@@ -106,6 +106,8 @@ public sealed class NetworkProtocolPeer : IDisposable
     private ulong _dataPacketsSent;
     private ulong _acknowledgementPacketsSent;
     private ulong _keepAlivePacketsSent;
+    private ulong _encryptionInvocations;
+    private ulong _encryptionPlaintextBytesAttempted;
     private ulong _dataUdpPayloadBytesSent;
     private ulong _dataPacketsReceived;
     private ulong _dataUdpPayloadBytesReceived;
@@ -801,6 +803,15 @@ public sealed class NetworkProtocolPeer : IDisposable
             status is DatagramSendStatus.Accepted or DatagramSendStatus.DroppedByImpairment;
     }
 
+    internal void SetNextSendPacketNumberForTesting(ulong value)
+    {
+        EnsureOperational();
+        if (_sentPacketsCount != 0 || _inFlight != 0)
+            throw new InvalidOperationException(
+                "A packet-number test position may only be installed before this peer sends.");
+        _nextPacketNumber = value;
+    }
+
     internal int ProcessInbound(ulong step)
     {
         EnsureOperational();
@@ -1009,6 +1020,7 @@ public sealed class NetworkProtocolPeer : IDisposable
             _sentPacketsCount, _receivedPacketsCount, _authenticationFailures, _replayRejections,
             _retransmissions, _acknowledgements, _sequencedDrops, _capacityDrops,
             _dataPacketsSent, _acknowledgementPacketsSent, _keepAlivePacketsSent,
+            _encryptionInvocations, _encryptionPlaintextBytesAttempted,
             _encryptedPlaintextBytes, _decryptedPlaintextBytes, _reliableFragmentsSent,
             _reliableRetransmittedWireBytes,
             _reliableCount, _reliableQueuedHighWater,
@@ -1699,6 +1711,11 @@ public sealed class NetworkProtocolPeer : IDisposable
             return false;
         }
         packet = new PacketNumber(_nextPacketNumber);
+        // AES-GCM requires a nonce to be unique for every encryption invocation under
+        // one key. Packet admission is a later, independently transactional concern:
+        // once this number has been assigned to an encryption attempt it must never be
+        // made available again because encryption, enqueue, or physical delivery failed.
+        _nextPacketNumber++;
         long secureStarted = StartStageTiming();
         var header = new NetworkSecureDatagramHeader(
             _manifest.Version, _connection, _sendCryptography.Epoch, packet, kind,
@@ -1709,6 +1726,9 @@ public sealed class NetworkProtocolPeer : IDisposable
         Span<byte> ciphertext = _wireScratch.AsSpan(NetworkSecureDatagramFraming.HeaderBytes, plaintext.Length);
         Span<byte> tag = _wireScratch.AsSpan(NetworkSecureDatagramFraming.HeaderBytes + plaintext.Length,
             NetworkSecureDatagramFraming.TagBytes);
+        _encryptionInvocations = SaturatingIncrement(_encryptionInvocations);
+        _encryptionPlaintextBytesAttempted = SaturatingAdd(
+            _encryptionPlaintextBytesAttempted, checked((ulong)plaintext.Length));
         _sendCryptography.Encrypt(packet, plaintext, ciphertext, tag,
             _wireScratch.AsSpan(0, NetworkSecureDatagramFraming.HeaderBytes));
         RecordStageTiming(ref _secureSendTicks, secureStarted);
@@ -1720,7 +1740,6 @@ public sealed class NetworkProtocolPeer : IDisposable
         {
             ulong wireBytes = checked((ulong)(NetworkSecureDatagramFraming.HeaderBytes +
                 plaintext.Length + NetworkSecureDatagramFraming.TagBytes));
-            _nextPacketNumber++;
             _sentPacketsCount = SaturatingIncrement(_sentPacketsCount);
             _encryptedPlaintextBytes = SaturatingAdd(
                 _encryptedPlaintextBytes, checked((ulong)plaintext.Length));

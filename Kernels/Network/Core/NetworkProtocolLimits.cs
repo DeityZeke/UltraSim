@@ -657,6 +657,8 @@ public readonly record struct NetworkProtocolSnapshot(
     ulong DataPacketsSent,
     ulong AcknowledgementPacketsSent,
     ulong KeepAlivePacketsSent,
+    ulong EncryptionInvocations,
+    ulong EncryptionPlaintextBytesAttempted,
     ulong EncryptedPlaintextBytes,
     ulong DecryptedPlaintextBytes,
     ulong ReliableFragmentsSent,

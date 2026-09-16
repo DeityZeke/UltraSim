@@ -47,6 +47,10 @@ internal static class N03ProtocolTests
         Run("ReplayAndAuthenticationRejectBeforePublication", ReplayAndAuthenticationRejectBeforePublication);
         Run("AuthenticatedReplayIsIndependentFromDeliveryBackpressure", AuthenticatedReplayIsIndependentFromDeliveryBackpressure);
         Run("AuthenticatedRegionsRejectWithoutStatePublication", AuthenticatedRegionsRejectWithoutStatePublication);
+        Run("EveryEncryptionAttemptConsumesItsPacketNonce", EveryEncryptionAttemptConsumesItsPacketNonce);
+        Run("RefusedAcknowledgementConsumesItsPacketNonce", RefusedAcknowledgementConsumesItsPacketNonce);
+        Run("ReliableDeliverySurvivesNonceGapBeyondAckWindow", ReliableDeliverySurvivesNonceGapBeyondAckWindow);
+        Run("PacketNonceExhaustionNeverWraps", PacketNonceExhaustionNeverWraps);
         Run("ReceiveBackpressureRetainsReliableMessage", ReceiveBackpressureRetainsReliableMessage);
         Run("SecurityEpochRotationIsAuthenticatedAndFailClosed", SecurityEpochRotationIsAuthenticatedAndFailClosed);
         Run("DelayedAcknowledgementCannotCrossSendingSecurityEpoch", DelayedAcknowledgementCannotCrossSendingSecurityEpoch);
@@ -1134,6 +1138,148 @@ internal static class N03ProtocolTests
         Equal(epoch, accepted.ReceiveSecurityEpoch);
     }
 
+    private static void EveryEncryptionAttemptConsumesItsPacketNonce()
+    {
+        var link = new DeterministicDatagramLink(s_datagrams);
+        using var endpoint = new ObservedSendEndpoint(
+            link.A,
+            DatagramSendStatus.CapacityExceeded,
+            DatagramSendStatus.Accepted,
+            DatagramSendStatus.Accepted);
+        byte[] masterSecret = Enumerable.Range(1, 32).Select(static value => (byte)value).ToArray();
+        var connection = new ConnectionId(19, 2);
+        var epoch = new SecurityEpoch(7);
+        using var sender = new NetworkProtocolPeer(
+            endpoint, s_manifest, s_limits, s_datagrams, connection, epoch, masterSecret,
+            sendsClientToServer: true);
+        using var receiver = new NetworkProtocolPeer(
+            link.B, s_manifest, s_limits, s_datagrams, connection, epoch, masterSecret,
+            sendsClientToServer: false);
+        CryptographicOperations.ZeroMemory(masterSecret);
+
+        Equal(NetworkQueueStatus.Accepted,
+            sender.TryQueue(Id(NetworkLane.OwnerState), stackalloc byte[] { 1 }));
+        sender.Emit(0); // Encrypt packet zero; endpoint admission refuses it.
+        True(sender.GetSnapshot().RetainedPayloads.UnreliableStreamBytes > 0);
+        Equal(NetworkQueueStatus.Accepted,
+            sender.TryQueue(Id(NetworkLane.OwnerState), stackalloc byte[] { 2, 3 }));
+        True(sender.TryEmitKeepAlive()); // Interleave transport work after the refusal.
+        sender.Emit(1);
+
+        Equal(3, endpoint.Headers.Count);
+        Equal(0UL, endpoint.Headers[0].PacketNumber.Value);
+        Equal(NetworkSecureDatagramKind.Data, endpoint.Headers[0].Kind);
+        Equal(1UL, endpoint.Headers[1].PacketNumber.Value);
+        Equal(NetworkSecureDatagramKind.KeepAlive, endpoint.Headers[1].Kind);
+        Equal(2UL, endpoint.Headers[2].PacketNumber.Value);
+        Equal(NetworkSecureDatagramKind.Data, endpoint.Headers[2].Kind);
+        NetworkProtocolSnapshot snapshot = sender.GetSnapshot();
+        Equal(3UL, snapshot.EncryptionInvocations);
+        Equal(2UL, snapshot.SentPackets);
+        True(snapshot.EncryptionPlaintextBytesAttempted > snapshot.EncryptedPlaintextBytes);
+        Equal(0, snapshot.RetainedPayloads.UnreliableStreamBytes);
+
+        receiver.ProcessInbound(1);
+        AssertReceive(receiver, NetworkLane.OwnerState, stackalloc byte[] { 2, 3 });
+    }
+
+    private static void RefusedAcknowledgementConsumesItsPacketNonce()
+    {
+        var link = new DeterministicDatagramLink(s_datagrams);
+        using var acknowledgingEndpoint = new ObservedSendEndpoint(
+            link.B,
+            DatagramSendStatus.CapacityExceeded,
+            DatagramSendStatus.Accepted);
+        byte[] masterSecret = Enumerable.Range(1, 32).Select(static value => (byte)(value * 5)).ToArray();
+        var connection = new ConnectionId(20, 3);
+        var epoch = new SecurityEpoch(8);
+        using var sender = new NetworkProtocolPeer(
+            link.A, s_manifest, s_limits, s_datagrams, connection, epoch, masterSecret,
+            sendsClientToServer: true);
+        using var receiver = new NetworkProtocolPeer(
+            acknowledgingEndpoint, s_manifest, s_limits, s_datagrams, connection, epoch, masterSecret,
+            sendsClientToServer: false);
+        CryptographicOperations.ZeroMemory(masterSecret);
+
+        Equal(NetworkQueueStatus.Accepted,
+            sender.TryQueue(Id(NetworkLane.Control), stackalloc byte[] { 9 }));
+        sender.Emit(0);
+        receiver.ProcessInbound(0);
+        AssertReceive(receiver, NetworkLane.Control, stackalloc byte[] { 9 });
+        receiver.Emit(0);
+        True(receiver.GetSnapshot().AcknowledgementPending);
+        receiver.Emit(1);
+
+        Equal(2, acknowledgingEndpoint.Headers.Count);
+        Equal(NetworkSecureDatagramKind.Acknowledgement, acknowledgingEndpoint.Headers[0].Kind);
+        Equal(NetworkSecureDatagramKind.Acknowledgement, acknowledgingEndpoint.Headers[1].Kind);
+        Equal(0UL, acknowledgingEndpoint.Headers[0].PacketNumber.Value);
+        Equal(1UL, acknowledgingEndpoint.Headers[1].PacketNumber.Value);
+        Equal(2UL, receiver.GetSnapshot().EncryptionInvocations);
+        False(receiver.GetSnapshot().AcknowledgementPending);
+        sender.ProcessInbound(1);
+        Equal(0, sender.GetSnapshot().ReliableQueued);
+    }
+
+    private static void ReliableDeliverySurvivesNonceGapBeyondAckWindow()
+    {
+        var link = new DeterministicDatagramLink(s_datagrams);
+        DatagramSendStatus[] refusals = Enumerable.Repeat(
+            DatagramSendStatus.CapacityExceeded, 70).Append(DatagramSendStatus.Accepted).ToArray();
+        using var endpoint = new ObservedSendEndpoint(link.A, refusals);
+        byte[] masterSecret = Enumerable.Range(1, 32).Select(static value => (byte)(value * 7)).ToArray();
+        var connection = new ConnectionId(21, 4);
+        var epoch = new SecurityEpoch(9);
+        using var sender = new NetworkProtocolPeer(
+            endpoint, s_manifest, s_limits, s_datagrams, connection, epoch, masterSecret,
+            sendsClientToServer: true);
+        using var receiver = new NetworkProtocolPeer(
+            link.B, s_manifest, s_limits, s_datagrams, connection, epoch, masterSecret,
+            sendsClientToServer: false);
+        CryptographicOperations.ZeroMemory(masterSecret);
+
+        Equal(NetworkQueueStatus.Accepted,
+            sender.TryQueue(Id(NetworkLane.Control), stackalloc byte[] { 4, 2 }));
+        for (ulong step = 0; step <= 70; step++) sender.Emit(step);
+        Equal(71, endpoint.Headers.Count);
+        for (int index = 0; index < endpoint.Headers.Count; index++)
+            Equal(checked((ulong)index), endpoint.Headers[index].PacketNumber.Value);
+        Equal(1, sender.GetSnapshot().ReliableQueued);
+        Equal(1, sender.GetSnapshot().InFlightPackets);
+        receiver.ProcessInbound(70);
+        AssertReceive(receiver, NetworkLane.Control, stackalloc byte[] { 4, 2 });
+        receiver.Emit(70);
+        sender.ProcessInbound(70);
+        Equal(0, sender.GetSnapshot().ReliableQueued);
+        Equal(71UL, sender.GetSnapshot().EncryptionInvocations);
+        Equal(1UL, sender.GetSnapshot().SentPackets);
+    }
+
+    private static void PacketNonceExhaustionNeverWraps()
+    {
+        var link = new DeterministicDatagramLink(s_datagrams);
+        using var endpoint = new ObservedSendEndpoint(
+            link.A, DatagramSendStatus.CapacityExceeded);
+        byte[] masterSecret = Enumerable.Range(1, 32).Select(
+            static value => unchecked((byte)(value * 11))).ToArray();
+        using var sender = new NetworkProtocolPeer(
+            endpoint, s_manifest, s_limits, s_datagrams, new ConnectionId(22, 5),
+            new SecurityEpoch(10), masterSecret, sendsClientToServer: true);
+        CryptographicOperations.ZeroMemory(masterSecret);
+        sender.SetNextSendPacketNumberForTesting(ulong.MaxValue - 1);
+        Equal(NetworkQueueStatus.Accepted,
+            sender.TryQueue(Id(NetworkLane.OwnerState), stackalloc byte[] { 8 }));
+
+        sender.Emit(0);
+        sender.Emit(1);
+        False(sender.TryEmitKeepAlive());
+        Equal(1, endpoint.Headers.Count);
+        Equal(ulong.MaxValue - 1, endpoint.Headers[0].PacketNumber.Value);
+        Equal(1UL, sender.GetSnapshot().EncryptionInvocations);
+        Equal(0UL, sender.GetSnapshot().SentPackets);
+        True(sender.GetSnapshot().RetainedPayloads.UnreliableStreamBytes > 0);
+    }
+
     private static byte[] CreateAuthenticatedDatagram(
         ReadOnlySpan<byte> masterSecret,
         ConnectionId connection,
@@ -1806,6 +1952,43 @@ internal static class N03ProtocolTests
             Sender.Dispose();
             Receiver.Dispose();
             CryptographicOperations.ZeroMemory(_masterSecret);
+        }
+    }
+
+    private sealed class ObservedSendEndpoint : INetworkDatagramEndpoint, IDisposable
+    {
+        private readonly INetworkDatagramEndpoint _inner;
+        private readonly DatagramSendStatus[] _statuses;
+        private int _attempt;
+
+        internal ObservedSendEndpoint(
+            INetworkDatagramEndpoint inner,
+            params DatagramSendStatus[] statuses)
+        {
+            _inner = inner;
+            _statuses = statuses;
+        }
+
+        internal List<NetworkSecureDatagramHeader> Headers { get; } = [];
+
+        public DatagramSendStatus TrySend(ReadOnlySpan<byte> datagram)
+        {
+            True(NetworkSecureDatagramFraming.TryReadExact(
+                datagram, out NetworkSecureDatagramHeader header, out _, out _, out _));
+            Headers.Add(header);
+            DatagramSendStatus status = _attempt < _statuses.Length
+                ? _statuses[_attempt++]
+                : DatagramSendStatus.Accepted;
+            return status == DatagramSendStatus.Accepted
+                ? _inner.TrySend(datagram)
+                : status;
+        }
+
+        public bool TryReceive(Span<byte> destination, out int length) =>
+            _inner.TryReceive(destination, out length);
+
+        public void Dispose()
+        {
         }
     }
 }
