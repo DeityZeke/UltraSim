@@ -4490,7 +4490,11 @@ internal readonly record struct P03ChunkCpuAttribution(
     ulong RecipientProofCommitCalls,
     ulong RecipientProofCommitTicks,
     ulong ProofRetirementCalls,
-    ulong ProofRetirementTicks);
+    ulong ProofRetirementTicks,
+    ulong ProofObsoleteEntryChecks,
+    ulong ProofObsoleteSameChunkChecks,
+    ulong DetailedSlabCopies,
+    ulong DetailedSlabClears);
 
 internal sealed class P03ChunkCpuAttributionAccumulator
 {
@@ -4558,6 +4562,10 @@ internal sealed class P03ChunkCpuAttributionAccumulator
     internal ulong RecipientProofCommitTicks;
     internal ulong ProofRetirementCalls;
     internal ulong ProofRetirementTicks;
+    internal ulong ProofObsoleteEntryChecks;
+    internal ulong ProofObsoleteSameChunkChecks;
+    internal ulong DetailedSlabCopies;
+    internal ulong DetailedSlabClears;
 
     internal void Add(in RemoteChunkCpuAttributionSnapshot value)
     {
@@ -4620,6 +4628,10 @@ internal sealed class P03ChunkCpuAttributionAccumulator
         RecipientProofCommitTicks += value.RecipientRead.AppliedProofCommitTicks;
         ProofRetirementCalls += value.ProofRetirementCalls;
         ProofRetirementTicks += value.ProofRetirementTicks;
+        ProofObsoleteEntryChecks += value.ProofObsoleteEntryChecks;
+        ProofObsoleteSameChunkChecks += value.ProofObsoleteSameChunkChecks;
+        DetailedSlabCopies += value.DetailedSlabCopies;
+        DetailedSlabClears += value.DetailedSlabClears;
     }
 
     internal P03ChunkCpuAttribution Capture() => new(
@@ -4650,7 +4662,9 @@ internal sealed class P03ChunkCpuAttributionAccumulator
         ProofValidationCalls, ProofValidationTicks,
         CursorAdvancementCalls, CursorAdvancementTicks,
         RecipientProofCommitCalls, RecipientProofCommitTicks,
-        ProofRetirementCalls, ProofRetirementTicks);
+        ProofRetirementCalls, ProofRetirementTicks,
+        ProofObsoleteEntryChecks, ProofObsoleteSameChunkChecks,
+        DetailedSlabCopies, DetailedSlabClears);
 }
 
 internal readonly record struct P03Metric(

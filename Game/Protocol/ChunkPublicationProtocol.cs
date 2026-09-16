@@ -913,6 +913,102 @@ public static partial class UltraSimGameProtocol
             out written);
     }
 
+    /// <summary>
+    /// Writes a prepared Delta header followed by canonical immutable record bytes produced by
+    /// <see cref="TryWritePreparedDeltaRecordBytes"/>. Recipient/session/delivery lineage remains
+    /// independently encoded in the header; this seam is unavailable to decoded network input.
+    /// </summary>
+    internal static bool TryWritePreparedChunkDeltaBytes(
+        Span<byte> destination,
+        ulong applicationSessionEpoch,
+        ulong publicationEpoch,
+        ulong deliveryId,
+        ulong spatialSpaceId,
+        int chunkX,
+        int chunkZ,
+        ulong baseRevision,
+        ulong currentRevision,
+        ulong historyFloor,
+        ulong contentHash,
+        ReadOnlySpan<byte> encodedRecords,
+        out int written)
+    {
+        written = 0;
+        if (!ValidLineage(applicationSessionEpoch, publicationEpoch, deliveryId, spatialSpaceId) ||
+            baseRevision == 0 || currentRevision <= baseRevision || historyFloor == 0 ||
+            historyFloor > baseRevision || encodedRecords.IsEmpty ||
+            encodedRecords.Length % RemoteChunkDeltaRecord.EncodedSize != 0)
+            return false;
+        int recordCount = encodedRecords.Length / RemoteChunkDeltaRecord.EncodedSize;
+        if (recordCount <= 0 || recordCount > MaximumChunkPublicationRecords)
+            return false;
+        int required = GetChunkDeltaEncodedBytes(recordCount);
+        if (destination.Length < required || encodedRecords.Overlaps(destination)) return false;
+        var header = new RemoteChunkDeltaHeader
+        {
+            ApplicationSessionEpoch = applicationSessionEpoch,
+            PublicationEpoch = publicationEpoch,
+            DeliveryId = deliveryId,
+            SpatialSpaceId = spatialSpaceId,
+            ChunkX = chunkX,
+            ChunkZ = chunkZ,
+            SchemaFingerprint = ChunkPublicationSchemaFingerprint,
+            BaseRevision = baseRevision,
+            CurrentRevision = currentRevision,
+            HistoryFloor = historyFloor,
+            ContentHash = contentHash,
+            RecordCount = checked((ushort)recordCount),
+        };
+        var writer = new NetworkPacketWriter(destination[..required]);
+        if (!RemoteChunkDeltaHeaderCodec.TryWrite(ref writer, in header) ||
+            !writer.TryWriteBytes(encodedRecords))
+            return false;
+        if (writer.WrittenCount != required)
+            throw new InvalidOperationException("Prepared chunk-delta byte accounting diverged.");
+        written = required;
+        return true;
+    }
+
+    internal static bool TryWritePreparedDeltaRecordBytes(
+        ReadOnlySpan<RemoteChunkDeltaRecord> records,
+        Span<byte> destination,
+        out int written)
+    {
+        written = 0;
+        if (records.IsEmpty || records.Length > MaximumChunkPublicationRecords) return false;
+        int required = checked(records.Length * RemoteChunkDeltaRecord.EncodedSize);
+        if (destination.Length < required || MemoryMarshal.AsBytes(records).Overlaps(destination))
+            return false;
+        var writer = new NetworkPacketWriter(destination[..required]);
+        for (int index = 0; index < records.Length; index++)
+            WriteDeltaRecord(ref writer, records[index]);
+        if (writer.WrittenCount != required)
+            throw new InvalidOperationException("Prepared Delta-record byte accounting diverged.");
+        written = required;
+        return true;
+    }
+
+    internal static bool TryReadPreparedDeltaRecordBytes(
+        ReadOnlySpan<byte> source,
+        Span<RemoteChunkDeltaRecord> records,
+        out int count)
+    {
+        count = 0;
+        if (source.IsEmpty || source.Length % RemoteChunkDeltaRecord.EncodedSize != 0)
+            return false;
+        int requiredRecords = source.Length / RemoteChunkDeltaRecord.EncodedSize;
+        if (requiredRecords <= 0 || requiredRecords > MaximumChunkPublicationRecords ||
+            records.Length < requiredRecords)
+            return false;
+        var reader = new NetworkPacketReader(source);
+        for (int index = 0; index < requiredRecords; index++)
+            if (!TryReadDeltaRecord(ref reader, out records[index]))
+                return false;
+        if (!reader.IsComplete) return false;
+        count = requiredRecords;
+        return true;
+    }
+
     private static bool TryWriteChunkDeltaValidated(
         Span<byte> destination,
         ulong applicationSessionEpoch,
@@ -1080,6 +1176,105 @@ public static partial class UltraSimGameProtocol
         => TryWriteDirtyChunkBundleCore(
             destination, applicationSessionEpoch, publicationEpoch, bundleId,
             entries, [], deltaRecords, trustedPreparedDeltaEntries: true, out written);
+
+    /// <summary>
+    /// Writes prepared Delta/Absence entries using canonical immutable record sections. Entry
+    /// headers and delivery identities remain recipient-local; untrusted readers retain their full
+    /// canonical validation and hash checks.
+    /// </summary>
+    internal static bool TryWritePreparedDirtyChunkBundleBytes(
+        Span<byte> destination,
+        ulong applicationSessionEpoch,
+        ulong publicationEpoch,
+        ulong bundleId,
+        ReadOnlySpan<RemoteDirtyChunkBundleEntry> entries,
+        ReadOnlySpan<byte> encodedDeltaRecords,
+        out int written)
+    {
+        written = 0;
+        if (applicationSessionEpoch == 0 || publicationEpoch == 0 || bundleId == 0 ||
+            entries.IsEmpty || entries.Length > MaximumDirtyChunkBundleEntries ||
+            encodedDeltaRecords.Length % RemoteChunkDeltaRecord.EncodedSize != 0 ||
+            MemoryMarshal.AsBytes(entries).Overlaps(destination) ||
+            encodedDeltaRecords.Overlaps(destination))
+            return false;
+        int totalDeltaRecords = encodedDeltaRecords.Length / RemoteChunkDeltaRecord.EncodedSize;
+        int required;
+        try { required = GetDirtyChunkBundleEncodedBytes(entries); }
+        catch (ArgumentOutOfRangeException) { return false; }
+        if (required > MaximumMessageBytes || destination.Length < required) return false;
+
+        int expectedDeltas = 0;
+        for (int index = 0; index < entries.Length; index++)
+        {
+            ref readonly RemoteDirtyChunkBundleEntry entry = ref entries[index];
+            if (!ValidPreparedDirtyChunkBundleEntryBytes(
+                    in entry, totalDeltaRecords, expectedDeltas))
+                return false;
+            for (int prior = 0; prior < index; prior++)
+                if (entries[prior].DeliveryId == entry.DeliveryId ||
+                    entries[prior].SpatialSpaceId == entry.SpatialSpaceId &&
+                    entries[prior].ChunkX == entry.ChunkX && entries[prior].ChunkZ == entry.ChunkZ)
+                    return false;
+            if (entry.Kind == RemoteChunkPublicationKind.Delta)
+                expectedDeltas += entry.RecordCount;
+        }
+        if (expectedDeltas != totalDeltaRecords) return false;
+
+        var writer = new NetworkPacketWriter(destination[..required]);
+        var header = new RemoteDirtyChunkBundleHeader
+        {
+            ApplicationSessionEpoch = applicationSessionEpoch,
+            PublicationEpoch = publicationEpoch,
+            BundleId = bundleId,
+            EntryCount = checked((byte)entries.Length),
+        };
+        if (!RemoteDirtyChunkBundleHeaderCodec.TryWrite(ref writer, in header)) return false;
+        for (int index = 0; index < entries.Length; index++)
+        {
+            ref readonly RemoteDirtyChunkBundleEntry entry = ref entries[index];
+            if (!writer.TryWriteByte((byte)entry.Kind) ||
+                !writer.TryWriteUInt64(entry.DeliveryId) ||
+                !writer.TryWriteUInt64(entry.SpatialSpaceId) ||
+                !writer.TryWriteInt32(entry.ChunkX) || !writer.TryWriteInt32(entry.ChunkZ))
+                return false;
+            if (entry.Kind == RemoteChunkPublicationKind.Delta)
+            {
+                if (!writer.TryWriteUInt64(entry.BaseRevision) ||
+                    !writer.TryWriteUInt64(entry.CurrentRevision) ||
+                    !writer.TryWriteUInt64(entry.HistoryFloor) ||
+                    !writer.TryWriteUInt64(entry.ContentHash) ||
+                    !writer.TryWriteUInt16(entry.RecordCount))
+                    return false;
+                int byteOffset = checked(entry.RecordOffset * RemoteChunkDeltaRecord.EncodedSize);
+                int byteCount = checked(entry.RecordCount * RemoteChunkDeltaRecord.EncodedSize);
+                if (!writer.TryWriteBytes(encodedDeltaRecords.Slice(byteOffset, byteCount)))
+                    return false;
+            }
+        }
+        if (writer.WrittenCount != required)
+            throw new InvalidOperationException("Prepared dirty-chunk byte accounting diverged.");
+        written = required;
+        return true;
+    }
+
+    private static bool ValidPreparedDirtyChunkBundleEntryBytes(
+        in RemoteDirtyChunkBundleEntry entry,
+        int totalDeltaRecords,
+        int expectedDeltaOffset)
+    {
+        if (entry.DeliveryId == 0 || entry.SpatialSpaceId == 0 ||
+            entry.RecordCount > MaximumChunkPublicationRecords)
+            return false;
+        if (entry.Kind == RemoteChunkPublicationKind.Delta)
+            return entry.RecordOffset == expectedDeltaOffset && entry.BaseRevision != 0 &&
+                entry.CurrentRevision > entry.BaseRevision && entry.HistoryFloor != 0 &&
+                entry.HistoryFloor <= entry.BaseRevision && entry.RecordCount != 0 &&
+                entry.RecordOffset + entry.RecordCount <= totalDeltaRecords;
+        return entry.Kind == RemoteChunkPublicationKind.Absence && entry.RecordOffset == 0 &&
+            entry.RecordCount == 0 && entry.BaseRevision == 0 && entry.CurrentRevision == 0 &&
+            entry.HistoryFloor == 0 && entry.ContentHash == 0;
+    }
 
     private static bool TryWriteDirtyChunkBundleCore(
         Span<byte> destination,

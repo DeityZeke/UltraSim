@@ -76,6 +76,9 @@ public readonly record struct RemoteChunkDeltaBodyStoreSnapshot(
     ulong HashRecordsAvoided,
     ulong BodyCopies,
     ulong BodyCopyRecords,
+    ulong EncodedBodyBuilds,
+    ulong EncodedBodyCopies,
+    ulong EncodedBodyBytesCopied,
     ulong LookupTicks,
     ulong FillTicks,
     ulong CopyTicks,
@@ -86,6 +89,7 @@ public readonly record struct RemoteChunkDeltaBodyStoreSnapshot(
     int LookupProbeHighWater,
     long MetadataBytes,
     long RecordStorageBytes,
+    long EncodedRecordStorageBytes,
     long DiagnosticBytes,
     long ReservedBytes);
 
@@ -107,7 +111,7 @@ public sealed class RemoteChunkDeltaBodyStore
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private readonly RemoteChunkDeltaBodyStoreLimits _limits;
     private readonly RemoteChunkDeltaBodyIdentity[] _identities;
-    private readonly RemoteChunkDeltaRecord[] _records;
+    private readonly byte[] _encodedRecords;
     private readonly ulong[] _contentHashes;
     private readonly ulong[] _requestsPerBody;
     private readonly ushort[] _recordCounts;
@@ -135,6 +139,9 @@ public sealed class RemoteChunkDeltaBodyStore
     private ulong _hashRecordsAvoided;
     private ulong _bodyCopies;
     private ulong _bodyCopyRecords;
+    private ulong _encodedBodyBuilds;
+    private ulong _encodedBodyCopies;
+    private ulong _encodedBodyBytesCopied;
     private ulong _lookupTicks;
     private ulong _fillTicks;
     private ulong _copyTicks;
@@ -154,7 +161,7 @@ public sealed class RemoteChunkDeltaBodyStore
         {
             _limits = default;
             _identities = [];
-            _records = [];
+            _encodedRecords = [];
             _contentHashes = [];
             _requestsPerBody = [];
             _recordCounts = [];
@@ -164,8 +171,9 @@ public sealed class RemoteChunkDeltaBodyStore
         }
         _limits = limits;
         _identities = new RemoteChunkDeltaBodyIdentity[limits.BodyCapacity];
-        _records = new RemoteChunkDeltaRecord[
-            checked(limits.BodyCapacity * limits.MaximumRecordsPerBody)];
+        _encodedRecords = new byte[checked(
+            limits.BodyCapacity * limits.MaximumRecordsPerBody *
+            RemoteChunkDeltaRecord.EncodedSize)];
         _contentHashes = new ulong[limits.BodyCapacity];
         _requestsPerBody = new ulong[limits.BodyCapacity];
         _recordCounts = new ushort[limits.BodyCapacity];
@@ -192,6 +200,7 @@ public sealed class RemoteChunkDeltaBodyStore
         _distinctBodyIdentities = 0;
         _materializationsAvoided = _validationHashCallsAvoided = _hashRecordsAvoided = 0;
         _bodyCopies = _bodyCopyRecords = 0;
+        _encodedBodyBuilds = _encodedBodyCopies = _encodedBodyBytesCopied = 0;
         _lookupTicks = _fillTicks = _copyTicks = 0;
         _lookupProbeHighWater = 0;
         Array.Clear(_requestsPerBody);
@@ -200,20 +209,45 @@ public sealed class RemoteChunkDeltaBodyStore
     internal bool TryCopy(
         ChunkPublicationStore source,
         in RemoteChunkDeltaBodyIdentity identity,
-        int expectedRecordCount,
         Span<RemoteChunkDeltaRecord> destination,
+        out int recordCount,
+        out ulong contentHash)
+    {
+        int maximumBytes = checked(
+            _limits.MaximumRecordsPerBody * RemoteChunkDeltaRecord.EncodedSize);
+        Span<byte> encoded = maximumBytes <= 4_096
+            ? stackalloc byte[maximumBytes]
+            : new byte[maximumBytes];
+        if (!TryCopyEncoded(
+                source, in identity, encoded, out recordCount,
+                out int encodedByteCount, out contentHash))
+            return false;
+        if (destination.Length < recordCount ||
+            !UltraSimGameProtocol.TryReadPreparedDeltaRecordBytes(
+                encoded[..encodedByteCount], destination, out int decoded) ||
+            decoded != recordCount)
+            return false;
+        return true;
+    }
+
+    internal bool TryCopyEncoded(
+        ChunkPublicationStore source,
+        in RemoteChunkDeltaBodyIdentity identity,
+        Span<byte> encodedDestination,
+        out int recordCount,
+        out int encodedByteCount,
         out ulong contentHash)
     {
         EnsureOwner();
+        recordCount = 0;
+        encodedByteCount = 0;
         contentHash = 0;
         if (_mode != RemoteChunkDeltaBodySharingMode.Enabled ||
             !ReferenceEquals(_source, source) || !identity.IsValid ||
             identity.SourceEpoch != source.Epoch ||
-            expectedRecordCount <= 0 || expectedRecordCount > _limits.MaximumRecordsPerBody ||
-            destination.Length < expectedRecordCount)
+            encodedDestination.IsEmpty)
             return false;
         SaturatingIncrement(ref _bodyRequests);
-        SaturatingAdd(ref _bodyRecordsRequested, checked((ulong)expectedRecordCount));
         long lookupStarted = Timestamp();
         int slot = Find(identity, out int probes);
         Elapsed(ref _lookupTicks, lookupStarted);
@@ -223,33 +257,74 @@ public sealed class RemoteChunkDeltaBodyStore
             SaturatingIncrement(ref _bodyMisses);
             return false;
         }
-        if (_requestsPerBody[slot] == 0)
-            SaturatingIncrement(ref _distinctBodyIdentities);
-        if (_recordCounts[slot] != expectedRecordCount)
+        int retainedRecordCount = _recordCounts[slot];
+        int retainedEncodedBytes = checked(
+            retainedRecordCount * RemoteChunkDeltaRecord.EncodedSize);
+        if (retainedRecordCount <= 0 || retainedRecordCount > _limits.MaximumRecordsPerBody ||
+            encodedDestination.Length < retainedEncodedBytes)
         {
             SaturatingIncrement(ref _bodyIdentityCollisions);
             SaturatingIncrement(ref _bodyMisses);
             return false;
         }
+        SaturatingAdd(ref _bodyRecordsRequested, checked((ulong)retainedRecordCount));
+        if (_requestsPerBody[slot] == 0)
+            SaturatingIncrement(ref _distinctBodyIdentities);
         long copyStarted = Timestamp();
-        Records(slot, expectedRecordCount).CopyTo(destination);
+        EncodedRecords(slot, retainedEncodedBytes).CopyTo(encodedDestination);
+        SaturatingIncrement(ref _encodedBodyCopies);
+        SaturatingAdd(ref _encodedBodyBytesCopied, checked((ulong)retainedEncodedBytes));
         Elapsed(ref _copyTicks, copyStarted);
+        recordCount = retainedRecordCount;
+        encodedByteCount = retainedEncodedBytes;
         contentHash = _contentHashes[slot];
         SaturatingIncrement(ref _bodyHits);
         SaturatingIncrement(ref _requestsPerBody[slot]);
-        SaturatingAdd(ref _bodyRecordsServed, checked((ulong)expectedRecordCount));
+        SaturatingAdd(ref _bodyRecordsServed, checked((ulong)retainedRecordCount));
         SaturatingIncrement(ref _materializationsAvoided);
         SaturatingIncrement(ref _validationHashCallsAvoided);
-        SaturatingAdd(ref _hashRecordsAvoided, checked((ulong)expectedRecordCount));
+        SaturatingAdd(ref _hashRecordsAvoided, checked((ulong)retainedRecordCount));
         SaturatingIncrement(ref _bodyCopies);
-        SaturatingAdd(ref _bodyCopyRecords, checked((ulong)expectedRecordCount));
+        SaturatingAdd(ref _bodyCopyRecords, checked((ulong)retainedRecordCount));
         return true;
+    }
+
+    internal bool TryCopy(
+        ChunkPublicationStore source,
+        in RemoteChunkDeltaBodyIdentity identity,
+        int expectedRecordCount,
+        Span<RemoteChunkDeltaRecord> destination,
+        out ulong contentHash)
+    {
+        bool copied = TryCopy(
+            source, in identity, destination, out int recordCount, out contentHash);
+        if (!copied || recordCount == expectedRecordCount) return copied;
+        SaturatingIncrement(ref _bodyIdentityCollisions);
+        return false;
     }
 
     internal RemoteChunkDeltaBodyPublishStatus PublishPrepared(
         ChunkPublicationStore source,
         in RemoteChunkDeltaBodyIdentity identity,
         ReadOnlySpan<RemoteChunkDeltaRecord> records,
+        ulong contentHash,
+        bool requestAlreadyCounted) => PublishPreparedCore(
+            source, in identity, records, default, contentHash, requestAlreadyCounted);
+
+    internal RemoteChunkDeltaBodyPublishStatus PublishPrepared(
+        ChunkPublicationStore source,
+        in RemoteChunkDeltaBodyIdentity identity,
+        ReadOnlySpan<RemoteChunkDeltaRecord> records,
+        ReadOnlySpan<byte> encodedRecords,
+        ulong contentHash,
+        bool requestAlreadyCounted) => PublishPreparedCore(
+            source, in identity, records, encodedRecords, contentHash, requestAlreadyCounted);
+
+    private RemoteChunkDeltaBodyPublishStatus PublishPreparedCore(
+        ChunkPublicationStore source,
+        in RemoteChunkDeltaBodyIdentity identity,
+        ReadOnlySpan<RemoteChunkDeltaRecord> records,
+        ReadOnlySpan<byte> encodedRecords,
         ulong contentHash,
         bool requestAlreadyCounted)
     {
@@ -261,6 +336,24 @@ public sealed class RemoteChunkDeltaBodyStore
         {
             SaturatingIncrement(ref _bodyFillFailures);
             return RemoteChunkDeltaBodyPublishStatus.CapacityExceeded;
+        }
+        int encodedByteCount = checked(records.Length * RemoteChunkDeltaRecord.EncodedSize);
+        bool callerEncoded = !encodedRecords.IsEmpty;
+        if (callerEncoded && encodedRecords.Length != encodedByteCount)
+        {
+            SaturatingIncrement(ref _bodyFillFailures);
+            return RemoteChunkDeltaBodyPublishStatus.CapacityExceeded;
+        }
+        Span<byte> synthesized = stackalloc byte[
+            _limits.MaximumRecordsPerBody * RemoteChunkDeltaRecord.EncodedSize];
+        int synthesizedBytes = 0;
+        if (!callerEncoded)
+        {
+            if (!UltraSimGameProtocol.TryWritePreparedDeltaRecordBytes(
+                    records, synthesized, out synthesizedBytes) ||
+                synthesizedBytes != encodedByteCount)
+                throw new InvalidOperationException(
+                    "Validated Delta records failed canonical retained byte encoding.");
         }
         if (!requestAlreadyCounted)
         {
@@ -274,7 +367,10 @@ public sealed class RemoteChunkDeltaBodyStore
         {
             bool exact = _recordCounts[existing] == records.Length &&
                 _contentHashes[existing] == contentHash &&
-                Records(existing, records.Length).SequenceEqual(records);
+                (callerEncoded
+                    ? EncodedRecords(existing, encodedByteCount).SequenceEqual(encodedRecords)
+                    : EncodedRecords(existing, encodedByteCount).SequenceEqual(
+                        synthesized[..synthesizedBytes]));
             if (!exact)
             {
                 SaturatingIncrement(ref _bodyIdentityCollisions);
@@ -317,14 +413,18 @@ public sealed class RemoteChunkDeltaBodyStore
 
         // Publish validity last. No reader can observe the partially copied replacement.
         _valid[slot] = false;
-        records.CopyTo(_records.AsSpan(
-            checked(slot * _limits.MaximumRecordsPerBody), records.Length));
+        Span<byte> encodedSlot = _encodedRecords.AsSpan(
+            checked(slot * _limits.MaximumRecordsPerBody *
+                RemoteChunkDeltaRecord.EncodedSize), encodedByteCount);
+        if (callerEncoded) encodedRecords.CopyTo(encodedSlot);
+        else synthesized[..synthesizedBytes].CopyTo(encodedSlot);
         _identities[slot] = identity;
         _contentHashes[slot] = contentHash;
         _recordCounts[slot] = checked((ushort)records.Length);
         _requestsPerBody[slot] = 1;
         SaturatingIncrement(ref _distinctBodyIdentities);
         _valid[slot] = true;
+        SaturatingIncrement(ref _encodedBodyBuilds);
         _currentRecords += records.Length;
         _highWaterRecords = Math.Max(_highWaterRecords, _currentRecords);
         SaturatingIncrement(ref _bodyFills);
@@ -357,24 +457,30 @@ public sealed class RemoteChunkDeltaBodyStore
             (long)_contentHashes.Length * sizeof(ulong) +
             (long)(_recordCounts.Length + _nextVictim.Length) * sizeof(ushort) +
             _valid.LongLength);
-        long recordStorage = checked(
-            (long)_records.Length * Unsafe.SizeOf<RemoteChunkDeltaRecord>());
+        long recordStorage = 0;
+        long encodedRecordStorage = _encodedRecords.LongLength;
         long diagnostics = checked((long)_requestsPerBody.Length * sizeof(ulong));
         return new RemoteChunkDeltaBodyStoreSnapshot(
-            _mode, _limits.BodyCapacity, _records.Length, _limits.MaximumRecordsPerBody,
+            _mode, _limits.BodyCapacity,
+            checked(_limits.BodyCapacity * _limits.MaximumRecordsPerBody),
+            _limits.MaximumRecordsPerBody,
             _limits.Associativity, _currentBodies, _highWaterBodies, _currentRecords,
             _highWaterRecords, _bodyRequests, _bodyHits, _bodyMisses, _bodyFills,
             _bodyFillFailures, _bodyEvictions, _bodyIdentityCollisions,
             _bodyRecordsRequested, _distinctBodyIdentities,
             _bodyRecordsBuilt, _bodyRecordsServed,
             _materializationsAvoided, _validationHashCallsAvoided, _hashRecordsAvoided,
-            _bodyCopies, _bodyCopyRecords, _lookupTicks, _fillTicks, _copyTicks,
+            _bodyCopies, _bodyCopyRecords,
+            _encodedBodyBuilds, _encodedBodyCopies, _encodedBodyBytesCopied,
+            _lookupTicks, _fillTicks, _copyTicks,
             maximum, p50, p95, p99, _lookupProbeHighWater, metadata, recordStorage,
-            diagnostics, checked(metadata + recordStorage + diagnostics));
+            encodedRecordStorage, diagnostics,
+            checked(metadata + recordStorage + encodedRecordStorage + diagnostics));
     }
 
-    private ReadOnlySpan<RemoteChunkDeltaRecord> Records(int slot, int count) =>
-        _records.AsSpan(checked(slot * _limits.MaximumRecordsPerBody), count);
+    private ReadOnlySpan<byte> EncodedRecords(int slot, int byteCount) =>
+        _encodedRecords.AsSpan(checked(
+            slot * _limits.MaximumRecordsPerBody * RemoteChunkDeltaRecord.EncodedSize), byteCount);
 
     private int Find(in RemoteChunkDeltaBodyIdentity identity, out int probes)
     {

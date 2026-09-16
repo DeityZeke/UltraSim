@@ -717,6 +717,90 @@ public sealed class OfflineDirectChunkRecipient
     }
 
     /// <summary>
+    /// Cold-peeks one due retained Delta range for immutable-body lookup. This method never starts
+    /// a read and never changes recipient knowledge; a successful cache lookup must still be
+    /// published through <see cref="TryBeginCachedDeltaRead"/>.
+    /// </summary>
+    internal bool TryInspectDueDeltaRange(
+        ChunkPublicationStore source,
+        int subscriptionIndex,
+        ulong cadenceStep,
+        out OfflineDirectChunkSubscription subscription,
+        out ChunkPublicationBatch batch)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        EnsureOwner();
+        subscription = default;
+        batch = default;
+        if (_pendingIndex >= 0 || source.Epoch != _sourceEpoch ||
+            subscriptionIndex < 0 || subscriptionIndex >= _subscriptionCount)
+            return false;
+        OfflineDirectChunkSubscriptionState state = _subscriptions[subscriptionIndex];
+        uint period = _cadence.Period(state.Tier);
+        if (!state.HasKnowledge || cadenceStep % period != state.CadencePhase)
+            return false;
+        ChunkPublicationCursor cursor = CursorFor(state);
+        if (!cursor.IsValid ||
+            !source.TryInspectPreparedDeltaRangeIdentity(state.Key, cursor, out batch))
+            return false;
+        subscription = GetSubscriptionForView(subscriptionIndex);
+        return true;
+    }
+
+    /// <summary>
+    /// Starts a Delta read from an already validated immutable body. The authoritative source range
+    /// is revalidated before publishing pending delivery state, so cache retention can never bypass
+    /// source-history eviction or a source/topology lifetime change.
+    /// </summary>
+    internal bool TryBeginCachedDeltaRead(
+        ChunkPublicationStore source,
+        int subscriptionIndex,
+        ulong cadenceStep,
+        in ChunkPublicationBatch inspectedBatch,
+        int recordCount,
+        out OfflineDirectChunkRead read)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        EnsureOwner();
+        read = default;
+        if (recordCount <= 0 || recordCount > _limits.MaximumDeltaRecords ||
+            _pendingIndex >= 0 || source.Epoch != _sourceEpoch ||
+            subscriptionIndex < 0 || subscriptionIndex >= _subscriptionCount)
+            return false;
+        OfflineDirectChunkSubscriptionState subscription = _subscriptions[subscriptionIndex];
+        uint period = _cadence.Period(subscription.Tier);
+        if (!subscription.HasKnowledge || cadenceStep % period != subscription.CadencePhase)
+            return false;
+        ChunkPublicationCursor cursor = CursorFor(subscription);
+        ChunkPublicationBatch current = default;
+        if (!cursor.IsValid || inspectedBatch.Status != ChunkPublicationReadStatus.Delta ||
+            inspectedBatch.Key != subscription.Key ||
+            inspectedBatch.Cursor.Epoch != source.Epoch ||
+            inspectedBatch.Cursor.Key != subscription.Key ||
+            inspectedBatch.Cursor.Revision.Value <= cursor.Revision.Value ||
+            !inspectedBatch.HistoryFloor.IsValid ||
+            inspectedBatch.HistoryFloor.Value > cursor.Revision.Value ||
+            !source.TryInspectPreparedDeltaRange(subscription.Key, cursor, out current) ||
+            current.Key != inspectedBatch.Key || current.Cursor != inspectedBatch.Cursor ||
+            current.HistoryFloor != inspectedBatch.HistoryFloor)
+            return false;
+
+        if (_readAttributionEnabled)
+        {
+            SaturatingIncrement(ref _attributedBeginReadCalls);
+            SaturatingIncrement(ref _attributedCadenceChecks);
+        }
+        ChunkPublicationBatch admitted = current with
+        {
+            Count = recordCount,
+            Required = recordCount,
+        };
+        PublishPending(subscriptionIndex, OfflineDirectChunkReadStatus.Delta,
+            source.Epoch, admitted, default, default, out read);
+        return true;
+    }
+
+    /// <summary>
     /// Begins an explicit complete-snapshot repair for one admitted subscription without consulting
     /// its current cursor or cadence. This is the exceptional N1.3 path for an MTU-oversize delta,
     /// client repair, or another caller-established recovery requirement.

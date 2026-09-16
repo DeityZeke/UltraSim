@@ -431,6 +431,71 @@ public sealed partial class ChunkPublicationStore
         return ChunkPublicationReadStatus.Delta;
     }
 
+    /// <summary>
+    /// Validates that one exact prepared latest-state range is still continuously retained without
+    /// traversing, collapsing, sorting, or materializing its records. This is deliberately only an
+    /// admission check for an immutable representation cache; it does not publish recipient
+    /// knowledge or make cached bytes authoritative.
+    /// </summary>
+    internal bool TryInspectPreparedDeltaRange(
+        SpatialChunkKey key,
+        ChunkPublicationCursor cursor,
+        out ChunkPublicationBatch batch)
+    {
+        EnsureOwner();
+        batch = default;
+        if (_preparedReadModel != PreparedChunkPublicationReadModel.PreparedLatestState ||
+            !cursor.IsValid || cursor.Epoch != Epoch || cursor.Key != key ||
+            !TryFindChunk(key, out int chunkSlot))
+            return false;
+
+        ref readonly ChunkRecord chunk = ref _chunks[chunkSlot];
+        if (cursor.Revision.Value >= chunk.Revision ||
+            cursor.Revision.Value < chunk.HistoryFloor)
+            return false;
+
+        ulong fromRevision = cursor.Revision.Value;
+        while (fromRevision < chunk.Revision)
+        {
+            int publicationSlot = FindPreparedPublication(key, fromRevision);
+            if (publicationSlot < 0) return false;
+            ref readonly PreparedPublication publication = ref _preparedPublications[publicationSlot];
+            if (!publication.Active || publication.ToRevision <= fromRevision ||
+                publication.ToRevision > chunk.Revision ||
+                publication.WrittenRecords != publication.ExpectedRecords)
+                return false;
+            fromRevision = publication.ToRevision;
+        }
+        if (fromRevision != chunk.Revision) return false;
+
+        batch = CreateBatch(ChunkPublicationReadStatus.Delta, key, chunk, 0, 0);
+        return true;
+    }
+
+    /// <summary>
+    /// Reads only the current exact range identity for a speculative immutable-body lookup. It
+    /// deliberately does not establish retained-chain coverage; every cache hit must subsequently
+    /// pass <see cref="TryInspectPreparedDeltaRange"/> before it can become pending delivery state.
+    /// </summary>
+    internal bool TryInspectPreparedDeltaRangeIdentity(
+        SpatialChunkKey key,
+        ChunkPublicationCursor cursor,
+        out ChunkPublicationBatch batch)
+    {
+        EnsureOwner();
+        batch = default;
+        if (_preparedReadModel != PreparedChunkPublicationReadModel.PreparedLatestState ||
+            !cursor.IsValid || cursor.Epoch != Epoch || cursor.Key != key ||
+            !TryFindChunk(key, out int chunkSlot))
+            return false;
+        ref readonly ChunkRecord chunk = ref _chunks[chunkSlot];
+        if (cursor.Revision.Value >= chunk.Revision ||
+            cursor.Revision.Value < chunk.HistoryFloor)
+            return false;
+        batch = CreateBatch(ChunkPublicationReadStatus.Delta, key, chunk, 0, 0);
+        return true;
+    }
+
     private void SortPreparedIndices(Span<int> indices)
     {
         if (indices.Length <= 1) return;
