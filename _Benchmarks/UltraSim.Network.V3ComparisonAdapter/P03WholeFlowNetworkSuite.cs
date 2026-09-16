@@ -3390,12 +3390,13 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
         P03ReplicationLifecycleCounters lifecycle = default;
         for (int index = 0; index < _servers.Length; index++)
         {
-            RemoteChunkReplicationTimingSnapshot timing =
-                _servers[index].GetTimingSnapshot();
+            RemoteChunkWorldStateServerSnapshot server = _servers[index].GetSnapshot();
+            RemoteChunkReplicationTimingSnapshot timing = server.Timing;
             RemoteChunkKnowledgeCensusSnapshot knowledge = timing.Knowledge;
             compression = compression.Add(knowledge.Compression);
             proofHealth = proofHealth.Add(knowledge);
-            lifecycle = lifecycle.Add(timing.Work, knowledge);
+            lifecycle = lifecycle.Add(
+                timing.Work, knowledge, server.OutstandingDeliveries);
         }
         return base.GetCounters() with
         {
@@ -4389,6 +4390,7 @@ internal readonly record struct P03ReplicationLifecycleCounters(
     ulong TransportDeferrals,
     ulong CapacityDeferrals,
     int OutstandingHighWater,
+    int OutstandingAtCapture,
     ulong ProofEntries,
     ulong ProofApplied,
     ulong ProofRejected,
@@ -4405,7 +4407,8 @@ internal readonly record struct P03ReplicationLifecycleCounters(
 {
     internal P03ReplicationLifecycleCounters Add(
         in RemoteChunkReplicationWorkSnapshot work,
-        in RemoteChunkKnowledgeCensusSnapshot knowledge)
+        in RemoteChunkKnowledgeCensusSnapshot knowledge,
+        int outstandingAtCapture)
     {
         UltraSim.Game.Replication.RemoteChunkProofCensusSnapshot proof = knowledge.Proof;
         RemoteChunkOutstandingCensusSnapshot outstanding = knowledge.Outstanding;
@@ -4417,6 +4420,7 @@ internal readonly record struct P03ReplicationLifecycleCounters(
             Plus(TransportDeferrals, work.TransportDeferrals),
             Plus(CapacityDeferrals, work.CapacityDeferrals),
             Math.Max(OutstandingHighWater, work.OutstandingHighWater),
+            checked(OutstandingAtCapture + outstandingAtCapture),
             Plus(ProofEntries, proof.EntriesReceived),
             Plus(ProofApplied, proof.AppliedEntries),
             Plus(ProofRejected, proof.RejectedEntries),
