@@ -67,12 +67,14 @@ Focused evidence includes:
 - one removal plus seven mixed-mask records round-tripping bit-exact canonical 129 bytes;
 - selected singleton impairment: 33 transmissions, 24 receives, 16 duplicates, eight exact
   applied proofs, convergence, and zero debt; and
+- the captured old-session 148 is recognized but rejected by a fresh application-session epoch
+  without changing the client cache; and
 - zero managed allocation across 32 warmed authoritative mutation / encode / compress / decode /
   proof cycles.
 
 Existing generation, AOI re-entry, source-epoch replacement, slot reuse, Rebase, snapshot,
-duplicate, stale proof, and reconnect gates remain representation-independent because message 148
-feeds the same canonical 129 decoder and proof ledger.
+duplicate, and stale-proof gates remain representation-independent because message 148 feeds the
+same canonical 129 decoder and proof ledger.
 
 ## Measurement environment and method
 

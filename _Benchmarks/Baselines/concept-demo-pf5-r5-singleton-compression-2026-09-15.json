@@ -133,6 +133,7 @@
     "selected148BoundaryBytes": 361,
     "poorData": {"standalone120Bytes":383,"canonical129Bytes":385,"compressed148Bytes":374,"selected":false},
     "impairment": {"sent":33,"received":24,"duplicates":16,"proofs":8,"outstandingDebt":0},
+    "freshApplicationSessionRejectsOld148WithoutCacheMutation": true,
     "warmedManagedAllocationBytes": 0
   },
   "verification": {

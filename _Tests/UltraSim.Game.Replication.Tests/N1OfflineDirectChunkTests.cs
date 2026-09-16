@@ -2794,6 +2794,16 @@ internal static class N1OfflineDirectChunkTests
         True(loopback.Client.TryPeekReceived(
             out NetworkDeliveredMessage delivered, out ReadOnlySpan<byte> payload));
         Equal(RemoteCompressedDirtyChunkBundleHeaderCodec.Descriptor.Id, delivered.MessageId);
+        var replacementLifetime = new RemoteChunkWorldStateClient(
+            loopback.Client, cache, 0xF5_0502, maximumDeltaRecords: 32,
+            maximumPendingProofs: 16);
+        True(replacementLifetime.TryProcess(delivered, payload));
+        Equal(1UL, replacementLifetime.GetSnapshot().RejectedDeliveries);
+        Equal(baseline, recipient.Subscriptions[FindSubscription(recipient, key)]
+            .Cursor.Revision.Value);
+        True(cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle replacementHandle));
+        True(cache.TryGetResidentView(replacementHandle, out ClientSemanticChunkView replacementView));
+        Equal(baseline, replacementView.Info.PublicationCursor.Revision.Value);
         byte[] canonical = new byte[
             UltraSimGameProtocol.MaximumCompressedDirtyChunkBundleDecodedBytes];
         True(UltraSimGameProtocol.TryReadCompressedDirtyChunkBundle(
