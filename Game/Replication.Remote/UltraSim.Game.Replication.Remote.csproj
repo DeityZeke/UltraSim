@@ -16,6 +16,7 @@
     <Compile Include="../Replication/RemoteApplicationEventServer.cs" Link="RemoteApplicationEventServer.cs" />
     <Compile Include="../Replication/RemoteChatServer.cs" Link="RemoteChatServer.cs" />
     <Compile Include="../Replication/RemoteChunkWorldStateServer.cs" Link="RemoteChunkWorldStateServer.cs" />
+    <Compile Include="../Replication/RemoteChunkDeltaBodyStore.cs" Link="RemoteChunkDeltaBodyStore.cs" />
     <Compile Include="../Replication/RemoteControlledSimulationServer.cs" Link="RemoteControlledSimulationServer.cs" />
     <Compile Include="../Replication/RemoteDirtyChunkSpatialFanoutServer.cs" Link="RemoteDirtyChunkSpatialFanoutServer.cs" />
     <Compile Include="../Replication/RemoteDirtyEntitySpatialFanoutServer.cs" Link="RemoteDirtyEntitySpatialFanoutServer.cs" />

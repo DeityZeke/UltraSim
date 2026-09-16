@@ -25,6 +25,111 @@ Console.WriteLine("PASS documentation architecture and links");
 if (options.ArchitectureOnly)
     return 0;
 
+if (options.Pf5R6Only)
+{
+    VerifyPf5R6CompatibleBodySharing(root, options.Configuration);
+    Console.WriteLine("PASS PF5-R6 focused compatible-body-sharing verification");
+    return 0;
+}
+
+static void VerifyPf5R6CompatibleBodySharing(string root, string configuration)
+{
+    Run(root, "dotnet",
+    [
+        "run", "--project",
+        "_Tests/UltraSim.Game.Replication.Tests/UltraSim.Game.Replication.Tests.csproj",
+        "-c", configuration,
+    ]);
+
+    string scope = Path.Combine(Path.GetTempPath(), "ultrasim-repository-verification",
+        Environment.ProcessId.ToString(), "pf5-r6");
+    if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    Directory.CreateDirectory(scope);
+    try
+    {
+        string udpOutput = Path.Combine(scope, "real-udp.json");
+        Run(root, "dotnet",
+        [
+            "run", "--project",
+            "_Benchmarks/UltraSim.Network.V3ComparisonAdapter/UltraSim.Network.V3ComparisonAdapter.csproj",
+            "-c", configuration, "--", "--p03-whole-flow",
+            "--pf5-r6-body-sharing", "--populations=64", "--include-census",
+            "--include-divergence", "--divergence-recipients=16", "--divergence-ticks=30",
+            "--warmup=6", "--ticks=30", $"--output={udpOutput}",
+        ]);
+        using JsonDocument udp = JsonDocument.Parse(File.ReadAllText(udpOutput));
+        if (udp.RootElement.GetProperty("Schema").GetString() !=
+                "ultrasim-network-pf5-r6-compatible-body-sharing-v1")
+            throw new InvalidOperationException("PF5-R6 report schema was not canonical.");
+        JsonElement[] rows = udp.RootElement.GetProperty("Rows").EnumerateArray()
+            .Select(static value => value.Clone()).ToArray();
+        if (rows.Length != 6 || rows.Any(static row =>
+                !row.GetProperty("Converged").GetBoolean() ||
+                row.GetProperty("SocketIoMode").GetString() !=
+                    "BackgroundPlatformBatch" ||
+                row.GetProperty("Transport").GetProperty("CapacityDrops").GetUInt64() != 0 ||
+                row.GetProperty("ProfileCounters").GetProperty("Compression")
+                    .GetProperty("SingletonSelected").GetUInt64() != 0))
+            throw new InvalidOperationException("PF5-R6 real-UDP matrix was incomplete.");
+        JsonElement[] divergence = udp.RootElement.GetProperty("DivergenceScenarios")
+            .EnumerateArray().Select(static value => value.Clone()).ToArray();
+        if (divergence.Length != 11 || divergence.Any(static row =>
+                row.GetProperty("CompatibleBodies").GetProperty("BodyRequests").GetUInt64() == 0 ||
+                row.GetProperty("CompatibleBodies").GetProperty("BodyIdentityCollisions")
+                    .GetUInt64() != 0))
+            throw new InvalidOperationException(
+                "PF5-R6 divergence census was incomplete or found incompatible bodies.");
+        foreach (IGrouping<int, JsonElement> workload in rows.GroupBy(static row =>
+                     row.GetProperty("DirtyEntitiesPerTick").GetInt32()))
+        {
+            JsonElement[] triple = workload.ToArray();
+            if (triple.Length != 3)
+                throw new InvalidOperationException("PF5-R6 OFF/Census/ON triple was incomplete.");
+            JsonElement off = triple.Single(static row => row.GetProperty("Curve").GetString()!
+                .EndsWith("-Disabled", StringComparison.Ordinal));
+            JsonElement census = triple.Single(static row => row.GetProperty("Curve").GetString()!
+                .EndsWith("-CensusOnly", StringComparison.Ordinal));
+            JsonElement on = triple.Single(static row => row.GetProperty("Curve").GetString()!
+                .EndsWith("-Enabled", StringComparison.Ordinal));
+            JsonElement offCounters = off.GetProperty("ProfileCounters");
+            JsonElement censusBodies = census.GetProperty("ProfileCounters")
+                .GetProperty("DeltaBodies");
+            JsonElement onCounters = on.GetProperty("ProfileCounters");
+            JsonElement onBodies = onCounters.GetProperty("DeltaBodies");
+            if (onBodies.GetProperty("BodyRequests").GetUInt64() == 0 ||
+                onBodies.GetProperty("BodyHits").GetUInt64() == 0 ||
+                onBodies.GetProperty("BodyFills").GetUInt64() == 0 ||
+                onBodies.GetProperty("MaterializationsAvoided").GetUInt64() == 0 ||
+                onBodies.GetProperty("BodyIdentityCollisions").GetUInt64() != 0 ||
+                censusBodies.GetProperty("BodyRequests").GetUInt64() == 0 ||
+                censusBodies.GetProperty("MaterializationsAvoided").GetUInt64() != 0 ||
+                off.GetProperty("SemanticDigest").GetString() !=
+                    on.GetProperty("SemanticDigest").GetString() ||
+                offCounters.GetProperty("SuccessfulSemanticPublications").GetUInt64() !=
+                    onCounters.GetProperty("SuccessfulSemanticPublications").GetUInt64() ||
+                offCounters.GetProperty("ProofEntries").GetUInt64() !=
+                    onCounters.GetProperty("ProofEntries").GetUInt64() ||
+                offCounters.GetProperty("GameMessagesQueued").GetUInt64() !=
+                    onCounters.GetProperty("GameMessagesQueued").GetUInt64() ||
+                CanonicalApplicationBytes(offCounters) != CanonicalApplicationBytes(onCounters))
+                throw new InvalidOperationException(
+                    "PF5-R6 changed canonical work or failed to reuse compatible bodies.");
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    }
+
+    static ulong CanonicalApplicationBytes(JsonElement counters)
+    {
+        JsonElement compression = counters.GetProperty("Compression");
+        return checked(counters.GetProperty("ApplicationBytesQueued").GetUInt64() -
+            compression.GetProperty("CompressedRepresentationBytes").GetUInt64() +
+            compression.GetProperty("CanonicalBytesSelected").GetUInt64());
+    }
+}
+
 if (options.Pf5R5Only)
 {
     VerifyPf5R5SingletonCompression(root, options.Configuration);
@@ -5245,6 +5350,7 @@ internal sealed record VerificationOptions(
     bool Pf5R3Only,
     bool Pf5R4Only,
     bool Pf5R5Only,
+    bool Pf5R6Only,
     bool Pf3Only,
     bool Pf3NativeOnly,
     bool Pf25LongNative,
@@ -5268,7 +5374,7 @@ internal sealed record VerificationOptions(
             pf4eR2Only = false, pf4fOnly = false, pf5Only = false,
             pf5R1Only = false, pf5R2Only = false, pf5R2R1Only = false,
             pf5R2R2Only = false, pf5R3Only = false, pf5R4Only = false,
-            pf5R5Only = false,
+            pf5R5Only = false, pf5R6Only = false,
             pf25LongNative = false,
             allConfigurations = false;
         bool skipGodot = false, noRestore = false;
@@ -5301,6 +5407,7 @@ internal sealed record VerificationOptions(
             else if (argument == "--pf5-r3-only") pf5R3Only = true;
             else if (argument == "--pf5-r4-only") pf5R4Only = true;
             else if (argument == "--pf5-r5-only") pf5R5Only = true;
+            else if (argument == "--pf5-r6-only") pf5R6Only = true;
             else if (argument == "--pf2.5-long-native") pf25LongNative = true;
             else if (argument == "--all-configurations") allConfigurations = true;
             else if (argument == "--skip-godot") skipGodot = true;
@@ -5409,7 +5516,8 @@ internal sealed record VerificationOptions(
         if ((pf1Only || pf2Only || pf25Only || pf3Only || pf3NativeOnly || pf4aOnly ||
              pf4bOnly || pf4cOnly || pf4dOnly || pf4eOnly || pf4eR1Only || pf4eR2Only ||
              pf4fOnly || pf5Only || pf5R1Only || pf5R2Only || pf5R2R1Only ||
-             pf5R2R2Only || pf5R3Only || pf5R4Only) && architectureOnly)
+             pf5R2R2Only || pf5R3Only || pf5R4Only || pf5R5Only || pf5R6Only) &&
+            architectureOnly)
             throw new ArgumentException("Focused PF verification cannot be architecture-only.");
         if ((pf1Only ? 1 : 0) + (pf2Only ? 1 : 0) + (pf25Only ? 1 : 0) +
             (pf3Only ? 1 : 0) + (pf3NativeOnly ? 1 : 0) + (pf4aOnly ? 1 : 0) +
@@ -5418,7 +5526,7 @@ internal sealed record VerificationOptions(
             (pf4fOnly ? 1 : 0) + (pf5Only ? 1 : 0) + (pf5R1Only ? 1 : 0) +
             (pf5R2Only ? 1 : 0) + (pf5R2R1Only ? 1 : 0) +
             (pf5R2R2Only ? 1 : 0) + (pf5R3Only ? 1 : 0) +
-            (pf5R4Only ? 1 : 0) > 1)
+            (pf5R4Only ? 1 : 0) + (pf5R5Only ? 1 : 0) + (pf5R6Only ? 1 : 0) > 1)
             throw new ArgumentException("Choose one focused PF verification mode.");
         if ((pf25LongNative || pf25EvidenceOutputDirectory is not null) && !pf25Only)
             throw new ArgumentException(
@@ -5443,7 +5551,7 @@ internal sealed record VerificationOptions(
             !pf4cOnly && !pf4dOnly && !pf4eOnly && !pf4fOnly && !pf5Only)
             throw new ArgumentException(
                 "Native PF options require --pf3-only, --pf3-native-only, --pf4a-only, --pf4b-only, --pf4c-only, --pf4d-only, --pf4e-only, --pf4f-only, or --pf5-only.");
-        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only, pf4fOnly, pf5Only, pf5R1Only, pf5R2Only, pf5R2R1Only, pf5R2R2Only, pf5R3Only, pf5R4Only, pf5R5Only,
+        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only, pf4fOnly, pf5Only, pf5R1Only, pf5R2Only, pf5R2R1Only, pf5R2R2Only, pf5R3Only, pf5R4Only, pf5R5Only, pf5R6Only,
             pf3Only, pf3NativeOnly,
             pf25LongNative,
             allConfigurations, configuration, skipGodot, noRestore, godot,

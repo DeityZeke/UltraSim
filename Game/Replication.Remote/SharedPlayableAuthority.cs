@@ -172,6 +172,7 @@ public sealed class SharedPlayableAuthority : IDisposable
     private readonly bool _ownsRuntime;
     private readonly GameTickTimingWindow _tickTimings;
     private readonly ChunkPublicationStore _publicationSource;
+    private readonly RemoteChunkDeltaBodyStore _remoteDeltaBodies;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private readonly long _generationStartedTimestamp;
     private readonly long _tickInterval;
@@ -232,6 +233,7 @@ public sealed class SharedPlayableAuthority : IDisposable
                 out _publicationSource))
             throw new InvalidOperationException(
                 "The shared authority requires an active public-state source.");
+        _remoteDeltaBodies = new RemoteChunkDeltaBodyStore(_publicationSource);
         _tickInterval = Math.Max(1, Stopwatch.Frequency / runtime.SimulationFrequencyHz);
         _nextTickTimestamp = checked(Stopwatch.GetTimestamp() + _tickInterval);
         _remoteObservedCommit = _publicationSource.CommitSequence;
@@ -359,6 +361,7 @@ public sealed class SharedPlayableAuthority : IDisposable
     internal AdmissionService Admission { get; }
     internal GameChatService Chat { get; }
     internal RemoteChatDeliveryService ChatDelivery { get; }
+    internal RemoteChunkDeltaBodyStore RemoteDeltaBodies => _remoteDeltaBodies;
     public GameTelemetryLevel TelemetryLevel => _tickTimings.Level;
 
     /// <summary>
@@ -385,6 +388,7 @@ public sealed class SharedPlayableAuthority : IDisposable
                 "Authority telemetry must be selected before remote applications exist.");
         _tickTimings.Configure(level);
         _publicationSource.ConfigureChangeCensus(level == GameTelemetryLevel.Detailed);
+        _remoteDeltaBodies.ConfigureDetailedTiming(level == GameTelemetryLevel.Detailed);
         if (level == GameTelemetryLevel.Detailed)
             _remoteDirtyFanout ??= new GameValueDistributionWindow();
         ResetRemoteReplicationTelemetry();
@@ -396,6 +400,7 @@ public sealed class SharedPlayableAuthority : IDisposable
         EnsureOperational();
         _tickTimings.Configure(_tickTimings.Level);
         ResetRemoteReplicationTelemetry();
+        _remoteDeltaBodies.ResetStatistics();
         for (int index = 0; index < _remoteApplications.Length; index++)
             _remoteApplications[index]?.ResetTelemetryWindow();
     }

@@ -50,7 +50,16 @@ public readonly record struct OfflineDirectChunkWireEncoderAttribution(
     ulong ProofValidationCalls,
     ulong ProofValidationTicks,
     ulong CursorAdvancementCalls,
-    ulong CursorAdvancementTicks);
+    ulong CursorAdvancementTicks,
+    ulong BodyRequests,
+    ulong BodyHits,
+    ulong BodyMisses,
+    ulong BodyRecordsServed,
+    ulong BodyRecordsBuilt,
+    ulong MaterializationsAvoided,
+    ulong ValidationHashCallsAvoided,
+    ulong BodyLookupTicks,
+    ulong BodyFillTicks);
 
 /// <summary>
 /// N1.1 packet-free server-side wire preparation. Encoding releases publication scratch but never
@@ -63,6 +72,7 @@ public sealed class OfflineDirectChunkWireEncoder
     private readonly ulong _applicationSessionEpoch;
     private readonly RemoteChunkPublicRecord[] _snapshotRecords;
     private readonly RemoteChunkDeltaRecord[] _deltaRecords;
+    private RemoteChunkDeltaBodyStore? _bodyStore;
     private bool _attributionEnabled;
     private ulong _sourceReadCalls;
     private ulong _sourceReadTicks;
@@ -81,8 +91,20 @@ public sealed class OfflineDirectChunkWireEncoder
     private ulong _proofValidationTicks;
     private ulong _cursorAdvancementCalls;
     private ulong _cursorAdvancementTicks;
+    private ulong _bodyRequests;
+    private ulong _bodyHits;
+    private ulong _bodyMisses;
+    private ulong _bodyRecordsServed;
+    private ulong _bodyRecordsBuilt;
+    private ulong _materializationsAvoided;
+    private ulong _validationHashCallsAvoided;
+    private ulong _bodyLookupTicks;
+    private ulong _bodyFillTicks;
 
-    public OfflineDirectChunkWireEncoder(ulong applicationSessionEpoch, int maximumRecords)
+    public OfflineDirectChunkWireEncoder(
+        ulong applicationSessionEpoch,
+        int maximumRecords,
+        RemoteChunkDeltaBodyStore? bodyStore = null)
     {
         ArgumentOutOfRangeException.ThrowIfZero(applicationSessionEpoch);
         if (maximumRecords is <= 0 or > UltraSimGameProtocol.MaximumChunkPublicationRecords)
@@ -90,6 +112,7 @@ public sealed class OfflineDirectChunkWireEncoder
         _applicationSessionEpoch = applicationSessionEpoch;
         _snapshotRecords = new RemoteChunkPublicRecord[maximumRecords];
         _deltaRecords = new RemoteChunkDeltaRecord[maximumRecords];
+        _bodyStore = bodyStore;
     }
 
     public void ResetAttribution(bool enabled)
@@ -106,6 +129,10 @@ public sealed class OfflineDirectChunkWireEncoder
         _preparedStandaloneWrites = 0;
         _proofValidationCalls = _proofValidationTicks = 0;
         _cursorAdvancementCalls = _cursorAdvancementTicks = 0;
+        _bodyRequests = _bodyHits = _bodyMisses = 0;
+        _bodyRecordsServed = _bodyRecordsBuilt = 0;
+        _materializationsAvoided = _validationHashCallsAvoided = 0;
+        _bodyLookupTicks = _bodyFillTicks = 0;
     }
 
     public OfflineDirectChunkWireEncoderAttribution GetAttribution()
@@ -129,7 +156,22 @@ public sealed class OfflineDirectChunkWireEncoder
             _proofValidationCalls,
             _proofValidationTicks,
             _cursorAdvancementCalls,
-            _cursorAdvancementTicks);
+            _cursorAdvancementTicks,
+            _bodyRequests,
+            _bodyHits,
+            _bodyMisses,
+            _bodyRecordsServed,
+            _bodyRecordsBuilt,
+            _materializationsAvoided,
+            _validationHashCallsAvoided,
+            _bodyLookupTicks,
+            _bodyFillTicks);
+    }
+
+    internal void ReplaceBodyStore(RemoteChunkDeltaBodyStore? bodyStore)
+    {
+        EnsureOwner();
+        _bodyStore = bodyStore;
     }
 
     public OfflineDirectChunkWireEncodeStatus TryEncode(
@@ -243,7 +285,8 @@ public sealed class OfflineDirectChunkWireEncoder
             case OfflineDirectChunkReadStatus.Snapshot:
                 return EncodeSnapshot(recipient, deliveryId, snapshotDestination, in read, out result);
             case OfflineDirectChunkReadStatus.Delta:
-                return PrepareDelta(recipient, subscriptionIndex, deliveryId, in read, out result);
+                return PrepareDelta(
+                    recipient, source, subscriptionIndex, deliveryId, in read, out result);
             case OfflineDirectChunkReadStatus.ChunkAbsent:
                 return PrepareAbsence(recipient, deliveryId, in read, out result);
             default:
@@ -449,6 +492,7 @@ public sealed class OfflineDirectChunkWireEncoder
 
     private OfflineDirectChunkWireEncodeStatus PrepareDelta(
         OfflineDirectChunkRecipient recipient,
+        ChunkPublicationStore source,
         int subscriptionIndex,
         ulong deliveryId,
         in OfflineDirectChunkRead read,
@@ -458,6 +502,43 @@ public sealed class OfflineDirectChunkWireEncoder
             return Cancel(recipient, OfflineDirectChunkWireEncodeStatus.CapacityExceeded, out result);
         ChunkPublicationRevision baseRevision =
             recipient.Subscriptions[subscriptionIndex].Cursor.Revision;
+        var bodyIdentity = new RemoteChunkDeltaBodyIdentity(
+            read.SourceEpoch, read.Batch.Key, baseRevision.Value,
+            read.Batch.Cursor.Revision.Value, read.Batch.HistoryFloor.Value);
+        RemoteChunkDeltaBodySharingMode sharing = _bodyStore?.Mode ??
+            RemoteChunkDeltaBodySharingMode.Disabled;
+        if (sharing == RemoteChunkDeltaBodySharingMode.Enabled)
+        {
+            long lookupStarted = AttributionTimestamp();
+            if (_attributionEnabled) SaturatingIncrement(ref _bodyRequests);
+            bool hit = _bodyStore!.TryCopy(
+                source, in bodyIdentity, read.Deltas.Length, _deltaRecords, out ulong cachedHash);
+            AttributeElapsed(ref _bodyLookupTicks, lookupStarted);
+            if (hit)
+            {
+                if (_attributionEnabled)
+                {
+                    SaturatingIncrement(ref _bodyHits);
+                    SaturatingAdd(ref _bodyRecordsServed, checked((ulong)read.Deltas.Length));
+                    SaturatingIncrement(ref _materializationsAvoided);
+                    SaturatingIncrement(ref _validationHashCallsAvoided);
+                }
+                OfflineDirectChunkDeliveryTicket cachedTicket =
+                    recipient.ReleaseReadForRemote(deliveryId);
+                result = new(OfflineDirectChunkWireEncodeStatus.Delta,
+                    RemoteChunkPublicationKind.Delta,
+                    UltraSimGameProtocol.GetChunkDeltaEncodedBytes(read.Deltas.Length), cachedTicket)
+                {
+                    BaseRevision = baseRevision.Value,
+                    CurrentRevision = read.Batch.Cursor.Revision.Value,
+                    HistoryFloor = read.Batch.HistoryFloor.Value,
+                    ContentHash = cachedHash,
+                    RecordCount = read.Deltas.Length,
+                };
+                return result.Status;
+            }
+            if (_attributionEnabled) SaturatingIncrement(ref _bodyMisses);
+        }
         long materializationStarted = AttributionTimestamp();
         if (_attributionEnabled) SaturatingIncrement(ref _deltaMaterializationCalls);
         MaterializeDeltaRecords(read.Deltas, _deltaRecords);
@@ -480,6 +561,30 @@ public sealed class OfflineDirectChunkWireEncoder
         AttributeElapsed(ref _preparedValidationHashTicks, validationHashStarted);
         if (!valid)
             return Cancel(recipient, OfflineDirectChunkWireEncodeStatus.EncodingFailed, out result);
+        if (sharing != RemoteChunkDeltaBodySharingMode.Disabled)
+        {
+            if (_attributionEnabled && sharing == RemoteChunkDeltaBodySharingMode.CensusOnly)
+                SaturatingIncrement(ref _bodyRequests);
+            long fillStarted = AttributionTimestamp();
+            RemoteChunkDeltaBodyPublishStatus publish = _bodyStore!.PublishPrepared(
+                source, in bodyIdentity, records, contentHash,
+                requestAlreadyCounted: sharing == RemoteChunkDeltaBodySharingMode.Enabled);
+            AttributeElapsed(ref _bodyFillTicks, fillStarted);
+            if (publish == RemoteChunkDeltaBodyPublishStatus.IdentityConflict)
+                throw new InvalidOperationException(
+                    "One exact source Delta-body identity produced different canonical records.");
+            if (_attributionEnabled)
+            {
+                if (publish == RemoteChunkDeltaBodyPublishStatus.Published)
+                    SaturatingAdd(ref _bodyRecordsBuilt, checked((ulong)records.Length));
+                else if (sharing == RemoteChunkDeltaBodySharingMode.CensusOnly &&
+                         publish == RemoteChunkDeltaBodyPublishStatus.ExistingExact)
+                {
+                    SaturatingIncrement(ref _bodyHits);
+                    SaturatingAdd(ref _bodyRecordsServed, checked((ulong)records.Length));
+                }
+            }
+        }
         OfflineDirectChunkDeliveryTicket ticket = recipient.ReleaseReadForRemote(deliveryId);
         result = new(OfflineDirectChunkWireEncodeStatus.Delta,
             RemoteChunkPublicationKind.Delta,

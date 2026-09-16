@@ -2731,6 +2731,253 @@ internal static class N1OfflineDirectChunkTests
             $"compressed={sent.CompressedRepresentationBytes} proofs=8 debt=0");
     }
 
+    internal static void CompatibleBodySharingKeepsRecipientProofIndependent()
+    {
+        using var fixture = new Fixture(historyCapacity: 128);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        using ProtocolLoopback firstLoopback = CreateLoopback(default);
+        NetworkProtocolLimits constrained = NetworkProtocolLimits.Default with
+        {
+            MaximumIndependentUnreliableMessages = 1,
+        };
+        using ProtocolLoopback secondLoopback = CreateLoopback(default, constrained);
+        using ProtocolLoopback disabledLoopback = CreateLoopback(default);
+        var firstRecipient = Recipient(maximumRecords: 8);
+        var secondRecipient = Recipient(maximumRecords: 8);
+        var disabledRecipient = Recipient(maximumRecords: 8);
+        var stalledRecipient = Recipient(maximumRecords: 8);
+        var firstCache = Cache(fixture, maximumPublicRecords: 8);
+        var secondCache = Cache(fixture, maximumPublicRecords: 8);
+        var disabledCache = Cache(fixture, maximumPublicRecords: 8);
+        var stalledCache = Cache(fixture, maximumPublicRecords: 8);
+        WorldPosition anchor = Position(0, 0, 8_000, 8_000);
+        ReconcileAndStageInitial(fixture, firstRecipient, firstCache, anchor);
+        ReconcileAndStageInitial(fixture, secondRecipient, secondCache, anchor);
+        ReconcileAndStageInitial(fixture, disabledRecipient, disabledCache, anchor);
+        ReconcileAndStageInitial(fixture, stalledRecipient, stalledCache, anchor);
+        int firstSubscription = FindSubscription(firstRecipient, Key(0, 0));
+        int secondSubscription = FindSubscription(secondRecipient, Key(0, 0));
+        ulong baseline = firstRecipient.Subscriptions[firstSubscription].Cursor.Revision.Value;
+        Equal(baseline, secondRecipient.Subscriptions[secondSubscription].Cursor.Revision.Value);
+        Equal(baseline, disabledRecipient.Subscriptions[
+            FindSubscription(disabledRecipient, Key(0, 0))].Cursor.Revision.Value);
+        int stalledSubscription = FindSubscription(stalledRecipient, Key(0, 0));
+        Equal(baseline, stalledRecipient.Subscriptions[stalledSubscription].Cursor.Revision.Value);
+
+        fixture.Present(0, Position(0, 0, 3_000, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        var bodies = new RemoteChunkDeltaBodyStore(
+            fixture.Store, RemoteChunkDeltaBodySharingMode.Enabled,
+            new RemoteChunkDeltaBodyStoreLimits(16, 8, 4));
+        var firstServer = new RemoteChunkWorldStateServer(
+            firstLoopback.Server, firstRecipient, fixture.Store, 0xF5_0601,
+            new RemoteChunkWorldStateTransportLimits(
+                16, BodySharing: RemoteChunkDeltaBodySharingMode.Enabled), bodies);
+        var secondServer = new RemoteChunkWorldStateServer(
+            secondLoopback.Server, secondRecipient, fixture.Store, 0xF5_0602,
+            new RemoteChunkWorldStateTransportLimits(
+                16, BodySharing: RemoteChunkDeltaBodySharingMode.Enabled), bodies);
+        var disabledServer = new RemoteChunkWorldStateServer(
+            disabledLoopback.Server, disabledRecipient, fixture.Store, 0xF5_0601,
+            new RemoteChunkWorldStateTransportLimits(
+                16, BodySharing: RemoteChunkDeltaBodySharingMode.Disabled));
+        var firstClient = new RemoteChunkWorldStateClient(
+            firstLoopback.Client, firstCache, 0xF5_0601, 8, 16);
+        var secondClient = new RemoteChunkWorldStateClient(
+            secondLoopback.Client, secondCache, 0xF5_0602, 8, 16);
+        var disabledClient = new RemoteChunkWorldStateClient(
+            disabledLoopback.Client, disabledCache, 0xF5_0601, 8, 16);
+        firstServer.ConfigureTelemetry(GameTelemetryLevel.Detailed);
+        secondServer.ConfigureTelemetry(GameTelemetryLevel.Detailed);
+        bodies.ResetStatistics();
+
+        ChunkPublicationWork[] works =
+        [
+            new(default, Key(0, 0), ChunkInterestTier.Immediate,
+                ChunkPublicationWorkKind.Dirty, 1, 1),
+        ];
+        Span<RemoteChunkWorldStateScheduleStatus> firstStatuses =
+            stackalloc RemoteChunkWorldStateScheduleStatus[1];
+        Span<RemoteChunkWorldStateScheduleStatus> secondStatuses =
+            stackalloc RemoteChunkWorldStateScheduleStatus[1];
+        Span<RemoteChunkWorldStateScheduleStatus> disabledStatuses =
+            stackalloc RemoteChunkWorldStateScheduleStatus[1];
+        Equal(NetworkQueueStatus.Accepted, secondLoopback.Server.TryQueue(
+            RemoteChunkDeltaHeaderCodec.Descriptor.Id, new byte[] { 1 }));
+        Equal(1, firstServer.TryScheduleDueBundle(
+            works, 1, firstStatuses, out int firstMessages));
+        Equal(1, disabledServer.TryScheduleDueBundle(
+            works, 1, disabledStatuses, out int disabledMessages));
+        Equal(1, secondServer.TryScheduleDueBundle(
+            works, 1, secondStatuses, out int refusedMessages));
+        Equal(1, firstMessages);
+        Equal(1, disabledMessages);
+        Equal(0, refusedMessages);
+        Equal(RemoteChunkWorldStateScheduleStatus.QueuedDelta, firstStatuses[0]);
+        Equal(RemoteChunkWorldStateScheduleStatus.QueuedDelta, disabledStatuses[0]);
+        Equal(RemoteChunkWorldStateScheduleStatus.TransportNotAccepting, secondStatuses[0]);
+        Equal(1UL, secondServer.GetSnapshot().NextDeliveryId);
+        Equal(0, secondServer.GetSnapshot().OutstandingDeliveries);
+        Equal(baseline, secondRecipient.Subscriptions[secondSubscription].Cursor.Revision.Value);
+        for (int pump = 0; pump < 8 && secondLoopback.Client.ReceivedQueued == 0; pump++)
+            secondLoopback.Pump();
+        True(secondLoopback.Client.TryConsumeReceived());
+
+        Equal(1, secondServer.TryScheduleDueBundle(
+            works, 2, secondStatuses, out int secondMessages));
+        Equal(1, secondMessages);
+        Equal(RemoteChunkWorldStateScheduleStatus.QueuedDelta, secondStatuses[0]);
+        RemoteChunkDeltaBodyStoreSnapshot shared = bodies.GetSnapshot();
+        Equal(3UL, shared.BodyRequests);
+        Equal(2UL, shared.BodyHits);
+        Equal(1UL, shared.BodyMisses);
+        Equal(1UL, shared.BodyFills);
+        Equal(2UL, shared.MaterializationsAvoided);
+        Equal(2UL, shared.ValidationHashCallsAvoided);
+        Equal(0UL, shared.BodyIdentityCollisions);
+        Equal(1UL, firstServer.GetTimingSnapshot().Cpu.Encoder.DeltaMaterializationCalls);
+        Equal(1UL, firstServer.GetTimingSnapshot().Cpu.Encoder.PreparedValidationHashCalls);
+        Equal(0UL, secondServer.GetTimingSnapshot().Cpu.Encoder.DeltaMaterializationCalls);
+        Equal(0UL, secondServer.GetTimingSnapshot().Cpu.Encoder.PreparedValidationHashCalls);
+        Equal(2UL, secondServer.GetTimingSnapshot().Cpu.Encoder.BodyHits);
+        Equal(1UL, firstServer.GetSnapshot().NextDeliveryId - 1);
+        Equal(1UL, secondServer.GetSnapshot().NextDeliveryId - 1);
+        Equal(1, firstServer.GetSnapshot().OutstandingDeliveries);
+        Equal(1, secondServer.GetSnapshot().OutstandingDeliveries);
+
+        for (int pump = 0; pump < 16 && firstLoopback.Client.ReceivedQueued == 0; pump++)
+            firstLoopback.Pump();
+        for (int pump = 0; pump < 16 && secondLoopback.Client.ReceivedQueued == 0; pump++)
+            secondLoopback.Pump();
+        for (int pump = 0; pump < 16 && disabledLoopback.Client.ReceivedQueued == 0; pump++)
+            disabledLoopback.Pump();
+        True(firstLoopback.Client.TryPeekReceived(
+            out NetworkDeliveredMessage firstMessage, out ReadOnlySpan<byte> firstPayload));
+        True(secondLoopback.Client.TryPeekReceived(
+            out NetworkDeliveredMessage secondMessage, out ReadOnlySpan<byte> secondPayload));
+        True(disabledLoopback.Client.TryPeekReceived(
+            out NetworkDeliveredMessage disabledMessage, out ReadOnlySpan<byte> disabledPayload));
+        Equal(RemoteChunkDeltaHeaderCodec.Descriptor.Id, firstMessage.MessageId);
+        Equal(firstMessage.MessageId, secondMessage.MessageId);
+        Equal(firstMessage.MessageId, disabledMessage.MessageId);
+        True(firstPayload.SequenceEqual(disabledPayload));
+        var firstRecords = new RemoteChunkDeltaRecord[8];
+        var secondRecords = new RemoteChunkDeltaRecord[8];
+        True(UltraSimGameProtocol.TryReadChunkDelta(
+            firstPayload, out RemoteChunkDeltaHeader firstHeader, firstRecords, out int firstCount));
+        True(UltraSimGameProtocol.TryReadChunkDelta(
+            secondPayload, out RemoteChunkDeltaHeader secondHeader, secondRecords, out int secondCount));
+        Equal(firstCount, secondCount);
+        True(firstRecords.AsSpan(0, firstCount).SequenceEqual(
+            secondRecords.AsSpan(0, secondCount)));
+        Equal(firstHeader.ContentHash, secondHeader.ContentHash);
+        False(firstHeader.ApplicationSessionEpoch == secondHeader.ApplicationSessionEpoch);
+        Equal(firstHeader.DeliveryId, secondHeader.DeliveryId);
+
+        True(firstClient.TryProcess(firstMessage, firstPayload));
+        True(firstLoopback.Client.TryConsumeReceived());
+        True(secondClient.TryProcess(secondMessage, secondPayload));
+        True(secondLoopback.Client.TryConsumeReceived());
+        True(disabledClient.TryProcess(disabledMessage, disabledPayload));
+        True(disabledLoopback.Client.TryConsumeReceived());
+        Drive(firstLoopback, firstServer, firstClient,
+            () => firstServer.GetSnapshot().AppliedProofs == 1);
+        Equal(0UL, secondServer.GetSnapshot().AppliedProofs);
+        Equal(1, secondServer.GetSnapshot().OutstandingDeliveries);
+        Drive(secondLoopback, secondServer, secondClient,
+            () => secondServer.GetSnapshot().AppliedProofs == 1);
+        Drive(disabledLoopback, disabledServer, disabledClient,
+            () => disabledServer.GetSnapshot().AppliedProofs == 1);
+        Equal(0, firstServer.GetSnapshot().OutstandingDeliveries);
+        Equal(0, secondServer.GetSnapshot().OutstandingDeliveries);
+        Equal(0, disabledServer.GetSnapshot().OutstandingDeliveries);
+
+        // Cached old truth cannot bypass the current source-retention decision. Pressure the exact
+        // baseline beyond the fixture's 128-entry prepared/history bound and require the ordinary
+        // recipient read to select a current-state Rebase/Snapshot before the store is consulted.
+        for (int revision = 0; revision < 132; revision++)
+            fixture.Present(0, Position(0, 0, 3_100 + revision, 2_000),
+                GameWorldPublicPrefabIds.Character);
+        var stalledEncoder = new OfflineDirectChunkWireEncoder(0xF5_0604, 8, bodies);
+        var stalledScratch = new byte[UltraSimGameProtocol.MaximumMessageBytes];
+        ulong requestsBeforeRebase = bodies.GetSnapshot().BodyRequests;
+        Equal(OfflineDirectChunkWireEncodeStatus.Snapshot,
+            stalledEncoder.TryPrepareForRepresentation(
+                stalledRecipient, fixture.Store, stalledSubscription, 4, 1,
+                stalledScratch, out OfflineDirectChunkWireEncodeResult rebase));
+        Equal(requestsBeforeRebase, bodies.GetSnapshot().BodyRequests);
+        Equal(OfflineDirectChunkAppliedProofStatus.Applied,
+            stalledRecipient.CommitAppliedProof(rebase.Ticket));
+        Console.WriteLine($"EVIDENCE PF5-R6 requests={shared.BodyRequests} fills=" +
+            $"{shared.BodyFills} hits={shared.BodyHits} avoided_hash=" +
+            $"{shared.ValidationHashCallsAvoided} refused_hit_transactional=true " +
+            "independent_proofs=3 exact_body=true exact_standalone120=true " +
+            "history_floor_rebase_bypasses_cache=true");
+    }
+
+    internal static void BodyStoreIsBoundedCollisionSafeAndAllocationFree()
+    {
+        using var fixture = new Fixture(historyCapacity: 128);
+        var bodies = new RemoteChunkDeltaBodyStore(
+            fixture.Store, RemoteChunkDeltaBodySharingMode.Enabled,
+            new RemoteChunkDeltaBodyStoreLimits(4, 2, 2));
+        var sourceRecords = new RemoteChunkDeltaRecord[1];
+        var copied = new RemoteChunkDeltaRecord[1];
+        RemoteChunkDeltaBodyIdentity latest = default;
+        ulong latestHash = 0;
+        for (int index = 0; index < 12; index++)
+        {
+            sourceRecords[0] = new RemoteChunkDeltaRecord(
+                RemoteChunkPublicOperation.Present,
+                RemoteChunkPublicFieldMask.Complete,
+                checked((uint)index), 1, checked((ulong)index + 1),
+                GameWorldPublicPrefabIds.Character, checked((ushort)(1_000 + index)),
+                2_000, 0, 0, (ushort)WorldPublicStateFlags.Visible,
+                checked((ulong)index + 2));
+            latest = new RemoteChunkDeltaBodyIdentity(
+                fixture.Store.Epoch, Key(index, 0), 1, checked((ulong)index + 2), 1);
+            True(UltraSimGameProtocol.TryGetChunkDeltaContentHash(
+                latest.SourceEpoch.Value, latest.Key.Space.Value,
+                latest.Key.Coord.X, latest.Key.Coord.Z,
+                latest.BaseRevision, latest.CurrentRevision, latest.HistoryFloor,
+                sourceRecords, out latestHash));
+            Equal(RemoteChunkDeltaBodyPublishStatus.Published,
+                bodies.PublishPrepared(
+                    fixture.Store, in latest, sourceRecords, latestHash,
+                    requestAlreadyCounted: false));
+        }
+        RemoteChunkDeltaBodyStoreSnapshot pressured = bodies.GetSnapshot();
+        Equal(4, pressured.CurrentBodies);
+        True(pressured.BodyEvictions > 0);
+        True(pressured.LookupProbeHighWater <= 2);
+        True(bodies.TryCopy(fixture.Store, in latest, 1, copied, out ulong copiedHash));
+        Equal(latestHash, copiedHash);
+        Equal(sourceRecords[0], copied[0]);
+
+        sourceRecords[0] = sourceRecords[0] with { EntityPublicVersion = 999 };
+        Equal(RemoteChunkDeltaBodyPublishStatus.IdentityConflict,
+            bodies.PublishPrepared(
+                fixture.Store, in latest, sourceRecords, latestHash,
+                requestAlreadyCounted: false));
+        True(bodies.GetSnapshot().BodyIdentityCollisions > 0);
+
+        // Warm the hit before the allocation window; every hit uses retained arrays only.
+        copied.AsSpan().Clear();
+        True(bodies.TryCopy(fixture.Store, in latest, 1, copied, out _));
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int index = 0; index < 1_024; index++)
+            True(bodies.TryCopy(fixture.Store, in latest, 1, copied, out _));
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Equal(0L, allocated);
+
+        fixture.ReplaceStore(historyCapacity: 128);
+        False(bodies.TryCopy(fixture.Store, in latest, 1, copied, out _));
+        Console.WriteLine($"EVIDENCE PF5-R6 bounded capacity={pressured.BodyCapacity} " +
+            $"evictions={pressured.BodyEvictions} probes={pressured.LookupProbeHighWater} " +
+            $"allocated={allocated} source_replacement_fenced=true");
+    }
+
     internal static void SingletonCompressionIsExactTransactionalAndBounded()
     {
         Equal(RemoteChunkSingletonDeltaCompression.Disabled,

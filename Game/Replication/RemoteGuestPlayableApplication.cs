@@ -291,6 +291,7 @@ public sealed class RemoteGuestPlayableApplication :
     private OfflineDirectChunkRecipient? _recipient;
     private RemoteChunkWorldStateServer? _worldDelivery;
     private ChunkPublicationStore? _publicationSource;
+    private RemoteChunkDeltaBodyStore? _remoteDeltaBodies;
     private ChunkPublicationWorkScheduler? _publicationWork;
     private ChunkReplicationRecipientId _publicationRecipient;
     private readonly ChunkPublicationWork[] _publicationDueWork = new ChunkPublicationWork[16];
@@ -1124,6 +1125,7 @@ public sealed class RemoteGuestPlayableApplication :
             _peer, _admission, _participant, _applicationSessionEpoch);
 
         ChunkPublicationStore publications = CapturePublications();
+        _remoteDeltaBodies = new RemoteChunkDeltaBodyStore(publications);
         _recipient = new OfflineDirectChunkRecipient(
             new OfflineDirectChunkRecipientLimits(
                 MaximumSubscriptions, MaximumPublicationRecords, MaximumPublicationRecords),
@@ -1133,7 +1135,8 @@ public sealed class RemoteGuestPlayableApplication :
             _peer, _recipient, publications, _applicationSessionEpoch,
             new RemoteChunkWorldStateTransportLimits(
                 128, 64, _publicationPolicy.Compression,
-                _publicationPolicy.SingletonDeltaCompression));
+                _publicationPolicy.SingletonDeltaCompression),
+            _remoteDeltaBodies);
         _worldDelivery.ConfigureTelemetry(_telemetryLevel);
         InitializePublicationWork(publications);
         if (!_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, WorldPublicEntityId>(
@@ -1203,6 +1206,7 @@ public sealed class RemoteGuestPlayableApplication :
         _chatSession = _chatDelivery.Register(
             _peer, _participant, _applicationSessionEpoch);
         ChunkPublicationStore publications = CapturePublications();
+        _remoteDeltaBodies = _sharedAuthority.RemoteDeltaBodies;
         _recipient = new OfflineDirectChunkRecipient(
             new OfflineDirectChunkRecipientLimits(
                 MaximumSubscriptions, MaximumPublicationRecords, MaximumPublicationRecords),
@@ -1212,7 +1216,8 @@ public sealed class RemoteGuestPlayableApplication :
             _peer, _recipient, publications, _applicationSessionEpoch,
             new RemoteChunkWorldStateTransportLimits(
                 128, 64, _publicationPolicy.Compression,
-                _publicationPolicy.SingletonDeltaCompression));
+                _publicationPolicy.SingletonDeltaCompression),
+            _remoteDeltaBodies);
         _worldDelivery.ConfigureTelemetry(_telemetryLevel);
         InitializePublicationWork(publications);
         _authorityTicks = _runtime.SimulationTick;
@@ -2114,7 +2119,8 @@ public sealed class RemoteGuestPlayableApplication :
 
         if (!ReferenceEquals(capture.Publications, _publicationSource))
         {
-            _worldDelivery!.ReplaceSource(capture.Publications);
+            _remoteDeltaBodies = new RemoteChunkDeltaBodyStore(capture.Publications);
+            _worldDelivery!.ReplaceSource(capture.Publications, _remoteDeltaBodies);
             _publicationWork!.ReplaceSource(capture.Publications, _authorityTicks);
             _publicationSource = capture.Publications;
             SaturatingIncrement(ref _publicationSourceReplacements);

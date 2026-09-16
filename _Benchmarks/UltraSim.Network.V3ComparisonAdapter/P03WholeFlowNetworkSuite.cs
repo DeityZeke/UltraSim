@@ -35,6 +35,11 @@ internal static class P03WholeFlowNetworkSuite
             RunPf5R5SingletonCompression(args);
             return;
         }
+        if (args.Contains("--pf5-r6-body-sharing", StringComparer.Ordinal))
+        {
+            RunPf5R6BodySharing(args);
+            return;
+        }
         if (args.Contains("--pf5-r3-background-egress", StringComparer.Ordinal))
         {
             RunPf5R3BackgroundEgress(args);
@@ -298,6 +303,202 @@ internal static class P03WholeFlowNetworkSuite
                 serverOwnedRemoteTimingEnabled: true,
                 socketIoMode: SharedUdpSocketIoMode.BackgroundPlatformBatch,
                 backgroundEgressTimingEnabled: egressTiming);
+        }
+    }
+
+    private static void RunPf5R6BodySharing(string[] args)
+    {
+        int warmup = ReadInt(args, "--warmup", 60);
+        int ticks = ReadInt(args, "--ticks", 270);
+        int[] populations = ParseOptionalPositiveIntegers(ReadText(args, "--populations")) ??
+            [64, 128, 192, 256, 300, 350];
+        bool detailed = args.Contains("--game-detailed", StringComparer.Ordinal);
+        bool includeCensus = args.Contains("--include-census", StringComparer.Ordinal);
+        bool censusOnly = args.Contains("--census-only", StringComparer.Ordinal);
+        bool includeDivergence = args.Contains("--include-divergence", StringComparer.Ordinal);
+        int divergenceRecipients = ReadInt(args, "--divergence-recipients", 64);
+        int divergenceTicks = ReadInt(args, "--divergence-ticks", 180);
+        if (includeCensus && censusOnly)
+            throw new ArgumentException("Choose either --include-census or --census-only.");
+        string output = ReadText(args, "--output") ??
+            "_Benchmarks/results/network-pf5-r6-body-sharing.json";
+        if (warmup < 1 || ticks < 10 || divergenceRecipients is < 2 or > 512 ||
+            divergenceTicks < 20)
+            throw new ArgumentOutOfRangeException(nameof(args));
+
+        RemoteChunkDeltaBodySharingMode[] modes = censusOnly
+            ? [RemoteChunkDeltaBodySharingMode.CensusOnly]
+            : includeCensus
+            ? [RemoteChunkDeltaBodySharingMode.Disabled,
+                RemoteChunkDeltaBodySharingMode.CensusOnly,
+                RemoteChunkDeltaBodySharingMode.Enabled]
+            : [RemoteChunkDeltaBodySharingMode.Disabled,
+                RemoteChunkDeltaBodySharingMode.Enabled];
+        var cases = new List<(int Population, bool High,
+            RemoteChunkDeltaBodySharingMode Mode)>(populations.Length * modes.Length * 2);
+        foreach (int population in populations)
+        foreach (bool high in new[] { false, true })
+        foreach (RemoteChunkDeltaBodySharingMode mode in modes)
+            cases.Add((population, high, mode));
+        var random = new Random(ExecutionSeed ^ 0x5F60_6006);
+        for (int index = cases.Count - 1; index > 0; index--)
+        {
+            int other = random.Next(index + 1);
+            (cases[index], cases[other]) = (cases[other], cases[index]);
+        }
+
+        foreach (RemoteChunkDeltaBodySharingMode mode in modes)
+        {
+            using var prime = CreateHarness(Math.Min(populations[0], 32), high: true, mode);
+            _ = prime.Run(Math.Max(30, warmup), 10);
+        }
+
+        var rows = new List<P03WholeFlowRow>(cases.Count);
+        for (int executionOrder = 0; executionOrder < cases.Count; executionOrder++)
+        {
+            (int population, bool high, RemoteChunkDeltaBodySharingMode mode) =
+                cases[executionOrder];
+            Console.WriteLine($"PF5-R6 {(high ? "high" : "low")}/{mode}/{population}: " +
+                "constructing...");
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            using P03WholeFlowHarness harness = CreateHarness(population, high, mode);
+            P03WholeFlowRow row = harness.Run(warmup, ticks) with
+            {
+                ExecutionOrder = executionOrder,
+                Curve = $"pf5-r6-{(high ? "high" : "low")}-{mode}",
+            };
+            P03WholeFlowHarness.Require(row.Converged && row.Transport.CapacityDrops == 0,
+                "PF5-R6 real-UDP row did not converge without capacity loss.");
+            rows.Add(row);
+            RemoteChunkDeltaBodyStoreSnapshot bodies = row.ProfileCounters.DeltaBodies;
+            Console.WriteLine($"PF5-R6 {(high ? "high" : "low")}/{mode}/{population}: " +
+                $"remote p95={row.Timing.ServerOwnedRemoteReplicationBudget.P95:F3}ms " +
+                $"requests={bodies.BodyRequests:N0} distinct={bodies.DistinctBodyIdentities:N0} " +
+                $"fills={bodies.BodyFills:N0} " +
+                $"hits={bodies.BodyHits:N0} records={bodies.BodyRecordsServed:N0}/" +
+                $"{bodies.BodyRecordsBuilt:N0} bundles=" +
+                $"{row.ProfileCounters.ChunkBundleMessages:N0}/" +
+                $"{row.ProfileCounters.ChunkBundleEntries:N0} compressed=" +
+                $"{row.ProfileCounters.Compression.Selected:N0} canonical=" +
+                $"{row.ProfileCounters.Compression.CanonicalBytesSelected:N0} selected=" +
+                $"{row.ProfileCounters.Compression.CompressedRepresentationBytes:N0} " +
+                $"wire={row.Transport.WireBytes:N0}");
+        }
+
+        if (!censusOnly)
+        foreach (IGrouping<(int Recipients, int Dirty), P03WholeFlowRow> group in rows.GroupBy(
+                     row => (row.Recipients, row.DirtyEntitiesPerTick)))
+        {
+            P03WholeFlowRow off = group.Single(row => row.Curve.EndsWith(
+                $"-{RemoteChunkDeltaBodySharingMode.Disabled}", StringComparison.Ordinal));
+            P03WholeFlowRow on = group.Single(row => row.Curve.EndsWith(
+                $"-{RemoteChunkDeltaBodySharingMode.Enabled}", StringComparison.Ordinal));
+            ulong offCanonicalApplicationBytes = checked(
+                off.ProfileCounters.ApplicationBytesQueued -
+                off.ProfileCounters.Compression.CompressedRepresentationBytes +
+                off.ProfileCounters.Compression.CanonicalBytesSelected);
+            ulong onCanonicalApplicationBytes = checked(
+                on.ProfileCounters.ApplicationBytesQueued -
+                on.ProfileCounters.Compression.CompressedRepresentationBytes +
+                on.ProfileCounters.Compression.CanonicalBytesSelected);
+            P03WholeFlowHarness.Require(
+                off.SemanticDigest == on.SemanticDigest &&
+                off.ProfileCounters.SuccessfulSemanticPublications ==
+                    on.ProfileCounters.SuccessfulSemanticPublications &&
+                off.ProfileCounters.ProofEntries == on.ProfileCounters.ProofEntries &&
+                off.ProfileCounters.GameMessagesQueued == on.ProfileCounters.GameMessagesQueued &&
+                off.ProfileCounters.ChunkBundleMessages ==
+                    on.ProfileCounters.ChunkBundleMessages &&
+                off.ProfileCounters.ChunkBundleEntries ==
+                    on.ProfileCounters.ChunkBundleEntries &&
+                off.ProfileCounters.Compression.Selected ==
+                    on.ProfileCounters.Compression.Selected &&
+                off.ProfileCounters.Compression.CanonicalBytesSelected ==
+                    on.ProfileCounters.Compression.CanonicalBytesSelected &&
+                offCanonicalApplicationBytes == onCanonicalApplicationBytes,
+                $"PF5-R6 body sharing changed semantic or canonical wire work: " +
+                $"digest {off.SemanticDigest}/{on.SemanticDigest}, publications " +
+                $"{off.ProfileCounters.SuccessfulSemanticPublications}/" +
+                $"{on.ProfileCounters.SuccessfulSemanticPublications}, proofs " +
+                $"{off.ProfileCounters.ProofEntries}/{on.ProfileCounters.ProofEntries}, messages " +
+                $"{off.ProfileCounters.GameMessagesQueued}/" +
+                $"{on.ProfileCounters.GameMessagesQueued}, canonical application bytes " +
+                $"{offCanonicalApplicationBytes}/{onCanonicalApplicationBytes}, physical " +
+                $"application bytes {off.ProfileCounters.ApplicationBytesQueued}/" +
+                $"{on.ProfileCounters.ApplicationBytesQueued}.");
+        }
+
+        Pf5R1ScenarioReport[] divergence = [];
+        if (includeDivergence)
+        {
+            string[] scenarios =
+            [
+                "synchronized", "staggered-joins", "cadence-phases", "controlled-loss",
+                "controlled-reorder", "proof-delay", "temporary-stalls", "aoi-churn",
+                "reconnect", "history-pressure", "combined-divergence",
+            ];
+            divergence = new Pf5R1ScenarioReport[scenarios.Length];
+            for (int index = 0; index < scenarios.Length; index++)
+            {
+                divergence[index] = Pf5R1HistoryAudit.RunPreparedBodyScenarioForPf5R6(
+                    scenarios[index], divergenceRecipients, divergenceTicks,
+                    ExecutionSeed ^ 0x5F60_6016);
+                RemoteChunkDeltaBodyStoreSnapshot body =
+                    divergence[index].CompatibleBodies;
+                Console.WriteLine($"PF5-R6 divergence {scenarios[index]}: " +
+                    $"requests={body.BodyRequests:N0} fills={body.BodyFills:N0} " +
+                    $"hits={body.BodyHits:N0} evictions={body.BodyEvictions:N0}");
+            }
+        }
+
+        var report = new Pf5R6BodySharingReport(
+            "ultrasim-network-pf5-r6-compatible-body-sharing-v1",
+            DateTimeOffset.UtcNow, ReadGitSha(), Environment.Version.ToString(),
+            Environment.OSVersion.VersionString, Environment.ProcessorCount,
+            Stopwatch.Frequency,
+            new P03WholeFlowScope(
+                "Matched E=1000 low dirty=20 and high dirty=round(35% of R) controls over real " +
+                    "secure loopback UDP, production BackgroundPlatformBatch egress, client " +
+                    "decode/application, and exact independent application proof.",
+                "Construction, admission, bootstrap, warmup, and final convergence drain are " +
+                    "excluded. The body store is source-lifetime-owned and never supplies a Delta " +
+                    "until the existing recipient read transaction authorizes the exact range.",
+                $"PF5-R6 sharing Off/Census/On as selected; singleton compression disabled; " +
+                    $"multi-entry 148 remains 384/32; cadence 1/2/4; CrossLane cap two; " +
+                    $"{warmup} warmup and {ticks} measured ticks; seed {ExecutionSeed}."),
+            ExecutionSeed, warmup, ticks,
+            rows.OrderBy(row => row.Recipients).ThenBy(row => row.DirtyEntitiesPerTick)
+                .ThenBy(row => row.Curve).ToArray(), divergence);
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
+        File.WriteAllText(output, JsonSerializer.Serialize(report,
+            new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
+        Console.WriteLine(Path.GetFullPath(output));
+        return;
+
+        P03WholeFlowHarness CreateHarness(
+            int population,
+            bool high,
+            RemoteChunkDeltaBodySharingMode mode)
+        {
+            int dirty = high
+                ? Math.Max(20, (int)Math.Round(
+                    population * .35, MidpointRounding.AwayFromZero))
+                : 20;
+            P03NetworkWorkload workload = P03NetworkWorkload.
+                ChunkMatchedControl(population, 1_000, dirty).
+                WithServerTickAndAoICadence(16, P03AoICadencePolicy.Selected124);
+            return new P03WholeFlowHarness(
+                workload, P03NetworkProfile.ChunkPublication, 2,
+                stageTimingEnabled: false,
+                gameDetailedAttribution: detailed,
+                compression: RemoteChunkBundleCompressionPolicy.Selected,
+                singletonDeltaCompression: RemoteChunkSingletonDeltaCompression.Disabled,
+                bodySharing: mode,
+                serverOwnedRemoteTimingEnabled: true,
+                socketIoMode: SharedUdpSocketIoMode.BackgroundPlatformBatch,
+                backgroundEgressTimingEnabled: true);
         }
     }
 
@@ -1375,6 +1576,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
         bool gameDetailedAttribution = false,
         RemoteChunkBundleCompressionPolicy compression = default,
         RemoteChunkSingletonDeltaCompression singletonDeltaCompression = default,
+        RemoteChunkDeltaBodySharingMode bodySharing = RemoteChunkDeltaBodySharingMode.Enabled,
         bool historyAudit = false,
         bool legacyRangeCensus = true,
         bool authorityThroughNetworkTimingEnabled = true,
@@ -1439,7 +1641,8 @@ internal sealed class P03WholeFlowHarness : IDisposable
                 workload, _sessions, _x, _z, _versions, chunkBatch: true),
             P03NetworkProfile.ChunkPublication => new P03ChunkPublicationRemoteAdapter(
                 workload, _sessions, _x, _z, _versions, s_content, compression,
-                singletonDeltaCompression, historyAudit, legacyRangeCensus, chunkReadModel),
+                singletonDeltaCompression, bodySharing, historyAudit, legacyRangeCensus,
+                chunkReadModel),
             P03NetworkProfile.DirtyChunkSpatialFanout => new P03DirtyChunkRemoteAdapter(
                 workload, _sessions, _x, _z, _versions, s_content),
             _ => throw new ArgumentOutOfRangeException(nameof(profile)),
@@ -2353,6 +2556,7 @@ internal sealed class P03DirtyEntityRemoteAdapter : P03RemoteProfileAdapter
 
 internal abstract class P03ChunkRemoteAdapterBase : P03RemoteProfileAdapter
 {
+    private const ulong ComparisonPublicationEpoch = 0xF03_7203;
     protected readonly EcsWorld World;
     protected readonly Entity[] Entities;
     protected readonly ChunkPublicationStore Source;
@@ -2384,7 +2588,7 @@ internal abstract class P03ChunkRemoteAdapterBase : P03RemoteProfileAdapter
             P03WholeFlowHarness.Require(World.TryCreate(empty, out Entities[index]),
                 "Chunk fixture entity setup failed.");
         Source = new ChunkPublicationStore(
-            PublicationEpoch.Create(),
+            new PublicationEpoch(ComparisonPublicationEpoch),
             new ChunkPublicationLimits(workload.Entities,
                 checked(workload.Entities * 2), 64,
                 Math.Max(65_536, checked(workload.Entities * 64))),
@@ -2679,6 +2883,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
     private ulong _uniqueDeltaRangeRecords;
     private ulong _reusableDeltaRangeRecords;
     private ulong _censusSourceDeltaReads;
+    private readonly RemoteChunkDeltaBodyStore _bodyStore;
     private const int MaximumDuePerRecipient = 64;
 
     internal P03ChunkPublicationRemoteAdapter(P03NetworkWorkload workload,
@@ -2686,6 +2891,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
         WorldContentFingerprint content,
         RemoteChunkBundleCompressionPolicy compression = default,
         RemoteChunkSingletonDeltaCompression singletonDeltaCompression = default,
+        RemoteChunkDeltaBodySharingMode bodySharing = RemoteChunkDeltaBodySharingMode.Enabled,
         bool historyAudit = false,
         bool legacyRangeCensus = true,
         PreparedChunkPublicationReadModel readModel =
@@ -2694,6 +2900,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
     {
         _historyAuditEnabled = historyAudit;
         _legacyRangeCensusEnabled = legacyRangeCensus;
+        _bodyStore = new RemoteChunkDeltaBodyStore(Source, bodySharing);
         int subscriptions = workload.Id.StartsWith("sparse", StringComparison.Ordinal) ? 128 : 1_024;
         _recipients = new OfflineDirectChunkRecipient[workload.Recipients];
         _recipientIds = new ChunkReplicationRecipientId[workload.Recipients];
@@ -2735,7 +2942,8 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
             _servers[index] = new RemoteChunkWorldStateServer(
                 sessions[index].Server, recipient, Source, ApplicationEpoch,
                 new RemoteChunkWorldStateTransportLimits(
-                    128, 1_024, compression, singletonDeltaCompression));
+                    128, 1_024, compression, singletonDeltaCompression, bodySharing),
+                _bodyStore);
             _clients[index] = new RemoteChunkWorldStateClient(
                 sessions[index].Client, Caches[index], ApplicationEpoch, 64, 256);
         }
@@ -2753,6 +2961,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
         _scheduler.ConfigureTelemetry(level);
         for (int index = 0; index < _servers.Length; index++)
             _servers[index].ConfigureTelemetry(level);
+        _bodyStore.ConfigureDetailedTiming(level == GameTelemetryLevel.Detailed);
     }
 
     internal override void ConfigureServerOwnedRemoteTiming(bool enabled)
@@ -3021,6 +3230,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
             HistoryAudit = _historyAuditEnabled ? Source.GetHistoryAuditSnapshot() : null,
             PreparedPublication = DifferencePreparedPublication(
                 Source.GetPreparedPublicationSnapshot(), _preparedBaseline),
+            DeltaBodies = _bodyStore.GetSnapshot(),
         };
     }
     internal override void ResetCounters()
@@ -3038,6 +3248,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
             _servers[index].ConfigureTelemetry(_telemetryLevel);
         _sourceBaseline = Source.GetSnapshot();
         _preparedBaseline = Source.GetPreparedPublicationSnapshot();
+        _bodyStore.ResetStatistics();
         if (_historyAuditEnabled)
             Source.ConfigureHistoryAudit(new ChunkPublicationHistoryAuditLimits(65_536));
     }
@@ -3165,7 +3376,8 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
     }
     internal override long GetServerReservedBytes()
     {
-        long value = checked(Source.GetSnapshot().ReservedBytes + _scheduler.GetSnapshot().ReservedBytes);
+        long value = checked(Source.GetSnapshot().ReservedBytes + _scheduler.GetSnapshot().ReservedBytes +
+            _bodyStore.GetSnapshot().ReservedBytes);
         for (int index = 0; index < _servers.Length; index++)
             value = checked(value + _recipients[index].GetSnapshot().ReservedBytes +
                 _servers[index].GetSnapshot().ReservedBytes);
@@ -3463,6 +3675,21 @@ internal readonly record struct P03WholeFlowReport(
     int WarmupTicks,
     int MeasuredTicks,
     P03WholeFlowRow[] Rows);
+
+internal readonly record struct Pf5R6BodySharingReport(
+    string Schema,
+    DateTimeOffset CapturedAtUtc,
+    string GitSha,
+    string Runtime,
+    string OperatingSystem,
+    int ProcessorCount,
+    long StopwatchFrequency,
+    P03WholeFlowScope Scope,
+    int ExecutionSeed,
+    int WarmupTicks,
+    int MeasuredTicks,
+    P03WholeFlowRow[] Rows,
+    Pf5R1ScenarioReport[] DivergenceScenarios);
 
 internal readonly record struct P03WholeFlowScope(
     string Included,
@@ -3879,7 +4106,8 @@ internal readonly record struct P03ProfileCounters(
     P03CompressionCounters Compression = default,
     P03ProofHealth ProofHealth = default,
     ChunkPublicationHistoryAuditSnapshot? HistoryAudit = null,
-    PreparedChunkPublicationSnapshot PreparedPublication = default);
+    PreparedChunkPublicationSnapshot PreparedPublication = default,
+    RemoteChunkDeltaBodyStoreSnapshot DeltaBodies = default);
 
 internal readonly record struct P03CompressionCounters(
     ulong Attempts,

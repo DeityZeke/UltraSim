@@ -163,6 +163,19 @@ internal static class Pf5R1HistoryAudit
         return run.Run();
     }
 
+    internal static Pf5R1ScenarioReport RunPreparedBodyScenarioForPf5R6(
+        string scenario,
+        int recipients,
+        int ticks,
+        int seed)
+    {
+        using var run = new SemanticScenario(
+            scenario, recipients, ticks, seed,
+            PreparedChunkPublicationReadModel.PreparedLatestState,
+            bodyCensus: true);
+        return run.Run();
+    }
+
     private static Pf5R1TopologyReport RunFixedTopology(int hotChunks, int fanout)
     {
         const int sourceRecords = 512;
@@ -335,6 +348,7 @@ internal static class Pf5R1HistoryAudit
         private readonly int _ticks;
         private readonly int _seed;
         private readonly SourceFixture _source;
+        private readonly RemoteChunkDeltaBodyStore? _bodyStore;
         private readonly RecipientState?[] _recipients;
         private readonly OfflineDirectChunkSubscriptionChange[] _changes =
             new OfflineDirectChunkSubscriptionChange[512];
@@ -376,7 +390,8 @@ internal static class Pf5R1HistoryAudit
             int recipientCount,
             int ticks,
             int seed,
-            PreparedChunkPublicationReadModel readModel)
+            PreparedChunkPublicationReadModel readModel,
+            bool bodyCensus = false)
         {
             _id = id;
             _recipientCount = recipientCount;
@@ -409,6 +424,10 @@ internal static class Pf5R1HistoryAudit
             _source.Store.ConfigureHistoryAudit(new ChunkPublicationHistoryAuditLimits(65_536));
             _source.Store.ConfigurePreparedPublicationAttribution(
                 readModel == PreparedChunkPublicationReadModel.PreparedLatestState);
+            if (bodyCensus)
+                _bodyStore = new RemoteChunkDeltaBodyStore(
+                    _source.Store, RemoteChunkDeltaBodySharingMode.CensusOnly,
+                    new RemoteChunkDeltaBodyStoreLimits(4_096, 64, 4));
             _recipients = new RecipientState[recipientCount];
             if (!_staggered)
                 for (int index = 0; index < recipientCount; index++)
@@ -519,12 +538,13 @@ internal static class Pf5R1HistoryAudit
                 _retiredMaterializedRecords, _retiredProofValidationTicks,
                 _retiredCursorTicks,
                 "Semantic/proof diagnostic harness; no UDP clock. The real-UDP selected-policy control is reported separately.",
-                prepared);
+                prepared,
+                _bodyStore?.GetSnapshot() ?? default);
         }
 
         private void Activate(int index, bool reconnect, int tick)
         {
-            var state = new RecipientState(index, reconnect);
+            var state = new RecipientState(index, reconnect, _bodyStore);
             _recipients[index] = state;
             state.Region = _aoiChurn ? index & 1 : 0;
             Reconcile(state);
@@ -754,7 +774,10 @@ internal static class Pf5R1HistoryAudit
 
     private sealed class RecipientState
     {
-        internal RecipientState(int id, bool reconnect)
+        internal RecipientState(
+            int id,
+            bool reconnect,
+            RemoteChunkDeltaBodyStore? bodyStore)
         {
             Id = id;
             Recipient = new OfflineDirectChunkRecipient(
@@ -767,7 +790,7 @@ internal static class Pf5R1HistoryAudit
             Recipient.ResetTelemetryWindow(enableReconcileAttribution: true);
             Recipient.ConfigureSnapshotReasonAudit(true);
             Encoder = new OfflineDirectChunkWireEncoder(
-                checked((ulong)id + 1 + (reconnect ? 10_000UL : 0)), 64);
+                checked((ulong)id + 1 + (reconnect ? 10_000UL : 0)), 64, bodyStore);
             Encoder.ResetAttribution(enabled: true);
             Scratch = new byte[UltraSim.Game.Protocol.UltraSimGameProtocol.MaximumMessageBytes];
             Pending = new PendingProof[4_096];
@@ -1087,7 +1110,8 @@ internal sealed record Pf5R1ScenarioReport(
     ulong ProofValidationTicks,
     ulong CursorAdvancementTicks,
     string ClockScope,
-    PreparedChunkPublicationSnapshot PreparedSource = default);
+    PreparedChunkPublicationSnapshot PreparedSource = default,
+    RemoteChunkDeltaBodyStoreSnapshot CompatibleBodies = default);
 
 internal readonly record struct Pf5R1SnapshotReasonRow(
     string Reason,

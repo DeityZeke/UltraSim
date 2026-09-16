@@ -15,6 +15,7 @@
     <Compile Remove="RemoteApplicationEventServer.cs" />
     <Compile Remove="RemoteChatServer.cs" />
     <Compile Remove="RemoteChunkWorldStateServer.cs" />
+    <Compile Remove="RemoteChunkDeltaBodyStore.cs" />
     <Compile Remove="RemoteControlledSimulationServer.cs" />
     <Compile Remove="RemoteDirtyChunkSpatialFanoutServer.cs" />
     <Compile Remove="RemoteDirtyEntitySpatialFanoutServer.cs" />

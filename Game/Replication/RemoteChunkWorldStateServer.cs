@@ -10,7 +10,8 @@ public readonly record struct RemoteChunkWorldStateTransportLimits(
     int MaximumOutstandingDeliveries,
     ulong MaximumSnapshotTransferSteps = 1_024,
     RemoteChunkBundleCompressionPolicy Compression = default,
-    RemoteChunkSingletonDeltaCompression SingletonDeltaCompression = default)
+    RemoteChunkSingletonDeltaCompression SingletonDeltaCompression = default,
+    RemoteChunkDeltaBodySharingMode BodySharing = RemoteChunkDeltaBodySharingMode.Enabled)
 {
     public static RemoteChunkWorldStateTransportLimits Default => new(1_024);
 
@@ -23,6 +24,8 @@ public readonly record struct RemoteChunkWorldStateTransportLimits(
             SingletonDeltaCompression != RemoteChunkSingletonDeltaCompression.Disabled &&
             !Compression.Enabled)
             throw new ArgumentOutOfRangeException(nameof(SingletonDeltaCompression));
+        if (!Enum.IsDefined(BodySharing))
+            throw new ArgumentOutOfRangeException(nameof(BodySharing));
     }
 }
 
@@ -70,6 +73,7 @@ public readonly record struct RemoteChunkWorldStateServerSnapshot(
     long BundleEntryAndRecordStagingBytes,
     long BundleTicketAndMetadataStagingBytes,
     long RetainedDetailedDiagnosticBytes,
+    RemoteChunkDeltaBodyStoreSnapshot BodyStore,
     OfflineDirectChunkRecipientSnapshot Recipient,
     RemoteChunkReplicationTimingSnapshot Timing);
 
@@ -328,6 +332,8 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     private readonly NetworkProtocolPeer _peer;
     private readonly OfflineDirectChunkRecipient _recipient;
     private ChunkPublicationStore _source;
+    private RemoteChunkDeltaBodyStore _bodyStore;
+    private readonly RemoteChunkDeltaBodySharingMode _bodySharingMode;
     private readonly OfflineDirectChunkWireEncoder _encoder;
     private readonly ulong _applicationSessionEpoch;
     private readonly byte[] _messageScratch;
@@ -527,7 +533,8 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         OfflineDirectChunkRecipient recipient,
         ChunkPublicationStore source,
         ulong applicationSessionEpoch,
-        RemoteChunkWorldStateTransportLimits limits = default)
+        RemoteChunkWorldStateTransportLimits limits = default,
+        RemoteChunkDeltaBodyStore? bodyStore = null)
     {
         _peer = peer ?? throw new ArgumentNullException(nameof(peer));
         _recipient = recipient ?? throw new ArgumentNullException(nameof(recipient));
@@ -539,9 +546,20 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             recipient.Limits.MaximumDeltaRecords > UltraSimGameProtocol.MaximumChunkPublicationRecords)
             throw new ArgumentOutOfRangeException(nameof(recipient));
         _applicationSessionEpoch = applicationSessionEpoch;
+        _bodySharingMode = limits.BodySharing;
+        _bodyStore = bodyStore ?? new RemoteChunkDeltaBodyStore(source, limits.BodySharing);
+        if (!_bodyStore.IsForSource(source))
+            throw new ArgumentException(
+                "The shared Delta-body store must belong to this publication source lifetime.",
+                nameof(bodyStore));
+        if (_bodyStore.Mode != limits.BodySharing)
+            throw new ArgumentException(
+                "The shared Delta-body store policy must match the recipient transport policy.",
+                nameof(bodyStore));
         _encoder = new OfflineDirectChunkWireEncoder(
             applicationSessionEpoch,
-            Math.Max(recipient.Limits.MaximumSnapshotRecords, recipient.Limits.MaximumDeltaRecords));
+            Math.Max(recipient.Limits.MaximumSnapshotRecords, recipient.Limits.MaximumDeltaRecords),
+            _bodyStore);
         _messageScratch = new byte[Math.Max(
             UltraSimGameProtocol.GetChunkSnapshotEncodedBytes(recipient.Limits.MaximumSnapshotRecords),
             UltraSimGameProtocol.GetChunkDeltaEncodedBytes(recipient.Limits.MaximumDeltaRecords))];
@@ -623,6 +641,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         _deliveryAgeSteps.Clear();
         _recipient.ResetTelemetryWindow(level == GameTelemetryLevel.Detailed);
         _encoder.ResetAttribution(level == GameTelemetryLevel.Detailed);
+        _bodyStore.ConfigureDetailedTiming(level == GameTelemetryLevel.Detailed);
         ResetCpuAttribution();
         _timedScheduleAttempts = _timedDeliveriesQueued = 0;
         _timedImmediateQueued = _timedNearQueued = _timedFarQueued = 0;
@@ -804,7 +823,12 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     /// Every outstanding delivery belongs to the prior publication epoch and is invalidated before
     /// the next required recipient reconciliation.
     /// </summary>
-    public void ReplaceSource(ChunkPublicationStore source)
+    public void ReplaceSource(ChunkPublicationStore source) =>
+        ReplaceSource(source, bodyStore: null);
+
+    public void ReplaceSource(
+        ChunkPublicationStore source,
+        RemoteChunkDeltaBodyStore? bodyStore)
     {
         EnsureOwner();
         ArgumentNullException.ThrowIfNull(source);
@@ -812,8 +836,21 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         if (source.Epoch == _source.Epoch)
             throw new ArgumentException(
                 "A replacement publication source must own a distinct epoch.", nameof(source));
+        RemoteChunkDeltaBodyStore replacement =
+            bodyStore ?? new RemoteChunkDeltaBodyStore(source, _bodySharingMode);
+        if (!replacement.IsForSource(source))
+            throw new ArgumentException(
+                "The replacement Delta-body store must belong to the replacement source lifetime.",
+                nameof(bodyStore));
+        if (replacement.Mode != _bodySharingMode)
+            throw new ArgumentException(
+                "The replacement Delta-body store policy must match the recipient transport policy.",
+                nameof(bodyStore));
         InvalidateAll(OutstandingInvalidationReason.SourceReplacement);
         _source = source;
+        _bodyStore = replacement;
+        _bodyStore.ConfigureDetailedTiming(_telemetryLevel == GameTelemetryLevel.Detailed);
+        _encoder.ReplaceBodyStore(_bodyStore);
     }
 
     /// <summary>Test-only injection for the monotonic delivery-ID exhaustion boundary.</summary>
@@ -2000,6 +2037,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             bundleEntryAndRecordBytes,
             bundleTicketAndMetadataBytes,
             detailedDiagnosticBytes,
+            _bodyStore.GetSnapshot(),
             _recipient.GetSnapshot(),
             GetTimingSnapshot());
     }
