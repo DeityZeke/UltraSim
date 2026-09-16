@@ -168,6 +168,7 @@ var tests = new (string Name, Action Body)[]
     ("PF5R5SingletonCompressionIsExactTransactionalAndBounded", N1OfflineDirectChunkTests.SingletonCompressionIsExactTransactionalAndBounded),
     ("PF5R5SingletonCompressionMtuAndProfitabilityAreExact", N1OfflineDirectChunkTests.SingletonCompressionMtuAndProfitabilityAreExact),
     ("PF5R5SingletonCompressionPoorDataFallsBack", N1OfflineDirectChunkTests.SingletonCompressionPoorDataFallsBack),
+    ("PF5R5SingletonCompressionPreservesRemovalAndMasks", N1OfflineDirectChunkTests.SingletonCompressionPreservesRemovalAndMasks),
     ("PF5R5SingletonCompressionConvergesThroughImpairment", N1OfflineDirectChunkTests.SingletonCompressionConvergesThroughImpairment),
     ("PF5R5SingletonCompressionWarmedPathAllocatesZero", N1OfflineDirectChunkTests.SingletonCompressionWarmedPathAllocatesZero),
     ("PF4FIndependentCompressedMessagesConvergeThroughImpairment", N1OfflineDirectChunkTests.IndependentCompressedMessagesConvergeThroughImpairment),

@@ -3095,6 +3095,93 @@ internal static class N1OfflineDirectChunkTests
             "loss_reorder_delay=converged proofs=8 debt=0");
     }
 
+    internal static void SingletonCompressionPreservesRemovalAndMasks()
+    {
+        const ulong applicationEpoch = 0x5F50_0801;
+        const ulong publicationEpoch = 0x5F50_0802;
+        const ulong baseRevision = 10;
+        const ulong currentRevision = 18;
+        RemoteChunkPublicFieldMask[] masks =
+        [
+            RemoteChunkPublicFieldMask.Transform,
+            RemoteChunkPublicFieldMask.Prefab,
+            RemoteChunkPublicFieldMask.Orientation,
+            RemoteChunkPublicFieldMask.StateFlags,
+            RemoteChunkPublicFieldMask.Transform | RemoteChunkPublicFieldMask.Prefab,
+            RemoteChunkPublicFieldMask.Transform | RemoteChunkPublicFieldMask.StateFlags,
+            RemoteChunkPublicFieldMask.Complete,
+        ];
+        var source = new RemoteChunkDeltaRecord[8];
+        source[0] = new RemoteChunkDeltaRecord(
+            RemoteChunkPublicOperation.Remove, RemoteChunkPublicFieldMask.None,
+            1, 1, 2, 0, 0, 0, 0, 0, 0, 0);
+        for (int index = 1; index < source.Length; index++)
+            source[index] = new RemoteChunkDeltaRecord(
+                RemoteChunkPublicOperation.Present, masks[index - 1],
+                checked((uint)index + 1), 1, checked((ulong)index + 2),
+                GameWorldPublicPrefabIds.Character,
+                checked((ushort)(2_000 + index)), checked((ushort)(3_000 + index)),
+                index * 17, checked((ushort)(index * 101)),
+                (ushort)WorldPublicStateFlags.Visible,
+                checked(baseRevision + (ulong)index));
+
+        byte[] standalone = new byte[
+            UltraSimGameProtocol.GetChunkDeltaEncodedBytes(source.Length)];
+        True(UltraSimGameProtocol.TryWriteChunkDelta(
+            standalone, applicationEpoch, publicationEpoch, 7, 1, -2, 3,
+            baseRevision, currentRevision, baseRevision, source,
+            out int standaloneBytes));
+        True(UltraSimGameProtocol.TryReadChunkDelta(
+            standalone.AsSpan(0, standaloneBytes), out RemoteChunkDeltaHeader deltaHeader,
+            new RemoteChunkDeltaRecord[source.Length], out int standaloneCount));
+        Equal(source.Length, standaloneCount);
+        var entry = new RemoteDirtyChunkBundleEntry(
+            RemoteChunkPublicationKind.Delta, deltaHeader.DeliveryId,
+            deltaHeader.SpatialSpaceId, deltaHeader.ChunkX, deltaHeader.ChunkZ,
+            deltaHeader.BaseRevision, deltaHeader.CurrentRevision,
+            deltaHeader.HistoryFloor, deltaHeader.ContentHash,
+            checked((ushort)source.Length), 0);
+        byte[] canonical = new byte[
+            UltraSimGameProtocol.MaximumCompressedDirtyChunkBundleDecodedBytes];
+        True(UltraSimGameProtocol.TryWritePreparedDirtyChunkBundle(
+            canonical, applicationEpoch, publicationEpoch, 7,
+            new[] { entry }, source, out int canonicalBytes));
+        byte[] compressed = new byte[
+            UltraSimGameProtocol.MaximumCompressedDirtyChunkBundleDecodedBytes];
+        var hashes = new ushort[UltraSimGameProtocol.DirtyChunkBundleCompressionHashEntries];
+        True(UltraSimGameProtocol.TryWriteCompressedDirtyChunkBundle(
+            compressed, canonical.AsSpan(0, canonicalBytes), hashes,
+            out int compressedBytes));
+        byte[] recovered = new byte[
+            UltraSimGameProtocol.MaximumCompressedDirtyChunkBundleDecodedBytes];
+        True(UltraSimGameProtocol.TryReadCompressedDirtyChunkBundle(
+            compressed.AsSpan(0, compressedBytes), recovered, out int recoveredBytes));
+        Equal(canonicalBytes, recoveredBytes);
+        True(canonical.AsSpan(0, canonicalBytes).SequenceEqual(
+            recovered.AsSpan(0, recoveredBytes)));
+        var entries = new RemoteDirtyChunkBundleEntry[1];
+        var decoded = new RemoteChunkDeltaRecord[source.Length];
+        True(UltraSimGameProtocol.TryReadDirtyChunkBundle(
+            recovered.AsSpan(0, recoveredBytes), out RemoteDirtyChunkBundleHeader header,
+            entries, [], decoded, out int entryCount, out int snapshotCount,
+            out int deltaCount));
+        Equal(1, entryCount);
+        Equal(0, snapshotCount);
+        Equal(source.Length, deltaCount);
+        Equal(applicationEpoch, header.ApplicationSessionEpoch);
+        Equal(publicationEpoch, header.PublicationEpoch);
+        Equal(entry, entries[0]);
+        True(source.AsSpan().SequenceEqual(decoded));
+
+        Span<byte> deliberatelyTooSmall = stackalloc byte[
+            RemoteCompressedDirtyChunkBundleHeaderCodec.EncodedSize];
+        False(UltraSimGameProtocol.TryWriteCompressedDirtyChunkBundle(
+            deliberatelyTooSmall, canonical.AsSpan(0, canonicalBytes), hashes, out _));
+        Console.WriteLine($"EVIDENCE PF5-R5 semantic_roundtrip records={source.Length} " +
+            $"removals=1 mixed_masks=7 canonical={canonicalBytes} " +
+            $"compressed={compressedBytes} exact=true codec_failure=bounded");
+    }
+
     internal static void IndependentCompressedMessagesConvergeThroughImpairment()
     {
         using var fixture = new Fixture(historyCapacity: 128, entityCount: 8);
