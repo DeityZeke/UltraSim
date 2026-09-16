@@ -638,6 +638,22 @@ chunk proofs, 3,840 event proofs, rebinds, and clean retirement. Bounded slow-se
 partial-`sendmmsg`, physical-loss/retransmit, rebind, worker-fault, and shutdown tests retain the
 failure contract. See the [PF5-R3 evidence](../../_Benchmarks/Baselines/concept-demo-pf5-r3-background-udp-egress-2026-09-15.md).
 
+### PF5-R4 recipient preparation flattening
+
+PF5-R4 preserves `BackgroundPlatformBatch` as the production egress path and uses inline
+`PlatformBatch` as its primary serial control, so the threading comparison does not also change
+syscall batching. Recipient scheduling now carries one bounded prepared candidate across adjacent
+local message splits, writes trusted prepared standalone deltas without a second validation/hash,
+and sorts compact indices before constructing canonical records. The public writer and all
+untrusted readers retain complete validation.
+
+The six-publication split regression now performs six builds rather than eleven. Queue refusal
+invalidates the local carry without advancing delivery identity, cursor, proof, or debt. Matched
+high-change schedule/codec p95 falls 38–59% across 128–350 synthetic recipients, while the real
+UDP matrix retains byte-for-byte/count-for-count output and the same 192 inline / 256 background
+first-tested 4 ms crossings. No persistent cache or warmed allocation is added. See the
+[PF5-R4 evidence](../../_Benchmarks/Baselines/concept-demo-pf5-r4-recipient-preparation-flattening-2026-09-15.md).
+
 ### Snapshot / delta / absence
 
 Ordinary MTU-admissible deltas and absence use independent-unreliable WorldState.

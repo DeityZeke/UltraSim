@@ -106,7 +106,9 @@ server-owned reduction. PF5-R2-R2 repairs the independently reproduced HTTP-host
 and preserves complete unexpected worker-failure reporting. PF5-R3 subsequently selects one
 bounded background native-batch sender per shared UDP listener after complete ciphertext
 construction; no Game, proof, cadence, AOI, compression, aggregation, or wire identity changes.
-PF6 external-human validation may resume on the verified integrated tree.
+PF5-R4 then removes packet-split candidate rebuilding, duplicate prepared-standalone
+validation/hash, and full-record sorting while preserving exact semantic and wire output. PF6
+external-human validation may resume on the verified integrated tree.
 A post-F0.8 defensive UI correction
 also makes
 local shutdown independent from a saturated presentation queue, contains expected view-capacity
@@ -1813,6 +1815,7 @@ then close:
     PF5-R2 independent review + combined timing closure                 CLOSED (timing accepted; outcome D)
     PF5-R2-R2 HTTP shutdown + normalized scaling attribution            CLOSED
     PF5-R3 bounded background UDP egress                                CLOSED (outcome A)
+    PF5-R4 recipient preparation / encoding flattening                  CLOSED (outcome A)
     PF6 external human validation                                       READY TO RESUME
 ```
 

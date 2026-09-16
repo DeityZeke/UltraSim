@@ -2743,6 +2743,7 @@ PF5-R2 shared latest-state publication                                       CLO
 PF5-R2 independent review + combined timing closure                          CLOSED (PF5-R2-R1 timing accepted; outcome D)
 PF5-R2-R2 HTTP shutdown + normalized scaling attribution                     CLOSED
 PF5-R3 bounded background UDP egress                                         CLOSED (outcome A)
+PF5-R4 recipient preparation / encoding flattening                           CLOSED (outcome A)
 PF6 external human validation                                                READY TO RESUME
         |
         v

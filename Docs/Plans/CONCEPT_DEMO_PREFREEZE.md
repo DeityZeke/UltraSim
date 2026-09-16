@@ -67,7 +67,11 @@ complete. PF5-R2-R2 repaired the pre-existing HTTP-host shutdown races, retained
 worker failures, and passed repeated Release/export closure. PF5-R3 then selected one bounded
 background native-batch UDP sender per shared listener after a four-mode real-socket comparison;
 it changes only physical submission after complete encrypted datagram construction. PF6 may
-resume on the integrated post-PF5-R3 candidate after canonical closure.
+resume on the integrated post-PF5-R4 candidate after canonical closure. PF5-R4 subsequently
+removes three recipient-local duplicate-work classes: packet-split candidate rebuilding,
+prepared-standalone revalidation/rehashing, and full-record sorting. It preserves exact semantic
+and physical wire output. Inline `PlatformBatch` is the serial control for the accepted
+`BackgroundPlatformBatch` path; scalar results remain secondary evidence.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -2259,11 +2263,12 @@ repair it.
 
 ## PF6 — external human validation
 
-**Status: READY TO RESUME after PF5-R3 canonical closure.** PF5-R2-R2 repaired the HTTP-host
+**Status: READY TO RESUME after PF5-R4 canonical closure.** PF5-R2-R2 repaired the HTTP-host
 shutdown race and retained complete unexpected-worker-failure reporting. PF5-R3 leaves Game,
 replication, proof, wire, cadence, AOI, compression, aggregation, and participant policy exact;
 its selected physical egress is covered by focused lifecycle, external Hosted, and full export
-verification.
+verification. PF5-R4 removes redundant recipient preparation/encoding while retaining the same
+semantic digest, publications, proofs, Game messages, bundle entries, UDP datagrams, and bytes.
 
 Close when:
 
@@ -2419,11 +2424,14 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
     **CLOSED — PF5-R2-R1 timing plus PF5-R2-R2 HTTP/attribution closure**
 30. Test bounded background physical UDP egress without moving protocol or Game ownership.
     **CLOSED — PF5-R3 outcome A; background native batching selected**
-31. Choose/document the default deployment-performance policy. **CLOSED — v29 plus PF5-R3 egress**
-32. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5/PF5-R3**
-33. Full exact-tree verifier and export closure.
-34. Freeze/tag the Concept Demo baseline.
-35. Begin the separate extraction/genericization/ecosystem roadmap.
+31. Remove duplicate recipient preparation, standalone validation/hash, and large-record sorting.
+    **CLOSED — PF5-R4 outcome A**
+32. Evaluate one-entry 129/148 only as a separate representation checkpoint if selected.
+33. Choose/document the default deployment-performance policy. **CLOSED — v29 plus PF5-R3 egress**
+34. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5/PF5-R4**
+35. Full exact-tree verifier and export closure.
+36. Freeze/tag the Concept Demo baseline.
+37. Begin the separate extraction/genericization/ecosystem roadmap.
 ```
 
 The intended outcome is not merely a demo that works.

@@ -1,0 +1,274 @@
+{
+  "schema": "ultrasim-concept-demo-pf5-r4-recipient-preparation-flattening-v1",
+  "checkpoint": "PF5-R4 Recipient Preparation & Encoding Flattening",
+  "date": "2026-09-15",
+  "status": "CLOSED",
+  "outcome": "A",
+  "startingHead": "8f6f1cba4979fe2121174d33a64d7565e8277e5b",
+  "replicationSemanticLineage": "992fc541460f18534da9036c73cb711277de11ce",
+  "priorIntegratedCorrectnessCandidate": "f2940afa18d69bb83df291215dcb6903938ee3c2",
+  "productionImplementationCandidate": "15aa839f865db18c1c47b72fb49ff5a6d416beb4",
+  "commits": {
+    "indexFirstCanonicalSort": "de841586250535048341dbf3b70daf0cceec6911",
+    "trustedPreparedStandaloneWriter": "80222de6fbeb3719577d9f4434753a0cfe973769",
+    "packetBoundaryCandidateCarry": "126222a18d6678b6b090a650ef6083e12be044b1",
+    "smallIndexSort": "a849af9c6cbb2656c0c2970127b81e70d38f1b85",
+    "queueRefusalRegression": "350e37b85a5f58aa9459000309ca323fd38f448c",
+    "measurementAndFocusedGate": "6489c3e6a38832bb15ca106b33603e8c1d580cdf",
+    "exactBundleEntryReporting": "15aa839f865db18c1c47b72fb49ff5a6d416beb4"
+  },
+  "productionPolicy": {
+    "profile": "ChunkPublication",
+    "bundlePolicy": "Message129WhenBeneficial",
+    "compression": "message148 LZ4; canonical 129 >= 384 bytes; >= 32 bytes net saving",
+    "cadence": "Immediate/Near/Far 1/2/4",
+    "unreliableAggregation": "CrossLane cap 2; no added delay",
+    "selectedEgress": "BackgroundPlatformBatch",
+    "serialControl": "PlatformBatch",
+    "gameManifest": 29,
+    "transportRevision": 2,
+    "semanticOrWirePolicyChanged": false
+  },
+  "environment": {
+    "runtime": "8.0.29",
+    "operatingSystem": "Unix 7.1.5.1",
+    "logicalProcessors": 16,
+    "stopwatchFrequency": 1000000000,
+    "configuration": "Release"
+  },
+  "rawEvidence": [
+    {
+      "name": "beforeSynthetic",
+      "gitSha": "8f6f1cba4979fe2121174d33a64d7565e8277e5b",
+      "sha256": "966488906b2575a8d6e1d2f0aec897c75d28ddb6a948a088be520bfde49ca3b2"
+    },
+    {
+      "name": "afterSynthetic",
+      "gitSha": "15aa839f865db18c1c47b72fb49ff5a6d416beb4",
+      "sha256": "23d327d9b108c8e1f538dc3e92daf6acfd2a2a0161b5dfec124aa933fc467bf1"
+    },
+    {
+      "name": "beforeRealUdp",
+      "gitSha": "8f6f1cba4979fe2121174d33a64d7565e8277e5b",
+      "sha256": "1959fa5871b5be5b6c6e877790bd464c4bffbab917a34c9269aa7d20f1bdc212"
+    },
+    {
+      "name": "afterRealUdp",
+      "gitSha": "15aa839f865db18c1c47b72fb49ff5a6d416beb4",
+      "sha256": "c81355d7c9e30b27b8e2f60b216ab4f1033e44a63688ac977f8849bf15f5c2f0"
+    },
+    {
+      "name": "afterDetailedAttribution",
+      "gitSha": "15aa839f865db18c1c47b72fb49ff5a6d416beb4",
+      "sha256": "e90375ee72107536a70d72af5a0130edc416e843bffcb4ba278ee161a7c0d32d"
+    },
+    {
+      "name": "sortMicro",
+      "gitSha": "126222a18d6678b6b090a650ef6083e12be044b1",
+      "sha256": "e2f072ddf6ad19de68c9004259e11ba49dabd28b3932711407f44451cdb8bd8b"
+    }
+  ],
+  "matchedSynthetic": {
+    "definition": "E=1000; low dirty=20; high dirty=floor(35% of R); identical geometry, AOI, cadence, protocol, proof, compression, aggregation, seed, 30 warmup and 270 measured ticks",
+    "beforeHead": "8f6f1cba4979fe2121174d33a64d7565e8277e5b",
+    "afterHead": "15aa839f865db18c1c47b72fb49ff5a6d416beb4",
+    "rows": [
+      { "r": 128, "dirty": 20, "beforeServerP95Ms": 1.859380, "afterServerP95Ms": 1.854868, "beforeScheduleP95Ms": 0.9870, "afterScheduleP95Ms": 0.9482 },
+      { "r": 128, "dirty": 45, "beforeServerP95Ms": 3.746752, "afterServerP95Ms": 2.733705, "beforeScheduleP95Ms": 2.8347, "afterScheduleP95Ms": 1.7703 },
+      { "r": 192, "dirty": 20, "beforeServerP95Ms": 2.949700, "afterServerP95Ms": 2.992095, "beforeScheduleP95Ms": 1.5367, "afterScheduleP95Ms": 1.5323 },
+      { "r": 192, "dirty": 67, "beforeServerP95Ms": 9.406890, "afterServerP95Ms": 5.840471, "beforeScheduleP95Ms": 7.2432, "afterScheduleP95Ms": 3.6014 },
+      { "r": 256, "dirty": 20, "beforeServerP95Ms": 3.807772, "afterServerP95Ms": 4.806712, "beforeScheduleP95Ms": 1.9306, "afterScheduleP95Ms": 2.1344, "note": "isolated server-budget p95 tail; p50 changed 3.711085 to 3.777492 ms" },
+      { "r": 256, "dirty": 90, "beforeServerP95Ms": 16.181281, "afterServerP95Ms": 9.705474, "beforeScheduleP95Ms": 12.3649, "afterScheduleP95Ms": 5.7495 },
+      { "r": 300, "dirty": 20, "beforeServerP95Ms": 4.817570, "afterServerP95Ms": 4.881081, "beforeScheduleP95Ms": 2.3913, "afterScheduleP95Ms": 2.3293 },
+      { "r": 300, "dirty": 105, "beforeServerP95Ms": 23.803074, "afterServerP95Ms": 13.850974, "beforeScheduleP95Ms": 17.8612, "afterScheduleP95Ms": 7.3874 },
+      { "r": 350, "dirty": 20, "beforeServerP95Ms": 6.299000, "afterServerP95Ms": 5.948470, "beforeScheduleP95Ms": 3.1475, "afterScheduleP95Ms": 2.9405 },
+      { "r": 350, "dirty": 122, "beforeServerP95Ms": 28.758284, "afterServerP95Ms": 16.460978, "beforeScheduleP95Ms": 21.7957, "afterScheduleP95Ms": 10.0495 }
+    ],
+    "highChangeServerP95ReductionPercent": [27.04, 37.91, 40.02, 41.81, 42.76],
+    "highChangeScheduleP95ReductionPercent": [37.55, 50.28, 53.50, 58.64, 53.89],
+    "invariance": {
+      "semanticDigest": "exact at every row",
+      "publications": "exact at every row",
+      "proofs": "exact at every row",
+      "gameMessages": "exact at every row",
+      "bundleEntries": "exact at every row",
+      "applicationBytes": "exact at every row",
+      "note": "R256 physical datagrams varied by 256 in the in-process fixture because client/proof timing affects cap-two occupancy; the real-UDP primary matrix is physically exact"
+    }
+  },
+  "detailedR300NinetyTicks": {
+    "lowDirty20": {
+      "semanticPublications": 114732,
+      "candidateRequests": 114732,
+      "candidateBuilds": 114732,
+      "candidateCarries": 0,
+      "candidateLocalReuses": 0,
+      "candidateInvalidations": 0,
+      "preparedValidationHashCalls": 114732,
+      "preparedRecordsValidated": 395380,
+      "preparedContentHashCalls": 114732,
+      "preparedStandaloneWrites": 182,
+      "actualBundleEntries": 114550,
+      "multiEntryBundleMessages": 27192,
+      "compressedMessages": 27118,
+      "recipientSortCalls": 114732,
+      "indicesSorted": 395380,
+      "finalRecordsConstructed": 395380
+    },
+    "highDirty105": {
+      "semanticPublications": 114732,
+      "candidateRequests": 114732,
+      "candidateBuilds": 114732,
+      "candidateCarries": 79024,
+      "candidateLocalReuses": 79024,
+      "candidateInvalidations": 0,
+      "preparedValidationHashCalls": 114732,
+      "preparedRecordsValidated": 2064056,
+      "preparedContentHashCalls": 114732,
+      "preparedStandaloneWrites": 98064,
+      "actualBundleEntries": 16668,
+      "multiEntryBundleMessages": 8334,
+      "compressedMessages": 8334,
+      "recipientSortCalls": 114732,
+      "indicesSorted": 2064056,
+      "finalRecordsConstructed": 2064056
+    },
+    "beforeDerivedFromCapturedSplitWorkAndStartingSource": {
+      "highCandidateBuilds": 193756,
+      "highPacketBoundaryRebuildsRemoved": 79024,
+      "highAdditionalStandaloneValidationHashPassesRemoved": 98064,
+      "highTotalValidationHashPassesBefore": 291820,
+      "highTotalValidationHashPassesAfter": 114732,
+      "note": "the starting binary predates these dedicated counters; build amplification is the captured semantic-candidate count plus the exact after-run carry count, following the unchanged old discard/re-enter control flow"
+    }
+  },
+  "sourceAndEncodingAttributionR300": {
+    "sample": "separate 90-tick Detailed controls; timing tax excludes these rows from rated p95 conclusions",
+    "v2PopulationV2Activity": {
+      "entities": 300,
+      "dirty": 105,
+      "beforeSourceReadTicks": 300258849,
+      "afterSourceReadTicks": 102639173,
+      "beforeSortTicks": 168353224,
+      "afterSortTicks": 23669802,
+      "beforeMaterializationTicks": 31221036,
+      "afterMaterializationTicks": 17987423,
+      "beforeStandaloneEncodeTicks": 371744396,
+      "afterStandaloneEncodeTicks": 20289895,
+      "beforeScheduleP95Ms": 21.4590,
+      "afterScheduleP95Ms": 9.8127
+    },
+    "thousandEntitiesV2Activity": {
+      "entities": 1000,
+      "dirty": 350,
+      "beforeSourceReadTicks": 551826112,
+      "afterSourceReadTicks": 181773009,
+      "beforeSortTicks": 304992854,
+      "afterSortTicks": 38928412,
+      "beforeMaterializationTicks": 52662741,
+      "afterMaterializationTicks": 29728789,
+      "beforeStandaloneEncodeTicks": 698415162,
+      "afterStandaloneEncodeTicks": 39173769,
+      "beforeScheduleP95Ms": 38.2363,
+      "afterScheduleP95Ms": 16.6192
+    }
+  },
+  "sortMicrobenchmark": {
+    "iterations": 20000,
+    "samples": 31,
+    "units": "nanoseconds per operation",
+    "rows": [
+      { "records": 1, "oldMean": 6.369, "indexFirstMean": 21.022, "reductionPercent": -230.07 },
+      { "records": 4, "oldMean": 107.319, "indexFirstMean": 137.231, "reductionPercent": -27.87 },
+      { "records": 8, "oldMean": 243.752, "indexFirstMean": 92.129, "reductionPercent": 62.20 },
+      { "records": 16, "oldMean": 547.329, "indexFirstMean": 235.983, "reductionPercent": 56.88 },
+      { "records": 30, "oldMean": 1257.578, "indexFirstMean": 544.675, "reductionPercent": 56.69 }
+    ],
+    "oldAllocatedBytes": 0,
+    "newAllocatedBytes": 0,
+    "interpretation": "tiny sets do not benefit; the retained insertion fast path bounds them, while index-first sorting materially reduces representative 8-30 record work"
+  },
+  "realUdpPrimaryMatrix": {
+    "definition": "real secure loopback UDP, actual PlatformBatch/BackgroundPlatformBatch listener paths, client receive/apply/proof, E=1000, dirty=20, 60 warmup and 270 measured ticks, detailed probes off",
+    "rows": [
+      { "r": 128, "implementation": "Before", "egress": "InlinePlatformBatch", "remoteP95Ms": 2.807753, "remoteP99Ms": 2.936242, "processCpuMs": 2950, "udpDatagrams": 69644, "udpBytes": 40761523 },
+      { "r": 128, "implementation": "Before", "egress": "BackgroundPlatformBatch", "remoteP95Ms": 2.543333, "remoteP99Ms": 2.640474, "processCpuMs": 2950, "udpDatagrams": 69644, "udpBytes": 40837217 },
+      { "r": 128, "implementation": "After", "egress": "InlinePlatformBatch", "remoteP95Ms": 2.735369, "remoteP99Ms": 2.789673, "processCpuMs": 2940, "udpDatagrams": 69644, "udpBytes": 40761523 },
+      { "r": 128, "implementation": "After", "egress": "BackgroundPlatformBatch", "remoteP95Ms": 2.672275, "remoteP99Ms": 3.295998, "processCpuMs": 2990, "udpDatagrams": 69644, "udpBytes": 40837217 },
+      { "r": 192, "implementation": "Before", "egress": "InlinePlatformBatch", "remoteP95Ms": 4.404686, "remoteP99Ms": 4.563605, "processCpuMs": 4520, "udpDatagrams": 104608, "udpBytes": 61133077 },
+      { "r": 192, "implementation": "Before", "egress": "BackgroundPlatformBatch", "remoteP95Ms": 3.882571, "remoteP99Ms": 4.081710, "processCpuMs": 4530, "udpDatagrams": 104608, "udpBytes": 61287410 },
+      { "r": 192, "implementation": "After", "egress": "InlinePlatformBatch", "remoteP95Ms": 4.022468, "remoteP99Ms": 4.257137, "processCpuMs": 4380, "udpDatagrams": 104608, "udpBytes": 61133077 },
+      { "r": 192, "implementation": "After", "egress": "BackgroundPlatformBatch", "remoteP95Ms": 3.836124, "remoteP99Ms": 4.819630, "processCpuMs": 4490, "udpDatagrams": 104608, "udpBytes": 61287410 },
+      { "r": 256, "implementation": "Before", "egress": "InlinePlatformBatch", "remoteP95Ms": 6.025239, "remoteP99Ms": 6.288436, "processCpuMs": 6180, "udpDatagrams": 139582, "udpBytes": 81727646 },
+      { "r": 256, "implementation": "Before", "egress": "BackgroundPlatformBatch", "remoteP95Ms": 5.535832, "remoteP99Ms": 5.718192, "processCpuMs": 6220, "udpDatagrams": 139582, "udpBytes": 81856777 },
+      { "r": 256, "implementation": "After", "egress": "InlinePlatformBatch", "remoteP95Ms": 5.602303, "remoteP99Ms": 5.950712, "processCpuMs": 6030, "udpDatagrams": 139582, "udpBytes": 81727646 },
+      { "r": 256, "implementation": "After", "egress": "BackgroundPlatformBatch", "remoteP95Ms": 4.892239, "remoteP99Ms": 4.994553, "processCpuMs": 5940, "udpDatagrams": 139582, "udpBytes": 81856777 },
+      { "r": 300, "implementation": "Before", "egress": "InlinePlatformBatch", "remoteP95Ms": 7.141417, "remoteP99Ms": 7.387230, "processCpuMs": 7320, "udpDatagrams": 163796, "udpBytes": 95576598 },
+      { "r": 300, "implementation": "Before", "egress": "BackgroundPlatformBatch", "remoteP95Ms": 6.494577, "remoteP99Ms": 6.827993, "processCpuMs": 7300, "udpDatagrams": 163796, "udpBytes": 95838762 },
+      { "r": 300, "implementation": "After", "egress": "InlinePlatformBatch", "remoteP95Ms": 6.589191, "remoteP99Ms": 8.378953, "processCpuMs": 7000, "udpDatagrams": 163796, "udpBytes": 95576598 },
+      { "r": 300, "implementation": "After", "egress": "BackgroundPlatformBatch", "remoteP95Ms": 6.002501, "remoteP99Ms": 7.418205, "processCpuMs": 7090, "udpDatagrams": 163796, "udpBytes": 95838762 },
+      { "r": 350, "implementation": "Before", "egress": "InlinePlatformBatch", "remoteP95Ms": 8.633733, "remoteP99Ms": 8.963890, "processCpuMs": 8660, "udpDatagrams": 190998, "udpBytes": 111603784 },
+      { "r": 350, "implementation": "Before", "egress": "BackgroundPlatformBatch", "remoteP95Ms": 7.644162, "remoteP99Ms": 8.124779, "processCpuMs": 8650, "udpDatagrams": 190998, "udpBytes": 111643267 },
+      { "r": 350, "implementation": "After", "egress": "InlinePlatformBatch", "remoteP95Ms": 7.593603, "remoteP99Ms": 7.904063, "processCpuMs": 8230, "udpDatagrams": 190998, "udpBytes": 111603784 },
+      { "r": 350, "implementation": "After", "egress": "BackgroundPlatformBatch", "remoteP95Ms": 7.705607, "remoteP99Ms": 8.768758, "processCpuMs": 8610, "udpDatagrams": 190998, "udpBytes": 111643267, "note": "host-tail outlier; isolated same-code rerun p95/p99 was 7.457/8.051 ms" }
+    ],
+    "firstTestedOverFourMilliseconds": {
+      "beforeInlinePlatformBatch": 192,
+      "beforeBackgroundPlatformBatch": 256,
+      "afterInlinePlatformBatch": 192,
+      "afterBackgroundPlatformBatch": 256
+    },
+    "physicalInvariance": "before/after UDP bytes and datagrams are exact for every population and egress mode"
+  },
+  "afterBackgroundSenderTiming": {
+    "scope": "separate timing-enabled final-code run; sender thread CPU is unavailable, so WorkerServiceMilliseconds is reported and total process CPU includes both producer and sender",
+    "rows": [
+      { "r": 128, "workerServiceMs": 97.296, "queueP99Ms": 0.354, "queueHighWater": 120, "proofLatencyP95Microseconds": 13160 },
+      { "r": 192, "workerServiceMs": 143.990, "queueP99Ms": 0.524, "queueHighWater": 192, "proofLatencyP95Microseconds": 23564 },
+      { "r": 256, "workerServiceMs": 185.087, "queueP99Ms": 0.621, "queueHighWater": 207, "proofLatencyP95Microseconds": 26892 },
+      { "r": 300, "workerServiceMs": 220.813, "queueP99Ms": 0.785, "queueHighWater": 235, "proofLatencyP95Microseconds": 31644 },
+      { "r": 350, "workerServiceMs": 253.485, "queueP99Ms": 0.813, "queueHighWater": 271, "proofLatencyP95Microseconds": 36130 }
+    ],
+    "sourceToProofP95AuthoritySteps": "2 at 128/256/300/350; one 192 run observed 3 alongside a transient outstanding high-water of 17",
+    "queueRetiredCleanly": true,
+    "capacityRefusals": 0,
+    "workerFailures": 0
+  },
+  "finding4Census": {
+    "r": 300,
+    "highDirty": 105,
+    "semanticPublications": 343032,
+    "standalone120": 293364,
+    "standalonePercent": 85.52,
+    "multiEntryBundleEntries": 49668,
+    "multiEntryBundleMessages": 24834,
+    "compressed148": 24834,
+    "compressionIneligibleBecauseSingleton": 293364,
+    "disposition": "deferred; no one-entry 129/148 or representation policy change in PF5-R4"
+  },
+  "memoryAndAllocation": {
+    "warmedManagedAllocationPerMessage": 0,
+    "sortMicroAllocatedBytes": 0,
+    "persistentRecipientCacheAdded": false,
+    "maximumCarriedCandidatesPerDrain": 1,
+    "maximumCarriedRecordScratch": "64 RemoteChunkDeltaRecord values; stack scoped; approximately 3072 bytes at the current 48-byte managed layout",
+    "reservedPersistentMemoryChangeBytes": 0
+  },
+  "verification": {
+    "gameReplicationTests": "PASS; 166",
+    "pf5R2Only": "PASS",
+    "pf5R2R1Only": "PASS",
+    "pf5R2R2Only": "PASS",
+    "pf5R3Only": "PASS",
+    "pf5R4Only": "PASS before final evidence commit; repeated at closure",
+    "canonicalRelease": "PENDING",
+    "exportsAndComposition": "PENDING"
+  },
+  "disposition": {
+    "finding1": "accepted",
+    "finding2": "accepted",
+    "finding3": "accepted",
+    "finding4": "separate representation experiment may proceed",
+    "remainingCost": "recipient-local canonical validation/hash, scheduling, outstanding delivery/proof bookkeeping, and high singleton-120 representation count remain; exact recipient proof identity remains intentionally local"
+  }
+}
