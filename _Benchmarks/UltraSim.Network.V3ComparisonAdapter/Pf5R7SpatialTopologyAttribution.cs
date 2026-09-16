@@ -65,7 +65,8 @@ internal static class Pf5R7SpatialTopologyAttribution
             // topology groups own the source truth. Total memberships remain approximately
             // matched (ordinary edge rounding is retained); this is characterization, not a
             // production-capacity row.
-            RunTopology(64, 64, 20, 1, "controlled-fanout-1x64");
+            RunTopology(64, 64, 20, 1, "controlled-fanout-1x64",
+                mutationPeriodTicks: 6);
             RunTopology(64, 64, 20, 8, "controlled-fanout-8x8");
             RunTopology(64, 64, 20, 64, "controlled-fanout-64x1");
             RunTopology(64, 64, 20, 8, "extent-small");
@@ -115,9 +116,11 @@ internal static class Pf5R7SpatialTopologyAttribution
                 "group stores at most 20 public records per 16 m publication chunk. A group is a " +
                 "spatial region/chunk-group, not necessarily one physical chunk.",
             "The controlled-fanout R64 rows use the same production AOI radius and approximately " +
-                "matched total memberships while varying 1/8/64 source groups. Ordinary chunk-edge " +
-                "rounding is retained, so exact membership and dirty-chunk fanout are reported and " +
-                "the rows are synthetic attribution rather than product-capacity evidence.",
+                "matched total memberships while varying 1/8/64 source groups. The dense row " +
+                "mutates once per six ticks so its dirty recipient-publication references remain " +
+                "near the medium/sparse rows; this deliberately varies distinct source bodies and " +
+                "source records and is not a fixed-authoritative-activity capacity comparison. " +
+                "Ordinary chunk-edge rounding is retained and every work count is reported.",
             "Rated rows run with detailed Game attribution off. Each row has a separate short " +
                 "diagnostic census using identical semantic work; only its topology/body counters " +
                 "are copied into the rated row.",
@@ -143,13 +146,21 @@ internal static class Pf5R7SpatialTopologyAttribution
             int dirty,
             int groups,
             string label,
-            int inactiveStoredChunks = 0)
+            int inactiveStoredChunks = 0,
+            int mutationPeriodTicks = 1)
         {
             P03NetworkWorkload workload = P03NetworkWorkload.ChunkTopology(
                 recipients, entities, dirty, groups, inactiveStoredChunks)
                 .WithServerTickAndAoICadence(16, P03AoICadencePolicy.Selected124);
+            if (mutationPeriodTicks > 1)
+                workload = workload with
+                {
+                    Id = $"{workload.Id}-period{mutationPeriodTicks}",
+                    MutationPeriodTicks = mutationPeriodTicks,
+                };
             Console.WriteLine($"PF5-R7 {label}: R={recipients} E={entities} " +
-                $"groups={groups} dirty={dirty} inactive={inactiveStoredChunks}");
+                $"groups={groups} dirty={dirty} inactive={inactiveStoredChunks} " +
+                $"period={mutationPeriodTicks}");
             P03WholeFlowRow rated = RunHarness(workload, warmup, ticks, detailed: false);
             P03WholeFlowRow census = RunHarness(
                 workload, Math.Min(warmup, 8), censusTicks, detailed: true);
