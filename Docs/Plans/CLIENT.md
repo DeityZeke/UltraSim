@@ -2747,7 +2747,7 @@ PF5-R4 recipient preparation / encoding flattening                           CLO
 PF5-R5 singleton compression / prepared-hash hardening                       CLOSED (outcome B)
 PF5-R6 compatible immutable recipient-body sharing                           CLOSED (outcome A)
 PF5-R7 spatial topology / whole-server attribution                           CLOSED (characterization)
-PF5-R8 required fanout / avoidable-processing assurance                      CLOSED (measurement)
+PF5-R8 required fanout / avoidable-processing assurance                      CLOSED (measurement; R1 controls corrected)
 PF6 external human validation                                                READY TO RESUME
         |
         v

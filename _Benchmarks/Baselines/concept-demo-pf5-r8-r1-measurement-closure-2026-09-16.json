@@ -1,0 +1,128 @@
+{
+  "checkpoint": "PF5-R8-R1 measurement-window and matched-control closure",
+  "date": "2026-09-16",
+  "startingHead": "32e0a8214354e89250a3c87c6a417e93a075b6ad",
+  "reviewedPf5R8Head": "96f154958d7238004fff44a0a3aa6f6b05e1fb59",
+  "implementationCommits": [
+    "6da70709f649b22dd1dd84c9107350cc21f79c01",
+    "3d339edbb526052b00b7f640ca8cd519628d3464",
+    "4a1e01934ca87dbc63b471f5ca4f2edce58ad647"
+  ],
+  "measurementHead": "4a1e01934ca87dbc63b471f5ca4f2edce58ad647",
+  "productionSemanticCandidate": "14e729a6ce69179cfbe4b9a3a4c4cdfa21797fa9",
+  "productionSemanticsChanged": false,
+  "productionPolicyChanged": false,
+  "rawEvidence": "concept-demo-pf5-r8-r1-measurement-closure-2026-09-16.raw.json",
+  "environment": {
+    "configuration": "Release",
+    "runtime": ".NET 8.0.29",
+    "os": "CachyOS",
+    "architecture": "x64",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "logicalProcessors": 16,
+    "processArrangement": "one in-process authority plus real secure loopback UDP clients and one bounded BackgroundPlatformBatch sender owner"
+  },
+  "windowClosure": {
+    "captureBoundary": "all measured process/transport/listener/profile/protocol snapshots are frozen before DrainToConvergence",
+    "ordinaryDrainServerCalls": 128,
+    "extraDrainServerCalls": 1024,
+    "ordinaryFinalDebt": 0,
+    "extraFinalDebt": 0,
+    "measuredLogicalWorkEqual": true,
+    "measuredProtocolCallCountsEqual": true,
+    "normalizedApplicationAndPublicationWorkEqual": true,
+    "drainDistributionsClaimed": false
+  },
+  "enabledSharing": [
+    { "scenario": "synchronized", "requests": 46080, "hits": 45360, "misses": 720, "encodedCopies": 45360, "materializationsAvoided": 45360, "evictions": 60 },
+    { "scenario": "staggered-joins", "requests": 38768, "hits": 38048, "misses": 720, "encodedCopies": 38048, "materializationsAvoided": 38048, "evictions": 70 },
+    { "scenario": "cadence-phases", "requests": 11904, "hits": 11168, "misses": 736, "encodedCopies": 11168, "materializationsAvoided": 11168, "evictions": 73 },
+    { "scenario": "controlled-loss", "requests": 46115, "hits": 44695, "misses": 1420, "encodedCopies": 44695, "materializationsAvoided": 44695, "evictions": 478 },
+    { "scenario": "controlled-reorder", "requests": 46080, "hits": 44648, "misses": 1432, "encodedCopies": 44648, "materializationsAvoided": 44648, "evictions": 496 },
+    { "scenario": "proof-delay", "requests": 46080, "hits": 45360, "misses": 720, "encodedCopies": 45360, "materializationsAvoided": 45360, "evictions": 78 },
+    { "scenario": "temporary-stalls", "requests": 42240, "hits": 41512, "misses": 728, "encodedCopies": 41512, "materializationsAvoided": 41512, "evictions": 81 },
+    { "scenario": "aoi-churn", "requests": 42464, "hits": 41459, "misses": 1005, "encodedCopies": 41459, "materializationsAvoided": 41459, "evictions": 182 },
+    { "scenario": "reconnect", "requests": 46080, "hits": 45360, "misses": 720, "encodedCopies": 45360, "materializationsAvoided": 45360, "evictions": 69, "reconnects": 8 },
+    { "scenario": "history-pressure", "requests": 42112, "hits": 41392, "misses": 720, "encodedCopies": 41392, "materializationsAvoided": 41392, "evictions": 68, "historyFloorRebases": 128 },
+    { "scenario": "combined-divergence", "requests": 8205, "hits": 6228, "misses": 1977, "encodedCopies": 6228, "materializationsAvoided": 6228, "evictions": 982, "reconnects": 8 }
+  ],
+  "enabledSharingEquality": {
+    "normalizedFinalKnowledge": true,
+    "logicalPublications": true,
+    "canonicalApplicationBytes": true,
+    "proofOutcomes": true,
+    "snapshotAndReconnectCounts": true,
+    "identityConflicts": 0
+  },
+  "fixedDeliveryTopology": {
+    "invariantsPerRow": {
+      "deliveries": 15360,
+      "deliveredRecords": 15360,
+      "gameMessages": 15360,
+      "proofs": 15360,
+      "applicationBytes": 1920000,
+      "deliveriesPerTick": 512
+    },
+    "rows": [
+      { "shape": "1x512", "sourcePreparations": 30, "scheduleMeanMs": 0.295727, "proofMeanMs": 0.191579, "networkOtherMeanMs": 1.755719, "serverRemoteMeanMs": 2.243025, "serverRemoteP95Ms": 2.477362 },
+      { "shape": "8x64", "sourcePreparations": 240, "scheduleMeanMs": 0.325463, "proofMeanMs": 0.194963, "networkOtherMeanMs": 1.808456, "serverRemoteMeanMs": 2.328882, "serverRemoteP95Ms": 2.481722 },
+      { "shape": "64x8", "sourcePreparations": 1920, "scheduleMeanMs": 0.349273, "proofMeanMs": 0.187059, "networkOtherMeanMs": 1.726253, "serverRemoteMeanMs": 2.262585, "serverRemoteP95Ms": 2.335689 },
+      { "shape": "512x1", "sourcePreparations": 15360, "scheduleMeanMs": 0.664498, "proofMeanMs": 0.191057, "networkOtherMeanMs": 1.777885, "serverRemoteMeanMs": 2.633441, "serverRemoteP95Ms": 2.795279 }
+    ]
+  },
+  "r128HighOffAttributionMsPerTick": {
+    "serverOwnedRemote": 1.136027,
+    "sourcePreparationAndCommitObservation": 0.017779,
+    "scheduleCodecQueue": 0.518645,
+    "proofApply": 0.125835,
+    "networkProtocolAndOther": 0.473768,
+    "reconciliationResidual": 0.0
+  },
+  "r128HighCorrectedDetailedCounts": {
+    "deliveries": 21332,
+    "proofs": 21332,
+    "exactRetirements": 21332,
+    "endingDebt": 0,
+    "bodyHits": 20523,
+    "bodyMisses": 809,
+    "coverageLinks": 39750,
+    "deliveryLookupComparisons": 41915,
+    "obsoleteChecks": 50982,
+    "bodyBytesCopied": 2254404,
+    "bundleRecordBytesCopied": 4957771
+  },
+  "proofDebt": {
+    "r128HighOutstandingHighWater": 8,
+    "r128HighObsoleteChecksPerProof": 2.3909,
+    "depth64MultiChunkLookupComparisonsPerProof": 16.3780,
+    "depth64MultiChunkObsoleteChecksPerProof": 31.2520,
+    "disposition": "linear scans confirmed; current product-shaped depth remains too shallow to justify an index"
+  },
+  "ratedBoundary": {
+    "r256HighP95Ms": 2.884607,
+    "r300LowScheduleP95RangeMs": [0.9881, 1.0284],
+    "r300LowRemoteP95RangeMs": [2.362899, 2.444242],
+    "r300HighScheduleP95RangeMs": [1.1794, 1.1985],
+    "r300HighRemoteP95RangeMs": [3.360104, 3.411230],
+    "r300HighPasses": 3,
+    "r300HighRuns": 3,
+    "r350HighP95Ms": 5.089957,
+    "r400HighP95Ms": 5.919322,
+    "interpretation": "all final R300 repetitions pass the approximate budget; R350 is the first clearly failing tested point; not product CCU"
+  },
+  "classification": {
+    "confirmedReuse": "shared prepared source truth and production-capacity compatible encoded bodies eliminate repeated collapse/sort/materialization/hash/record serialization on hits",
+    "measuredRequiredCurrentPolicy": "independent recipient delivery/proof/lifetime state and independently selected secure output remain required",
+    "unattributed": [
+      "0.519 ms/tick Off schedule/codec/queue at R128 high",
+      "0.474 ms/tick Off Network protocol plus unsplit remote/harness work at R128 high"
+    ],
+    "efficiencySettled": false,
+    "another50To100Recipients": "unsupported promise"
+  },
+  "verification": {
+    "focusedPf5R8": "pass",
+    "gameReplicationTests": "176/176 pass",
+    "canonicalRelease": "pass, including physical exports, Contentless Online, mixed exported-client swarms, lifecycle/parity, and git diff --check"
+  }
+}

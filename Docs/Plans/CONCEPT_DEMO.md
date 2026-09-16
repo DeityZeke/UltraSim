@@ -122,10 +122,12 @@ replication and 2.681 ms locomotion/current Simple Physics. Dense shared AOI is 
 replication amplifier; inactive world extent alone adds no publication work. Sim Core,
 pathfinding, Dungeon Core, and actor-contact Physics remain unimplemented rather than assigned
 speculative budgets. PF5-R8 then separates fixed source work, required recipient fanout,
-compatible reuse, record shape, and proof debt. It finds approximately constant cost per admitted
-obligation at the larger fanout points and no large justified production optimization. Three
-R300/high runs remain below the 4 ms remote p95 budget while R350 fails; this is a synthetic
-boundary, not CCU.
+compatible reuse, record shape, and proof debt. Its R1 measurement closure freezes child evidence
+before drain, proves the production-capacity body store under divergence, and adds a true
+fixed-delivery topology control. The result supports that earlier reconstruction waste is largely
+gone, while explicitly leaving the remaining per-recipient efficiency question open. All three
+final R300/high runs pass the approximate 4 ms remote p95 boundary, while R350 clearly fails; this
+is a synthetic boundary, not CCU or a promise that another 50–100 recipients can be recovered.
 A post-F0.8 defensive UI correction
 also makes
 local shutdown independent from a saturated presentation queue, contains expected view-capacity
@@ -1836,7 +1838,7 @@ then close:
     PF5-R5 singleton compression / prepared-hash hardening              CLOSED (outcome B)
     PF5-R6 compatible immutable recipient-body sharing                  CLOSED (outcome A)
     PF5-R7 spatial topology / whole-server attribution                  CLOSED (characterization)
-    PF5-R8 required fanout / avoidable-processing assurance             CLOSED (measurement)
+    PF5-R8 required fanout / avoidable-processing assurance             CLOSED (measurement; R1 controls corrected)
     PF6 external human validation                                       READY TO RESUME
 ```
 

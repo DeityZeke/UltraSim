@@ -2312,19 +2312,26 @@ fixed-source matrix holds 480 source preparations / 600 records while scaling ac
 recipients from 1 to 256. From 64 through 256, Detailed scheduling and the separately rated
 server-owned remote mean remain approximately 1.5–1.7 microseconds per admitted obligation.
 
-The matched R128/high ledger reconciles 22,019 attempts, deliveries, applied proofs, knowledge
-advancements, and exact retirements to zero ending debt. Compatible body reuse is 96.29% there and
+The corrected matched R128/high ledger reconciles 21,332 deliveries, applied proofs, knowledge
+advancements, and exact retirements to zero ending debt. Compatible body reuse is 96.21% there and
 remains 75.90% under combined loss/reorder/stall/AOI/reconnect divergence. Controlled proof debt
-confirms linear delivery/obsolete scans, but depth-64 service remains below 1 microsecond per proof
-and ordinary high-water remains eight; indexing stays deferred. Three bracketed R300/high Off runs
-remain below the 4 ms p95 budget, while R350 fails, so another 50–100 synthetic recipients is not a
-supported optimization claim.
+confirms linear delivery/obsolete scans, but ordinary high-water remains eight; indexing stays
+deferred. The original closure rerun straddled the 4 ms p95 budget in one of three R300/high Off
+runs. The final bounded-evidence rerun put all three at 3.360–3.411 ms, while R350 still fails
+clearly at 5.090 ms. The tested boundary is therefore between R300 and R350, but another 50–100
+synthetic recipients remains an unsupported optimization claim.
 
-Detailed attribution doubles its parent and is explicitly diagnostic. It exposes small candidate
-experiments—coverage certificates and one fewer cached-body copy—and one confirmed but tiny
-Off-mode typed diagnostic clear. No result warrants a production change. Permanent evidence is in
-`_Benchmarks/Baselines/concept-demo-pf5-r8-required-fanout-2026-09-16.json`, its raw companion, and
-the human-readable report.
+Detailed attribution doubles its parent and is explicitly diagnostic. PF5-R8-R1 subsequently
+corrects its measured-window boundary: all child snapshots now freeze before convergence drain,
+whose work is reported separately. It also proves actual `Enabled` 1,024-body sharing under
+divergence and adds a topology control holding 15,360 deliveries, records, messages, proofs, and
+1.92 MB constant. That control confirms a large required recipient-output floor and a smaller
+source-cardinality cost, but does not establish that remaining per-recipient work is minimal.
+All three final R300/high ratings pass the approximate 4 ms boundary; R350 is the first clearly
+failing tested point. No result warrants a production change or another 50–100 recipient promise.
+Permanent closure evidence is in
+`_Benchmarks/Baselines/concept-demo-pf5-r8-r1-measurement-closure-2026-09-16.json`, its raw
+companion, and the human-readable report.
 
 ## PF6 — external human validation
 
@@ -2506,7 +2513,7 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 34. Close adversarial late-lookup, canonical-byte, telemetry-Off, and proof-debt findings.
     **CLOSED — PF5-R7 adversarial follow-up; proof index deferred by measured debt**
 35. Distinguish required dense fanout from avoidable processing.
-    **CLOSED — PF5-R8 measurement; no production optimization selected**
+    **CLOSED — PF5-R8/R1 measurement controls corrected; no production optimization selected**
 36. Choose/document the default deployment-performance policy. **CLOSED — v29 plus PF5-R3 egress**
 37. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5/PF5-R8**
 38. Full exact-tree verifier and export closure.

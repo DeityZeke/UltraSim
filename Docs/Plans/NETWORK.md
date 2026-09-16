@@ -729,9 +729,9 @@ unchanged and runs with instrumentation Off; Detailed exclusive clocks publish t
 and an unattributed residual rather than assigning it to crypto or proof by subtraction.
 
 At the larger fixed-source points, cost remains approximately constant per admitted recipient
-obligation. Compatible reuse reaches 96.27% at R128 and remains 75.90% under combined divergence.
-The R128/high ledger reconciles 22,019 admitted deliveries, proofs, knowledge advancements, and
-exact retirements to zero debt. Controlled scans become linear with artificial debt, but ordinary
+obligation. Compatible reuse reaches 96.21% at R128 and remains 75.90% under combined divergence.
+The corrected R128/high ledger reconciles 21,332 admitted deliveries, proofs, knowledge
+advancements, and exact retirements to zero debt. Controlled scans become linear with artificial debt, but ordinary
 high-water remains eight and the depth-64 service cost stays below one microsecond per proof, so a
 delivery/chunk index remains deferred.
 
@@ -741,6 +741,24 @@ intermediate cached-body copy are bounded experiment candidates with observer-in
 of 0.063 and 0.017 ms/tick. One typed diagnostic staging array is unnecessarily cleared in Off,
 but the entire clear stage measures only 0.010 ms/tick; PF5-R8 records rather than repairs it.
 See the [PF5-R8 evidence](../../_Benchmarks/Baselines/concept-demo-pf5-r8-required-fanout-2026-09-16.md).
+
+The bounded PF5-R8-R1 follow-up corrects the original child-measurement window, exercises
+production-capacity `Enabled` body sharing under every divergence shape, and adds the missing
+fixed-delivered-work topology control. Measured child counters/timings now freeze before
+convergence drain; drain work is a separate exact delta. Enabled sharing performs real encoded
+copies and avoids materialization at 75.90–98.44% hit rates despite loss, reorder, AOI churn,
+eviction, history-pressure Rebase, and reconnect, with exact final truth equal to the `CensusOnly`
+control.
+
+The topology control holds 15,360 deliveries, records, messages, and proofs plus 1.92 MB of
+application bytes constant while unique source preparations vary from 30 to 15,360. Required
+recipient proof and Network work remains broadly flat; source/scheduling cost rises at the
+many-unique-source extreme. The lower-overhead R128/high Off split measures 0.018 ms shared source/
+wakeup, 0.519 ms schedule/codec/queue, 0.126 ms proof apply, and 0.474 ms Network/other per tick.
+The latter broad buckets are not proven minimal. The supported conclusion is therefore that
+earlier reconstruction waste is largely gone—not that the remaining implementation is optimal or
+unavoidable. See the
+[PF5-R8-R1 closure](../../_Benchmarks/Baselines/concept-demo-pf5-r8-r1-measurement-closure-2026-09-16.md).
 
 ### Snapshot / delta / absence
 
