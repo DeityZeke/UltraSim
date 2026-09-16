@@ -942,6 +942,37 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         return _outstandingDiagnosticSlabRetirementOperations;
     }
 
+    internal void SeedBundleDiagnosticRecordSlabForTesting(int count)
+    {
+        EnsureOwner();
+        if (count < 0 || count > _bundleDeltaRecords.Length)
+            throw new ArgumentOutOfRangeException(nameof(count));
+        var marker = new RemoteChunkDeltaRecord(
+            RemoteChunkPublicOperation.Present,
+            RemoteChunkPublicFieldMask.Complete,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+        _bundleDeltaRecords.AsSpan(0, count).Fill(marker);
+    }
+
+    internal int GetBundleDiagnosticRecordNonDefaultCountForTesting(int count)
+    {
+        EnsureOwner();
+        if (count < 0 || count > _bundleDeltaRecords.Length)
+            throw new ArgumentOutOfRangeException(nameof(count));
+        int nonDefault = 0;
+        for (int index = 0; index < count; index++)
+        {
+            if (_bundleDeltaRecords[index] != default) nonDefault++;
+        }
+        return nonDefault;
+    }
+
+    internal void ClearBundleStagingForTesting(int entries, int deltaRecords)
+    {
+        EnsureOwner();
+        ClearBundleStaging(entries, deltaRecords);
+    }
+
     /// <summary>
     /// Reconciles game-owned chunk interest and invalidates delivery lineage for every leave or
     /// publication-epoch replacement before a key can be admitted as a new subscription lifetime.
@@ -3041,6 +3072,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     private void ClearBundleStaging(int entries, int deltaRecords)
     {
         long started = CpuTimestamp();
+        bool detailed = _telemetryLevel == GameTelemetryLevel.Detailed;
         if (CpuAttributionEnabled)
         {
             SaturatingIncrement(ref _attributionBundleClearCalls);
@@ -3050,7 +3082,9 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                 (ulong)entries * (ulong)Unsafe.SizeOf<ChunkInterestTier>() +
                 (ulong)entries * 2UL * sizeof(ulong) +
                 (ulong)entries * 3UL * sizeof(int) +
-                (ulong)deltaRecords * (ulong)Unsafe.SizeOf<RemoteChunkDeltaRecord>() +
+                (detailed
+                    ? (ulong)deltaRecords * (ulong)Unsafe.SizeOf<RemoteChunkDeltaRecord>()
+                    : 0UL) +
                 (ulong)deltaRecords * RemoteChunkDeltaRecord.EncodedSize);
             SaturatingAdd(ref _attributionBundleBytesCleared, bytes);
         }
@@ -3062,7 +3096,10 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         _bundleStandaloneBytes.AsSpan(0, entries).Clear();
         _bundleWorkPositions.AsSpan(0, entries).Clear();
         _bundleSubscriptionIndices.AsSpan(0, entries).Clear();
-        _bundleDeltaRecords.AsSpan(0, deltaRecords).Clear();
+        // The typed records exist only for Detailed queued-delta diagnostics. Off and Basic
+        // never read or populate this slab, so retaining its allocation for a later Detailed
+        // window must not impose record clearing on ordinary production scheduling.
+        if (detailed) _bundleDeltaRecords.AsSpan(0, deltaRecords).Clear();
         _bundleDeltaRecordBytes.AsSpan(
             0, checked(deltaRecords * RemoteChunkDeltaRecord.EncodedSize)).Clear();
         CpuElapsed(ref _attributionBundleClearTicks, started);

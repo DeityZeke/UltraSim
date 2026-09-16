@@ -165,6 +165,7 @@ var tests = new (string Name, Action Body)[]
     ("PF5R6CompatibleBodySharingKeepsRecipientProofIndependent", N1OfflineDirectChunkTests.CompatibleBodySharingKeepsRecipientProofIndependent),
     ("PF5R6BodyStoreIsBoundedCollisionSafeAndAllocationFree", N1OfflineDirectChunkTests.BodyStoreIsBoundedCollisionSafeAndAllocationFree),
     ("PF5R7DetailedTelemetryOffStopsOutstandingSlabWork", N1OfflineDirectChunkTests.DetailedTelemetryOffStopsOutstandingSlabWork),
+    ("PF5R9DetailedTelemetryOffStopsBundleSlabWork", N1OfflineDirectChunkTests.DetailedTelemetryOffStopsBundleSlabWork),
     ("PF4ER2PreparedBundleEncodingIsCanonicalAndBounded", N1OfflineDirectChunkTests.PreparedBundleEncodingIsCanonicalAndBounded),
     ("PF4FCompressedBundleCodecIsExactBoundedHostileSafeAndAllocationFree", N1OfflineDirectChunkTests.CompressedBundleCodecIsExactBoundedHostileSafeAndAllocationFree),
     ("PF4FSelectedCompressionPreservesQueueTransactionAndProofs", N1OfflineDirectChunkTests.SelectedCompressionPreservesQueueTransactionAndProofs),

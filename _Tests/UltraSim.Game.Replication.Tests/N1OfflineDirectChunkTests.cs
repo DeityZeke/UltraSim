@@ -3067,6 +3067,32 @@ internal static class N1OfflineDirectChunkTests
         Equal(0, server.GetSnapshot().OutstandingDeliveries);
     }
 
+    internal static void DetailedTelemetryOffStopsBundleSlabWork()
+    {
+        using var fixture = new Fixture(historyCapacity: 16, entityCount: 1);
+        using ProtocolLoopback loopback = CreateLoopback(default);
+        var recipient = Recipient(maximumRecords: 8);
+        var server = new RemoteChunkWorldStateServer(
+            loopback.Server, recipient, fixture.Store, 0xF5_0901,
+            new RemoteChunkWorldStateTransportLimits(8));
+
+        server.ConfigureTelemetry(GameTelemetryLevel.Detailed);
+        server.SeedBundleDiagnosticRecordSlabForTesting(4);
+        Equal(4, server.GetBundleDiagnosticRecordNonDefaultCountForTesting(4));
+
+        server.ConfigureTelemetry(GameTelemetryLevel.Off);
+        server.ClearBundleStagingForTesting(0, 4);
+        Equal(4, server.GetBundleDiagnosticRecordNonDefaultCountForTesting(4));
+
+        server.ConfigureTelemetry(GameTelemetryLevel.Basic);
+        server.ClearBundleStagingForTesting(0, 4);
+        Equal(4, server.GetBundleDiagnosticRecordNonDefaultCountForTesting(4));
+
+        server.ConfigureTelemetry(GameTelemetryLevel.Detailed);
+        server.ClearBundleStagingForTesting(0, 4);
+        Equal(0, server.GetBundleDiagnosticRecordNonDefaultCountForTesting(4));
+    }
+
     internal static void BodyStoreIsBoundedCollisionSafeAndAllocationFree()
     {
         using var fixture = new Fixture(historyCapacity: 128);
