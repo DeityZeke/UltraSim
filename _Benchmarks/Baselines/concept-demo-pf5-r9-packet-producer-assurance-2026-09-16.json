@@ -1,0 +1,119 @@
+{
+  "schema": "ultrasim-concept-demo-pf5-r9-packet-producer-assurance-v1",
+  "checkpoint": "PF5-R9",
+  "date": "2026-09-16",
+  "startingHead": "1cf51fc833b7c12b9b7ea971a8201ba2fd0663d3",
+  "replicationSemanticCandidate": "14e729a6ce69179cfbe4b9a3a4c4cdfa21797fa9",
+  "commits": {
+    "nonceRepair": "c95c77bf",
+    "completeEnqueueMeasurement": "f5e5bf64",
+    "dormantSlabRepair": "e9997ed5",
+    "primaryMeasurement": "d6abeb93629b65bcd53bb056c726ae1c9a341e61",
+    "backgroundTimingPolicy": "4a58e58ad08c5dc8ea77eab6983414d4d0f64b49",
+    "compressionInputCensus": "f9b0a44d2e583b75c8511dbebe74bcbfbf653101"
+  },
+  "integratedProductionCandidate": "f9b0a44d2e583b75c8511dbebe74bcbfbf653101",
+  "environment": {
+    "configuration": "Release",
+    "runtime": ".NET 8.0.29",
+    "os": "CachyOS Linux x64",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "logicalProcessors": 16,
+    "stopwatchFrequency": 1000000000,
+    "processArrangement": "one process containing authority and secure-loopback protocol-adapter clients, plus one bounded BackgroundPlatformBatch sender thread"
+  },
+  "productionPolicy": {
+    "replication": "ChunkPublication",
+    "bodySharing": "Enabled/1024",
+    "representation": "CurrentBundled",
+    "compression": "multi-entry message-148 LZ4 at 384-byte attempt / 32-byte minimum saving; singleton off",
+    "cadence": "Immediate/Near/Far 1/2/4",
+    "networkAggregation": "CrossLane cap 2",
+    "egress": "BackgroundPlatformBatch",
+    "backgroundEgressDetailedTimingDefault": false,
+    "gameManifest": 29,
+    "transportRevision": 2,
+    "authorityHz": 60,
+    "productParticipantCap": 64
+  },
+  "repairs": {
+    "nonce": {
+      "disposition": "confirmed and repaired",
+      "invariant": "every AES-GCM encryption invocation under one directional key consumes a unique epoch/packet-number nonce even when endpoint admission refuses or later delivery fails",
+      "sentAccountingUnchangedByRefusal": true,
+      "remoteCiphertextExposureEstablished": false
+    },
+    "enqueueTiming": {
+      "disposition": "confirmed measurement omission and repaired",
+      "oldMetric": "accepted queue-mutation core only",
+      "newMetric": "caller-owned complete TryEnqueue call through fault/refusal/core diagnostics/worker wake, excluding only its own outer recorder"
+    },
+    "diagnosticSlab": {
+      "disposition": "confirmed performance defect and repaired",
+      "offAndBasicSkipDetailedTypedRecordClear": true,
+      "functionalAndSecurityClearsPreserved": true
+    }
+  },
+  "timingToggleAverages": [
+    { "workload": "R128/high", "offMeanMs": 0.906684, "onMeanMs": 0.921640, "deltaMeanMs": 0.014956, "offP95Ms": 1.021268, "onP95Ms": 1.030709, "deltaP95Ms": 0.009442, "acceptedCoreUs": 0.135745, "completeCallUs": 0.195974 },
+    { "workload": "R300/low", "offMeanMs": 2.296653, "onMeanMs": 2.330307, "deltaMeanMs": 0.033654, "offP95Ms": 2.442602, "onP95Ms": 2.513233, "deltaP95Ms": 0.070631, "acceptedCoreUs": 0.147114, "completeCallUs": 0.203975 },
+    { "workload": "R300/high", "offMeanMs": 3.096058, "onMeanMs": 3.196631, "deltaMeanMs": 0.100573, "offP95Ms": 3.324615, "onP95Ms": 3.425649, "deltaP95Ms": 0.101034, "acceptedCoreUs": 0.141427, "completeCallUs": 0.193614 },
+    { "workload": "R350/high", "offMeanMs": 4.466908, "onMeanMs": 4.623786, "deltaMeanMs": 0.156878, "offP95Ms": 4.859864, "onP95Ms": 5.073736, "deltaP95Ms": 0.213872, "acceptedCoreUs": 0.148650, "completeCallUs": 0.202396 }
+  ],
+  "detailedAttribution": [
+    { "workload": "R128/high", "ticks": 30, "serverOwnedMeanMs": 1.924866, "scheduleCodecQueueMeanMs": 0.890573, "proofMeanMs": 0.233842, "serverOutboundMeanMs": 0.339988, "serverInboundMeanMs": 0.146838, "signedResidualMeanMs": 0.301176, "signedResidualMinMs": 0.275430, "signedResidualMaxMs": 0.319786, "publications": 8984, "encryptionInvocations": 8880 },
+    { "workload": "R300/high", "ticks": 30, "serverOwnedMeanMs": 6.753895, "scheduleCodecQueueMeanMs": 3.365713, "proofMeanMs": 0.868275, "serverOutboundMeanMs": 1.442544, "serverInboundMeanMs": 0.371016, "signedResidualMeanMs": 0.669739, "signedResidualMinMs": 0.653363, "signedResidualMaxMs": 0.725752, "publications": 37725, "encryptionInvocations": 41797 }
+  ],
+  "fixedDeliveryTopology": {
+    "constantWork": { "publications": 30720, "messages": 30720, "proofs": 30720, "gamePayloadBytes": 5406720, "wireDatagrams": 61440 },
+    "rows": [
+      { "shape": "1x512", "meanMs": 2.189875, "p95Ms": 2.409518 },
+      { "shape": "8x64", "meanMs": 2.231626, "p95Ms": 2.420932 },
+      { "shape": "64x8", "meanMs": 2.203582, "p95Ms": 2.388025 },
+      { "shape": "512x1", "meanMs": 2.631307, "p95Ms": 2.884742 }
+    ]
+  },
+  "compressionInputCompatibility": {
+    "sharedSyntheticEpoch": [
+      { "workload": "R128/high", "attempts": 2444, "distinct": 99, "exactRepeats": 2345, "exactRepeatPercent": 95.9493 },
+      { "workload": "R300/high", "attempts": 2863, "distinct": 275, "exactRepeats": 2588, "exactRepeatPercent": 90.3947 }
+    ],
+    "independentProductionShapedEpochs": [
+      { "workload": "R128/high", "attempts": 2444, "distinct": 2444, "exactRepeats": 0 },
+      { "workload": "R300/high", "attempts": 2863, "distinct": 2863, "exactRepeats": 0 }
+    ],
+    "productionCompressionResultSharingSelected": false,
+    "reason": "recipient application-session and delivery lineage make complete canonical message-129 inputs byte-distinct even when source bodies match"
+  },
+  "primitiveMeansNanoseconds": [
+    { "operation": "AES-GCM Encrypt", "payloadBytes": 64, "mean": 413.400, "p95": 400, "warmedManagedBytes": 0 },
+    { "operation": "TryQueue+Emit", "payloadBytes": 64, "mean": 608.205, "p95": 600, "warmedManagedBytes": 0 },
+    { "operation": "AES-GCM Encrypt", "payloadBytes": 256, "mean": 404.760, "p95": 400, "warmedManagedBytes": 0 },
+    { "operation": "TryQueue+Emit", "payloadBytes": 256, "mean": 703.170, "p95": 700, "warmedManagedBytes": 0 },
+    { "operation": "AES-GCM Encrypt", "payloadBytes": 1024, "mean": 509.460, "p95": 500, "warmedManagedBytes": 0 },
+    { "operation": "TryQueue+Emit", "payloadBytes": 1024, "mean": 749.170, "p95": 800, "warmedManagedBytes": 0 },
+    { "operation": "AES-GCM Encrypt", "payloadBytes": 1428, "mean": 594.720, "p95": 600, "warmedManagedBytes": 0 },
+    { "operation": "TryQueue+Emit", "payloadBytes": 1405, "mean": 815.020, "p95": 800, "warmedManagedBytes": 0 }
+  ],
+  "ratedBoundary": {
+    "metric": "server-owned remote-replication p95 with detailed timing off",
+    "R300HighAverageMs": 3.324615,
+    "R350HighAverageMs": 4.859864,
+    "testedCrossing": "between R300/high and R350/high",
+    "classification": "synthetic protocol-adapter recipients, not product CCU"
+  },
+  "acceptedOptimization": "make detailed background-egress timing opt-in by default",
+  "rejectedOptimization": "compression-result reuse across recipients",
+  "closure": "A",
+  "rawEvidence": [
+    { "file": "concept-demo-pf5-r9-packet-producer-audit-2026-09-16.raw.json", "sha256": "2533853f1180968c660f1d7e056c273d15299b473923f105fac093496039f36f" },
+    { "file": "concept-demo-pf5-r9-compression-input-census-2026-09-16.raw.json", "sha256": "470115af97c1e443a5fbceca9a7230851467cb445d79d1b4d118e7ef5f2a5410" },
+    { "file": "concept-demo-pf5-r9-compression-input-census-unique-epochs-2026-09-16.raw.json", "sha256": "492e16f9dcc2239b5bae620beef03869394dddcda764a4bcd84abac631c9769e" }
+  ],
+  "verification": {
+    "network": "passed",
+    "replication": "passed",
+    "pf5R9Focused": "passed",
+    "canonicalRelease": "passed"
+  }
+}

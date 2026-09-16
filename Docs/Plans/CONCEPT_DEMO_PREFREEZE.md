@@ -2514,11 +2514,15 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
     **CLOSED — PF5-R7 adversarial follow-up; proof index deferred by measured debt**
 35. Distinguish required dense fanout from avoidable processing.
     **CLOSED — PF5-R8/R1 measurement controls corrected; no production optimization selected**
-36. Choose/document the default deployment-performance policy. **CLOSED — v29 plus PF5-R3 egress**
-37. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5/PF5-R8**
-38. Full exact-tree verifier and export closure.
-39. Freeze/tag the Concept Demo baseline.
-40. Begin the separate extraction/genericization/ecosystem roadmap.
+36. Assure and attribute the ChunkPublication packet producer and background handoff.
+    **CLOSED — PF5-R9 outcome A; refused-encryption nonce repair, exact enqueue boundary,
+    dormant diagnostic clearing repair, detailed egress timing opt-in, no compression-result cache**
+37. Choose/document the default deployment-performance policy.
+    **CLOSED — v29 plus PF5-R3 egress and PF5-R9 opt-in detailed egress timing**
+38. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5/PF5-R8/PF5-R9**
+39. Full exact-tree verifier and export closure.
+40. Freeze/tag the Concept Demo baseline.
+41. Begin the separate extraction/genericization/ecosystem roadmap.
 ```
 
 The intended outcome is not merely a demo that works.

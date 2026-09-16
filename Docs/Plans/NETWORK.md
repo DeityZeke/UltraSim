@@ -1079,6 +1079,15 @@ Do not begin any of the following merely because the benchmark infrastructure ex
 New Network work should be earned by a real gameplay/client/deployment consumer that
 exposes a correctness, capacity, freshness, or measured performance problem.
 
+PF5-R9 closed the current packet-producer assurance pass. Every AES-GCM invocation now consumes
+its packet-number nonce before endpoint admission, so refusal cannot make a nonce reusable while
+application work remains transactional. The background sender's physical accounting remains
+always available, while detailed enqueue/queue-residence/worker timing is independently opt-in;
+matched Off controls measured enough authority-thread cost to keep it out of the production
+default. Exact canonical message-129 compression inputs do not repeat when recipient application
+epochs are independent, so no cross-recipient compression-result cache is selected. The current
+synthetic 4 ms crossing remains between R300/high and R350/high and is not a product CCU claim.
+
 The first such consumer vertical has already validated public actors, and I0.8 has
 validated a very different owner-private UI/Inventory path over the same lower
 Network machinery. Future gameplay should continue to consume these seams before

@@ -108,10 +108,45 @@ static void VerifyPf5R9PacketProducer(string root, string configuration)
         if (report.GetProperty("Primitives").EnumerateArray().Any(static row =>
                 row.GetProperty("WarmedManagedBytes").GetInt64() != 0))
             throw new InvalidOperationException("PF5-R9 primitive path allocated after warmup.");
+
+        JsonElement compressionAttribution = report.GetProperty("Attribution")[0];
+        AssertPf5R9CompressionCensus(compressionAttribution, requireDistinct: false);
+
+        string uniqueEpochOutput = Path.Combine(scope, "compression-unique-epochs.json");
+        Run(root, "dotnet",
+        [
+            "run", "--project",
+            "_Benchmarks/UltraSim.Network.V3ComparisonAdapter/UltraSim.Network.V3ComparisonAdapter.csproj",
+            "-c", configuration, "--", "--pf5-r9-packet-producer", "--focused",
+            "--diagnostic-only", "--unique-epochs", "--output", uniqueEpochOutput,
+        ]);
+        using JsonDocument uniqueDocument = JsonDocument.Parse(File.ReadAllText(uniqueEpochOutput));
+        JsonElement uniqueReport = uniqueDocument.RootElement;
+        if (!uniqueReport.GetProperty("UniqueApplicationEpochs").GetBoolean())
+            throw new InvalidOperationException("PF5-R9 unique-epoch control was not enabled.");
+        JsonElement uniqueAttribution = uniqueReport.GetProperty("Attribution")[0];
+        AssertPf5R9CompressionCensus(uniqueAttribution, requireDistinct: true);
     }
     finally
     {
         if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    }
+
+    static void AssertPf5R9CompressionCensus(JsonElement attribution, bool requireDistinct)
+    {
+        JsonElement census = attribution.GetProperty("CompressionInputs");
+        ulong attempts = census.GetProperty("Attempts").GetUInt64();
+        ulong expectedAttempts = attribution.GetProperty("Row").GetProperty("ProfileCounters")
+            .GetProperty("Compression").GetProperty("Attempts").GetUInt64();
+        if (attempts != expectedAttempts ||
+            census.GetProperty("SaturatedInputs").GetUInt64() != 0)
+            throw new InvalidOperationException(
+                "PF5-R9 compression-input census did not match the measured window.");
+        if (requireDistinct &&
+            (census.GetProperty("ExactRepeatedInputs").GetUInt64() != 0 ||
+             census.GetProperty("DistinctInputs").GetUInt64() != attempts))
+            throw new InvalidOperationException(
+                "PF5-R9 independent application lifetimes shared a compression input.");
     }
 }
 
