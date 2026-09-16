@@ -193,7 +193,7 @@ internal static class Pf5R7SpatialTopologyAttribution
                 authorityThroughNetworkTimingEnabled: true,
                 serverOwnedRemoteTimingEnabled: true,
                 chunkReadModel: PreparedChunkPublicationReadModel.PreparedLatestState,
-                socketIoMode: UltraSim.Network.SharedUdpSocketIoMode.PlatformSendReceiveBatch,
+                socketIoMode: UltraSim.Network.SharedUdpSocketIoMode.BackgroundPlatformBatch,
                 backgroundEgressTimingEnabled: true,
                 externalServerWorkload: game);
             P03WholeFlowRow flow = harness.Run(warmup, ticks);
@@ -248,7 +248,7 @@ internal static class Pf5R7SpatialTopologyAttribution
                             authorityThroughNetworkTimingEnabled: true,
                             serverOwnedRemoteTimingEnabled: true,
                             chunkReadModel: PreparedChunkPublicationReadModel.PreparedLatestState,
-                            socketIoMode: UltraSim.Network.SharedUdpSocketIoMode.PlatformSendReceiveBatch,
+                            socketIoMode: UltraSim.Network.SharedUdpSocketIoMode.BackgroundPlatformBatch,
                             backgroundEgressTimingEnabled: true,
                             externalServerWorkload: game);
                         P03WholeFlowRow flow = harness.Run(warmup, ticks);
@@ -318,7 +318,7 @@ internal static class Pf5R7SpatialTopologyAttribution
                 bodySharing: RemoteChunkDeltaBodySharingMode.Enabled,
                 legacyRangeCensus: false,
                 serverOwnedRemoteTimingEnabled: true,
-                socketIoMode: UltraSim.Network.SharedUdpSocketIoMode.PlatformSendReceiveBatch,
+                socketIoMode: UltraSim.Network.SharedUdpSocketIoMode.BackgroundPlatformBatch,
                 externalServerWorkload: game);
             P03WholeFlowRow flow = harness.Run(warmup, ticks);
             physicsRows.Add(new Pf5R7PhysicsRow(
@@ -352,7 +352,7 @@ internal static class Pf5R7SpatialTopologyAttribution
             authorityThroughNetworkTimingEnabled: true,
             serverOwnedRemoteTimingEnabled: true,
             chunkReadModel: PreparedChunkPublicationReadModel.PreparedLatestState,
-            socketIoMode: UltraSim.Network.SharedUdpSocketIoMode.PlatformSendReceiveBatch,
+            socketIoMode: UltraSim.Network.SharedUdpSocketIoMode.BackgroundPlatformBatch,
             backgroundEgressTimingEnabled: true);
         P03WholeFlowRow row = harness.Run(warmup, ticks);
         Require(row.Converged && row.Transport.CapacityDrops == 0,
@@ -371,7 +371,7 @@ internal static class Pf5R7SpatialTopologyAttribution
             compression: RemoteChunkBundleCompressionPolicy.Selected,
             bodySharing: RemoteChunkDeltaBodySharingMode.Enabled,
             legacyRangeCensus: false,
-            socketIoMode: UltraSim.Network.SharedUdpSocketIoMode.PlatformSendReceiveBatch);
+            socketIoMode: UltraSim.Network.SharedUdpSocketIoMode.BackgroundPlatformBatch);
         _ = harness.Run(3, 3);
     }
 
