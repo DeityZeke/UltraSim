@@ -11,6 +11,17 @@ public enum RemoteChunkPublicationRepresentation : byte
 }
 
 /// <summary>
+/// Optional representation selection for one already-prepared Delta. Disabled preserves the
+/// canonical message-120 baseline; compressed selection may use an independently decodable
+/// one-entry 129 carried by message 148 only when it beats the complete 120 representation.
+/// </summary>
+public enum RemoteChunkSingletonDeltaCompression : byte
+{
+    Disabled = 0,
+    WhenBeneficial = 1,
+}
+
+/// <summary>
 /// Optional physical compression of an already-composed canonical message 129. This policy may
 /// change neither bundle membership nor the delivery/proof transaction.
 /// </summary>
@@ -47,7 +58,8 @@ public readonly record struct RemoteChunkBundleCompressionPolicy(
 public readonly record struct RemoteChunkPublicationPolicy(
     OfflineDirectChunkCadence Cadence,
     RemoteChunkPublicationRepresentation Representation,
-    RemoteChunkBundleCompressionPolicy Compression = default)
+    RemoteChunkBundleCompressionPolicy Compression = default,
+    RemoteChunkSingletonDeltaCompression SingletonDeltaCompression = default)
 {
     public static RemoteChunkPublicationPolicy CurrentStandalone { get; } = new(
         OfflineDirectChunkCadence.EvidenceProfile,
@@ -63,6 +75,12 @@ public readonly record struct RemoteChunkPublicationPolicy(
         RemoteChunkPublicationRepresentation.Message129WhenBeneficial,
         RemoteChunkBundleCompressionPolicy.Disabled);
 
+    public static RemoteChunkPublicationPolicy ExperimentalSingletonCompression { get; } = new(
+        OfflineDirectChunkCadence.EvidenceProfile,
+        RemoteChunkPublicationRepresentation.Message129WhenBeneficial,
+        RemoteChunkBundleCompressionPolicy.Selected,
+        RemoteChunkSingletonDeltaCompression.WhenBeneficial);
+
     public static RemoteChunkPublicationPolicy CandidateStandalone { get; } = new(
         new OfflineDirectChunkCadence(1, 3, 6),
         RemoteChunkPublicationRepresentation.Standalone);
@@ -72,8 +90,12 @@ public readonly record struct RemoteChunkPublicationPolicy(
         RemoteChunkPublicationRepresentation.Message129WhenBeneficial);
 
     public bool IsValid => Cadence.IsValid && Enum.IsDefined(Representation) &&
+        Enum.IsDefined(SingletonDeltaCompression) &&
         Compression.IsValid &&
         (!Compression.Enabled ||
+         Representation == RemoteChunkPublicationRepresentation.Message129WhenBeneficial) &&
+        (SingletonDeltaCompression == RemoteChunkSingletonDeltaCompression.Disabled ||
+         Compression.Enabled &&
          Representation == RemoteChunkPublicationRepresentation.Message129WhenBeneficial);
 
     public void Validate()

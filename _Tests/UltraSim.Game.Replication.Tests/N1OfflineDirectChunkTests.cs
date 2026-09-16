@@ -2731,6 +2731,365 @@ internal static class N1OfflineDirectChunkTests
             $"compressed={sent.CompressedRepresentationBytes} proofs=8 debt=0");
     }
 
+    internal static void SingletonCompressionIsExactTransactionalAndBounded()
+    {
+        const int recordCount = 30;
+        using var fixture = new Fixture(historyCapacity: 256, entityCount: recordCount);
+        fixture.PresentAll(2_000, GameWorldPublicPrefabIds.Character);
+        NetworkProtocolLimits constrained = NetworkProtocolLimits.Default with
+        {
+            MaximumIndependentUnreliableMessages = 1,
+        };
+        using ProtocolLoopback loopback = CreateLoopback(default, constrained);
+        var recipient = Recipient(maximumRecords: 32);
+        var cache = Cache(fixture, maximumPublicRecords: 32);
+        SpatialChunkKey key = Key(0, 0);
+        ReconcileAndStageInitial(fixture, recipient, cache, Position(0, 0, 8_000, 8_000));
+        ulong baseline = recipient.Subscriptions[FindSubscription(recipient, key)]
+            .Cursor.Revision.Value;
+        fixture.PresentAll(2_100, GameWorldPublicPrefabIds.Character);
+        ulong current = CurrentRevision(fixture.Store, key);
+        var server = new RemoteChunkWorldStateServer(
+            loopback.Server, recipient, fixture.Store, 0xF5_0501,
+            new RemoteChunkWorldStateTransportLimits(
+                32, 64, RemoteChunkBundleCompressionPolicy.Selected,
+                RemoteChunkSingletonDeltaCompression.WhenBeneficial));
+        server.ConfigureTelemetry(GameTelemetryLevel.Detailed);
+        var client = new RemoteChunkWorldStateClient(
+            loopback.Client, cache, 0xF5_0501, maximumDeltaRecords: 32,
+            maximumPendingProofs: 16);
+        ChunkPublicationWork[] works =
+        [
+            new(default, key, ChunkInterestTier.Immediate,
+                ChunkPublicationWorkKind.Dirty, 1, 1),
+        ];
+        Span<RemoteChunkWorldStateScheduleStatus> statuses =
+            stackalloc RemoteChunkWorldStateScheduleStatus[1];
+
+        Equal(NetworkQueueStatus.Accepted, loopback.Server.TryQueue(
+            RemoteChunkDeltaHeaderCodec.Descriptor.Id, new byte[] { 1 }));
+        Equal(1, server.TryScheduleDueBundle(works, 1, statuses, out int refused));
+        Equal(0, refused);
+        Equal(RemoteChunkWorldStateScheduleStatus.TransportNotAccepting, statuses[0]);
+        Equal(1UL, server.GetSnapshot().NextDeliveryId);
+        Equal(0, server.GetSnapshot().OutstandingDeliveries);
+        Equal(baseline, recipient.Subscriptions[FindSubscription(recipient, key)]
+            .Cursor.Revision.Value);
+        for (int pump = 0; pump < 8 && loopback.Client.ReceivedQueued == 0; pump++)
+            loopback.Pump();
+        True(loopback.Client.TryConsumeReceived());
+
+        Equal(1, server.TryScheduleDueBundle(works, 2, statuses, out int accepted));
+        Equal(1, accepted);
+        Equal(RemoteChunkWorldStateScheduleStatus.QueuedDelta, statuses[0]);
+        Equal(2UL, server.GetSnapshot().NextDeliveryId);
+        Equal(1, server.GetSnapshot().OutstandingDeliveries);
+        for (int pump = 0; pump < 8 && loopback.Client.ReceivedQueued == 0; pump++)
+            loopback.Pump();
+        True(loopback.Client.TryPeekReceived(
+            out NetworkDeliveredMessage delivered, out ReadOnlySpan<byte> payload));
+        Equal(RemoteCompressedDirtyChunkBundleHeaderCodec.Descriptor.Id, delivered.MessageId);
+        byte[] canonical = new byte[
+            UltraSimGameProtocol.MaximumCompressedDirtyChunkBundleDecodedBytes];
+        True(UltraSimGameProtocol.TryReadCompressedDirtyChunkBundle(
+            payload, canonical, out int canonicalBytes));
+        Equal(RemoteDirtyChunkBundleHeaderCodec.EncodedSize +
+            UltraSimGameProtocol.GetDirtyChunkBundleEntryEncodedBytes(
+                RemoteChunkPublicationKind.Delta, recordCount), canonicalBytes);
+        var entries = new RemoteDirtyChunkBundleEntry[1];
+        var records = new RemoteChunkDeltaRecord[recordCount];
+        True(UltraSimGameProtocol.TryReadDirtyChunkBundle(
+            canonical.AsSpan(0, canonicalBytes), out RemoteDirtyChunkBundleHeader header,
+            entries, [], records, out int entryCount, out int snapshotCount,
+            out int deltaCount));
+        Equal(1, entryCount);
+        Equal(0, snapshotCount);
+        Equal(recordCount, deltaCount);
+        Equal(1UL, header.BundleId);
+        Equal(RemoteChunkPublicationKind.Delta, entries[0].Kind);
+        Equal(1UL, entries[0].DeliveryId);
+        Equal(baseline, entries[0].BaseRevision);
+        Equal(current, entries[0].CurrentRevision);
+        True(client.TryProcess(delivered, payload));
+        True(loopback.Client.TryConsumeReceived());
+        Drive(loopback, server, client, () => server.GetSnapshot().AppliedProofs == 1);
+        Equal(current, recipient.Subscriptions[FindSubscription(recipient, key)]
+            .Cursor.Revision.Value);
+        Equal(0, server.GetSnapshot().OutstandingDeliveries);
+
+        RemoteChunkCompressionCensusSnapshot compression =
+            server.GetTimingSnapshot().Knowledge.Compression;
+        Equal(0UL, compression.Selected);
+        Equal(2UL, compression.SingletonDeltaCandidates);
+        Equal(2UL, compression.SingletonAttempts);
+        Equal(2UL, compression.SingletonCodecSuccesses);
+        Equal(1UL, compression.SingletonSelected);
+        True(compression.SingletonBytesSavedVs120 >= 32);
+        Console.WriteLine($"EVIDENCE PF5-R5 singleton_transaction attempts=" +
+            $"{compression.SingletonAttempts} selected={compression.SingletonSelected} " +
+            $"canonical129={compression.SingletonCanonical129Bytes} " +
+            $"selected_bytes={compression.SingletonSelectedBytes} " +
+            $"saved_vs120={compression.SingletonBytesSavedVs120} proof=1");
+    }
+
+    internal static void SingletonCompressionMtuAndProfitabilityAreExact()
+    {
+        RemoteChunkBundleCompressionPolicy policy =
+            RemoteChunkBundleCompressionPolicy.Selected;
+        False(RemoteChunkWorldStateServer.ShouldSelectSingletonCompressedRepresentation(
+            1_000, 1_002, 969, 1_405, policy));
+        True(RemoteChunkWorldStateServer.ShouldSelectSingletonCompressedRepresentation(
+            1_000, 1_002, 968, 1_405, policy));
+        True(RemoteChunkWorldStateServer.ShouldSelectSingletonCompressedRepresentation(
+            1_000, 1_002, 967, 1_405, policy));
+        False(RemoteChunkWorldStateServer.ShouldSelectSingletonCompressedRepresentation(
+            1_000, 1_002, 968, 967, policy));
+        False(RemoteChunkWorldStateServer.ShouldSelectSingletonCompressedRepresentation(
+            1_000, UltraSimGameProtocol.MaximumCompressedDirtyChunkBundleDecodedBytes + 1,
+            100, 1_405, policy));
+
+        const int recordCount = 30;
+        int standaloneBytes = UltraSimGameProtocol.GetChunkDeltaEncodedBytes(recordCount);
+        int canonical129Bytes = RemoteDirtyChunkBundleHeaderCodec.EncodedSize +
+            UltraSimGameProtocol.GetDirtyChunkBundleEntryEncodedBytes(
+                RemoteChunkPublicationKind.Delta, recordCount);
+        Equal(1_372, standaloneBytes);
+        Equal(1_374, canonical129Bytes);
+        using var fixture = new Fixture(historyCapacity: 128, entityCount: recordCount);
+        fixture.PresentAll(2_000, GameWorldPublicPrefabIds.Character);
+        using ProtocolLoopback loopback = CreateLoopbackWithMaximumApplicationBytes(
+            standaloneBytes);
+        var recipient = Recipient(maximumRecords: 32);
+        var cache = Cache(fixture, maximumPublicRecords: 32);
+        SpatialChunkKey key = Key(0, 0);
+        ReconcileAndStageInitial(fixture, recipient, cache, Position(0, 0, 8_000, 8_000));
+        fixture.PresentAll(2_100, GameWorldPublicPrefabIds.Character);
+        var server = new RemoteChunkWorldStateServer(
+            loopback.Server, recipient, fixture.Store, 0xF5_0502,
+            new RemoteChunkWorldStateTransportLimits(
+                16, 64, policy,
+                RemoteChunkSingletonDeltaCompression.WhenBeneficial));
+        var client = new RemoteChunkWorldStateClient(
+            loopback.Client, cache, 0xF5_0502, maximumDeltaRecords: 32,
+            maximumPendingProofs: 8);
+        ChunkPublicationWork[] works =
+        [
+            new(default, key, ChunkInterestTier.Immediate,
+                ChunkPublicationWorkKind.Dirty, 1, 1),
+        ];
+        Span<RemoteChunkWorldStateScheduleStatus> statuses =
+            stackalloc RemoteChunkWorldStateScheduleStatus[1];
+        Equal(1, server.TryScheduleDueBundle(works, 1, statuses, out int messages));
+        Equal(1, messages);
+        Equal(RemoteChunkWorldStateScheduleStatus.QueuedDelta, statuses[0]);
+        for (int pump = 0; pump < 8 && loopback.Client.ReceivedQueued == 0; pump++)
+            loopback.Pump();
+        True(loopback.Client.TryPeekReceived(
+            out NetworkDeliveredMessage delivered, out ReadOnlySpan<byte> payload));
+        Equal(RemoteCompressedDirtyChunkBundleHeaderCodec.Descriptor.Id, delivered.MessageId);
+        True(payload.Length < standaloneBytes);
+        True(client.TryProcess(delivered, payload));
+        True(loopback.Client.TryConsumeReceived());
+        Drive(loopback, server, client, () => server.GetSnapshot().AppliedProofs == 1);
+        Equal(1UL, server.GetTimingSnapshot().Knowledge.Compression.SingletonSelected);
+        Console.WriteLine($"EVIDENCE PF5-R5 mtu={standaloneBytes} standalone=" +
+            $"{standaloneBytes} canonical129={canonical129Bytes} selected=148 " +
+            $"compressed={payload.Length} profitability=31:false,32:true,33:true");
+    }
+
+    internal static void SingletonCompressionWarmedPathAllocatesZero()
+    {
+        const int recordCount = 30;
+        using var fixture = new Fixture(historyCapacity: 512, entityCount: recordCount);
+        fixture.PresentAll(2_000, GameWorldPublicPrefabIds.Character);
+        using ProtocolLoopback loopback = CreateLoopback(default);
+        var recipient = Recipient(maximumRecords: 32);
+        var cache = Cache(fixture, maximumPublicRecords: 32);
+        SpatialChunkKey key = Key(0, 0);
+        ReconcileAndStageInitial(fixture, recipient, cache, Position(0, 0, 8_000, 8_000));
+        var server = new RemoteChunkWorldStateServer(
+            loopback.Server, recipient, fixture.Store, 0xF5_0503,
+            new RemoteChunkWorldStateTransportLimits(
+                16, 64, RemoteChunkBundleCompressionPolicy.Selected,
+                RemoteChunkSingletonDeltaCompression.WhenBeneficial));
+        var client = new RemoteChunkWorldStateClient(
+            loopback.Client, cache, 0xF5_0503, maximumDeltaRecords: 32,
+            maximumPendingProofs: 16);
+        ChunkPublicationWork[] works =
+        [
+            new(default, key, ChunkInterestTier.Immediate,
+                ChunkPublicationWorkKind.Dirty),
+        ];
+        var statuses = new RemoteChunkWorldStateScheduleStatus[1];
+        ulong step = 0;
+        for (int warm = 0; warm < 8; warm++) RunOne();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int iteration = 0; iteration < 32; iteration++) RunOne();
+        Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
+        True(server.GetTimingSnapshot().Knowledge.Compression.SingletonSelected >= 40);
+
+        void RunOne()
+        {
+            step++;
+            fixture.PresentAll((step & 1) == 0 ? 2_100 : 2_200,
+                GameWorldPublicPrefabIds.Character);
+            works[0] = works[0] with { LatestSourceStep = step, FirstDueStep = step };
+            Equal(1, server.TryScheduleDueBundle(works, step, statuses, out int messages));
+            Equal(1, messages);
+            for (int pump = 0; pump < 64 &&
+                    server.GetSnapshot().AppliedProofs < step; pump++)
+                Pump(loopback, server, client);
+            Equal(step, server.GetSnapshot().AppliedProofs);
+        }
+    }
+
+    internal static void SingletonCompressionPoorDataFallsBack()
+    {
+        const int recordCount = 7;
+        const ulong applicationEpoch = 0xD419_A01B_3F7C_2E65;
+        const ulong publicationEpoch = 0xA7E3_95C1_6B2D_F849;
+        const ulong deliveryId = 0x91D5_73B9_E62F_4AC7;
+        const ulong spatialSpaceId = 0xC53B_8E17_F294_6DA1;
+        const ulong baseRevision = 1;
+        const ulong currentRevision = ulong.MaxValue;
+        var random = new Random(0x5F50_0603);
+        var records = new RemoteChunkDeltaRecord[recordCount];
+        Span<byte> randomBytes = stackalloc byte[40];
+        for (int index = 0; index < records.Length; index++)
+        {
+            random.NextBytes(randomBytes);
+            records[index] = new RemoteChunkDeltaRecord(
+                RemoteChunkPublicOperation.Present,
+                (RemoteChunkPublicFieldMask)(1 + index % 15),
+                checked(0x1000_0000u + (uint)index * 0x1000_0000u),
+                BinaryPrimitives.ReadUInt32LittleEndian(randomBytes) | 1u,
+                BinaryPrimitives.ReadUInt64LittleEndian(randomBytes[4..]) | 1UL,
+                BinaryPrimitives.ReadUInt32LittleEndian(randomBytes[12..]) | 1u,
+                BinaryPrimitives.ReadUInt16LittleEndian(randomBytes[16..]),
+                BinaryPrimitives.ReadUInt16LittleEndian(randomBytes[18..]),
+                BinaryPrimitives.ReadInt32LittleEndian(randomBytes[20..]),
+                BinaryPrimitives.ReadUInt16LittleEndian(randomBytes[24..]),
+                (ushort)WorldPublicStateFlags.Visible,
+                BinaryPrimitives.ReadUInt64LittleEndian(randomBytes[26..]) | 2UL);
+        }
+
+        byte[] standalone = new byte[
+            UltraSimGameProtocol.GetChunkDeltaEncodedBytes(recordCount)];
+        if (!UltraSimGameProtocol.TryWriteChunkDelta(
+                standalone, applicationEpoch, publicationEpoch, deliveryId, spatialSpaceId,
+                unchecked((int)0x91D5_73B9), unchecked((int)0xE62F_4AC7),
+                baseRevision, currentRevision, baseRevision, records,
+                out int standaloneBytes))
+            throw new InvalidOperationException("Poor-data standalone fixture was invalid.");
+        if (!UltraSimGameProtocol.TryGetChunkDeltaContentHash(
+                publicationEpoch, spatialSpaceId,
+                unchecked((int)0x91D5_73B9), unchecked((int)0xE62F_4AC7),
+                baseRevision, currentRevision,
+                baseRevision, records, out ulong hash))
+            throw new InvalidOperationException("Poor-data hash fixture was invalid.");
+        var entry = new RemoteDirtyChunkBundleEntry(
+            RemoteChunkPublicationKind.Delta, deliveryId, spatialSpaceId,
+            unchecked((int)0x91D5_73B9), unchecked((int)0xE62F_4AC7),
+            baseRevision, currentRevision, baseRevision, hash, recordCount, 0);
+        byte[] canonical = new byte[
+            UltraSimGameProtocol.MaximumCompressedDirtyChunkBundleDecodedBytes];
+        if (!UltraSimGameProtocol.TryWritePreparedDirtyChunkBundle(
+                canonical, applicationEpoch, publicationEpoch, deliveryId,
+                new[] { entry }, records, out int canonicalBytes))
+            throw new InvalidOperationException("Poor-data bundle fixture was invalid.");
+        byte[] compressed = new byte[
+            UltraSimGameProtocol.MaximumCompressedDirtyChunkBundleDecodedBytes];
+        var hashes = new ushort[UltraSimGameProtocol.DirtyChunkBundleCompressionHashEntries];
+        bool codecSucceeded = UltraSimGameProtocol.TryWriteCompressedDirtyChunkBundle(
+            compressed, canonical.AsSpan(0, canonicalBytes), hashes,
+            out int compressedBytes);
+        bool selected = codecSucceeded &&
+            RemoteChunkWorldStateServer.ShouldSelectSingletonCompressedRepresentation(
+                standaloneBytes, canonicalBytes, compressedBytes, 1_405,
+                RemoteChunkBundleCompressionPolicy.Selected);
+        False(selected);
+        True(!codecSucceeded || standaloneBytes - compressedBytes <
+            RemoteChunkBundleCompressionPolicy.Selected.MinimumNetSavingsBytes);
+        Console.WriteLine($"EVIDENCE PF5-R5 poor_data codec={codecSucceeded} " +
+            $"standalone={standaloneBytes} canonical129={canonicalBytes} " +
+            $"compressed={(codecSucceeded ? compressedBytes : 0)} selected=false fallback=120");
+    }
+
+    internal static void SingletonCompressionConvergesThroughImpairment()
+    {
+        const int recordCount = 30;
+        using var fixture = new Fixture(historyCapacity: 256, entityCount: recordCount);
+        fixture.PresentAll(2_000, GameWorldPublicPrefabIds.Character);
+        using ProtocolLoopback loopback = CreateLoopback(
+            new NetworkImpairmentOptions(0x5F50_0701, 220, 180, 0, 5));
+        var recipient = Recipient(maximumRecords: 32);
+        var cache = Cache(fixture, maximumPublicRecords: 32);
+        SpatialChunkKey key = Key(0, 0);
+        ReconcileAndStageInitial(fixture, recipient, cache, Position(0, 0, 8_000, 8_000));
+        var server = new RemoteChunkWorldStateServer(
+            loopback.Server, recipient, fixture.Store, 0x5F50_0702,
+            new RemoteChunkWorldStateTransportLimits(
+                32, 64, RemoteChunkBundleCompressionPolicy.Selected,
+                RemoteChunkSingletonDeltaCompression.WhenBeneficial));
+        server.ConfigureTelemetry(GameTelemetryLevel.Detailed);
+        var client = new RemoteChunkWorldStateClient(
+            loopback.Client, cache, 0x5F50_0702, maximumDeltaRecords: 32,
+            maximumPendingProofs: 32);
+        client.ConfigureTelemetry(NetworkTelemetryLevel.Detailed);
+        ChunkPublicationWork[] works =
+        [
+            new(default, key, ChunkInterestTier.Immediate,
+                ChunkPublicationWorkKind.Dirty, 1, 1),
+        ];
+        var statuses = new RemoteChunkWorldStateScheduleStatus[1];
+        ulong step = 0;
+        for (int round = 0; round < 8; round++)
+        {
+            fixture.PresentAll((round & 1) == 0 ? 2_100 : 2_200,
+                GameWorldPublicPrefabIds.Character);
+            ulong current = CurrentRevision(fixture.Store, key);
+            works[0] = works[0] with
+            {
+                LatestSourceStep = step + 1,
+                FirstDueStep = step + 1,
+            };
+            for (int attempt = 0; attempt < 8_192; attempt++)
+            {
+                step++;
+                int subscription = FindSubscription(recipient, key);
+                if (recipient.Subscriptions[subscription].Cursor.Revision.Value == current &&
+                    server.GetSnapshot().OutstandingDeliveries == 0)
+                    break;
+                if ((step & 3) == 1)
+                {
+                    Equal(1, server.TryScheduleDueBundle(works, step, statuses, out _));
+                    True(statuses[0] is RemoteChunkWorldStateScheduleStatus.QueuedDelta or
+                        RemoteChunkWorldStateScheduleStatus.NoPayload or
+                        RemoteChunkWorldStateScheduleStatus.CapacityExceeded or
+                        RemoteChunkWorldStateScheduleStatus.TransportNotAccepting);
+                }
+                Pump(loopback, server, client);
+            }
+            Equal(current, recipient.Subscriptions[FindSubscription(recipient, key)]
+                .Cursor.Revision.Value);
+            Equal(0, server.GetSnapshot().OutstandingDeliveries);
+        }
+        RemoteChunkCompressionCensusSnapshot sent =
+            server.GetTimingSnapshot().Knowledge.Compression;
+        RemoteChunkCompressionReceiveCensusSnapshot received =
+            client.GetTimingSnapshot().CompressionCensus;
+        True(sent.SingletonSelected > 0);
+        True(received.Messages > 0);
+        Equal(0UL, received.Malformed);
+        Equal(8UL, client.GetSnapshot().AppliedDeltas);
+        True(client.GetSnapshot().DuplicateDeliveries > 0 ||
+            sent.SingletonSelected > received.Messages);
+        Console.WriteLine($"EVIDENCE PF5-R5 singleton_impairment sent=" +
+            $"{sent.SingletonSelected} received={received.Messages} " +
+            $"duplicates={client.GetSnapshot().DuplicateDeliveries} " +
+            "loss_reorder_delay=converged proofs=8 debt=0");
+    }
+
     internal static void IndependentCompressedMessagesConvergeThroughImpairment()
     {
         using var fixture = new Fixture(historyCapacity: 128, entityCount: 8);
@@ -4340,6 +4699,7 @@ internal static class N1OfflineDirectChunkTests
     {
         private readonly EcsWorld _world;
         private readonly Entity[] _entities;
+        private readonly WorldPublicChange[] _changes;
         private readonly int _entityCapacity;
         private readonly PreparedChunkPublicationReadModel _readModel;
 
@@ -4373,6 +4733,7 @@ internal static class N1OfflineDirectChunkTests
             _readModel = readModel;
             _entityCapacity = Math.Max(16, entityCount);
             _entities = new Entity[entityCount];
+            _changes = new WorldPublicChange[entityCount];
             _world = new EcsWorld(
                 GameSchema.CreateSchema(),
                 new EcsWorldOptions(new EntityCapacity(_entityCapacity), 2, 4,
@@ -4413,11 +4774,10 @@ internal static class N1OfflineDirectChunkTests
         {
             var descriptor = new WorldPublicDescriptor(
                 prefab, WorldYaw.Zero, WorldPublicStateFlags.Visible);
-            var changes = new WorldPublicChange[_entities.Length];
-            for (int index = 0; index < changes.Length; index++)
-                changes[index] = WorldPublicChange.Present(
+            for (int index = 0; index < _changes.Length; index++)
+                _changes[index] = WorldPublicChange.Present(
                     _entities[index], Position(0, 0, localX + index, 2_000), descriptor);
-            True(Store.TryCommit(changes, out _));
+            True(Store.TryCommit(_changes, out _));
         }
 
         internal void PresentAllAcrossChunks(int localX, int chunkStride)
@@ -4425,12 +4785,11 @@ internal static class N1OfflineDirectChunkTests
             var descriptor = new WorldPublicDescriptor(
                 GameWorldPublicPrefabIds.Character, WorldYaw.Zero,
                 WorldPublicStateFlags.Visible);
-            var changes = new WorldPublicChange[_entities.Length];
-            for (int index = 0; index < changes.Length; index++)
-                changes[index] = WorldPublicChange.Present(
+            for (int index = 0; index < _changes.Length; index++)
+                _changes[index] = WorldPublicChange.Present(
                     _entities[index], Position(index * chunkStride, 0, localX, 2_000),
                     descriptor);
-            True(Store.TryCommit(changes, out _));
+            True(Store.TryCommit(_changes, out _));
         }
 
         internal void Remove(int entity) =>

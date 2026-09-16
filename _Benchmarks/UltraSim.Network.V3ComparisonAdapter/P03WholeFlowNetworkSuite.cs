@@ -30,6 +30,11 @@ internal static class P03WholeFlowNetworkSuite
             Pf5R2R1TimingBoundaryClosure.Run(args);
             return;
         }
+        if (args.Contains("--pf5-r5-singleton-compression", StringComparer.Ordinal))
+        {
+            RunPf5R5SingletonCompression(args);
+            return;
+        }
         if (args.Contains("--pf5-r3-background-egress", StringComparer.Ordinal))
         {
             RunPf5R3BackgroundEgress(args);
@@ -173,6 +178,127 @@ internal static class P03WholeFlowNetworkSuite
             : overrideTickCadence
                 ? workload.WithTickDuration(tickMilliseconds)
                 : workload;
+    }
+
+    private static void RunPf5R5SingletonCompression(string[] args)
+    {
+        int warmup = ReadInt(args, "--warmup", 60);
+        int ticks = ReadInt(args, "--ticks", 270);
+        int[] populations = ParseOptionalPositiveIntegers(ReadText(args, "--populations")) ??
+            [64, 128, 192, 256, 300, 350];
+        bool detailed = args.Contains("--game-detailed", StringComparer.Ordinal);
+        bool egressTiming = !string.Equals(
+            ReadText(args, "--egress-timing"), "off", StringComparison.OrdinalIgnoreCase);
+        string output = ReadText(args, "--output") ??
+            "_Benchmarks/results/network-pf5-r5-singleton-compression.json";
+        if (warmup < 1 || ticks < 10)
+            throw new ArgumentOutOfRangeException(nameof(args));
+
+        RemoteChunkSingletonDeltaCompression[] policies =
+        [
+            RemoteChunkSingletonDeltaCompression.Disabled,
+            RemoteChunkSingletonDeltaCompression.WhenBeneficial,
+        ];
+        var cases = new List<(int Population, bool High,
+            RemoteChunkSingletonDeltaCompression Policy)>(populations.Length * 4);
+        foreach (int population in populations)
+        foreach (bool high in new[] { false, true })
+        foreach (RemoteChunkSingletonDeltaCompression policy in policies)
+            cases.Add((population, high, policy));
+        var random = new Random(ExecutionSeed ^ 0x5F50_5005);
+        for (int index = cases.Count - 1; index > 0; index--)
+        {
+            int other = random.Next(index + 1);
+            (cases[index], cases[other]) = (cases[other], cases[index]);
+        }
+
+        foreach (RemoteChunkSingletonDeltaCompression policy in policies)
+        {
+            using var prime = CreateHarness(
+                Math.Min(populations[0], 32), high: true, policy);
+            _ = prime.Run(Math.Max(30, warmup), 10);
+        }
+
+        var rows = new List<P03WholeFlowRow>(cases.Count);
+        for (int executionOrder = 0; executionOrder < cases.Count; executionOrder++)
+        {
+            (int population, bool high, RemoteChunkSingletonDeltaCompression policy) =
+                cases[executionOrder];
+            Console.WriteLine($"PF5-R5 {(high ? "high" : "low")}/{policy}/{population}: " +
+                "constructing...");
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            using P03WholeFlowHarness harness = CreateHarness(population, high, policy);
+            P03WholeFlowRow row = harness.Run(warmup, ticks) with
+            {
+                ExecutionOrder = executionOrder,
+                Curve = $"pf5-r5-{(high ? "high" : "low")}-{policy}",
+            };
+            P03WholeFlowHarness.Require(row.Converged && row.Transport.CapacityDrops == 0,
+                "PF5-R5 real-UDP row did not converge without capacity loss.");
+            rows.Add(row);
+            Console.WriteLine($"PF5-R5 {(high ? "high" : "low")}/{policy}/{population}: " +
+                $"remote p95={row.Timing.ServerOwnedRemoteReplicationBudget.P95:F3}ms " +
+                $"120={row.ProfileCounters.Compression.SingletonDeltaCandidates - row.ProfileCounters.Compression.SingletonSelected:N0} " +
+                $"singleton148={row.ProfileCounters.Compression.SingletonSelected:N0} " +
+                $"app={row.ProfileCounters.ApplicationBytesQueued:N0} " +
+                $"wire={row.Transport.WireBytes:N0}");
+        }
+
+        var report = new P03WholeFlowReport(
+            "ultrasim-network-pf5-r5-singleton-compression-v1",
+            DateTimeOffset.UtcNow,
+            ReadGitSha(),
+            Environment.Version.ToString(),
+            Environment.OSVersion.VersionString,
+            Environment.ProcessorCount,
+            Stopwatch.Frequency,
+            new P03WholeFlowScope(
+                "Matched E=1000 low dirty=20 and high dirty=round(35% of R) controls over real " +
+                    "secure loopback UDP, production BackgroundPlatformBatch egress, client " +
+                    "decode/application, and exact application proof.",
+                "Construction, admission, bootstrap, warmup, and final convergence drain are " +
+                    "excluded. Server and clients share one process, so ProcessCpu includes both; " +
+                    "ServerOwnedRemoteReplicationBudget excludes client work and background send.",
+                $"PF5-R5 singleton compression Off versus WhenBeneficial; canonical 129 >= " +
+                    $"{RemoteChunkBundleCompressionPolicy.Selected.MinimumCanonicalBytes} bytes; " +
+                    $"minimum saving versus actual 120 = " +
+                    $"{RemoteChunkBundleCompressionPolicy.Selected.MinimumNetSavingsBytes} bytes; " +
+                    $"BackgroundPlatformBatch; CrossLane cap two; {warmup} warmup and {ticks} " +
+                    $"measured ticks; seed {ExecutionSeed}."),
+            ExecutionSeed,
+            warmup,
+            ticks,
+            rows.OrderBy(row => row.Recipients).ThenBy(row => row.Curve).ToArray());
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
+        File.WriteAllText(output, JsonSerializer.Serialize(report,
+            new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
+        Console.WriteLine(Path.GetFullPath(output));
+        return;
+
+        P03WholeFlowHarness CreateHarness(
+            int population,
+            bool high,
+            RemoteChunkSingletonDeltaCompression policy)
+        {
+            int dirty = high
+                ? Math.Max(20, (int)Math.Round(
+                    population * .35, MidpointRounding.AwayFromZero))
+                : 20;
+            P03NetworkWorkload workload = P03NetworkWorkload.
+                ChunkMatchedControl(population, 1_000, dirty).
+                WithServerTickAndAoICadence(16, P03AoICadencePolicy.Selected124);
+            return new P03WholeFlowHarness(
+                workload, P03NetworkProfile.ChunkPublication, 2,
+                stageTimingEnabled: false,
+                gameDetailedAttribution: detailed,
+                compression: RemoteChunkBundleCompressionPolicy.Selected,
+                singletonDeltaCompression: policy,
+                serverOwnedRemoteTimingEnabled: true,
+                socketIoMode: SharedUdpSocketIoMode.BackgroundPlatformBatch,
+                backgroundEgressTimingEnabled: egressTiming);
+        }
     }
 
     private static void RunPf5R3BackgroundEgress(string[] args)
@@ -1248,6 +1374,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
         bool stageTimingEnabled = true,
         bool gameDetailedAttribution = false,
         RemoteChunkBundleCompressionPolicy compression = default,
+        RemoteChunkSingletonDeltaCompression singletonDeltaCompression = default,
         bool historyAudit = false,
         bool legacyRangeCensus = true,
         bool authorityThroughNetworkTimingEnabled = true,
@@ -1312,7 +1439,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
                 workload, _sessions, _x, _z, _versions, chunkBatch: true),
             P03NetworkProfile.ChunkPublication => new P03ChunkPublicationRemoteAdapter(
                 workload, _sessions, _x, _z, _versions, s_content, compression,
-                historyAudit, legacyRangeCensus, chunkReadModel),
+                singletonDeltaCompression, historyAudit, legacyRangeCensus, chunkReadModel),
             P03NetworkProfile.DirtyChunkSpatialFanout => new P03DirtyChunkRemoteAdapter(
                 workload, _sessions, _x, _z, _versions, s_content),
             _ => throw new ArgumentOutOfRangeException(nameof(profile)),
@@ -2558,6 +2685,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
         SharedUdpProtocolSession[] sessions, long[] x, long[] z, ulong[] versions,
         WorldContentFingerprint content,
         RemoteChunkBundleCompressionPolicy compression = default,
+        RemoteChunkSingletonDeltaCompression singletonDeltaCompression = default,
         bool historyAudit = false,
         bool legacyRangeCensus = true,
         PreparedChunkPublicationReadModel readModel =
@@ -2606,7 +2734,8 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
             ExpectedCounts[index] = Caches[index].GetSnapshot().KnownPublicIdentities;
             _servers[index] = new RemoteChunkWorldStateServer(
                 sessions[index].Server, recipient, Source, ApplicationEpoch,
-                new RemoteChunkWorldStateTransportLimits(128, 1_024, compression));
+                new RemoteChunkWorldStateTransportLimits(
+                    128, 1_024, compression, singletonDeltaCompression));
             _clients[index] = new RemoteChunkWorldStateClient(
                 sessions[index].Client, Caches[index], ApplicationEpoch, 64, 256);
         }
@@ -3763,7 +3892,24 @@ internal readonly record struct P03CompressionCounters(
     ulong CompressedRepresentationBytes,
     ulong DirectBytesSaved,
     ulong CompressionStopwatchTicks,
-    long MaximumCompressionMicroseconds)
+    long MaximumCompressionMicroseconds,
+    ulong SingletonDeltaCandidates,
+    ulong SingletonEligibleByCanonicalSize,
+    ulong SingletonAttempts,
+    ulong SingletonCodecSuccesses,
+    ulong SingletonCodecFailures,
+    ulong SingletonBelowSavingsThreshold,
+    ulong SingletonTooLargeForPeer,
+    ulong SingletonDecodedBoundRejected,
+    ulong SingletonProfitableVsCanonical129,
+    ulong SingletonProfitableVsStandalone120,
+    ulong SingletonSelected,
+    ulong SingletonCanonical129Bytes,
+    ulong SingletonStandalone120Bytes,
+    ulong SingletonSelectedBytes,
+    ulong SingletonBytesSavedVs120,
+    ulong SingletonCompressionStopwatchTicks,
+    long MaximumSingletonCompressionMicroseconds)
 {
     internal P03CompressionCounters Add(in RemoteChunkCompressionCensusSnapshot value) => new(
         Add(Attempts, value.Attempts),
@@ -3776,7 +3922,26 @@ internal readonly record struct P03CompressionCounters(
         Add(CompressedRepresentationBytes, value.CompressedRepresentationBytes),
         Add(DirectBytesSaved, value.DirectBytesSaved),
         Add(CompressionStopwatchTicks, value.Compression.TotalStopwatchTicks),
-        Math.Max(MaximumCompressionMicroseconds, value.Compression.MaximumMicroseconds));
+        Math.Max(MaximumCompressionMicroseconds, value.Compression.MaximumMicroseconds),
+        Add(SingletonDeltaCandidates, value.SingletonDeltaCandidates),
+        Add(SingletonEligibleByCanonicalSize, value.SingletonEligibleByCanonicalSize),
+        Add(SingletonAttempts, value.SingletonAttempts),
+        Add(SingletonCodecSuccesses, value.SingletonCodecSuccesses),
+        Add(SingletonCodecFailures, value.SingletonCodecFailures),
+        Add(SingletonBelowSavingsThreshold, value.SingletonBelowSavingsThreshold),
+        Add(SingletonTooLargeForPeer, value.SingletonTooLargeForPeer),
+        Add(SingletonDecodedBoundRejected, value.SingletonDecodedBoundRejected),
+        Add(SingletonProfitableVsCanonical129, value.SingletonProfitableVsCanonical129),
+        Add(SingletonProfitableVsStandalone120, value.SingletonProfitableVsStandalone120),
+        Add(SingletonSelected, value.SingletonSelected),
+        Add(SingletonCanonical129Bytes, value.SingletonCanonical129Bytes),
+        Add(SingletonStandalone120Bytes, value.SingletonStandalone120Bytes),
+        Add(SingletonSelectedBytes, value.SingletonSelectedBytes),
+        Add(SingletonBytesSavedVs120, value.SingletonBytesSavedVs120),
+        Add(SingletonCompressionStopwatchTicks,
+            value.SingletonCompression.TotalStopwatchTicks),
+        Math.Max(MaximumSingletonCompressionMicroseconds,
+            value.SingletonCompression.MaximumMicroseconds));
 
     private static ulong Add(ulong left, ulong right) =>
         ulong.MaxValue - left < right ? ulong.MaxValue : left + right;

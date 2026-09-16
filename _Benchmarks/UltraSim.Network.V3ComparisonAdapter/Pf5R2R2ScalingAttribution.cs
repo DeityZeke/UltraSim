@@ -23,6 +23,8 @@ internal static class Pf5R2R2ScalingAttribution
         bool focused = args.Contains("--focused", StringComparer.Ordinal);
         bool matchedOnly = args.Contains("--matched-only", StringComparer.Ordinal);
         bool matchedDetailed = args.Contains("--matched-detailed", StringComparer.Ordinal);
+        RemoteChunkSingletonDeltaCompression singletonDeltaCompression =
+            ParseSingletonCompression(ReadText(args, "--singleton-compression"));
         int warmup = ReadInt(args, "--warmup", focused ? 8 : 30);
         int ticks = ReadInt(args, "--ticks", focused ? 24 : 270);
         int attributionTicks = ReadInt(args, "--attribution-ticks", focused ? 16 : 90);
@@ -38,7 +40,7 @@ internal static class Pf5R2R2ScalingAttribution
         V2ShardedHistoricalEvidence shardedHistorical =
             ReadShardedHistoricalV2(V2ShardedArtifact);
 
-        Prime();
+        Prime(singletonDeltaCompression);
         var rows = new List<Pf5R2R2ScalingRow>(checked(populations.Length * 4));
         var matchedRows = new List<Pf5R2R2ScalingRow>(checked(populations.Length * 3));
         foreach (int population in populations)
@@ -106,7 +108,8 @@ internal static class Pf5R2R2ScalingAttribution
             attributionTicks,
             "ChunkPublication; Message129WhenBeneficial; selective message148 LZ4 " +
                 "canonical>=384/saving>=32; V3 production cadence 1/2/4; CrossLane cap 2; " +
-                "Game manifest v29; transport revision 2",
+                "Game manifest v29; transport revision 2; singleton compression " +
+                singletonDeltaCompression,
             "RemotePublicationPreparation is the exact opt-in ChunkPublicationStore interval " +
                 "which groups current-tick source changes and creates shared prepared " +
                 "publications/records. The encompassing ApplyAuthority interval also owns " +
@@ -162,7 +165,8 @@ internal static class Pf5R2R2ScalingAttribution
         {
             Console.WriteLine($"PF5-R2-R2 {shape} R={workload.Recipients} " +
                 $"E={workload.Entities} dirty={workload.DirtyEntitiesPerTick}: rated");
-            P03WholeFlowRow flow = RunHarness(workload, warmup, ticks, detailed: false);
+            P03WholeFlowRow flow = RunHarness(
+                workload, warmup, ticks, detailed: false, singletonDeltaCompression);
             VerifyServerBudget(flow, ticks);
             rows.Add(new Pf5R2R2ScalingRow(shape, false, flow));
             Console.WriteLine($"  game={flow.Timing.GameScheduleAndCodecQueue.P95:F3}ms " +
@@ -175,7 +179,8 @@ internal static class Pf5R2R2ScalingAttribution
         {
             Console.WriteLine($"PF5-R2-R2 {shape} R={workload.Recipients}: attribution");
             P03WholeFlowRow flow = RunHarness(
-                workload, Math.Min(warmup, 12), attributionTicks, detailed: true);
+                workload, Math.Min(warmup, 12), attributionTicks, detailed: true,
+                singletonDeltaCompression);
             VerifyServerBudget(flow, attributionTicks);
             Require(flow.ProfileCounters.ChunkCpu.Enabled,
                 "Detailed Chunk attribution was not enabled.");
@@ -189,7 +194,8 @@ internal static class Pf5R2R2ScalingAttribution
             Console.WriteLine($"PF5-R2-R2 {shape} R={workload.Recipients} " +
                 $"E={workload.Entities} dirty={workload.DirtyEntitiesPerTick}: matched");
             P03WholeFlowRow flow = RunHarness(
-                workload, warmup, ticks, detailed: matchedDetailed);
+                workload, warmup, ticks, detailed: matchedDetailed,
+                singletonDeltaCompression);
             VerifyServerBudget(flow, ticks);
             matchedRows.Add(new Pf5R2R2ScalingRow(shape, matchedDetailed, flow));
             Console.WriteLine($"  game={flow.Timing.GameScheduleAndCodecQueue.P95:F3}ms " +
@@ -237,7 +243,8 @@ internal static class Pf5R2R2ScalingAttribution
         P03NetworkWorkload workload,
         int warmup,
         int ticks,
-        bool detailed)
+        bool detailed,
+        RemoteChunkSingletonDeltaCompression singletonDeltaCompression)
     {
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -249,6 +256,7 @@ internal static class Pf5R2R2ScalingAttribution
             stageTimingEnabled: true,
             gameDetailedAttribution: detailed,
             compression: RemoteChunkBundleCompressionPolicy.Selected,
+            singletonDeltaCompression: singletonDeltaCompression,
             historyAudit: false,
             legacyRangeCensus: false,
             authorityThroughNetworkTimingEnabled: true,
@@ -285,7 +293,8 @@ internal static class Pf5R2R2ScalingAttribution
             "Server-owned p95 does not include every non-overlapping owned phase.");
     }
 
-    private static void Prime()
+    private static void Prime(
+        RemoteChunkSingletonDeltaCompression singletonDeltaCompression)
     {
         using var harness = new P03WholeFlowHarness(
             P03NetworkWorkload.ChunkV2Shaped(8, 8, v2Activity: true),
@@ -294,6 +303,7 @@ internal static class Pf5R2R2ScalingAttribution
             stageTimingEnabled: false,
             gameDetailedAttribution: false,
             compression: RemoteChunkBundleCompressionPolicy.Selected,
+            singletonDeltaCompression: singletonDeltaCompression,
             legacyRangeCensus: false);
         _ = harness.Run(4, 4);
     }
@@ -378,6 +388,16 @@ internal static class Pf5R2R2ScalingAttribution
             throw new ArgumentOutOfRangeException(nameof(text));
         return values;
     }
+
+    private static RemoteChunkSingletonDeltaCompression ParseSingletonCompression(string? text) =>
+        text?.Trim().ToLowerInvariant() switch
+        {
+            null or "" or "off" or "disabled" =>
+                RemoteChunkSingletonDeltaCompression.Disabled,
+            "on" or "selected" or "when-beneficial" =>
+                RemoteChunkSingletonDeltaCompression.WhenBeneficial,
+            _ => throw new ArgumentException($"Unknown singleton compression '{text}'."),
+        };
 
     private static string ReadGitSha()
     {
