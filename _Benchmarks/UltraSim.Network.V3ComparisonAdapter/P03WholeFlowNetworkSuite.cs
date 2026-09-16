@@ -1233,6 +1233,7 @@ internal enum P03EntityLayout : byte
     TwentyEntitiesPerChunk = 2,
     V2DenseClosestTwoMeterGrid = 3,
     TopologyChunkGroups = 4,
+    TopologyCompactGroups = 5,
 }
 
 internal enum P03MutationPattern : byte
@@ -1245,6 +1246,7 @@ internal enum P03MutationPattern : byte
     MatchedDistributedPrefix = 6,
     BurstChunkStripe = 7,
     SingleAcrossChunkStripe = 8,
+    TopologyOnePerGroup = 9,
 }
 
 internal readonly record struct P03NetworkWorkload(
@@ -1391,6 +1393,28 @@ internal readonly record struct P03NetworkWorkload(
         };
     }
 
+    internal static P03NetworkWorkload ChunkFixedDeliveryTopology(
+        int recipientPublicationRelationships,
+        int groups)
+    {
+        if (recipientPublicationRelationships <= 0 || groups <= 0 ||
+            groups > recipientPublicationRelationships ||
+            recipientPublicationRelationships % groups != 0)
+            throw new ArgumentOutOfRangeException(nameof(groups));
+        P03NetworkWorkload basis = ChunkTopology(
+            recipientPublicationRelationships,
+            recipientPublicationRelationships,
+            groups,
+            groups);
+        return basis with
+        {
+            Id = $"fixed-delivery-r{recipientPublicationRelationships}-g{groups}",
+            EntityLayout = P03EntityLayout.TopologyCompactGroups,
+            MutationPattern = P03MutationPattern.TopologyOnePerGroup,
+            ActiveEntities = recipientPublicationRelationships,
+        };
+    }
+
     internal void CopyDirtyEntityIndices(int tick, Span<int> destination)
     {
         if (destination.Length < DirtyEntitiesPerTick)
@@ -1516,6 +1540,16 @@ internal readonly record struct P03NetworkWorkload(
                         "The matched distributed-prefix workload did not fill its selection.");
                 break;
             }
+            case P03MutationPattern.TopologyOnePerGroup:
+            {
+                if (TopologyGroups <= 0 || DirtyEntitiesPerTick != TopologyGroups ||
+                    Entities % TopologyGroups != 0)
+                    throw new InvalidOperationException(
+                        "The fixed-delivery topology requires one mutation per equal group.");
+                for (int group = 0; group < TopologyGroups; group++)
+                    selected[group] = checked(group * Entities / TopologyGroups);
+                break;
+            }
             default:
                 throw new ArgumentOutOfRangeException(nameof(MutationPattern));
         }
@@ -1585,6 +1619,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
     private readonly bool _stageTimingEnabled;
     private readonly GameTelemetryLevel _gameTelemetryLevel;
     private readonly int _serverProofDispatchIntervalTicks;
+    private readonly int _postMeasurementDrainRepetitions;
     private readonly bool _authorityThroughNetworkTimingEnabled;
     private readonly bool _serverOwnedRemoteTimingEnabled;
     private readonly bool _retainRawSamples;
@@ -1648,7 +1683,8 @@ internal sealed class P03WholeFlowHarness : IDisposable
         IP03ExternalServerWorkload? externalServerWorkload = null,
         bool retainRawSamples = false,
         GameTelemetryLevel? gameTelemetryLevel = null,
-        int serverProofDispatchIntervalTicks = 1)
+        int serverProofDispatchIntervalTicks = 1,
+        int postMeasurementDrainRepetitions = 1)
     {
         _workload = workload;
         _profile = profile;
@@ -1660,6 +1696,9 @@ internal sealed class P03WholeFlowHarness : IDisposable
         if (serverProofDispatchIntervalTicks <= 0)
             throw new ArgumentOutOfRangeException(nameof(serverProofDispatchIntervalTicks));
         _serverProofDispatchIntervalTicks = serverProofDispatchIntervalTicks;
+        if (postMeasurementDrainRepetitions <= 0)
+            throw new ArgumentOutOfRangeException(nameof(postMeasurementDrainRepetitions));
+        _postMeasurementDrainRepetitions = postMeasurementDrainRepetitions;
         _authorityThroughNetworkTimingEnabled = authorityThroughNetworkTimingEnabled;
         _serverOwnedRemoteTimingEnabled = serverOwnedRemoteTimingEnabled;
         _retainRawSamples = retainRawSamples;
@@ -1723,9 +1762,9 @@ internal sealed class P03WholeFlowHarness : IDisposable
 
     internal P03WholeFlowRow Run(int warmup, int ticks)
     {
-        DrainToConvergence(0, 16_384);
+        _ = DrainToConvergence(0, 16_384);
         for (int tick = 1; tick <= warmup; tick++) RunTick(tick, measure: false);
-        DrainToConvergence(checked((ulong)warmup + 1), 4_096);
+        _ = DrainToConvergence(checked((ulong)warmup + 1), 4_096);
         ResetMeasurement(ticks);
         P03TransportTotals before = CaptureTransport();
         SharedUdpListenerSnapshot listenerBefore = _host.GetSnapshot().Listener;
@@ -1739,7 +1778,9 @@ internal sealed class P03WholeFlowHarness : IDisposable
         long processWallStarted = Stopwatch.GetTimestamp();
         long allocatedBefore = GC.GetTotalAllocatedBytes(true);
         for (int tick = 1; tick <= ticks; tick++) RunTick(warmup + tick, measure: true);
-        DrainToConvergence(checked((ulong)(warmup + ticks + 1)), 4_096);
+
+        // Freeze every cumulative child at the same boundary as the measured parent samples.
+        // Convergence work is intentionally captured as a separate delta below.
         double processWallMilliseconds = Stopwatch.GetElapsedTime(processWallStarted)
             .TotalMilliseconds;
         double processCpuMilliseconds =
@@ -1748,16 +1789,35 @@ internal sealed class P03WholeFlowHarness : IDisposable
         long processWorkingSetAfter = measuredProcess.WorkingSet64;
         long processPeakWorkingSetBytes = measuredProcess.PeakWorkingSet64;
         long allocated = GC.GetTotalAllocatedBytes(false) - allocatedBefore;
-        P03TransportTotals after = CaptureTransport();
-        SharedUdpListenerSnapshot listenerAfter = _host.GetSnapshot().Listener;
-        _adapter.Validate();
+        int gen0Collections = GC.CollectionCount(0) - gen0Before;
+        int gen1Collections = GC.CollectionCount(1) - gen1Before;
+        int gen2Collections = GC.CollectionCount(2) - gen2Before;
+        P03TransportTotals measuredAfter = CaptureTransport();
+        SharedUdpListenerSnapshot measuredListenerAfter = _host.GetSnapshot().Listener;
         P03ProfileCounters profile = _adapter.GetCounters();
         P03ProtocolTiming protocol = CaptureProtocolTiming();
+
+        int drainRounds = 0;
+        ulong drainStep = checked((ulong)(warmup + ticks + 1));
+        for (int repetition = 0; repetition < _postMeasurementDrainRepetitions; repetition++)
+            drainRounds = checked(drainRounds + DrainToConvergence(
+                checked(drainStep + (ulong)repetition * 4_096UL), 4_096));
+        P03TransportTotals finalAfter = CaptureTransport();
+        SharedUdpListenerSnapshot finalListenerAfter = _host.GetSnapshot().Listener;
+        P03ProfileCounters finalProfile = _adapter.GetCounters();
+        P03ProtocolTiming finalProtocol = CaptureProtocolTiming();
+        _adapter.Validate();
         SharedUdpProtocolHostSnapshot hostSnapshot = _host.GetSnapshot();
         long profileServerReserved = _adapter.GetServerReservedBytes();
         long profileClientReserved = _adapter.GetClientReservedBytes();
         P03TransportSummary transport = P03TransportSummary.Delta(
-            after, before, listenerAfter, listenerBefore, _frameCap);
+            measuredAfter, before, measuredListenerAfter, listenerBefore, _frameCap);
+        P03DrainSummary drain = P03DrainSummary.Create(
+            _postMeasurementDrainRepetitions, drainRounds,
+            in profile, in finalProfile, in protocol, in finalProtocol,
+            in finalAfter, in measuredAfter,
+            in finalListenerAfter, in measuredListenerAfter, _frameCap,
+            _adapter.IsConverged);
         P03NormalizedCost normalized = P03NormalizedCost.Calculate(
             _workload.Recipients, ticks, _networkAndRemoteReplication, _serverRole,
             transport, profile);
@@ -1810,7 +1870,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
             hostSnapshot.KnownClientReservedBytes,
             _adapter.IsConverged, "", normalized,
             P03BackgroundEgressSummary.Delta(
-                listenerAfter.BackgroundEgress, listenerBefore.BackgroundEgress),
+                measuredListenerAfter.BackgroundEgress, listenerBefore.BackgroundEgress),
             new P03ProcessWindowSummary(
                 processWallMilliseconds,
                 processCpuMilliseconds,
@@ -1819,22 +1879,46 @@ internal sealed class P03WholeFlowHarness : IDisposable
                 processPeakWorkingSetBytes,
                 processWorkingSetBefore,
                 processWorkingSetAfter,
-                GC.CollectionCount(0) - gen0Before,
-                GC.CollectionCount(1) - gen1Before,
-                GC.CollectionCount(2) - gen2Before),
+                gen0Collections,
+                gen1Collections,
+                gen2Collections),
             new P03ListenerConfigurationSummary(
-                listenerAfter.ConfiguredSocketBufferBytes,
-                listenerAfter.ActualSocketBufferBytes,
-                listenerAfter.ReservedBytes),
+                measuredListenerAfter.ConfiguredSocketBufferBytes,
+                measuredListenerAfter.ActualSocketBufferBytes,
+                measuredListenerAfter.ReservedBytes),
             _retainRawSamples
                 ? new P03WholeFlowRawSamples(
                     _remotePublicationPreparation.ToArray(),
                     _recipientCommitObservation.ToArray(),
+                    _schedule.ToArray(),
+                    _serverApplication.ToArray(),
                     _networkAndRemoteReplication.ToArray(),
+                    ExclusiveResidualSamples(
+                        _networkAndRemoteReplication, _schedule, _serverApplication),
                     _serverOwnedRemoteReplicationBudget.ToArray(),
                     _serverOwnedTick.ToArray(),
                     _tick.ToArray())
-                : null);
+                : null,
+            drain,
+            new P03MeasurementWindowBoundary(
+                CountersCapturedBeforeDrain: true,
+                ProtocolTimingCapturedBeforeDrain: true,
+                TransportCapturedBeforeDrain: true,
+                ProcessWindowCapturedBeforeDrain: true,
+                ticks));
+    }
+
+    private static double[] ExclusiveResidualSamples(
+        IReadOnlyList<double> parent,
+        IReadOnlyList<double> first,
+        IReadOnlyList<double> second)
+    {
+        if (parent.Count != first.Count || parent.Count != second.Count)
+            throw new InvalidOperationException("Whole-flow phase sample counts diverged.");
+        var result = new double[parent.Count];
+        for (int index = 0; index < result.Length; index++)
+            result[index] = Math.Max(0, parent[index] - first[index] - second[index]);
+        return result;
     }
 
     private void RunTick(int tick, bool measure)
@@ -2026,14 +2110,14 @@ internal sealed class P03WholeFlowHarness : IDisposable
         return serverTicks;
     }
 
-    private void DrainToConvergence(ulong step, int guard)
+    private int DrainToConvergence(ulong step, int guard)
     {
         for (int round = 0; round < guard; round++)
         {
             _currentTick = checked((int)Math.Min(int.MaxValue, step + (ulong)round));
             _adapter.Schedule(step + checked((ulong)round));
             for (int pass = 0; pass < 4; pass++) _ = PumpAndDispatch();
-            if (_adapter.IsConverged) return;
+            if (_adapter.IsConverged) return checked(round + 1);
             if ((round & 31) == 31) Thread.Yield();
         }
         throw new InvalidOperationException(
@@ -2111,7 +2195,43 @@ internal sealed class P03WholeFlowHarness : IDisposable
 
     private void InitializePositions()
     {
-        if (_workload.EntityLayout == P03EntityLayout.TopologyChunkGroups)
+        if (_workload.EntityLayout == P03EntityLayout.TopologyCompactGroups)
+        {
+            const int entitiesPerChunk = 64;
+            const long groupStride = 192_000;
+            ReadOnlySpan<(int X, int Z)> chunkOffsets =
+            [
+                (0, 0), (-1, 0), (1, 0), (0, -1), (0, 1),
+                (-1, -1), (1, -1), (-1, 1), (1, 1),
+            ];
+            int groupColumns = checked((int)Math.Ceiling(Math.Sqrt(_workload.TopologyGroups)));
+            for (int group = 0; group < _workload.TopologyGroups; group++)
+            {
+                int start = checked(group * _workload.Entities / _workload.TopologyGroups);
+                int end = checked((group + 1) * _workload.Entities / _workload.TopologyGroups);
+                long originX = checked((long)(group % groupColumns) * groupStride);
+                long originZ = checked((long)(group / groupColumns) * groupStride);
+                for (int index = start; index < end; index++)
+                {
+                    int local = index - start;
+                    int chunk = local / entitiesPerChunk;
+                    if (chunk >= chunkOffsets.Length)
+                        throw new InvalidOperationException(
+                            "The compact topology exceeded its bounded nearby chunks.");
+                    int slot = local % entitiesPerChunk;
+                    _x[index] = checked(originX +
+                        (long)chunkOffsets[chunk].X *
+                            GameWorldSpatialProfile.WorldChunkEdgeUnits +
+                        1_000L + slot % 8 * 1_750L);
+                    _z[index] = checked(originZ +
+                        (long)chunkOffsets[chunk].Z *
+                            GameWorldSpatialProfile.WorldChunkEdgeUnits +
+                        1_000L + slot / 8 * 1_750L);
+                    _versions[index] = 1;
+                }
+            }
+        }
+        else if (_workload.EntityLayout == P03EntityLayout.TopologyChunkGroups)
         {
             const int entitiesPerChunk = 20;
             const long groupStride = 192_000;
@@ -2312,8 +2432,25 @@ internal abstract class P03RemoteProfileAdapter : IDisposable
         }
         return count;
     }
-    protected long RecipientX(int recipient) => X[recipient % X.Length];
-    protected long RecipientZ(int recipient) => Z[recipient % Z.Length];
+    protected long RecipientX(int recipient)
+    {
+        if (Workload.EntityLayout != P03EntityLayout.TopologyCompactGroups)
+            return X[recipient % X.Length];
+        int group = checked((int)((long)recipient * Workload.TopologyGroups /
+            Workload.Recipients));
+        int columns = checked((int)Math.Ceiling(Math.Sqrt(Workload.TopologyGroups)));
+        return checked((long)(group % columns) * 192_000L + 8_000L);
+    }
+
+    protected long RecipientZ(int recipient)
+    {
+        if (Workload.EntityLayout != P03EntityLayout.TopologyCompactGroups)
+            return Z[recipient % Z.Length];
+        int group = checked((int)((long)recipient * Workload.TopologyGroups /
+            Workload.Recipients));
+        int columns = checked((int)Math.Ceiling(Math.Sqrt(Workload.TopologyGroups)));
+        return checked((long)(group / columns) * 192_000L + 8_000L);
+    }
     protected static GameProjectedEntity Projected(int entity, ulong version) => new(
         P03WholeFlowHarness.ReplicationId(entity), true,
         new GameSimulationState { TickMarker = checked((int)version), InputVelocity = entity });
@@ -2986,15 +3123,28 @@ internal abstract class P03ChunkRemoteAdapterBase : P03RemoteProfileAdapter
         ReadOnlySpan<long> x,
         ReadOnlySpan<long> z)
     {
-        if (workload.EntityLayout == P03EntityLayout.TopologyChunkGroups)
+        if (workload.EntityLayout is P03EntityLayout.TopologyChunkGroups or
+            P03EntityLayout.TopologyCompactGroups)
         {
             var topologyKeys = new HashSet<SpatialChunkKey>();
             var entries = new ChunkInterestEntry[1_024];
+            int compactColumns = workload.EntityLayout == P03EntityLayout.TopologyCompactGroups
+                ? checked((int)Math.Ceiling(Math.Sqrt(workload.TopologyGroups)))
+                : 0;
             for (int index = 0; index < workload.Recipients; index++)
             {
+                long recipientX = x[index];
+                long recipientZ = z[index];
+                if (workload.EntityLayout == P03EntityLayout.TopologyCompactGroups)
+                {
+                    int group = checked((int)((long)index * workload.TopologyGroups /
+                        workload.Recipients));
+                    recipientX = checked((long)(group % compactColumns) * 192_000L + 8_000L);
+                    recipientZ = checked((long)(group / compactColumns) * 192_000L + 8_000L);
+                }
                 ChunkInterestQueryStatus status = ChunkInterestQuery.TryQuery(
                     GameWorldState.DefaultSpace,
-                    P03WholeFlowHarness.Position(x[index], z[index]),
+                    P03WholeFlowHarness.Position(recipientX, recipientZ),
                     workload.ChunkInterest,
                     [], entries,
                     out int count,
@@ -3949,12 +4099,85 @@ internal readonly record struct P03WholeFlowRow(
     P03BackgroundEgressSummary BackgroundEgress,
     P03ProcessWindowSummary ProcessWindow,
     P03ListenerConfigurationSummary ListenerConfiguration,
-    P03WholeFlowRawSamples? RawSamples = null);
+    P03WholeFlowRawSamples? RawSamples = null,
+    P03DrainSummary Drain = default,
+    P03MeasurementWindowBoundary MeasurementWindow = default);
+
+internal readonly record struct P03MeasurementWindowBoundary(
+    bool CountersCapturedBeforeDrain,
+    bool ProtocolTimingCapturedBeforeDrain,
+    bool TransportCapturedBeforeDrain,
+    bool ProcessWindowCapturedBeforeDrain,
+    int MeasuredTicks);
+
+internal readonly record struct P03DrainSummary(
+    int RequestedRepetitions,
+    int ExecutedRounds,
+    int OutstandingAtMeasurementEnd,
+    int FinalOutstanding,
+    ulong ScheduleAttempts,
+    ulong DeliveriesQueued,
+    ulong GameMessagesQueued,
+    ulong ProofEntries,
+    ulong KnowledgeAdvancements,
+    ulong ExactDebtRetired,
+    ulong SupersededDebtRetired,
+    double ServerProtocolMilliseconds,
+    double ClientProtocolMilliseconds,
+    ulong ServerEmitCalls,
+    ulong ServerInboundCalls,
+    ulong ClientEmitCalls,
+    ulong ClientInboundCalls,
+    P03TransportSummary Transport,
+    P03BackgroundEgressSummary BackgroundEgress,
+    bool Converged)
+{
+    internal static P03DrainSummary Create(
+        int requestedRepetitions,
+        int executedRounds,
+        in P03ProfileCounters measured,
+        in P03ProfileCounters final,
+        in P03ProtocolTiming measuredProtocol,
+        in P03ProtocolTiming finalProtocol,
+        in P03TransportTotals finalTransport,
+        in P03TransportTotals measuredTransport,
+        in SharedUdpListenerSnapshot finalListener,
+        in SharedUdpListenerSnapshot measuredListener,
+        int frameCap,
+        bool converged) => new(
+        requestedRepetitions,
+        executedRounds,
+        measured.Lifecycle.OutstandingAtCapture,
+        final.Lifecycle.OutstandingAtCapture,
+        D(final.Lifecycle.ScheduleAttempts, measured.Lifecycle.ScheduleAttempts),
+        D(final.Lifecycle.DeliveriesQueued, measured.Lifecycle.DeliveriesQueued),
+        D(final.GameMessagesQueued, measured.GameMessagesQueued),
+        D(final.Lifecycle.ProofEntries, measured.Lifecycle.ProofEntries),
+        D(final.Lifecycle.KnowledgeAdvancements, measured.Lifecycle.KnowledgeAdvancements),
+        D(final.Lifecycle.ExactDebtRetired, measured.Lifecycle.ExactDebtRetired),
+        D(final.Lifecycle.SupersededDebtRetired, measured.Lifecycle.SupersededDebtRetired),
+        Math.Max(0, finalProtocol.ServerMilliseconds - measuredProtocol.ServerMilliseconds),
+        Math.Max(0, finalProtocol.ClientMilliseconds - measuredProtocol.ClientMilliseconds),
+        D(finalProtocol.Server.EmitCalls, measuredProtocol.Server.EmitCalls),
+        D(finalProtocol.Server.InboundCalls, measuredProtocol.Server.InboundCalls),
+        D(finalProtocol.Client.EmitCalls, measuredProtocol.Client.EmitCalls),
+        D(finalProtocol.Client.InboundCalls, measuredProtocol.Client.InboundCalls),
+        P03TransportSummary.Delta(
+            finalTransport, measuredTransport, finalListener, measuredListener, frameCap),
+        P03BackgroundEgressSummary.Delta(
+            finalListener.BackgroundEgress, measuredListener.BackgroundEgress),
+        converged);
+
+    private static ulong D(ulong after, ulong before) => after >= before ? after - before : 0;
+}
 
 internal sealed record P03WholeFlowRawSamples(
     double[] RemotePublicationPreparationMilliseconds,
     double[] RecipientCommitObservationMilliseconds,
+    double[] GameScheduleAndCodecQueueMilliseconds,
+    double[] ServerGameProofApplyMilliseconds,
     double[] NetworkAndRemoteReplicationMilliseconds,
+    double[] NetworkProtocolAndOtherMilliseconds,
     double[] ServerOwnedRemoteReplicationBudgetMilliseconds,
     double[] ServerOwnedTickMilliseconds,
     double[] WholeFixtureMilliseconds);

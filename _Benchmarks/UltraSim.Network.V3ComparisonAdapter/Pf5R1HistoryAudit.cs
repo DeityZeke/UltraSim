@@ -172,7 +172,22 @@ internal static class Pf5R1HistoryAudit
         using var run = new SemanticScenario(
             scenario, recipients, ticks, seed,
             PreparedChunkPublicationReadModel.PreparedLatestState,
-            bodyCensus: true);
+            RemoteChunkDeltaBodySharingMode.CensusOnly,
+            new RemoteChunkDeltaBodyStoreLimits(4_096, 64, 4));
+        return run.Run();
+    }
+
+    internal static Pf5R1ScenarioReport RunPreparedBodyEnabledScenarioForPf5R8(
+        string scenario,
+        int recipients,
+        int ticks,
+        int seed)
+    {
+        using var run = new SemanticScenario(
+            scenario, recipients, ticks, seed,
+            PreparedChunkPublicationReadModel.PreparedLatestState,
+            RemoteChunkDeltaBodySharingMode.Enabled,
+            RemoteChunkDeltaBodyStoreLimits.Default);
         return run.Run();
     }
 
@@ -391,7 +406,9 @@ internal static class Pf5R1HistoryAudit
             int ticks,
             int seed,
             PreparedChunkPublicationReadModel readModel,
-            bool bodyCensus = false)
+            RemoteChunkDeltaBodySharingMode bodySharing =
+                RemoteChunkDeltaBodySharingMode.Disabled,
+            RemoteChunkDeltaBodyStoreLimits bodyLimits = default)
         {
             _id = id;
             _recipientCount = recipientCount;
@@ -424,10 +441,9 @@ internal static class Pf5R1HistoryAudit
             _source.Store.ConfigureHistoryAudit(new ChunkPublicationHistoryAuditLimits(65_536));
             _source.Store.ConfigurePreparedPublicationAttribution(
                 readModel == PreparedChunkPublicationReadModel.PreparedLatestState);
-            if (bodyCensus)
+            if (bodySharing != RemoteChunkDeltaBodySharingMode.Disabled)
                 _bodyStore = new RemoteChunkDeltaBodyStore(
-                    _source.Store, RemoteChunkDeltaBodySharingMode.CensusOnly,
-                    new RemoteChunkDeltaBodyStoreLimits(4_096, 64, 4));
+                    _source.Store, bodySharing, bodyLimits);
             _recipients = new RecipientState[recipientCount];
             if (!_staggered)
                 for (int index = 0; index < recipientCount; index++)
@@ -487,6 +503,7 @@ internal static class Pf5R1HistoryAudit
                 CatchUp(state, checked((ulong)_ticks + 1));
                 Collect(state);
             }
+            Pf5R1RecipientKnowledgeObservation[] finalKnowledge = CaptureFinalKnowledge();
             ulong wallTicks = checked((ulong)(Stopwatch.GetTimestamp() - wallStarted));
             ChunkPublicationHistoryAuditSnapshot audit = _source.Store.GetHistoryAuditSnapshot();
             PreparedChunkPublicationSnapshot prepared =
@@ -539,7 +556,47 @@ internal static class Pf5R1HistoryAudit
                 _retiredCursorTicks,
                 "Semantic/proof diagnostic harness; no UDP clock. The real-UDP selected-policy control is reported separately.",
                 prepared,
-                _bodyStore?.GetSnapshot() ?? default);
+                _bodyStore?.GetSnapshot() ?? default,
+                finalKnowledge);
+        }
+
+        private Pf5R1RecipientKnowledgeObservation[] CaptureFinalKnowledge()
+        {
+            var result = new List<Pf5R1RecipientKnowledgeObservation>();
+            for (int recipient = 0; recipient < _recipients.Length; recipient++)
+            {
+                RecipientState? state = _recipients[recipient];
+                if (state is null) continue;
+                OfflineDirectChunkSubscriptionView subscriptions = state.Recipient.Subscriptions;
+                for (int index = 0; index < subscriptions.Length; index++)
+                {
+                    OfflineDirectChunkSubscription subscription = subscriptions[index];
+                    bool sourcePresent = _source.Store.TryGetCommittedView(
+                        subscription.Interest.Key, out ChunkPublicationView source);
+                    // This semantic harness bootstraps populated source chunks. Empty AOI cells
+                    // are retained in the topology but are not absence-delivery fixtures here.
+                    // Validate every populated source scope exactly; absence remains covered by
+                    // the maintained product/protocol regressions.
+                    bool exact = !sourcePresent || subscription.HasKnowledge &&
+                        subscription.Cursor.IsValid &&
+                        subscription.Cursor.Epoch == source.Epoch &&
+                        subscription.Cursor.Key == source.Key &&
+                        subscription.Cursor.Revision == source.Revision;
+                    Require(exact,
+                        $"{_id} recipient {recipient} final knowledge diverged for " +
+                        $"{subscription.Interest.Key}.");
+                    result.Add(new Pf5R1RecipientKnowledgeObservation(
+                        recipient,
+                        subscription.Interest.Key,
+                        subscription.HasKnowledge,
+                        subscription.Cursor.Epoch,
+                        subscription.Cursor.Revision.Value,
+                        sourcePresent,
+                        sourcePresent ? source.Revision.Value : 0,
+                        sourcePresent ? source.Count : 0));
+                }
+            }
+            return result.ToArray();
         }
 
         private void Activate(int index, bool reconnect, int tick)
@@ -1111,7 +1168,18 @@ internal sealed record Pf5R1ScenarioReport(
     ulong CursorAdvancementTicks,
     string ClockScope,
     PreparedChunkPublicationSnapshot PreparedSource = default,
-    RemoteChunkDeltaBodyStoreSnapshot CompatibleBodies = default);
+    RemoteChunkDeltaBodyStoreSnapshot CompatibleBodies = default,
+    Pf5R1RecipientKnowledgeObservation[]? FinalKnowledge = null);
+
+internal readonly record struct Pf5R1RecipientKnowledgeObservation(
+    int Recipient,
+    SpatialChunkKey Key,
+    bool HasKnowledge,
+    PublicationEpoch AppliedEpoch,
+    ulong AppliedRevision,
+    bool SourcePresent,
+    ulong SourceRevision,
+    int SourceRecords);
 
 internal readonly record struct Pf5R1SnapshotReasonRow(
     string Reason,

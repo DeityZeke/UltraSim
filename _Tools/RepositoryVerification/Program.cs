@@ -72,7 +72,7 @@ static void VerifyPf5R8RequiredFanout(string root, string configuration)
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(output));
         JsonElement report = document.RootElement;
         if (report.GetProperty("Schema").GetString() !=
-                "ultrasim-concept-demo-pf5-r8-required-fanout-v1")
+                "ultrasim-concept-demo-pf5-r8-required-fanout-v2")
             throw new InvalidOperationException("PF5-R8 emitted an unexpected report schema.");
         JsonElement[] fanout = report.GetProperty("FixedSourceFanout").EnumerateArray()
             .Select(static value => value.Clone()).ToArray();
@@ -106,9 +106,69 @@ static void VerifyPf5R8RequiredFanout(string root, string configuration)
                 "PF5-R8 coverage attribution was absent or left the selected read model.");
         if (report.GetProperty("TelemetryControls").GetArrayLength() != 3 ||
             report.GetProperty("ProofDebt").GetArrayLength() != 4 ||
-            report.GetProperty("RecipientDivergence").GetArrayLength() != 3 ||
+            report.GetProperty("RecipientDivergencePotential").GetArrayLength() != 3 ||
+            report.GetProperty("RecipientDivergenceEnabled").GetArrayLength() != 3 ||
             report.GetProperty("RatedAnchors").GetArrayLength() != 3)
             throw new InvalidOperationException("PF5-R8 focused controls were incomplete.");
+        JsonElement[] fixedDelivery = report.GetProperty("FixedDeliveryTopology")
+            .EnumerateArray().Select(static value => value.Clone()).ToArray();
+        if (fixedDelivery.Length != 3)
+            throw new InvalidOperationException("PF5-R8 fixed-delivery topology was absent.");
+        JsonElement fixedExpected = fixedDelivery[0].GetProperty("Detailed")
+            .GetProperty("ProfileCounters");
+        ulong expectedDeliveries = fixedExpected.GetProperty("Lifecycle")
+            .GetProperty("DeliveriesQueued").GetUInt64();
+        ulong expectedRecords = fixedExpected.GetProperty("DeltaBodies")
+            .GetProperty("BodyRecordsRequested").GetUInt64() +
+            fixedExpected.GetProperty("DeltaBodies").GetProperty("BodyRecordsBuilt").GetUInt64();
+        ulong expectedBytes = fixedExpected.GetProperty("ApplicationBytesQueued").GetUInt64();
+        ulong previousPreparations = 0;
+        foreach (JsonElement row in fixedDelivery)
+        {
+            JsonElement counters = row.GetProperty("Detailed").GetProperty("ProfileCounters");
+            JsonElement bodies = counters.GetProperty("DeltaBodies");
+            ulong preparations = counters.GetProperty("PreparedPublication")
+                .GetProperty("PreparedSourcePublications").GetUInt64();
+            if (counters.GetProperty("Lifecycle").GetProperty("DeliveriesQueued").GetUInt64() !=
+                    expectedDeliveries ||
+                bodies.GetProperty("BodyRecordsRequested").GetUInt64() +
+                    bodies.GetProperty("BodyRecordsBuilt").GetUInt64() != expectedRecords ||
+                counters.GetProperty("ApplicationBytesQueued").GetUInt64() != expectedBytes ||
+                preparations <= previousPreparations)
+                throw new InvalidOperationException(
+                    "PF5-R8 fixed-delivery topology did not isolate unique source preparation.");
+            previousPreparations = preparations;
+        }
+        JsonElement[] enabledDivergence = report.GetProperty("RecipientDivergenceEnabled")
+            .EnumerateArray().Select(static value => value.Clone()).ToArray();
+        JsonElement enabledSynchronized = enabledDivergence.Single(static row =>
+            row.GetProperty("Scenario").GetString() == "synchronized");
+        JsonElement enabledBodies = enabledSynchronized.GetProperty("CompatibleBodies");
+        if (enabledBodies.GetProperty("Mode").GetInt32() != 2 ||
+            enabledBodies.GetProperty("BodyCapacity").GetInt32() != 1024 ||
+            enabledBodies.GetProperty("EncodedBodyCopies").GetUInt64() == 0 ||
+            enabledBodies.GetProperty("MaterializationsAvoided").GetUInt64() == 0 ||
+            enabledSynchronized.GetProperty("FinalKnowledge").GetArrayLength() == 0)
+            throw new InvalidOperationException(
+                "PF5-R8 production-capacity sharing did not serve divergent recipients.");
+        JsonElement window = report.GetProperty("MeasurementWindowRegression");
+        JsonElement ordinary = window.GetProperty("OrdinaryDrain");
+        JsonElement extra = window.GetProperty("ExtraDrain");
+        if (!ordinary.GetProperty("MeasurementWindow")
+                .GetProperty("CountersCapturedBeforeDrain").GetBoolean() ||
+            extra.GetProperty("Drain").GetProperty("RequestedRepetitions").GetInt32() != 8 ||
+            ordinary.GetProperty("ProfileCounters").GetProperty("Lifecycle")
+                .GetProperty("DeliveriesQueued").GetUInt64() !=
+            extra.GetProperty("ProfileCounters").GetProperty("Lifecycle")
+                .GetProperty("DeliveriesQueued").GetUInt64() ||
+            ordinary.GetProperty("Timing").GetProperty("Protocol").GetProperty("Server")
+                .GetProperty("EmitCalls").GetUInt64() !=
+            extra.GetProperty("Timing").GetProperty("Protocol").GetProperty("Server")
+                .GetProperty("EmitCalls").GetUInt64() ||
+            extra.GetProperty("Drain").GetProperty("ServerEmitCalls").GetUInt64() <=
+            ordinary.GetProperty("Drain").GetProperty("ServerEmitCalls").GetUInt64())
+            throw new InvalidOperationException(
+                "PF5-R8 measured-window counters leaked convergence-drain work.");
         if (report.GetProperty("ProofDebt").EnumerateArray().Any(static row =>
                 !row.GetProperty("Converged").GetBoolean() ||
                 row.GetProperty("DeliveryLookupCalls").GetUInt64() == 0 ||

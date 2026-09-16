@@ -31,6 +31,7 @@ internal static class Pf5R8RequiredFanoutAttribution
         Prime();
         var fanout = new List<Pf5R8MeasuredRow>();
         var topology = new List<Pf5R8MeasuredRow>();
+        var fixedDeliveryTopology = new List<Pf5R8MeasuredRow>();
         var activity = new List<Pf5R8MeasuredRow>();
         var telemetry = new List<Pf5R8TelemetryRow>();
         var proofDebt = new List<Pf5R8ProofDebtRow>();
@@ -56,6 +57,20 @@ internal static class Pf5R8RequiredFanoutAttribution
             topology.Add(RunMeasured("fixed-total-topology",
                 $"{groups}x{topologyRecipients / groups}", workload));
         }
+
+        int fixedDeliveryRelationships = focused ? 16 : 512;
+        int[] fixedDeliveryGroups = focused ? [1, 4, 16] : [1, 8, 64, 512];
+        foreach (int groups in fixedDeliveryGroups)
+        {
+            P03NetworkWorkload workload = P03NetworkWorkload.ChunkFixedDeliveryTopology(
+                    fixedDeliveryRelationships, groups)
+                .WithServerTickAndAoICadence(16, P03AoICadencePolicy.Selected124);
+            fixedDeliveryTopology.Add(RunMeasured(
+                "fixed-delivery-topology",
+                $"{groups}x{fixedDeliveryRelationships / groups}",
+                workload));
+        }
+        RequireFixedDeliveryWork(fixedDeliveryTopology);
 
         int activityRecipients = focused ? 16 : 128;
         int activityEntities = focused ? 32 : 1_000;
@@ -147,10 +162,32 @@ internal static class Pf5R8RequiredFanoutAttribution
             : ["synchronized", "staggered-joins", "cadence-phases", "controlled-loss",
                 "controlled-reorder", "proof-delay", "temporary-stalls", "aoi-churn",
                 "reconnect", "history-pressure", "combined-divergence"];
-        var divergence = new Pf5R1ScenarioReport[divergenceNames.Length];
-        for (int index = 0; index < divergence.Length; index++)
-            divergence[index] = Pf5R1HistoryAudit.RunPreparedBodyScenarioForPf5R6(
+        var divergenceCensus = new Pf5R1ScenarioReport[divergenceNames.Length];
+        var divergenceEnabled = new Pf5R1ScenarioReport[divergenceNames.Length];
+        for (int index = 0; index < divergenceCensus.Length; index++)
+        {
+            divergenceCensus[index] = Pf5R1HistoryAudit.RunPreparedBodyScenarioForPf5R6(
                 divergenceNames[index], focused ? 16 : 64, focused ? 40 : 180, Seed);
+            divergenceEnabled[index] =
+                Pf5R1HistoryAudit.RunPreparedBodyEnabledScenarioForPf5R8(
+                    divergenceNames[index], focused ? 16 : 64, focused ? 40 : 180, Seed);
+            RequireEquivalentDivergence(
+                in divergenceCensus[index], in divergenceEnabled[index]);
+        }
+        RequireEnabledDivergenceCoverage(divergenceEnabled);
+
+        P03NetworkWorkload windowWorkload = P03NetworkWorkload.ChunkFixedDeliveryTopology(
+                focused ? 8 : 32, focused ? 2 : 8)
+            .WithServerTickAndAoICadence(16, P03AoICadencePolicy.Selected124);
+        P03WholeFlowRow ordinaryDrain = RunHarness(
+            windowWorkload, matrixWarmup, matrixTicks, GameTelemetryLevel.Off,
+            retainRaw: true, postMeasurementDrainRepetitions: 1,
+            networkStageTiming: true);
+        P03WholeFlowRow extraDrain = RunHarness(
+            windowWorkload, matrixWarmup, matrixTicks, GameTelemetryLevel.Off,
+            retainRaw: true, postMeasurementDrainRepetitions: 8,
+            networkStageTiming: true);
+        RequireMeasurementWindowIsolation(in ordinaryDrain, in extraDrain);
 
         int[] boundaryPopulations = focused ? [32] : [256, 350, 400];
         foreach (int population in boundaryPopulations)
@@ -165,7 +202,7 @@ internal static class Pf5R8RequiredFanoutAttribution
         }
 
         var report = new Pf5R8Report(
-            "ultrasim-concept-demo-pf5-r8-required-fanout-v1",
+            "ultrasim-concept-demo-pf5-r8-required-fanout-v2",
             DateTimeOffset.UtcNow,
             StartingHead,
             ReadGitSha(),
@@ -201,8 +238,10 @@ internal static class Pf5R8RequiredFanoutAttribution
                 "sent != known; only a matching application proof advances recipient knowledge",
                 "positive latest state may supersede older positive debt; absence remains exact",
             ],
-            fanout.ToArray(), topology.ToArray(), activity.ToArray(),
-            telemetry.ToArray(), divergence, proofDebt.ToArray(), rated.ToArray());
+            fanout.ToArray(), topology.ToArray(), fixedDeliveryTopology.ToArray(),
+            activity.ToArray(), telemetry.ToArray(), divergenceCensus, divergenceEnabled,
+            new Pf5R8MeasurementWindowRegression(ordinaryDrain, extraDrain),
+            proofDebt.ToArray(), rated.ToArray());
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
         File.WriteAllText(output, JsonSerializer.Serialize(report,
             new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
@@ -223,8 +262,30 @@ internal static class Pf5R8RequiredFanoutAttribution
                 workload, Math.Min(matrixWarmup, 8), diagnosticTicks,
                 GameTelemetryLevel.Detailed, retainRaw: false);
             return new Pf5R8MeasuredRow(matrix, label, ratedRow, detailedRow,
+                BuildCoarseAttribution(ratedRow),
                 BuildExclusiveAttribution(detailedRow));
         }
+    }
+
+    private static Pf5R8CoarseAttribution BuildCoarseAttribution(P03WholeFlowRow row)
+    {
+        P03WholeFlowRawSamples samples = row.RawSamples ??
+            throw new InvalidOperationException("Coarse attribution requires raw paired samples.");
+        P03Metric schedule = P03Metric.From(samples.GameScheduleAndCodecQueueMilliseconds);
+        P03Metric proof = P03Metric.From(samples.ServerGameProofApplyMilliseconds);
+        P03Metric protocol = P03Metric.From(samples.NetworkProtocolAndOtherMilliseconds);
+        P03Metric parent = P03Metric.From(samples.NetworkAndRemoteReplicationMilliseconds);
+        double childMean = schedule.Mean + proof.Mean + protocol.Mean;
+        return new Pf5R8CoarseAttribution(
+            schedule,
+            proof,
+            protocol,
+            parent,
+            childMean,
+            Math.Max(0, parent.Mean - childMean),
+            "Instrumentation-Off paired per-tick parent minus schedule and proof. The residual " +
+                "contains Network protocol/crypto/transport and any unsplit harness overhead; it " +
+                "does not guess an internal scheduling-stage allocation.");
     }
 
     private static P03WholeFlowRow RunRated(
@@ -248,7 +309,9 @@ internal static class Pf5R8RequiredFanoutAttribution
         int ticks,
         GameTelemetryLevel telemetry,
         bool retainRaw,
-        int proofDispatchInterval = 1)
+        int proofDispatchInterval = 1,
+        int postMeasurementDrainRepetitions = 1,
+        bool networkStageTiming = false)
     {
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -257,7 +320,7 @@ internal static class Pf5R8RequiredFanoutAttribution
             workload,
             P03NetworkProfile.ChunkPublication,
             2,
-            stageTimingEnabled: telemetry == GameTelemetryLevel.Detailed,
+            stageTimingEnabled: networkStageTiming || telemetry == GameTelemetryLevel.Detailed,
             gameDetailedAttribution: false,
             compression: RemoteChunkBundleCompressionPolicy.Selected,
             singletonDeltaCompression: RemoteChunkSingletonDeltaCompression.Disabled,
@@ -271,13 +334,146 @@ internal static class Pf5R8RequiredFanoutAttribution
             backgroundEgressTimingEnabled: true,
             retainRawSamples: retainRaw,
             gameTelemetryLevel: telemetry,
-            serverProofDispatchIntervalTicks: proofDispatchInterval);
+            serverProofDispatchIntervalTicks: proofDispatchInterval,
+            postMeasurementDrainRepetitions: postMeasurementDrainRepetitions);
         P03WholeFlowRow row = harness.Run(warmup, ticks);
         Require(row.Converged && row.Transport.CapacityDrops == 0,
             $"PF5-R8 row did not converge: {workload.Id}/{telemetry}.");
         Require(row.ProfileCounters.PreparedPublication.HistoryDerivedSteadyStateCalls == 0,
             "PF5-R8 left the selected prepared latest-state path.");
         return row;
+    }
+
+    private static void RequireFixedDeliveryWork(List<Pf5R8MeasuredRow> rows)
+    {
+        if (rows.Count == 0) throw new InvalidOperationException("Missing fixed-delivery rows.");
+        P03ProfileCounters expected = rows[0].Detailed.ProfileCounters;
+        foreach (Pf5R8MeasuredRow row in rows)
+        {
+            P03ProfileCounters value = row.Detailed.ProfileCounters;
+            Console.WriteLine($"PF5-R8 fixed-delivery {row.Label}: " +
+                $"deliveries={value.Lifecycle.DeliveriesQueued}, " +
+                $"records={value.DeltaBodies.BodyRecordsRequested + value.DeltaBodies.BodyRecordsBuilt}, " +
+                $"bytes={value.ApplicationBytesQueued}, messages={value.GameMessagesQueued}, " +
+                $"proofs={value.Lifecycle.ProofEntries}, " +
+                $"prepared={value.PreparedPublication.PreparedSourcePublications}");
+            Require(value.Lifecycle.DeliveriesQueued == expected.Lifecycle.DeliveriesQueued &&
+                value.DeltaBodies.BodyRecordsRequested + value.DeltaBodies.BodyRecordsBuilt ==
+                    expected.DeltaBodies.BodyRecordsRequested +
+                    expected.DeltaBodies.BodyRecordsBuilt &&
+                value.ApplicationBytesQueued == expected.ApplicationBytesQueued &&
+                value.GameMessagesQueued == expected.GameMessagesQueued &&
+                value.Lifecycle.ProofEntries == expected.Lifecycle.ProofEntries,
+                $"Fixed-delivery topology changed recipient work at {row.Label}.");
+        }
+    }
+
+    private static void RequireEquivalentDivergence(
+        in Pf5R1ScenarioReport census,
+        in Pf5R1ScenarioReport enabled)
+    {
+        Pf5R1RecipientKnowledgeObservation[] censusKnowledge = census.FinalKnowledge ?? [];
+        Pf5R1RecipientKnowledgeObservation[] enabledKnowledge = enabled.FinalKnowledge ?? [];
+        bool knowledgeEqual = censusKnowledge.Length == enabledKnowledge.Length;
+        for (int index = 0; knowledgeEqual && index < censusKnowledge.Length; index++)
+        {
+            Pf5R1RecipientKnowledgeObservation left = censusKnowledge[index];
+            Pf5R1RecipientKnowledgeObservation right = enabledKnowledge[index];
+            // Each independent scenario owns a fresh random source epoch. Compare the exact
+            // normalized logical knowledge; lifetime fencing is validated inside each run.
+            knowledgeEqual = left.Recipient == right.Recipient && left.Key == right.Key &&
+                left.HasKnowledge == right.HasKnowledge &&
+                left.AppliedRevision == right.AppliedRevision &&
+                left.SourcePresent == right.SourcePresent &&
+                left.SourceRevision == right.SourceRevision &&
+                left.SourceRecords == right.SourceRecords;
+        }
+        bool equal = census.Scenario == enabled.Scenario &&
+            census.PreparedPublications == enabled.PreparedPublications &&
+            census.CanonicalApplicationBytes == enabled.CanonicalApplicationBytes &&
+            census.ProofsApplied == enabled.ProofsApplied &&
+            census.StaleOrDuplicateProofs == enabled.StaleOrDuplicateProofs &&
+            census.DeliberatelyLostProofs == enabled.DeliberatelyLostProofs &&
+            census.Reconnects == enabled.Reconnects &&
+            census.SnapshotOccurrences == enabled.SnapshotOccurrences &&
+            census.SnapshotRecords == enabled.SnapshotRecords &&
+            knowledgeEqual;
+        if (!equal)
+            Console.WriteLine($"PF5-R8 divergence mismatch {census.Scenario}: " +
+                $"publications={census.PreparedPublications}/{enabled.PreparedPublications} " +
+                $"bytes={census.CanonicalApplicationBytes}/{enabled.CanonicalApplicationBytes} " +
+                $"proofs={census.ProofsApplied}/{enabled.ProofsApplied} " +
+                $"stale={census.StaleOrDuplicateProofs}/{enabled.StaleOrDuplicateProofs} " +
+                $"lost={census.DeliberatelyLostProofs}/{enabled.DeliberatelyLostProofs} " +
+                $"snapshots={census.SnapshotOccurrences}/{enabled.SnapshotOccurrences} " +
+                $"records={census.SnapshotRecords}/{enabled.SnapshotRecords} " +
+                $"knowledge={knowledgeEqual}");
+        Require(equal,
+            $"Enabled body sharing changed final truth for {census.Scenario}.");
+    }
+
+    private static void RequireEnabledDivergenceCoverage(Pf5R1ScenarioReport[] rows)
+    {
+        Pf5R1ScenarioReport synchronized = rows.Single(static row =>
+            row.Scenario == "synchronized");
+        Require(synchronized.CompatibleBodies.Mode == RemoteChunkDeltaBodySharingMode.Enabled &&
+            synchronized.CompatibleBodies.BodyCapacity ==
+                RemoteChunkDeltaBodyStoreLimits.Default.BodyCapacity &&
+            synchronized.CompatibleBodies.BodyHits > 0 &&
+            synchronized.CompatibleBodies.EncodedBodyCopies > 0 &&
+            synchronized.CompatibleBodies.MaterializationsAvoided > 0,
+            "Enabled divergence control did not serve production-capacity cached bodies.");
+        Pf5R1ScenarioReport? pressure = rows.FirstOrDefault(static row =>
+            row.Scenario == "history-pressure");
+        if (pressure is not null)
+            Require(pressure.SnapshotReasons.Any(static reason =>
+                    reason.Reason == "HistoryFloorLost") &&
+                pressure.CompatibleBodies.BodyEvictions > 0,
+                "Enabled cache pressure did not preserve explicit HistoryFloor recovery.");
+        Pf5R1ScenarioReport? reconnect = rows.FirstOrDefault(static row =>
+            row.Scenario == "reconnect");
+        if (reconnect is not null)
+            Require(reconnect.Reconnects > 0 && reconnect.CompatibleBodies.BodyHits > 0,
+                "Enabled reconnect control did not exercise fresh lifetime plus cache serving.");
+    }
+
+    private static void RequireMeasurementWindowIsolation(
+        in P03WholeFlowRow ordinary,
+        in P03WholeFlowRow extra)
+    {
+        static bool IsFrozen(in P03WholeFlowRow row) =>
+            row.MeasurementWindow.CountersCapturedBeforeDrain &&
+            row.MeasurementWindow.ProtocolTimingCapturedBeforeDrain &&
+            row.MeasurementWindow.TransportCapturedBeforeDrain &&
+            row.MeasurementWindow.ProcessWindowCapturedBeforeDrain;
+        Require(IsFrozen(in ordinary) && IsFrozen(in extra),
+            "The measurement window was not frozen before drain.");
+        Require(ordinary.ProfileCounters.SuccessfulSemanticPublications ==
+                extra.ProfileCounters.SuccessfulSemanticPublications &&
+            ordinary.ProfileCounters.GameMessagesQueued ==
+                extra.ProfileCounters.GameMessagesQueued &&
+            ordinary.ProfileCounters.Lifecycle.DeliveriesQueued ==
+                extra.ProfileCounters.Lifecycle.DeliveriesQueued &&
+            ordinary.ProfileCounters.Lifecycle.ProofEntries ==
+                extra.ProfileCounters.Lifecycle.ProofEntries &&
+            ordinary.Timing.Protocol.Server.EmitCalls ==
+                extra.Timing.Protocol.Server.EmitCalls &&
+            ordinary.Timing.Protocol.Server.InboundCalls ==
+                extra.Timing.Protocol.Server.InboundCalls &&
+            ordinary.Normalized.ApplicationBytesPerRecipientTick ==
+                extra.Normalized.ApplicationBytesPerRecipientTick &&
+            ordinary.Normalized.SemanticPublicationsPerRecipientTick ==
+                extra.Normalized.SemanticPublicationsPerRecipientTick,
+            "Extra drain passes changed measured-window counts or normalized work.");
+        Console.WriteLine($"PF5-R8 drain isolation: ordinary=" +
+            $"{ordinary.Drain.RequestedRepetitions}/{ordinary.Drain.ExecutedRounds}/" +
+            $"{ordinary.Drain.ServerEmitCalls}/{ordinary.Drain.FinalOutstanding}; extra=" +
+            $"{extra.Drain.RequestedRepetitions}/{extra.Drain.ExecutedRounds}/" +
+            $"{extra.Drain.ServerEmitCalls}/{extra.Drain.FinalOutstanding}");
+        Require(extra.Drain.RequestedRepetitions == 8 &&
+            extra.Drain.ServerEmitCalls > ordinary.Drain.ServerEmitCalls &&
+            extra.Drain.FinalOutstanding == 0 && extra.Drain.Converged,
+            "Extra drain work was not isolated in the drain summary.");
     }
 
     private static Pf5R8ExclusiveAttribution BuildExclusiveAttribution(P03WholeFlowRow row)
@@ -441,18 +637,35 @@ internal sealed record Pf5R8Report(
     string[] WorkDefinitions,
     Pf5R8MeasuredRow[] FixedSourceFanout,
     Pf5R8MeasuredRow[] FixedTotalTopology,
+    Pf5R8MeasuredRow[] FixedDeliveryTopology,
     Pf5R8MeasuredRow[] FixedRecipientActivity,
     Pf5R8TelemetryRow[] TelemetryControls,
-    Pf5R1ScenarioReport[] RecipientDivergence,
+    Pf5R1ScenarioReport[] RecipientDivergencePotential,
+    Pf5R1ScenarioReport[] RecipientDivergenceEnabled,
+    Pf5R8MeasurementWindowRegression MeasurementWindowRegression,
     Pf5R8ProofDebtRow[] ProofDebt,
     Pf5R8RatedRow[] RatedAnchors);
+
+internal sealed record Pf5R8MeasurementWindowRegression(
+    P03WholeFlowRow OrdinaryDrain,
+    P03WholeFlowRow ExtraDrain);
 
 internal sealed record Pf5R8MeasuredRow(
     string Matrix,
     string Label,
     P03WholeFlowRow Rated,
     P03WholeFlowRow Detailed,
+    Pf5R8CoarseAttribution RatedCoarse,
     Pf5R8ExclusiveAttribution Exclusive);
+
+internal sealed record Pf5R8CoarseAttribution(
+    P03Metric ScheduleAndCodecQueue,
+    P03Metric ProofApply,
+    P03Metric NetworkProtocolAndOther,
+    P03Metric NetworkAndRemoteParent,
+    double ExclusiveChildrenMeanMilliseconds,
+    double ReconciliationResidualMeanMilliseconds,
+    string Scope);
 
 internal sealed record Pf5R8TelemetryRow(
     string Activity,
