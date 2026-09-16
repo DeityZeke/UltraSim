@@ -1,0 +1,175 @@
+{
+  "checkpoint": "PF5-R8 required dense fanout versus avoidable processing",
+  "date": "2026-09-16",
+  "startingHead": "13c1afedae7e18ad736a93e28573bcd96cdb5a9e",
+  "lastIndependentReference": "8e60c4a1b8496a79f98ba58411875bc43b7b41be",
+  "measurementCommits": [
+    "a014c54bf304f3595b29eec5e7706e7bd1464112",
+    "228bd1287bcc0e8c0cba27436ca2aeb2bf594d36",
+    "d1b0ac270dcf845aecf9a30399679100d7337c6d"
+  ],
+  "productionSemanticCandidate": "14e729a6ce69179cfbe4b9a3a4c4cdfa21797fa9",
+  "productionSemanticsChanged": false,
+  "policyChanged": false,
+  "rawEvidence": "concept-demo-pf5-r8-required-fanout-2026-09-16.raw.json",
+  "environment": {
+    "configuration": "Release",
+    "runtime": ".NET 8.0.29",
+    "os": "CachyOS",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "logicalProcessors": 16,
+    "processArrangement": "one in-process authority plus real secure loopback UDP sessions and clients; one bounded BackgroundPlatformBatch sender owner"
+  },
+  "selectedPolicy": {
+    "replication": "ChunkPublication",
+    "source": "shared prepared latest-state publications",
+    "bodySharing": "enabled canonical immutable bytes",
+    "bundle": "CurrentBundled",
+    "singletonCompression": "disabled",
+    "bundleCompression": "message 148 selected 384-byte/32-byte threshold",
+    "cadence": "Immediate/Near/Far 1/2/4",
+    "networkAggregation": "CrossLane cap 2",
+    "socketIo": "BackgroundPlatformBatch",
+    "manifest": 29,
+    "transportRevision": 2,
+    "authorityHz": 60,
+    "productParticipantCap": 64
+  },
+  "timingBoundary": "paired same-tick RemotePublicationPreparation + RecipientCommitObservation + NetworkAndRemoteReplication; Detailed exclusive stages are diagnostic and not rated",
+  "fixedSourceFanout": [
+    { "recipients": 1, "sourcePublications": 480, "sourceRecords": 600, "deliveries": 102, "bodyHitPercent": 0.0, "detailedScheduleUsPerDelivery": 11.013, "ratedRemoteMeanMs": 0.057, "ratedRemoteP95Ms": 0.074 },
+    { "recipients": 8, "sourcePublications": 480, "sourceRecords": 600, "deliveries": 874, "bodyHitPercent": 82.61, "detailedScheduleUsPerDelivery": 5.775, "ratedRemoteMeanMs": 0.237, "ratedRemoteP95Ms": 0.283 },
+    { "recipients": 32, "sourcePublications": 480, "sourceRecords": 600, "deliveries": 4239, "bodyHitPercent": 93.09, "detailedScheduleUsPerDelivery": 1.586, "ratedRemoteMeanMs": 0.720, "ratedRemoteP95Ms": 0.949 },
+    { "recipients": 64, "sourcePublications": 480, "sourceRecords": 600, "deliveries": 9778, "bodyHitPercent": 94.91, "detailedScheduleUsPerDelivery": 1.674, "ratedRemoteMeanMs": 0.544, "ratedRemoteP95Ms": 0.593 },
+    { "recipients": 128, "sourcePublications": 480, "sourceRecords": 600, "deliveries": 19803, "bodyHitPercent": 96.27, "detailedScheduleUsPerDelivery": 1.465, "ratedRemoteMeanMs": 1.051, "ratedRemoteP95Ms": 1.118 },
+    { "recipients": 256, "sourcePublications": 480, "sourceRecords": 600, "deliveries": 40895, "bodyHitPercent": 97.97, "detailedScheduleUsPerDelivery": 1.640, "ratedRemoteMeanMs": 2.293, "ratedRemoteP95Ms": 2.530 }
+  ],
+  "fixedTotalTopology": [
+    { "shape": "1x512", "sourcePublications": 270, "sourceRecords": 5370, "deliveries": 44644, "deliveredRecordInstances": 886029, "bodyHits": 44179, "remoteP95Ms": 5.670 },
+    { "shape": "8x64", "sourcePublications": 330, "sourceRecords": 5370, "deliveries": 16308, "deliveredRecordInstances": 274536, "bodyHits": 15819, "remoteP95Ms": 2.041 },
+    { "shape": "64x8", "sourcePublications": 690, "sourceRecords": 5370, "deliveries": 5520, "deliveredRecordInstances": 42960, "bodyHits": 4830, "remoteP95Ms": 1.282 },
+    { "shape": "512x1", "sourcePublications": 5370, "sourceRecords": 5370, "deliveries": 5370, "deliveredRecordInstances": 5370, "bodyHits": 0, "remoteP95Ms": 1.373 }
+  ],
+  "compatibleReuse": {
+    "synchronizedPercent": 98.4375,
+    "cadenceSkewPercent": 93.8172,
+    "lossPercent": 96.9207,
+    "reorderPercent": 96.8924,
+    "aoiChurnPercent": 97.6333,
+    "combinedDivergencePercent": 75.9049,
+    "historyPressureRebases": 128,
+    "historyPressureEvictions": 1184,
+    "historyDerivedSteadyStateCalls": 0
+  },
+  "r128HighDetailedConservation": {
+    "sourceMutations": 1350,
+    "dirtyChunks": 540,
+    "dirtyRecipientFanout": 42330,
+    "dueWork": 22019,
+    "scheduleAttempts": 22019,
+    "deliveriesQueued": 22019,
+    "proofEntries": 22019,
+    "proofsApplied": 22019,
+    "knowledgeAdvancements": 22019,
+    "exactDebtRetired": 22019,
+    "endingOutstandingDebt": 0,
+    "queueRefusals": 0,
+    "bundleMessages": 4005,
+    "bundleEntries": 21896,
+    "standaloneMessages": 123,
+    "gameMessages": 4128,
+    "bidirectionalFrames": 8256,
+    "bidirectionalDatagrams": 8256,
+    "capacityDrops": 0
+  },
+  "r128HighDetailedExclusiveMsPerTick": {
+    "parentNetworkAndRemote": 2.426,
+    "sourceReadParent": 0.278,
+    "rangeIdentityAndCoverage": 0.063,
+    "bodyLookupAndCopy": 0.047,
+    "fullRangeMissPreparationAndHash": 0.031,
+    "sourceReadResidual": 0.156,
+    "bundleRepresentationAndClearing": 0.096,
+    "compression": 0.209,
+    "queueAndBookkeeping": 0.123,
+    "detailedCensusObserverWork": 0.182,
+    "scheduleResidual": 0.241,
+    "schedulerSelection": 0.089,
+    "proofParent": 0.433,
+    "networkProtocol": 0.486,
+    "remoteResidual": 0.269,
+    "warning": "Detailed doubles the measured parent versus Off; operation counts are durable, but these timings include observer tax and are not rated production cost."
+  },
+  "r128HighDetailedOperations": {
+    "subscriptionLookups": 44038,
+    "subscriptionComparisons": 178814,
+    "bodyRequests": 22019,
+    "bodyHits": 21203,
+    "bodyMisses": 816,
+    "coverageValidationLinks": 40870,
+    "bodyStoreToEncoderBytes": 2325354,
+    "bundleRecordBytesCopiedIncludingDetailedTypedRecords": 5109286,
+    "bundleBytesCleared": 9975485,
+    "proofDeliveryLookupComparisons": 42864,
+    "proofSubscriptionLookupComparisons": 89407,
+    "obsoleteDebtChecks": 51757,
+    "obsoleteSameChunkMatches": 0,
+    "serverProfileReservationBytes": 126520800,
+    "serverNetworkReservationBytes": 54116515,
+    "bodyStoreReservationBytes": 2887168,
+    "processAllocatedBytesDuringDetailedWindow": 62688
+  },
+  "proofDebt": {
+    "realisticR128HighOutstandingHighWater": 8,
+    "realisticObsoleteChecksPerProof": 2.3506,
+    "syntheticDepth64MultiChunk": { "highWater": 64, "deliveryLookupComparisonsPerProof": 16.2578, "obsoleteChecksPerProof": 31.0078, "microsecondsPerProof": 0.8929 },
+    "syntheticDepth64SameChunk": { "highWater": 64, "deliveryLookupComparisonsPerProof": 16.5, "obsoleteChecksPerProof": 31.5, "microsecondsPerProof": 0.9880 },
+    "disposition": "linear scans confirmed but not material at realistic measured depth; index remains deferred"
+  },
+  "telemetryOverhead": {
+    "low": { "offMeanMs": 1.0274, "basicMeanMs": 1.0782, "detailedMeanMs": 2.1442, "offP95Ms": 1.0950, "basicP95Ms": 1.2008, "detailedP95Ms": 2.2697 },
+    "high": { "offMeanMs": 1.1653, "basicMeanMs": 1.1767, "detailedMeanMs": 2.3565, "offP95Ms": 1.2669, "basicP95Ms": 1.2663, "detailedP95Ms": 2.4922 },
+    "freshOffAndDetailedToOffSlabRegression": "pass",
+    "ratedMode": "Off only"
+  },
+  "ratedBoundary": {
+    "r256HighP95Ms": 3.1498,
+    "r300LowScheduleP95RangeMs": [1.0468, 1.1193],
+    "r300LowRemoteP95RangeMs": [2.5025, 2.6412],
+    "r300HighScheduleP95RangeMs": [1.2773, 1.3538],
+    "r300HighRemoteP95RangeMs": [3.6622, 3.8616],
+    "r350HighP95Ms": 5.7262,
+    "r400HighP95Ms": 6.8140,
+    "firstTestedCrossing": "between R300 and R350 synthetic recipients",
+    "productCcuClaim": false
+  },
+  "classification": {
+    "requiredCurrentPolicy": [
+      "recipient-specific header, application epoch, delivery id, queue transaction, outstanding debt, exact proof, cursor and lifetime fencing",
+      "recipient-specific secure Network framing/crypto and physical egress",
+      "one final materialization of each recipient's selected output bytes"
+    ],
+    "confirmedAvoidableSmall": [
+      "RemoteChunkWorldStateServer.ClearBundleStaging clears the typed diagnostic record slab while Off even though StagePreparedCandidate populates it only in Detailed"
+    ],
+    "experimentOnly": [
+      "retention-generation-fenced O(1) compatible-range coverage certificate",
+      "borrowed cached canonical body bytes through bundle staging to remove one intermediate copy",
+      "proof delivery/chunk index only if realistic outstanding depth grows materially"
+    ],
+    "unattributed": "0.241 ms/tick inside scheduling plus 0.269 ms/tick in the broader Detailed parent; observer-inflated and not assignable to a guessed subsystem"
+  },
+  "verification": {
+    "focusedCommand": "dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj -c Release -- --pf5-r8-only",
+    "focusedResult": "pass: 176 Game replication tests plus the focused real-secure-UDP matrix",
+    "canonicalCommand": "./verify.sh --configuration=Release",
+    "canonicalResult": "pass: canonical Release, physical publishes/exports, Contentless Online, mixed exported-client swarm, lifecycle/parity, and git diff --check"
+  },
+  "conclusion": {
+    "primary": "Dense fanout cost is predominantly more required recipient obligations and delivered records. Shared source/body preparation is already effective.",
+    "costPerObligation": "approximately flat at the larger fixed-source points, with batching/tiering and fixed costs dominating small populations",
+    "another50To100Recipients": "unsupported: the current synthetic high-change crossing is between R300 and R350, while measured non-overlapping local opportunities are far smaller than the observed gap",
+    "productionOptimizationAccepted": false,
+    "pf6Blocked": false
+  }
+}

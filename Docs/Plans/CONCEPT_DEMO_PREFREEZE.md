@@ -85,7 +85,13 @@ policy remains unchanged. The PF5-R7 adversarial follow-up then moves compatible
 of record reconstruction, shares canonical record bytes, and stops Detailed slab processing while
 telemetry is Off. R300/high schedule p95 falls from 1.960 ms to 1.180 ms without semantic or wire
 format change; measured proof ledgers remain too shallow to justify another index. PF6 may resume
-on the integrated post-follow-up tree after canonical closure.
+on the integrated post-follow-up tree after canonical closure. PF5-R8 then closes a measurement-
+only assurance pass that distinguishes semantic dense fanout from repeated compatible work. With
+shared source preparation fixed, the larger fanout points remain approximately constant per
+admitted obligation; dense topology is expensive chiefly because it requires many more recipient
+records. Compatible-body reuse remains 75.90–98.44% under divergence. The only newly confirmed
+avoidable work is a small Off-mode typed diagnostic-slab clear; no production optimization or
+policy change is accepted, and PF6 remains ready.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -2297,9 +2303,32 @@ current dense V3 remains materially costlier. Permanent evidence is in
 `_Benchmarks/Baselines/concept-demo-pf5-r7-spatial-topology-and-server-cost-attribution-2026-09-16.json`
 and its human-readable companion.
 
+## PF5-R8 — required dense fanout versus avoidable processing
+
+**Status: CLOSED — measurement/assurance; production policy unchanged.** A bounded census now
+separates source mutations, prepared intervals, recipient wakeups/due obligations, admission,
+logical publications, messages, frames/datagrams, proof outcomes, and exact debt retirement. The
+fixed-source matrix holds 480 source preparations / 600 records while scaling actual interested
+recipients from 1 to 256. From 64 through 256, Detailed scheduling and the separately rated
+server-owned remote mean remain approximately 1.5–1.7 microseconds per admitted obligation.
+
+The matched R128/high ledger reconciles 22,019 attempts, deliveries, applied proofs, knowledge
+advancements, and exact retirements to zero ending debt. Compatible body reuse is 96.29% there and
+remains 75.90% under combined loss/reorder/stall/AOI/reconnect divergence. Controlled proof debt
+confirms linear delivery/obsolete scans, but depth-64 service remains below 1 microsecond per proof
+and ordinary high-water remains eight; indexing stays deferred. Three bracketed R300/high Off runs
+remain below the 4 ms p95 budget, while R350 fails, so another 50–100 synthetic recipients is not a
+supported optimization claim.
+
+Detailed attribution doubles its parent and is explicitly diagnostic. It exposes small candidate
+experiments—coverage certificates and one fewer cached-body copy—and one confirmed but tiny
+Off-mode typed diagnostic clear. No result warrants a production change. Permanent evidence is in
+`_Benchmarks/Baselines/concept-demo-pf5-r8-required-fanout-2026-09-16.json`, its raw companion, and
+the human-readable report.
+
 ## PF6 — external human validation
 
-**Status: READY TO RESUME after PF5-R7 and adversarial follow-up closure.** PF5-R2-R2 repaired the HTTP-host
+**Status: READY TO RESUME after PF5-R8 measurement closure.** PF5-R2-R2 repaired the HTTP-host
 shutdown race and retained complete unexpected-worker-failure reporting. PF5-R3 leaves Game,
 replication, proof, wire, cadence, AOI, compression, aggregation, and participant policy exact;
 its selected physical egress is covered by focused lifecycle, external Hosted, and full export
@@ -2476,11 +2505,13 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
     **CLOSED — PF5-R6 outcome A**
 34. Close adversarial late-lookup, canonical-byte, telemetry-Off, and proof-debt findings.
     **CLOSED — PF5-R7 adversarial follow-up; proof index deferred by measured debt**
-35. Choose/document the default deployment-performance policy. **CLOSED — v29 plus PF5-R3 egress**
-36. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5/PF5-R7**
-37. Full exact-tree verifier and export closure.
-38. Freeze/tag the Concept Demo baseline.
-39. Begin the separate extraction/genericization/ecosystem roadmap.
+35. Distinguish required dense fanout from avoidable processing.
+    **CLOSED — PF5-R8 measurement; no production optimization selected**
+36. Choose/document the default deployment-performance policy. **CLOSED — v29 plus PF5-R3 egress**
+37. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5/PF5-R8**
+38. Full exact-tree verifier and export closure.
+39. Freeze/tag the Concept Demo baseline.
+40. Begin the separate extraction/genericization/ecosystem roadmap.
 ```
 
 The intended outcome is not merely a demo that works.

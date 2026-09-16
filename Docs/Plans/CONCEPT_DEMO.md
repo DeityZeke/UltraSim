@@ -121,7 +121,11 @@ production policy. At R350 full chaos, complete server-owned p95 is 6.993 ms: 4.
 replication and 2.681 ms locomotion/current Simple Physics. Dense shared AOI is the dominant
 replication amplifier; inactive world extent alone adds no publication work. Sim Core,
 pathfinding, Dungeon Core, and actor-contact Physics remain unimplemented rather than assigned
-speculative budgets.
+speculative budgets. PF5-R8 then separates fixed source work, required recipient fanout,
+compatible reuse, record shape, and proof debt. It finds approximately constant cost per admitted
+obligation at the larger fanout points and no large justified production optimization. Three
+R300/high runs remain below the 4 ms remote p95 budget while R350 fails; this is a synthetic
+boundary, not CCU.
 A post-F0.8 defensive UI correction
 also makes
 local shutdown independent from a saturated presentation queue, contains expected view-capacity
@@ -1832,6 +1836,7 @@ then close:
     PF5-R5 singleton compression / prepared-hash hardening              CLOSED (outcome B)
     PF5-R6 compatible immutable recipient-body sharing                  CLOSED (outcome A)
     PF5-R7 spatial topology / whole-server attribution                  CLOSED (characterization)
+    PF5-R8 required fanout / avoidable-processing assurance             CLOSED (measurement)
     PF6 external human validation                                       READY TO RESUME
 ```
 

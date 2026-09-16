@@ -719,6 +719,29 @@ A delivery/chunk index is therefore deferred; permanent operation counters will 
 debt-shape change. See the
 [adversarial follow-up evidence](../../_Benchmarks/Baselines/concept-demo-pf5-r7-adversarial-follow-up-2026-09-16.md).
 
+### PF5-R8 required dense fanout versus avoidable processing
+
+PF5-R8 is measurement-only. It fixes source work at 480 prepared intervals / 600 records while
+scaling interested recipients through 256, retains a fixed-total topology matrix, separates
+mutation placement and records/publication, attacks compatible identity with loss/reorder/stalls/
+AOI churn/reconnect, and controls proof debt through depth 64. The rated server-owned boundary is
+unchanged and runs with instrumentation Off; Detailed exclusive clocks publish their observer tax
+and an unattributed residual rather than assigning it to crypto or proof by subtraction.
+
+At the larger fixed-source points, cost remains approximately constant per admitted recipient
+obligation. Compatible reuse reaches 96.27% at R128 and remains 75.90% under combined divergence.
+The R128/high ledger reconciles 22,019 admitted deliveries, proofs, knowledge advancements, and
+exact retirements to zero debt. Controlled scans become linear with artificial debt, but ordinary
+high-water remains eight and the depth-64 service cost stays below one microsecond per proof, so a
+delivery/chunk index remains deferred.
+
+The census finds no large unshared source preparation. Recipient headers, delivery/proof state,
+secure framing, and final output remain independently required. Coverage-chain validation and an
+intermediate cached-body copy are bounded experiment candidates with observer-inflated upper bounds
+of 0.063 and 0.017 ms/tick. One typed diagnostic staging array is unnecessarily cleared in Off,
+but the entire clear stage measures only 0.010 ms/tick; PF5-R8 records rather than repairs it.
+See the [PF5-R8 evidence](../../_Benchmarks/Baselines/concept-demo-pf5-r8-required-fanout-2026-09-16.md).
+
 ### Snapshot / delta / absence
 
 Ordinary MTU-admissible deltas and absence use independent-unreliable WorldState.
