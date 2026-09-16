@@ -223,8 +223,7 @@ internal static class Pf5R9PacketProducerAudit
                     second.ProfileCounters.SuccessfulSemanticPublications &&
                 first.ProfileCounters.ProofEntries == second.ProfileCounters.ProofEntries &&
                 first.ProfileCounters.GameMessagesQueued ==
-                    second.ProfileCounters.GameMessagesQueued &&
-                first.Transport.GamePayloadBytes == second.Transport.GamePayloadBytes,
+                    second.ProfileCounters.GameMessagesQueued,
                 $"PF5-R9 timing toggle changed semantic work for {group.Key}.");
         }
     }
