@@ -1816,7 +1816,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
             _postMeasurementDrainRepetitions, drainRounds,
             in profile, in finalProfile, in protocol, in finalProtocol,
             in finalAfter, in measuredAfter,
-            in finalListenerAfter, in measuredListenerAfter, _frameCap,
+            in finalListenerAfter, in measuredListenerAfter,
             _adapter.IsConverged);
         P03NormalizedCost normalized = P03NormalizedCost.Calculate(
             _workload.Recipients, ticks, _networkAndRemoteReplication, _serverRole,
@@ -4128,8 +4128,8 @@ internal readonly record struct P03DrainSummary(
     ulong ServerInboundCalls,
     ulong ClientEmitCalls,
     ulong ClientInboundCalls,
-    P03TransportSummary Transport,
-    P03BackgroundEgressSummary BackgroundEgress,
+    P03DrainTransportDelta Transport,
+    P03DrainBackgroundEgressDelta BackgroundEgress,
     bool Converged)
 {
     internal static P03DrainSummary Create(
@@ -4143,7 +4143,6 @@ internal readonly record struct P03DrainSummary(
         in P03TransportTotals measuredTransport,
         in SharedUdpListenerSnapshot finalListener,
         in SharedUdpListenerSnapshot measuredListener,
-        int frameCap,
         bool converged) => new(
         requestedRepetitions,
         executedRounds,
@@ -4162,13 +4161,138 @@ internal readonly record struct P03DrainSummary(
         D(finalProtocol.Server.InboundCalls, measuredProtocol.Server.InboundCalls),
         D(finalProtocol.Client.EmitCalls, measuredProtocol.Client.EmitCalls),
         D(finalProtocol.Client.InboundCalls, measuredProtocol.Client.InboundCalls),
-        P03TransportSummary.Delta(
-            finalTransport, measuredTransport, finalListener, measuredListener, frameCap),
-        P03BackgroundEgressSummary.Delta(
+        P03DrainTransportDelta.Create(
+            finalTransport, measuredTransport, finalListener, measuredListener),
+        P03DrainBackgroundEgressDelta.Create(
             finalListener.BackgroundEgress, measuredListener.BackgroundEgress),
         converged);
 
     private static ulong D(ulong after, ulong before) => after >= before ? after - before : 0;
+}
+
+// Drain-only evidence deliberately exposes exact cumulative deltas, not cumulative
+// lifetime percentiles/high-water marks sampled after the drain. Percentiles cannot be
+// subtracted into a window distribution; measured-window distributions live on the row.
+internal readonly record struct P03DrainTransportDelta(
+    ulong SecurePackets,
+    ulong DataDatagrams,
+    ulong AcknowledgementDatagrams,
+    ulong UnreliableFrames,
+    ulong UnreliableDatagrams,
+    ulong EncryptedPlaintextBytes,
+    ulong DecryptedPlaintextBytes,
+    ulong WireDatagrams,
+    ulong WireBytes,
+    ulong CapacityDrops,
+    ulong Retransmissions,
+    ulong ListenerSendCalls,
+    ulong ListenerReceiveCalls,
+    ulong NativeSendCalls,
+    ulong NativeReceiveCalls,
+    ulong NativeSentDatagrams,
+    ulong NativeReceivedDatagrams,
+    double ListenerSendSyscallMilliseconds,
+    double ListenerReceiveSyscallMilliseconds,
+    double ListenerRoutingMilliseconds)
+{
+    internal static P03DrainTransportDelta Create(
+        in P03TransportTotals after,
+        in P03TransportTotals before,
+        in SharedUdpListenerSnapshot listenerAfter,
+        in SharedUdpListenerSnapshot listenerBefore)
+    {
+        SharedUdpReceiveCensusSnapshot receiveAfter = listenerAfter.ReceiveCensus;
+        SharedUdpReceiveCensusSnapshot receiveBefore = listenerBefore.ReceiveCensus;
+        ulong clientWireDatagrams = D(after.ClientWireDatagrams, before.ClientWireDatagrams);
+        ulong clientWireBytes = D(after.ClientWireBytes, before.ClientWireBytes);
+        return new(
+            D(after.SentPackets, before.SentPackets),
+            D(after.DataPackets, before.DataPackets),
+            D(after.AcknowledgementPackets, before.AcknowledgementPackets),
+            D(after.Frames, before.Frames),
+            D(after.UnreliableDatagrams, before.UnreliableDatagrams),
+            D(after.PlaintextBytes, before.PlaintextBytes),
+            D(after.DecryptedBytes, before.DecryptedBytes),
+            D(listenerAfter.Sent, listenerBefore.Sent) + clientWireDatagrams,
+            D(listenerAfter.SentBytes, listenerBefore.SentBytes) + clientWireBytes,
+            D(after.CapacityDrops, before.CapacityDrops) +
+                D(listenerAfter.CapacityDrops, listenerBefore.CapacityDrops),
+            D(after.Retransmissions, before.Retransmissions),
+            D(listenerAfter.SendCalls, listenerBefore.SendCalls),
+            D(listenerAfter.ReceiveCalls, listenerBefore.ReceiveCalls),
+            D(listenerAfter.NativeSendCalls, listenerBefore.NativeSendCalls),
+            D(receiveAfter.NativeReceiveCalls, receiveBefore.NativeReceiveCalls),
+            D(listenerAfter.NativeSentDatagrams, listenerBefore.NativeSentDatagrams),
+            D(receiveAfter.NativeReceivedDatagrams, receiveBefore.NativeReceivedDatagrams),
+            Ms(D(listenerAfter.SendSystemCallTicks, listenerBefore.SendSystemCallTicks)),
+            Ms(D(listenerAfter.ReceiveSystemCallTicks, listenerBefore.ReceiveSystemCallTicks)),
+            Ms(D(receiveAfter.RoutingTicks, receiveBefore.RoutingTicks)));
+    }
+
+    private static ulong D(ulong after, ulong before) => after >= before ? after - before : 0;
+    private static double Ms(ulong ticks) => ticks * 1_000d / Stopwatch.Frequency;
+}
+
+internal readonly record struct P03DrainBackgroundEgressDelta(
+    int FinalQueuedDatagrams,
+    long FinalQueuedBytes,
+    ulong AcceptedDatagrams,
+    ulong AcceptedBytes,
+    ulong PhysicallySentDatagrams,
+    ulong PhysicallySentBytes,
+    ulong StalePathDrops,
+    ulong PhysicalSendFailures,
+    ulong CapacityRefusals,
+    ulong WorkerWakeups,
+    ulong DrainPasses,
+    ulong ScalarSendCalls,
+    ulong NativeSendCalls,
+    ulong PartialNativeSendCalls,
+    ulong WouldBlockEvents,
+    ulong NoBufferEvents,
+    ulong ProducerEnqueueSamples,
+    double ProducerEnqueueTotalMilliseconds,
+    ulong QueueResidenceSamples,
+    double QueueResidenceTotalMilliseconds,
+    double PhysicalSendSystemCallMilliseconds,
+    double WorkerServiceMilliseconds,
+    bool HasWorkerFailure,
+    string LastSocketError)
+{
+    internal static P03DrainBackgroundEgressDelta Create(
+        in SharedUdpBackgroundEgressSnapshot after,
+        in SharedUdpBackgroundEgressSnapshot before) => new(
+        after.CurrentDatagrams,
+        after.CurrentBytes,
+        D(after.AcceptedDatagrams, before.AcceptedDatagrams),
+        D(after.AcceptedBytes, before.AcceptedBytes),
+        D(after.PhysicallySentDatagrams, before.PhysicallySentDatagrams),
+        D(after.PhysicallySentBytes, before.PhysicallySentBytes),
+        D(after.StalePathDrops, before.StalePathDrops),
+        D(after.PhysicalSendFailures, before.PhysicalSendFailures),
+        D(after.CapacityRefusals, before.CapacityRefusals),
+        D(after.WorkerWakeups, before.WorkerWakeups),
+        D(after.DrainPasses, before.DrainPasses),
+        D(after.ScalarSendCalls, before.ScalarSendCalls),
+        D(after.NativeSendCalls, before.NativeSendCalls),
+        D(after.PartialNativeSendCalls, before.PartialNativeSendCalls),
+        D(after.WouldBlockEvents, before.WouldBlockEvents),
+        D(after.NoBufferEvents, before.NoBufferEvents),
+        D(after.ProducerEnqueue.Count, before.ProducerEnqueue.Count),
+        Ms(D(after.ProducerEnqueue.TotalStopwatchTicks,
+            before.ProducerEnqueue.TotalStopwatchTicks)),
+        D(after.QueueResidence.Count, before.QueueResidence.Count),
+        Ms(D(after.QueueResidence.TotalStopwatchTicks,
+            before.QueueResidence.TotalStopwatchTicks)),
+        Ms(D(after.PhysicalSendSystemCallStopwatchTicks,
+            before.PhysicalSendSystemCallStopwatchTicks)),
+        Ms(D(after.WorkerServiceStopwatchTicks,
+            before.WorkerServiceStopwatchTicks)),
+        after.HasWorkerFailure,
+        after.LastSocketError.ToString());
+
+    private static ulong D(ulong after, ulong before) => after >= before ? after - before : 0;
+    private static double Ms(ulong ticks) => ticks * 1_000d / Stopwatch.Frequency;
 }
 
 internal sealed record P03WholeFlowRawSamples(
