@@ -33,6 +33,12 @@ if (args.Contains("--pf5-r7-attribution", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--pf5-r8-required-fanout", StringComparer.Ordinal))
+{
+    Pf5R8RequiredFanoutAttribution.Run(args);
+    return;
+}
+
 if (args.Contains("--pf5-r4-sort-micro", StringComparer.Ordinal))
 {
     Pf5R4SortMicrobenchmark.Run(args);

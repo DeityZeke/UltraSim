@@ -1570,9 +1570,11 @@ internal sealed class P03WholeFlowHarness : IDisposable
     private readonly P03NetworkProfile _profile;
     private readonly int _frameCap;
     private readonly bool _stageTimingEnabled;
-    private readonly bool _gameDetailedAttribution;
+    private readonly GameTelemetryLevel _gameTelemetryLevel;
+    private readonly int _serverProofDispatchIntervalTicks;
     private readonly bool _authorityThroughNetworkTimingEnabled;
     private readonly bool _serverOwnedRemoteTimingEnabled;
+    private readonly bool _retainRawSamples;
     private readonly IP03ExternalServerWorkload? _externalServerWorkload;
     private readonly SharedUdpSocketIoMode _socketIoMode;
     private readonly NetworkProtocolLimits _protocolLimits;
@@ -1610,6 +1612,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
     private long _tickServerApplication;
     private long _tickClientApplication;
     private long _tickClientNetwork;
+    private int _currentTick;
 
     internal P03WholeFlowHarness(
         P03NetworkWorkload workload,
@@ -1629,15 +1632,24 @@ internal sealed class P03WholeFlowHarness : IDisposable
         SharedUdpSocketIoMode socketIoMode =
             SharedUdpSocketIoMode.PlatformSendReceiveBatch,
         bool backgroundEgressTimingEnabled = true,
-        IP03ExternalServerWorkload? externalServerWorkload = null)
+        IP03ExternalServerWorkload? externalServerWorkload = null,
+        bool retainRawSamples = false,
+        GameTelemetryLevel? gameTelemetryLevel = null,
+        int serverProofDispatchIntervalTicks = 1)
     {
         _workload = workload;
         _profile = profile;
         _frameCap = frameCap;
         _stageTimingEnabled = stageTimingEnabled;
-        _gameDetailedAttribution = gameDetailedAttribution;
+        _gameTelemetryLevel = gameTelemetryLevel ?? (gameDetailedAttribution
+            ? GameTelemetryLevel.Detailed
+            : GameTelemetryLevel.Off);
+        if (serverProofDispatchIntervalTicks <= 0)
+            throw new ArgumentOutOfRangeException(nameof(serverProofDispatchIntervalTicks));
+        _serverProofDispatchIntervalTicks = serverProofDispatchIntervalTicks;
         _authorityThroughNetworkTimingEnabled = authorityThroughNetworkTimingEnabled;
         _serverOwnedRemoteTimingEnabled = serverOwnedRemoteTimingEnabled;
+        _retainRawSamples = retainRawSamples;
         _socketIoMode = socketIoMode;
         _externalServerWorkload = externalServerWorkload;
         _x = new long[workload.Entities];
@@ -1692,9 +1704,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
                 workload, _sessions, _x, _z, _versions, s_content),
             _ => throw new ArgumentOutOfRangeException(nameof(profile)),
         };
-        _adapter.ConfigureTelemetry(gameDetailedAttribution
-            ? GameTelemetryLevel.Detailed
-            : GameTelemetryLevel.Off);
+        _adapter.ConfigureTelemetry(_gameTelemetryLevel);
         _adapter.ConfigureServerOwnedRemoteTiming(serverOwnedRemoteTimingEnabled);
     }
 
@@ -1802,11 +1812,21 @@ internal sealed class P03WholeFlowHarness : IDisposable
             new P03ListenerConfigurationSummary(
                 listenerAfter.ConfiguredSocketBufferBytes,
                 listenerAfter.ActualSocketBufferBytes,
-                listenerAfter.ReservedBytes));
+                listenerAfter.ReservedBytes),
+            _retainRawSamples
+                ? new P03WholeFlowRawSamples(
+                    _remotePublicationPreparation.ToArray(),
+                    _recipientCommitObservation.ToArray(),
+                    _networkAndRemoteReplication.ToArray(),
+                    _serverOwnedRemoteReplicationBudget.ToArray(),
+                    _serverOwnedTick.ToArray(),
+                    _tick.ToArray())
+                : null);
     }
 
     private void RunTick(int tick, bool measure)
     {
+        _currentTick = tick;
         P03ProtocolTiming protocolBefore = measure ? CaptureProtocolTiming() : default;
         long totalStarted = measure ? Stopwatch.GetTimestamp() : 0;
         P03ExternalServerPhaseSample external = _externalServerWorkload?.RunTick(tick, measure)
@@ -1962,10 +1982,12 @@ internal sealed class P03WholeFlowHarness : IDisposable
         {
             _host.Pump();
         }
+        bool dispatchServerProofs = _serverProofDispatchIntervalTicks == 1 ||
+            _currentTick % _serverProofDispatchIntervalTicks == 0;
         for (int index = 0; index < _sessions.Length; index++)
         {
             long started = Stopwatch.GetTimestamp();
-            while (_sessions[index].Server.TryPeekReceived(
+            while (dispatchServerProofs && _sessions[index].Server.TryPeekReceived(
                        out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
             {
                 if (!_adapter.ProcessServer(index, in message, payload))
@@ -1995,6 +2017,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
     {
         for (int round = 0; round < guard; round++)
         {
+            _currentTick = checked((int)Math.Min(int.MaxValue, step + (ulong)round));
             _adapter.Schedule(step + checked((ulong)round));
             for (int pass = 0; pass < 4; pass++) _ = PumpAndDispatch();
             if (_adapter.IsConverged) return;
@@ -3351,12 +3374,15 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
         ChunkPublicationStoreSnapshot source = Source.GetSnapshot();
         P03CompressionCounters compression = default;
         P03ProofHealth proofHealth = default;
+        P03ReplicationLifecycleCounters lifecycle = default;
         for (int index = 0; index < _servers.Length; index++)
         {
-            RemoteChunkKnowledgeCensusSnapshot knowledge =
-                _servers[index].GetTimingSnapshot().Knowledge;
+            RemoteChunkReplicationTimingSnapshot timing =
+                _servers[index].GetTimingSnapshot();
+            RemoteChunkKnowledgeCensusSnapshot knowledge = timing.Knowledge;
             compression = compression.Add(knowledge.Compression);
             proofHealth = proofHealth.Add(knowledge);
+            lifecycle = lifecycle.Add(timing.Work, knowledge);
         }
         return base.GetCounters() with
         {
@@ -3375,6 +3401,12 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
             ProofEntries = ScheduleSuccesses,
             DirtyChunksObserved = scheduler.DirtyChunksObserved,
             DirtyRecipientFanout = scheduler.DirtyRecipientFanout,
+            CommitObservations = scheduler.CommitsObserved,
+            EmptyCommitObservations = scheduler.EmptyCommitsObserved,
+            DirtyCommitObservations = scheduler.DirtyCommitsObserved,
+            DirtyWorkCoalesces = scheduler.DirtyWorkCoalesces,
+            SchedulerRetryQueues = scheduler.RetryQueues,
+            DueWorkDequeued = scheduler.DueWorkDequeued,
             PendingMembershipsExamined = scheduler.PendingMembershipsExamined,
             SchedulerCadenceDeferrals = scheduler.CadenceDeferrals,
             SourceDeltaReads = Difference(
@@ -3390,6 +3422,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
                 _reusableDeltaRangeRecords, _censusSourceDeltaReads),
             Compression = compression,
             ProofHealth = proofHealth,
+            Lifecycle = lifecycle,
             HistoryAudit = _historyAuditEnabled ? Source.GetHistoryAuditSnapshot() : null,
             PreparedPublication = DifferencePreparedPublication(
                 Source.GetPreparedPublicationSnapshot(), _preparedBaseline),
@@ -3458,6 +3491,13 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
             Difference(after.RecipientTrivialSorts, before.RecipientTrivialSorts),
             Difference(after.RecipientRecordsConstructed,
                 before.RecipientRecordsConstructed),
+            Difference(after.RangeIdentityInspections, before.RangeIdentityInspections),
+            Difference(after.RangeIdentityInspectionTicks,
+                before.RangeIdentityInspectionTicks),
+            Difference(after.CoverageValidationCalls, before.CoverageValidationCalls),
+            Difference(after.CoverageValidationLinks, before.CoverageValidationLinks),
+            Difference(after.CoverageValidationFailures, before.CoverageValidationFailures),
+            Difference(after.CoverageValidationTicks, before.CoverageValidationTicks),
             after.CoveragePublicationHighWater,
             after.ReservedBytes);
 
@@ -3894,7 +3934,16 @@ internal readonly record struct P03WholeFlowRow(
     P03NormalizedCost Normalized,
     P03BackgroundEgressSummary BackgroundEgress,
     P03ProcessWindowSummary ProcessWindow,
-    P03ListenerConfigurationSummary ListenerConfiguration);
+    P03ListenerConfigurationSummary ListenerConfiguration,
+    P03WholeFlowRawSamples? RawSamples = null);
+
+internal sealed record P03WholeFlowRawSamples(
+    double[] RemotePublicationPreparationMilliseconds,
+    double[] RecipientCommitObservationMilliseconds,
+    double[] NetworkAndRemoteReplicationMilliseconds,
+    double[] ServerOwnedRemoteReplicationBudgetMilliseconds,
+    double[] ServerOwnedTickMilliseconds,
+    double[] WholeFixtureMilliseconds);
 
 internal readonly record struct P03ProcessWindowSummary(
     double WallMilliseconds,
@@ -4295,6 +4344,12 @@ internal readonly record struct P03ProfileCounters(
     ulong ProofEntries = 0,
     ulong DirtyChunksObserved = 0,
     ulong DirtyRecipientFanout = 0,
+    ulong CommitObservations = 0,
+    ulong EmptyCommitObservations = 0,
+    ulong DirtyCommitObservations = 0,
+    ulong DirtyWorkCoalesces = 0,
+    ulong SchedulerRetryQueues = 0,
+    ulong DueWorkDequeued = 0,
     ulong PendingMembershipsExamined = 0,
     ulong SchedulerCadenceDeferrals = 0,
     ulong SourceDeltaReads = 0,
@@ -4304,6 +4359,7 @@ internal readonly record struct P03ProfileCounters(
     P03DeltaRangeReuseCensus DeltaRangeReuse = default,
     P03CompressionCounters Compression = default,
     P03ProofHealth ProofHealth = default,
+    P03ReplicationLifecycleCounters Lifecycle = default,
     ChunkPublicationHistoryAuditSnapshot? HistoryAudit = null,
     PreparedChunkPublicationSnapshot PreparedPublication = default,
     RemoteChunkDeltaBodyStoreSnapshot DeltaBodies = default,
@@ -4311,6 +4367,61 @@ internal readonly record struct P03ProfileCounters(
     int CurrentSharedSubscriptionChunks = 0,
     int CurrentMemberships = 0,
     ChunkPublicationTopologyCensusSnapshot Topology = default);
+
+internal readonly record struct P03ReplicationLifecycleCounters(
+    ulong ScheduleAttempts,
+    ulong DeliveriesQueued,
+    ulong NoPayload,
+    ulong CadenceDeferrals,
+    ulong TransportDeferrals,
+    ulong CapacityDeferrals,
+    int OutstandingHighWater,
+    ulong ProofEntries,
+    ulong ProofApplied,
+    ulong ProofRejected,
+    ulong ProofCapacity,
+    ulong ProofContradictory,
+    ulong KnowledgeAdvancements,
+    ulong NonAdvancingApplied,
+    ulong ExactDebtRetired,
+    ulong SupersededDebtRetired,
+    ulong MalformedOrUnknown,
+    ulong InvalidatedAoi,
+    ulong InvalidatedSource,
+    ulong InvalidatedRecovery)
+{
+    internal P03ReplicationLifecycleCounters Add(
+        in RemoteChunkReplicationWorkSnapshot work,
+        in RemoteChunkKnowledgeCensusSnapshot knowledge)
+    {
+        UltraSim.Game.Replication.RemoteChunkProofCensusSnapshot proof = knowledge.Proof;
+        RemoteChunkOutstandingCensusSnapshot outstanding = knowledge.Outstanding;
+        return new(
+            Plus(ScheduleAttempts, work.ScheduleAttempts),
+            Plus(DeliveriesQueued, work.DeliveriesQueued),
+            Plus(NoPayload, work.NoPayload),
+            Plus(CadenceDeferrals, work.CadenceDeferrals),
+            Plus(TransportDeferrals, work.TransportDeferrals),
+            Plus(CapacityDeferrals, work.CapacityDeferrals),
+            Math.Max(OutstandingHighWater, work.OutstandingHighWater),
+            Plus(ProofEntries, proof.EntriesReceived),
+            Plus(ProofApplied, proof.AppliedEntries),
+            Plus(ProofRejected, proof.RejectedEntries),
+            Plus(ProofCapacity, proof.CapacityExceededEntries),
+            Plus(ProofContradictory, proof.ContradictoryEntries),
+            Plus(KnowledgeAdvancements, proof.KnowledgeAdvancingEntries),
+            Plus(NonAdvancingApplied, proof.NonAdvancingAppliedEntries),
+            Plus(ExactDebtRetired, proof.ExactOutstandingRetired),
+            Plus(SupersededDebtRetired, proof.SupersededOutstandingRetired),
+            Plus(MalformedOrUnknown, proof.MalformedOrUnknownEntries),
+            Plus(InvalidatedAoi, outstanding.InvalidatedByAoiLeave),
+            Plus(InvalidatedSource, outstanding.InvalidatedBySourceReplacement),
+            Plus(InvalidatedRecovery, outstanding.InvalidatedByRecovery));
+    }
+
+    private static ulong Plus(ulong left, ulong right) =>
+        ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
+}
 
 internal readonly record struct P03CompressionCounters(
     ulong Attempts,
@@ -4469,6 +4580,15 @@ internal readonly record struct P03ChunkCpuAttribution(
     ulong BundleStagingCalls,
     ulong BundleStagingRecords,
     ulong BundleStagingTicks,
+    ulong BundleRecordCopyCalls,
+    ulong BundleRecordBytesCopied,
+    ulong BundleRecordCopyTicks,
+    ulong PacketBoundaryCarryCopyCalls,
+    ulong PacketBoundaryCarryBytesCopied,
+    ulong PacketBoundaryCarryCopyTicks,
+    ulong BundleClearCalls,
+    ulong BundleBytesCleared,
+    ulong BundleClearTicks,
     ulong BundleEncodeCalls,
     ulong BundleEncodeEntries,
     ulong BundleEncodeRecords,
@@ -4481,6 +4601,9 @@ internal readonly record struct P03ChunkCpuAttribution(
     ulong ProofLookupCalls,
     ulong ProofLookupComparisons,
     ulong ProofLookupTicks,
+    ulong ProofSubscriptionLookupCalls,
+    ulong ProofSubscriptionLookupComparisons,
+    ulong ProofSubscriptionLookupTicks,
     ulong ProofTicketValidationCalls,
     ulong ProofTicketValidationTicks,
     ulong ProofValidationCalls,
@@ -4540,6 +4663,15 @@ internal sealed class P03ChunkCpuAttributionAccumulator
     internal ulong BundleStagingCalls;
     internal ulong BundleStagingRecords;
     internal ulong BundleStagingTicks;
+    internal ulong BundleRecordCopyCalls;
+    internal ulong BundleRecordBytesCopied;
+    internal ulong BundleRecordCopyTicks;
+    internal ulong PacketBoundaryCarryCopyCalls;
+    internal ulong PacketBoundaryCarryBytesCopied;
+    internal ulong PacketBoundaryCarryCopyTicks;
+    internal ulong BundleClearCalls;
+    internal ulong BundleBytesCleared;
+    internal ulong BundleClearTicks;
     internal ulong BundleEncodeCalls;
     internal ulong BundleEncodeEntries;
     internal ulong BundleEncodeRecords;
@@ -4552,6 +4684,9 @@ internal sealed class P03ChunkCpuAttributionAccumulator
     internal ulong ProofLookupCalls;
     internal ulong ProofLookupComparisons;
     internal ulong ProofLookupTicks;
+    internal ulong ProofSubscriptionLookupCalls;
+    internal ulong ProofSubscriptionLookupComparisons;
+    internal ulong ProofSubscriptionLookupTicks;
     internal ulong ProofTicketValidationCalls;
     internal ulong ProofTicketValidationTicks;
     internal ulong ProofValidationCalls;
@@ -4606,6 +4741,15 @@ internal sealed class P03ChunkCpuAttributionAccumulator
         BundleStagingCalls += value.BundleStagingCalls;
         BundleStagingRecords += value.BundleStagingRecords;
         BundleStagingTicks += value.BundleStagingTicks;
+        BundleRecordCopyCalls += value.BundleRecordCopyCalls;
+        BundleRecordBytesCopied += value.BundleRecordBytesCopied;
+        BundleRecordCopyTicks += value.BundleRecordCopyTicks;
+        PacketBoundaryCarryCopyCalls += value.PacketBoundaryCarryCopyCalls;
+        PacketBoundaryCarryBytesCopied += value.PacketBoundaryCarryBytesCopied;
+        PacketBoundaryCarryCopyTicks += value.PacketBoundaryCarryCopyTicks;
+        BundleClearCalls += value.BundleClearCalls;
+        BundleBytesCleared += value.BundleBytesCleared;
+        BundleClearTicks += value.BundleClearTicks;
         BundleEncodeCalls += value.BundleEncodeCalls;
         BundleEncodeEntries += value.BundleEncodeEntries;
         BundleEncodeRecords += value.BundleEncodeRecords;
@@ -4618,6 +4762,9 @@ internal sealed class P03ChunkCpuAttributionAccumulator
         ProofLookupCalls += value.ProofLookupCalls;
         ProofLookupComparisons += value.ProofLookupComparisons;
         ProofLookupTicks += value.ProofLookupTicks;
+        ProofSubscriptionLookupCalls += value.ProofSubscriptionLookupCalls;
+        ProofSubscriptionLookupComparisons += value.ProofSubscriptionLookupComparisons;
+        ProofSubscriptionLookupTicks += value.ProofSubscriptionLookupTicks;
         ProofTicketValidationCalls += value.ProofTicketValidationCalls;
         ProofTicketValidationTicks += value.ProofTicketValidationTicks;
         ProofValidationCalls += value.Encoder.ProofValidationCalls;
@@ -4653,11 +4800,17 @@ internal sealed class P03ChunkCpuAttributionAccumulator
         CanonicalReparseCalls, CanonicalReparseRecords, CanonicalReparseTicks,
         BundlePreflightCalls, BundlePreflightTicks,
         BundleStagingCalls, BundleStagingRecords, BundleStagingTicks,
+        BundleRecordCopyCalls, BundleRecordBytesCopied, BundleRecordCopyTicks,
+        PacketBoundaryCarryCopyCalls, PacketBoundaryCarryBytesCopied,
+        PacketBoundaryCarryCopyTicks,
+        BundleClearCalls, BundleBytesCleared, BundleClearTicks,
         BundleEncodeCalls, BundleEncodeEntries, BundleEncodeRecords, BundleEncodeTicks,
         NetworkQueueCalls, NetworkQueueTicks,
         OutstandingBookkeepingCalls, OutstandingBookkeepingTicks,
         DetailedCensusTicks,
         ProofLookupCalls, ProofLookupComparisons, ProofLookupTicks,
+        ProofSubscriptionLookupCalls, ProofSubscriptionLookupComparisons,
+        ProofSubscriptionLookupTicks,
         ProofTicketValidationCalls, ProofTicketValidationTicks,
         ProofValidationCalls, ProofValidationTicks,
         CursorAdvancementCalls, CursorAdvancementTicks,

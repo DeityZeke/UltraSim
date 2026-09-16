@@ -2742,6 +2742,11 @@ internal static class N1OfflineDirectChunkTests
         Drive(loopback, server, client, () => server.GetSnapshot().AppliedProofs == 8);
         Equal(0, server.GetSnapshot().OutstandingDeliveries);
         RemoteChunkCpuAttributionSnapshot proofCpu = server.GetTimingSnapshot().Cpu;
+        Equal(8UL, proofCpu.ProofLookupCalls);
+        True(proofCpu.ProofLookupComparisons >= proofCpu.ProofLookupCalls);
+        Equal(8UL, proofCpu.ProofSubscriptionLookupCalls);
+        True(proofCpu.ProofSubscriptionLookupComparisons >=
+            proofCpu.ProofSubscriptionLookupCalls);
         Equal(28UL, proofCpu.ProofObsoleteEntryChecks);
         Equal(0UL, proofCpu.ProofObsoleteSameChunkChecks);
         RemoteChunkCompressionCensusSnapshot sent =
@@ -2818,6 +2823,8 @@ internal static class N1OfflineDirectChunkTests
             disabledLoopback.Client, disabledCache, 0xF5_0601, 8, 16);
         firstServer.ConfigureTelemetry(GameTelemetryLevel.Detailed);
         secondServer.ConfigureTelemetry(GameTelemetryLevel.Detailed);
+        fixture.Store.ConfigurePreparedPublicationAttribution(
+            sourceEnabled: false, recipientEnabled: true);
         bodies.ResetStatistics();
 
         ChunkPublicationWork[] works =
@@ -2877,8 +2884,14 @@ internal static class N1OfflineDirectChunkTests
         Equal(1UL, secondServer.GetSnapshot().NextDeliveryId - 1);
         Equal(1, firstServer.GetSnapshot().OutstandingDeliveries);
         Equal(1, secondServer.GetSnapshot().OutstandingDeliveries);
-        Equal(2UL, fixture.Store.GetPreparedPublicationSnapshot().RecipientRangeReads -
-            sourceReadsBefore);
+        PreparedChunkPublicationSnapshot sourceAttribution =
+            fixture.Store.GetPreparedPublicationSnapshot();
+        Equal(2UL, sourceAttribution.RecipientRangeReads - sourceReadsBefore);
+        Equal(shared.BodyRequests, sourceAttribution.RangeIdentityInspections);
+        Equal(shared.BodyHits, sourceAttribution.CoverageValidationCalls);
+        True(sourceAttribution.CoverageValidationLinks >=
+            sourceAttribution.CoverageValidationCalls);
+        Equal(0UL, sourceAttribution.CoverageValidationFailures);
 
         for (int pump = 0; pump < 16 && firstLoopback.Client.ReceivedQueued == 0; pump++)
             firstLoopback.Pump();

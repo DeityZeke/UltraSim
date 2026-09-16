@@ -46,6 +46,12 @@ public readonly record struct PreparedChunkPublicationSnapshot(
     ulong RecipientIndicesSorted,
     ulong RecipientTrivialSorts,
     ulong RecipientRecordsConstructed,
+    ulong RangeIdentityInspections,
+    ulong RangeIdentityInspectionTicks,
+    ulong CoverageValidationCalls,
+    ulong CoverageValidationLinks,
+    ulong CoverageValidationFailures,
+    ulong CoverageValidationTicks,
     int CoveragePublicationHighWater,
     long ReservedBytes);
 
@@ -90,6 +96,12 @@ public sealed partial class ChunkPublicationStore
     private ulong _preparedRecipientIndicesSorted;
     private ulong _preparedRecipientTrivialSorts;
     private ulong _preparedRecipientRecordsConstructed;
+    private ulong _preparedRangeIdentityInspections;
+    private ulong _preparedRangeIdentityInspectionTicks;
+    private ulong _preparedCoverageValidationCalls;
+    private ulong _preparedCoverageValidationLinks;
+    private ulong _preparedCoverageValidationFailures;
+    private ulong _preparedCoverageValidationTicks;
     private bool _preparedSourceAttributionEnabled;
     private bool _preparedRecipientAttributionEnabled;
     private int _preparedCoveragePublicationHighWater;
@@ -163,6 +175,12 @@ public sealed partial class ChunkPublicationStore
             _preparedRecipientIndicesSorted,
             _preparedRecipientTrivialSorts,
             _preparedRecipientRecordsConstructed,
+            _preparedRangeIdentityInspections,
+            _preparedRangeIdentityInspectionTicks,
+            _preparedCoverageValidationCalls,
+            _preparedCoverageValidationLinks,
+            _preparedCoverageValidationFailures,
+            _preparedCoverageValidationTicks,
             _preparedCoveragePublicationHighWater,
             CalculatePreparedPublicationReservedBytes());
     }
@@ -196,6 +214,12 @@ public sealed partial class ChunkPublicationStore
         _preparedRecipientIndicesSorted = 0;
         _preparedRecipientTrivialSorts = 0;
         _preparedRecipientRecordsConstructed = 0;
+        _preparedRangeIdentityInspections = 0;
+        _preparedRangeIdentityInspectionTicks = 0;
+        _preparedCoverageValidationCalls = 0;
+        _preparedCoverageValidationLinks = 0;
+        _preparedCoverageValidationFailures = 0;
+        _preparedCoverageValidationTicks = 0;
     }
 
     public ulong GetLastPreparedSourcePreparationTicks()
@@ -443,33 +467,38 @@ public sealed partial class ChunkPublicationStore
         out ChunkPublicationBatch batch)
     {
         EnsureOwner();
+        long started = PreparedRecipientAttributionTimestamp();
+        if (_preparedRecipientAttributionEnabled)
+            SaturatingIncrement(ref _preparedCoverageValidationCalls);
         batch = default;
         if (_preparedReadModel != PreparedChunkPublicationReadModel.PreparedLatestState ||
             !cursor.IsValid || cursor.Epoch != Epoch || cursor.Key != key ||
             !TryFindChunk(key, out int chunkSlot))
-            return false;
+            return CoverageValidationResult(false, started);
 
         ref readonly ChunkRecord chunk = ref _chunks[chunkSlot];
         if (cursor.Revision.Value >= chunk.Revision ||
             cursor.Revision.Value < chunk.HistoryFloor)
-            return false;
+            return CoverageValidationResult(false, started);
 
         ulong fromRevision = cursor.Revision.Value;
         while (fromRevision < chunk.Revision)
         {
+            if (_preparedRecipientAttributionEnabled)
+                SaturatingIncrement(ref _preparedCoverageValidationLinks);
             int publicationSlot = FindPreparedPublication(key, fromRevision);
-            if (publicationSlot < 0) return false;
+            if (publicationSlot < 0) return CoverageValidationResult(false, started);
             ref readonly PreparedPublication publication = ref _preparedPublications[publicationSlot];
             if (!publication.Active || publication.ToRevision <= fromRevision ||
                 publication.ToRevision > chunk.Revision ||
                 publication.WrittenRecords != publication.ExpectedRecords)
-                return false;
+                return CoverageValidationResult(false, started);
             fromRevision = publication.ToRevision;
         }
-        if (fromRevision != chunk.Revision) return false;
+        if (fromRevision != chunk.Revision) return CoverageValidationResult(false, started);
 
         batch = CreateBatch(ChunkPublicationReadStatus.Delta, key, chunk, 0, 0);
-        return true;
+        return CoverageValidationResult(true, started);
     }
 
     /// <summary>
@@ -483,17 +512,39 @@ public sealed partial class ChunkPublicationStore
         out ChunkPublicationBatch batch)
     {
         EnsureOwner();
+        long started = PreparedRecipientAttributionTimestamp();
+        if (_preparedRecipientAttributionEnabled)
+            SaturatingIncrement(ref _preparedRangeIdentityInspections);
         batch = default;
         if (_preparedReadModel != PreparedChunkPublicationReadModel.PreparedLatestState ||
             !cursor.IsValid || cursor.Epoch != Epoch || cursor.Key != key ||
             !TryFindChunk(key, out int chunkSlot))
-            return false;
+            return RangeIdentityInspectionResult(false, started);
         ref readonly ChunkRecord chunk = ref _chunks[chunkSlot];
         if (cursor.Revision.Value >= chunk.Revision ||
             cursor.Revision.Value < chunk.HistoryFloor)
-            return false;
+            return RangeIdentityInspectionResult(false, started);
         batch = CreateBatch(ChunkPublicationReadStatus.Delta, key, chunk, 0, 0);
-        return true;
+        return RangeIdentityInspectionResult(true, started);
+    }
+
+    private bool CoverageValidationResult(bool result, long started)
+    {
+        if (_preparedRecipientAttributionEnabled)
+        {
+            if (!result) SaturatingIncrement(ref _preparedCoverageValidationFailures);
+            SaturatingAdd(ref _preparedCoverageValidationTicks,
+                checked((ulong)(Stopwatch.GetTimestamp() - started)));
+        }
+        return result;
+    }
+
+    private bool RangeIdentityInspectionResult(bool result, long started)
+    {
+        if (_preparedRecipientAttributionEnabled)
+            SaturatingAdd(ref _preparedRangeIdentityInspectionTicks,
+                checked((ulong)(Stopwatch.GetTimestamp() - started)));
+        return result;
     }
 
     private void SortPreparedIndices(Span<int> indices)

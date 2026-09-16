@@ -57,6 +57,7 @@ public readonly record struct ChunkPublicationWorkSchedulerSnapshot(
     ulong DirtyChunksWithoutSubscribers,
     ulong DirtyRecipientFanout,
     ulong DirtyWorkCoalesces,
+    ulong RetryQueues,
     ulong PendingMembershipsExamined,
     ulong DueWorkDequeued,
     ulong CadenceDeferrals,
@@ -165,6 +166,7 @@ public sealed class ChunkPublicationWorkScheduler
     private ulong _dirtyChunksWithoutSubscribers;
     private ulong _dirtyRecipientFanout;
     private ulong _dirtyWorkCoalesces;
+    private ulong _retryQueues;
     private ulong _pendingMembershipsExamined;
     private ulong _dueWorkDequeued;
     private ulong _cadenceDeferrals;
@@ -498,6 +500,7 @@ public sealed class ChunkPublicationWorkScheduler
         if (!work.Recipient.IsValid || !work.Key.Space.IsValid ||
             !TryFindMembership(new RecipientChunkKey(work.Recipient, work.Key), out int membership))
             return false;
+        SaturatingIncrement(ref _retryQueues);
         Queue(membership, work.Kind, work.LatestSourceStep, work.FirstDueStep, isRetry: true);
         // A retry depends on a later cadence step, transport/proof progress, or source change.
         // Do not let a just-requeued membership circulate again in the current bounded pass.
@@ -517,6 +520,7 @@ public sealed class ChunkPublicationWorkScheduler
         _dirtyChunksWithoutSubscribers = 0;
         _dirtyRecipientFanout = 0;
         _dirtyWorkCoalesces = 0;
+        _retryQueues = 0;
         _pendingMembershipsExamined = 0;
         _dueWorkDequeued = 0;
         _cadenceDeferrals = 0;
@@ -557,6 +561,7 @@ public sealed class ChunkPublicationWorkScheduler
             _dirtyChunksWithoutSubscribers,
             _dirtyRecipientFanout,
             _dirtyWorkCoalesces,
+            _retryQueues,
             _pendingMembershipsExamined,
             _dueWorkDequeued,
             _cadenceDeferrals,

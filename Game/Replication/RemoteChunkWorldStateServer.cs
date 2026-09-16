@@ -113,6 +113,15 @@ public readonly record struct RemoteChunkCpuAttributionSnapshot(
     ulong BundleStagingCalls,
     ulong BundleStagingRecords,
     ulong BundleStagingTicks,
+    ulong BundleRecordCopyCalls,
+    ulong BundleRecordBytesCopied,
+    ulong BundleRecordCopyTicks,
+    ulong PacketBoundaryCarryCopyCalls,
+    ulong PacketBoundaryCarryBytesCopied,
+    ulong PacketBoundaryCarryCopyTicks,
+    ulong BundleClearCalls,
+    ulong BundleBytesCleared,
+    ulong BundleClearTicks,
     ulong BundleEncodeCalls,
     ulong BundleEncodeEntries,
     ulong BundleEncodeRecords,
@@ -125,6 +134,9 @@ public readonly record struct RemoteChunkCpuAttributionSnapshot(
     ulong ProofLookupCalls,
     ulong ProofLookupComparisons,
     ulong ProofLookupTicks,
+    ulong ProofSubscriptionLookupCalls,
+    ulong ProofSubscriptionLookupComparisons,
+    ulong ProofSubscriptionLookupTicks,
     ulong ProofTicketValidationCalls,
     ulong ProofTicketValidationTicks,
     ulong ProofRetirementCalls,
@@ -518,6 +530,15 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     private ulong _attributionBundleStagingCalls;
     private ulong _attributionBundleStagingRecords;
     private ulong _attributionBundleStagingTicks;
+    private ulong _attributionBundleRecordCopyCalls;
+    private ulong _attributionBundleRecordBytesCopied;
+    private ulong _attributionBundleRecordCopyTicks;
+    private ulong _attributionPacketBoundaryCarryCopyCalls;
+    private ulong _attributionPacketBoundaryCarryBytesCopied;
+    private ulong _attributionPacketBoundaryCarryCopyTicks;
+    private ulong _attributionBundleClearCalls;
+    private ulong _attributionBundleBytesCleared;
+    private ulong _attributionBundleClearTicks;
     private ulong _attributionBundleEncodeCalls;
     private ulong _attributionBundleEncodeEntries;
     private ulong _attributionBundleEncodeRecords;
@@ -530,6 +551,9 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     private ulong _attributionProofLookupCalls;
     private ulong _attributionProofLookupComparisons;
     private ulong _attributionProofLookupTicks;
+    private ulong _attributionProofSubscriptionLookupCalls;
+    private ulong _attributionProofSubscriptionLookupComparisons;
+    private ulong _attributionProofSubscriptionLookupTicks;
     private ulong _attributionProofTicketValidationCalls;
     private ulong _attributionProofTicketValidationTicks;
     private ulong _attributionProofRetirementCalls;
@@ -784,6 +808,13 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         _attributionBundleStagingCalls = 0;
         _attributionBundleStagingRecords = 0;
         _attributionBundleStagingTicks = 0;
+        _attributionBundleRecordCopyCalls = _attributionBundleRecordBytesCopied = 0;
+        _attributionBundleRecordCopyTicks = 0;
+        _attributionPacketBoundaryCarryCopyCalls = 0;
+        _attributionPacketBoundaryCarryBytesCopied = 0;
+        _attributionPacketBoundaryCarryCopyTicks = 0;
+        _attributionBundleClearCalls = _attributionBundleBytesCleared = 0;
+        _attributionBundleClearTicks = 0;
         _attributionBundleEncodeCalls = 0;
         _attributionBundleEncodeEntries = 0;
         _attributionBundleEncodeRecords = 0;
@@ -794,6 +825,9 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         _attributionProofLookupCalls = 0;
         _attributionProofLookupComparisons = 0;
         _attributionProofLookupTicks = 0;
+        _attributionProofSubscriptionLookupCalls = 0;
+        _attributionProofSubscriptionLookupComparisons = 0;
+        _attributionProofSubscriptionLookupTicks = 0;
         _attributionProofTicketValidationCalls = _attributionProofTicketValidationTicks = 0;
         _attributionProofRetirementCalls = _attributionProofRetirementTicks = 0;
         _attributionProofObsoleteEntryChecks = 0;
@@ -823,6 +857,15 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         _attributionBundleStagingCalls,
         _attributionBundleStagingRecords,
         _attributionBundleStagingTicks,
+        _attributionBundleRecordCopyCalls,
+        _attributionBundleRecordBytesCopied,
+        _attributionBundleRecordCopyTicks,
+        _attributionPacketBoundaryCarryCopyCalls,
+        _attributionPacketBoundaryCarryBytesCopied,
+        _attributionPacketBoundaryCarryCopyTicks,
+        _attributionBundleClearCalls,
+        _attributionBundleBytesCleared,
+        _attributionBundleClearTicks,
         _attributionBundleEncodeCalls,
         _attributionBundleEncodeEntries,
         _attributionBundleEncodeRecords,
@@ -835,6 +878,9 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         _attributionProofLookupCalls,
         _attributionProofLookupComparisons,
         _attributionProofLookupTicks,
+        _attributionProofSubscriptionLookupCalls,
+        _attributionProofSubscriptionLookupComparisons,
+        _attributionProofSubscriptionLookupTicks,
         _attributionProofTicketValidationCalls,
         _attributionProofTicketValidationTicks,
         _attributionProofRetirementCalls,
@@ -1397,11 +1443,20 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                         result, work, subscriptionIndex, entryBytes, Valid: true);
                     if (result.Kind == RemoteChunkPublicationKind.Delta)
                     {
+                        long carryCopyStarted = CpuTimestamp();
+                        if (CpuAttributionEnabled)
+                            SaturatingIncrement(ref _attributionPacketBoundaryCarryCopyCalls);
                         if (_telemetryLevel == GameTelemetryLevel.Detailed)
                             _encoder.PreparedDeltaRecords(result.RecordCount).CopyTo(
                                 carriedRecords);
                         _encoder.PreparedDeltaRecordBytes(result.RecordCount).CopyTo(
                             carriedRecordBytes);
+                        if (CpuAttributionEnabled)
+                            SaturatingAdd(ref _attributionPacketBoundaryCarryBytesCopied,
+                                checked((ulong)(result.RecordCount *
+                                    RemoteChunkDeltaRecord.EncodedSize)));
+                        CpuElapsed(ref _attributionPacketBoundaryCarryCopyTicks,
+                            carryCopyStarted);
                     }
                     if (CpuAttributionEnabled)
                         SaturatingIncrement(ref _attributionPreparedCandidatePacketBoundaryCarries);
@@ -2353,7 +2408,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             if (_telemetryLevel == GameTelemetryLevel.Detailed)
                 SaturatingIncrement(ref _timedSupersededDebtRetired);
         }
-        int subscription = FindSubscription(key);
+        int subscription = FindSubscription(key, proofContext: true);
         if (subscription < 0)
         {
             Invalidate(key, OutstandingInvalidationReason.AoiLeave);
@@ -2382,29 +2437,49 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     }
 
     private int FindSubscription(SpatialChunkKey key)
+        => FindSubscription(key, proofContext: false);
+
+    private int FindSubscription(SpatialChunkKey key, bool proofContext)
     {
         long started = CpuTimestamp();
         if (CpuAttributionEnabled)
+        {
             SaturatingIncrement(ref _attributionSubscriptionLookupCalls);
+            if (proofContext)
+                SaturatingIncrement(ref _attributionProofSubscriptionLookupCalls);
+        }
         OfflineDirectChunkSubscriptionView subscriptions = _recipient.Subscriptions;
         int low = 0;
         int high = subscriptions.Length - 1;
         while (low <= high)
         {
             if (CpuAttributionEnabled)
+            {
                 SaturatingIncrement(ref _attributionSubscriptionLookupComparisons);
+                if (proofContext)
+                    SaturatingIncrement(ref _attributionProofSubscriptionLookupComparisons);
+            }
             int middle = low + ((high - low) >> 1);
             int comparison = subscriptions[middle].Interest.Key.CompareTo(key);
             if (comparison == 0)
             {
-                CpuElapsed(ref _attributionSubscriptionLookupTicks, started);
+                RecordSubscriptionLookupElapsed(started, proofContext);
                 return middle;
             }
             if (comparison < 0) low = middle + 1;
             else high = middle - 1;
         }
-        CpuElapsed(ref _attributionSubscriptionLookupTicks, started);
+        RecordSubscriptionLookupElapsed(started, proofContext);
         return -1;
+    }
+
+    private void RecordSubscriptionLookupElapsed(long started, bool proofContext)
+    {
+        if (!CpuAttributionEnabled) return;
+        ulong elapsed = checked((ulong)(System.Diagnostics.Stopwatch.GetTimestamp() - started));
+        SaturatingAdd(ref _attributionSubscriptionLookupTicks, elapsed);
+        if (proofContext)
+            SaturatingAdd(ref _attributionProofSubscriptionLookupTicks, elapsed);
     }
 
     private int FindDelivery(ulong deliveryId)
@@ -2965,6 +3040,20 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
 
     private void ClearBundleStaging(int entries, int deltaRecords)
     {
+        long started = CpuTimestamp();
+        if (CpuAttributionEnabled)
+        {
+            SaturatingIncrement(ref _attributionBundleClearCalls);
+            ulong bytes = checked(
+                (ulong)entries * (ulong)Unsafe.SizeOf<RemoteDirtyChunkBundleEntry>() +
+                (ulong)entries * (ulong)Unsafe.SizeOf<OfflineDirectChunkWireEncodeResult>() +
+                (ulong)entries * (ulong)Unsafe.SizeOf<ChunkInterestTier>() +
+                (ulong)entries * 2UL * sizeof(ulong) +
+                (ulong)entries * 3UL * sizeof(int) +
+                (ulong)deltaRecords * (ulong)Unsafe.SizeOf<RemoteChunkDeltaRecord>() +
+                (ulong)deltaRecords * RemoteChunkDeltaRecord.EncodedSize);
+            SaturatingAdd(ref _attributionBundleBytesCleared, bytes);
+        }
         _bundleEntries.AsSpan(0, entries).Clear();
         _bundleResults.AsSpan(0, entries).Clear();
         _bundleTiers.AsSpan(0, entries).Clear();
@@ -2976,6 +3065,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         _bundleDeltaRecords.AsSpan(0, deltaRecords).Clear();
         _bundleDeltaRecordBytes.AsSpan(
             0, checked(deltaRecords * RemoteChunkDeltaRecord.EncodedSize)).Clear();
+        CpuElapsed(ref _attributionBundleClearTicks, started);
     }
 
     private void StagePreparedCandidate(
@@ -3002,10 +3092,23 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                 deltaRecords + result.RecordCount > _bundleDeltaRecords.Length)
                 throw new InvalidOperationException(
                     "A validated selected-profile delta exceeded bundle staging.");
+            long copyStarted = CpuTimestamp();
+            if (CpuAttributionEnabled)
+                SaturatingIncrement(ref _attributionBundleRecordCopyCalls);
             if (_telemetryLevel == GameTelemetryLevel.Detailed)
                 records.CopyTo(_bundleDeltaRecords.AsSpan(deltaRecords));
             encodedRecords.CopyTo(_bundleDeltaRecordBytes.AsSpan(
                 checked(deltaRecords * RemoteChunkDeltaRecord.EncodedSize)));
+            if (CpuAttributionEnabled)
+            {
+                ulong bytes = checked((ulong)encodedRecords.Length +
+                    (_telemetryLevel == GameTelemetryLevel.Detailed
+                        ? (ulong)records.Length *
+                            (ulong)Unsafe.SizeOf<RemoteChunkDeltaRecord>()
+                        : 0));
+                SaturatingAdd(ref _attributionBundleRecordBytesCopied, bytes);
+            }
+            CpuElapsed(ref _attributionBundleRecordCopyTicks, copyStarted);
             deltaRecords += result.RecordCount;
         }
         else if (!records.IsEmpty || !encodedRecords.IsEmpty || result.RecordCount != 0)
