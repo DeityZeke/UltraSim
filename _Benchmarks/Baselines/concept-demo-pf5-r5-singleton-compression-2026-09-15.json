@@ -137,8 +137,15 @@
   },
   "verification": {
     "pf5R5Only": "pass",
-    "inheritedFocused": "pending closure commit",
-    "canonicalRelease": "pending closure commit"
+    "pf5R2": "pass",
+    "pf5R2R1": "pass",
+    "pf5R2R2": "pass",
+    "pf5R3": "pass",
+    "pf5R4": "pass",
+    "inheritedImpairmentAndLifecycle": "pass",
+    "canonicalReleaseAndExports": "pass",
+    "singlePlayerPacketFree": "pass",
+    "f07F08NativeLifecycleParity": "pass"
   },
   "recommendedNextInvestigation": "compatible immutable recipient-body materialization/encoding sharing with recipient-local delivery and proof identity"
 }

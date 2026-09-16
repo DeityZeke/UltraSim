@@ -205,5 +205,7 @@ a materially cheaper codec; threshold tuning alone does not remove the per-selec
 
 `--pf5-r5-only` runs the complete replication suite plus a real secure-UDP OFF/ON parity gate with
 `BackgroundPlatformBatch`. Existing PF5-R2 through PF5-R4, impairment/lifecycle, Release, export,
-composition, and contentless gates are reported by the closure commit. PF6 remains free to resume
-under the unchanged selected production representation.
+composition, and contentless gates all pass. The canonical Release verifier also passes the
+packet-free Single Player, exported native client, F0.7 mixed-session lifecycle, and F0.8 final
+composition/parity gates. PF6 remains free to resume under the unchanged selected production
+representation.
