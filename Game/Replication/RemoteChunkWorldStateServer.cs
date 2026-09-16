@@ -29,6 +29,18 @@ public readonly record struct RemoteChunkWorldStateTransportLimits(
     }
 }
 
+/// <summary>
+/// Diagnostic-only observation of the complete canonical message-129 bytes presented to the
+/// compressor. Implementations must not retain the supplied span. The observer has no authority
+/// over representation selection, delivery, proof, or recipient knowledge.
+/// </summary>
+internal interface IRemoteChunkCompressionInputObserver
+{
+    void Observe(ReadOnlySpan<byte> canonicalBundle);
+    void Reset();
+    void FreezeMeasurement();
+}
+
 public enum RemoteChunkWorldStateScheduleStatus : byte
 {
     QueuedDelta = 1,
@@ -357,6 +369,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     private readonly byte[] _bundleScratch;
     private readonly byte[]? _compressedBundleScratch;
     private readonly ushort[]? _compressionHashScratch;
+    private IRemoteChunkCompressionInputObserver? _compressionInputObserver;
     private readonly RemoteChunkBundleCompressionPolicy _compressionPolicy;
     private readonly RemoteChunkSingletonDeltaCompression _singletonDeltaCompression;
     private readonly RemoteDirtyChunkBundleEntry[] _bundleEntries;
@@ -930,6 +943,13 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     {
         EnsureOwner();
         _nextDeliveryId = nextDeliveryId;
+    }
+
+    internal void SetCompressionInputObserverForDiagnostics(
+        IRemoteChunkCompressionInputObserver? observer)
+    {
+        EnsureOwner();
+        _compressionInputObserver = observer;
     }
 
     /// <summary>
@@ -1560,6 +1580,8 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                     SaturatingIncrement(ref _timedCompressionAttempts);
                     SaturatingAdd(ref _timedCompressionCanonicalAttempted,
                         checked((ulong)written));
+                    if (_telemetryLevel == GameTelemetryLevel.Detailed)
+                        _compressionInputObserver?.Observe(_bundleScratch.AsSpan(0, written));
                     long compressionStarted = _compressionTiming.StartDetailed();
                     bool encodedCompression = UltraSimGameProtocol.
                         TryWriteCompressedDirtyChunkBundle(

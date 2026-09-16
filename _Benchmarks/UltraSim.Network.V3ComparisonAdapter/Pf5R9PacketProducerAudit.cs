@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
+using UltraSim.Game.Protocol;
 using UltraSim.Game.Replication;
 using UltraSim.Game.World;
 using UltraSim.Network;
@@ -21,6 +22,8 @@ internal static class Pf5R9PacketProducerAudit
     internal static void Run(string[] args)
     {
         bool focused = args.Contains("--focused", StringComparer.Ordinal);
+        bool diagnosticOnly = args.Contains("--diagnostic-only", StringComparer.Ordinal);
+        bool uniqueApplicationEpochs = args.Contains("--unique-epochs", StringComparer.Ordinal);
         int warmup = ReadInt(args, "--warmup", focused ? 6 : 60);
         int ticks = ReadInt(args, "--ticks", focused ? 8 : 270);
         int repetitions = ReadInt(args, "--repetitions", focused ? 1 : 3);
@@ -35,7 +38,9 @@ internal static class Pf5R9PacketProducerAudit
 
         Prime();
         var timing = new List<Pf5R9TimingRow>();
-        (string Label, int Population, bool High)[] cases = focused
+        (string Label, int Population, bool High)[] cases = diagnosticOnly
+            ? []
+            : focused
             ? [("r32-high", 32, true)]
             :
             [
@@ -58,7 +63,7 @@ internal static class Pf5R9PacketProducerAudit
                         backgroundTiming: timingEnabled, retainRaw: true)));
             }
         }
-        RequireTimingParity(timing);
+        if (!diagnosticOnly) RequireTimingParity(timing);
 
         var attribution = new List<Pf5R9AttributionRow>();
         (string Label, int Population, bool High)[] attributionCases = focused
@@ -67,15 +72,18 @@ internal static class Pf5R9PacketProducerAudit
         foreach ((string label, int population, bool high) in attributionCases)
         {
             Console.WriteLine($"PF5-R9 {label} diagnostic attribution");
+            var compressionInputs = new Pf5R9CompressionInputCensus();
             P03WholeFlowRow row = RunHarness(
                 CreateRated(population, high), Math.Min(warmup, 12), diagnosticTicks,
                 GameTelemetryLevel.Detailed, networkStageTiming: true,
-                backgroundTiming: false, retainRaw: true);
-            attribution.Add(new(label, row, BuildAttribution(row)));
+                backgroundTiming: false, retainRaw: true,
+                compressionInputObserver: compressionInputs,
+                uniqueApplicationEpochs: uniqueApplicationEpochs);
+            attribution.Add(new(label, row, BuildAttribution(row), compressionInputs.Capture()));
         }
 
         int relationships = focused ? 16 : 512;
-        int[] groups = focused ? [1, 4, 16] : [1, 8, 64, 512];
+        int[] groups = diagnosticOnly ? [] : focused ? [1, 4, 16] : [1, 8, 64, 512];
         var topology = new List<Pf5R9TopologyRow>(groups.Length);
         foreach (int groupCount in groups)
         {
@@ -90,9 +98,11 @@ internal static class Pf5R9PacketProducerAudit
                 backgroundTiming: false, retainRaw: true);
             topology.Add(new(groupCount, relationships / groupCount, row));
         }
-        RequireFixedDelivery(topology);
+        if (!diagnosticOnly) RequireFixedDelivery(topology);
 
-        Pf5R9PrimitiveResult[] primitives = RunPrimitives(primitiveIterations);
+        Pf5R9PrimitiveResult[] primitives = diagnosticOnly
+            ? []
+            : RunPrimitives(primitiveIterations);
         var report = new Pf5R9Report(
             "ultrasim-concept-demo-pf5-r9-packet-producer-audit-v1",
             DateTimeOffset.UtcNow,
@@ -110,6 +120,7 @@ internal static class Pf5R9PacketProducerAudit
             Stopwatch.Frequency,
             Seed,
             focused,
+            uniqueApplicationEpochs,
             warmup,
             ticks,
             repetitions,
@@ -158,7 +169,9 @@ internal static class Pf5R9PacketProducerAudit
         GameTelemetryLevel gameTelemetry,
         bool networkStageTiming,
         bool backgroundTiming,
-        bool retainRaw)
+        bool retainRaw,
+        IRemoteChunkCompressionInputObserver? compressionInputObserver = null,
+        bool uniqueApplicationEpochs = false)
     {
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -177,7 +190,9 @@ internal static class Pf5R9PacketProducerAudit
             socketIoMode: SharedUdpSocketIoMode.BackgroundPlatformBatch,
             backgroundEgressTimingEnabled: backgroundTiming,
             retainRawSamples: retainRaw,
-            gameTelemetryLevel: gameTelemetry);
+            gameTelemetryLevel: gameTelemetry,
+            compressionInputObserver: compressionInputObserver,
+            uniqueApplicationEpochs: uniqueApplicationEpochs);
         P03WholeFlowRow row = harness.Run(warmup, ticks);
         Require(row.Converged, $"PF5-R9 row did not converge: {workload.Id}.");
         Require(row.Transport.CapacityDrops == 0,
@@ -424,6 +439,7 @@ internal sealed record Pf5R9Report(
     long StopwatchFrequency,
     int Seed,
     bool Focused,
+    bool UniqueApplicationEpochs,
     int WarmupTicks,
     int MeasuredTicks,
     int Repetitions,
@@ -446,7 +462,8 @@ internal readonly record struct Pf5R9TimingRow(
 internal readonly record struct Pf5R9AttributionRow(
     string Label,
     P03WholeFlowRow Row,
-    Pf5R9Attribution Attribution);
+    Pf5R9Attribution Attribution,
+    Pf5R9CompressionInputCensusSnapshot CompressionInputs);
 
 internal readonly record struct Pf5R9Attribution(
     double ParentMilliseconds,
@@ -474,3 +491,121 @@ internal readonly record struct Pf5R9PrimitiveResult(
     ulong EncryptionInvocations,
     long PlaintextBytesAttempted,
     string Boundary);
+
+internal readonly record struct Pf5R9CompressionInputCensusSnapshot(
+    int Capacity,
+    int MaximumCanonicalBytes,
+    ulong Attempts,
+    ulong DistinctInputs,
+    ulong ExactRepeatedInputs,
+    ulong InputBytes,
+    ulong ExactRepeatedBytes,
+    ulong HashCollisions,
+    ulong SaturatedInputs)
+{
+    public double ExactRepeatPercent => Attempts == 0
+        ? 0
+        : ExactRepeatedInputs * 100d / Attempts;
+}
+
+/// <summary>
+/// Bounded diagnostic oracle for complete canonical message-129 inputs. Hashes select candidate
+/// slots only; equality is confirmed with length plus byte-for-byte comparison. It never supplies
+/// production output and is reset at the measured-window boundary by the adapter.
+/// </summary>
+internal sealed class Pf5R9CompressionInputCensus : IRemoteChunkCompressionInputObserver
+{
+    private const int Capacity = 4_096;
+    private const int MaximumCanonicalBytes =
+        UltraSimGameProtocol.MaximumCompressedDirtyChunkBundleDecodedBytes;
+    private readonly ulong[] _hashes = new ulong[Capacity];
+    private readonly ushort[] _lengths = new ushort[Capacity];
+    private readonly byte[] _bytes = new byte[checked(Capacity * MaximumCanonicalBytes)];
+    private ulong _attempts;
+    private ulong _distinct;
+    private ulong _repeated;
+    private ulong _inputBytes;
+    private ulong _repeatedBytes;
+    private ulong _hashCollisions;
+    private ulong _saturated;
+    private bool _measurementFrozen;
+    private Pf5R9CompressionInputCensusSnapshot _frozen;
+
+    public void Observe(ReadOnlySpan<byte> canonicalBundle)
+    {
+        if (_measurementFrozen) return;
+        if (canonicalBundle.IsEmpty || canonicalBundle.Length > MaximumCanonicalBytes)
+            throw new InvalidOperationException("PF5-R9 observed an invalid compression input.");
+        _attempts++;
+        _inputBytes += checked((ulong)canonicalBundle.Length);
+        ulong hash = Hash(canonicalBundle);
+        int slot = checked((int)(hash & (Capacity - 1)));
+        for (int probe = 0; probe < Capacity; probe++)
+        {
+            int length = _lengths[slot];
+            if (length == 0)
+            {
+                if (_distinct == Capacity)
+                {
+                    _saturated++;
+                    return;
+                }
+                _hashes[slot] = hash;
+                _lengths[slot] = checked((ushort)canonicalBundle.Length);
+                canonicalBundle.CopyTo(_bytes.AsSpan(
+                    checked(slot * MaximumCanonicalBytes), canonicalBundle.Length));
+                _distinct++;
+                return;
+            }
+            if (_hashes[slot] == hash)
+            {
+                if (length == canonicalBundle.Length && canonicalBundle.SequenceEqual(
+                        _bytes.AsSpan(checked(slot * MaximumCanonicalBytes), length)))
+                {
+                    _repeated++;
+                    _repeatedBytes += checked((ulong)canonicalBundle.Length);
+                    return;
+                }
+                _hashCollisions++;
+            }
+            slot = (slot + 1) & (Capacity - 1);
+        }
+        _saturated++;
+    }
+
+    public void Reset()
+    {
+        Array.Clear(_lengths);
+        _attempts = _distinct = _repeated = _inputBytes = _repeatedBytes = 0;
+        _hashCollisions = _saturated = 0;
+        _measurementFrozen = false;
+        _frozen = default;
+    }
+
+    public void FreezeMeasurement()
+    {
+        if (_measurementFrozen) return;
+        _frozen = Current();
+        _measurementFrozen = true;
+    }
+
+    internal Pf5R9CompressionInputCensusSnapshot Capture() =>
+        _measurementFrozen ? _frozen : Current();
+
+    private Pf5R9CompressionInputCensusSnapshot Current() => new(
+        Capacity, MaximumCanonicalBytes, _attempts, _distinct, _repeated,
+        _inputBytes, _repeatedBytes, _hashCollisions, _saturated);
+
+    private static ulong Hash(ReadOnlySpan<byte> value)
+    {
+        const ulong offset = 14_695_981_039_346_656_037UL;
+        const ulong prime = 1_099_511_628_211UL;
+        ulong hash = offset;
+        for (int index = 0; index < value.Length; index++)
+        {
+            hash ^= value[index];
+            hash = unchecked(hash * prime);
+        }
+        return hash;
+    }
+}

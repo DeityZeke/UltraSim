@@ -1687,7 +1687,9 @@ internal sealed class P03WholeFlowHarness : IDisposable
         bool retainRawSamples = false,
         GameTelemetryLevel? gameTelemetryLevel = null,
         int serverProofDispatchIntervalTicks = 1,
-        int postMeasurementDrainRepetitions = 1)
+        int postMeasurementDrainRepetitions = 1,
+        IRemoteChunkCompressionInputObserver? compressionInputObserver = null,
+        bool uniqueApplicationEpochs = false)
     {
         _workload = workload;
         _profile = profile;
@@ -1754,7 +1756,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
             P03NetworkProfile.ChunkPublication => new P03ChunkPublicationRemoteAdapter(
                 workload, _sessions, _x, _z, _versions, s_content, compression,
                 singletonDeltaCompression, bodySharing, historyAudit, legacyRangeCensus,
-                chunkReadModel),
+                chunkReadModel, compressionInputObserver, uniqueApplicationEpochs),
             P03NetworkProfile.DirtyChunkSpatialFanout => new P03DirtyChunkRemoteAdapter(
                 workload, _sessions, _x, _z, _versions, s_content),
             _ => throw new ArgumentOutOfRangeException(nameof(profile)),
@@ -3240,6 +3242,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
         new WorldPublicDeltaRecord[UltraSimGameProtocol.MaximumChunkPublicationRecords];
     private readonly bool _historyAuditEnabled;
     private readonly bool _legacyRangeCensusEnabled;
+    private readonly IRemoteChunkCompressionInputObserver? _compressionInputObserver;
     private ulong _dueCandidates;
     private ulong _simultaneouslyDueCandidates;
     private ulong _multiDueRecipientPasses;
@@ -3274,11 +3277,14 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
         bool historyAudit = false,
         bool legacyRangeCensus = true,
         PreparedChunkPublicationReadModel readModel =
-            PreparedChunkPublicationReadModel.PreparedLatestState)
+            PreparedChunkPublicationReadModel.PreparedLatestState,
+        IRemoteChunkCompressionInputObserver? compressionInputObserver = null,
+        bool uniqueApplicationEpochs = false)
         : base(workload, sessions, x, z, versions, content, readModel)
     {
         _historyAuditEnabled = historyAudit;
         _legacyRangeCensusEnabled = legacyRangeCensus;
+        _compressionInputObserver = compressionInputObserver;
         _bodyStore = new RemoteChunkDeltaBodyStore(Source, bodySharing);
         int subscriptions = workload.Id.StartsWith("sparse", StringComparison.Ordinal) ? 128 : 1_024;
         _recipients = new OfflineDirectChunkRecipient[workload.Recipients];
@@ -3318,13 +3324,17 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
                 StageEmpty(Caches[index], initial[subscription].Interest.Key);
             Bootstrap(index);
             ExpectedCounts[index] = Caches[index].GetSnapshot().KnownPublicIdentities;
+            ulong applicationEpoch = uniqueApplicationEpochs
+                ? checked(ApplicationEpoch + (ulong)index)
+                : ApplicationEpoch;
             _servers[index] = new RemoteChunkWorldStateServer(
-                sessions[index].Server, recipient, Source, ApplicationEpoch,
+                sessions[index].Server, recipient, Source, applicationEpoch,
                 new RemoteChunkWorldStateTransportLimits(
                     128, 1_024, compression, singletonDeltaCompression, bodySharing),
                 _bodyStore);
+            _servers[index].SetCompressionInputObserverForDiagnostics(compressionInputObserver);
             _clients[index] = new RemoteChunkWorldStateClient(
-                sessions[index].Client, Caches[index], ApplicationEpoch, 64, 256);
+                sessions[index].Client, Caches[index], applicationEpoch, 64, 256);
         }
         while (_scheduler.TryDequeueDue(0, out _)) { }
         if (_historyAuditEnabled)
@@ -3563,6 +3573,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
     }
     internal override P03ProfileCounters GetCounters()
     {
+        _compressionInputObserver?.FreezeMeasurement();
         ChunkPublicationWorkSchedulerSnapshot scheduler = _scheduler.GetSnapshot();
         ChunkPublicationStoreSnapshot source = Source.GetSnapshot();
         P03CompressionCounters compression = default;
@@ -3643,6 +3654,8 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
         _sourceBaseline = Source.GetSnapshot();
         _preparedBaseline = Source.GetPreparedPublicationSnapshot();
         _bodyStore.ResetStatistics();
+        if (_compressionInputObserver is not null)
+            _compressionInputObserver.Reset();
         if (_historyAuditEnabled)
             Source.ConfigureHistoryAudit(new ChunkPublicationHistoryAuditLimits(65_536));
     }
