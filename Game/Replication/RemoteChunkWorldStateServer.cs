@@ -538,6 +538,10 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     private ulong _attributionProofObsoleteSameChunkChecks;
     private ulong _attributionDetailedSlabCopies;
     private ulong _attributionDetailedSlabClears;
+    // Test-only observation of the actual retirement slab branch. Unlike CPU attribution this is
+    // advanced by the operation itself, not by the current telemetry level, so an Off/Basic
+    // regression cannot make its own evidence disappear.
+    private ulong _outstandingDiagnosticSlabRetirementOperations;
 
     public RemoteChunkWorldStateServer(
         NetworkProtocolPeer peer,
@@ -880,6 +884,16 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     {
         EnsureOwner();
         _nextDeliveryId = nextDeliveryId;
+    }
+
+    /// <summary>
+    /// Test-only monotonic count of actual outstanding diagnostic-slab copy/clear operations.
+    /// It deliberately survives telemetry-window resets.
+    /// </summary>
+    internal ulong GetOutstandingDiagnosticSlabRetirementOperationsForTesting()
+    {
+        EnsureOwner();
+        return _outstandingDiagnosticSlabRetirementOperations;
     }
 
     /// <summary>
@@ -2424,12 +2438,14 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                     index * recordsPerDelivery, recordsPerDelivery));
             _timedOutstandingDeltaRecordCounts[index] =
                 _timedOutstandingDeltaRecordCounts[_outstandingCount];
+            SaturatingIncrement(ref _outstandingDiagnosticSlabRetirementOperations);
             if (CpuAttributionEnabled)
                 SaturatingIncrement(ref _attributionDetailedSlabCopies);
         }
         _timedOutstandingDeltaRecords.AsSpan(
             _outstandingCount * recordsPerDelivery, recordsPerDelivery).Clear();
         _timedOutstandingDeltaRecordCounts[_outstandingCount] = 0;
+        SaturatingIncrement(ref _outstandingDiagnosticSlabRetirementOperations);
         if (CpuAttributionEnabled)
             SaturatingIncrement(ref _attributionDetailedSlabClears);
     }

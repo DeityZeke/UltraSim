@@ -2991,13 +2991,19 @@ internal static class N1OfflineDirectChunkTests
         True(client.TryProcess(first, firstPayload));
         True(loopback.Client.TryConsumeReceived());
 
+        ulong beforeOffRetirement =
+            server.GetOutstandingDiagnosticSlabRetirementOperationsForTesting();
         server.ConfigureTelemetry(GameTelemetryLevel.Off);
         Drive(loopback, server, client, () => server.GetSnapshot().AppliedProofs == 2);
+        Equal(beforeOffRetirement,
+            server.GetOutstandingDiagnosticSlabRetirementOperationsForTesting());
         RemoteChunkCpuAttributionSnapshot off = server.GetTimingSnapshot().Cpu;
         Equal(0UL, off.DetailedSlabCopies);
         Equal(0UL, off.DetailedSlabClears);
         Equal(0, server.GetSnapshot().OutstandingDeliveries);
 
+        // Basic also retains the allocated slabs without maintaining them. Observe the actual
+        // retirement-operation version rather than counters whose own collection is Detailed-only.
         server.ConfigureTelemetry(GameTelemetryLevel.Detailed);
         fixture.Present(0, Position(0, 0, 2_200, 2_000),
             GameWorldPublicPrefabIds.Character);
@@ -3011,7 +3017,37 @@ internal static class N1OfflineDirectChunkTests
             out NetworkDeliveredMessage second, out ReadOnlySpan<byte> secondPayload));
         True(client.TryProcess(second, secondPayload));
         True(loopback.Client.TryConsumeReceived());
+        ulong beforeBasicRetirement =
+            server.GetOutstandingDiagnosticSlabRetirementOperationsForTesting();
+        server.ConfigureTelemetry(GameTelemetryLevel.Basic);
         Drive(loopback, server, client, () => server.GetSnapshot().AppliedProofs == 4);
+        Equal(beforeBasicRetirement,
+            server.GetOutstandingDiagnosticSlabRetirementOperationsForTesting());
+        RemoteChunkCpuAttributionSnapshot basic = server.GetTimingSnapshot().Cpu;
+        Equal(0UL, basic.DetailedSlabCopies);
+        Equal(0UL, basic.DetailedSlabClears);
+        Equal(0, server.GetSnapshot().OutstandingDeliveries);
+
+        // Re-enable Detailed and prove that the same direct observer advances when the slab branch
+        // actually executes, while the ordinary Detailed attribution remains available.
+        server.ConfigureTelemetry(GameTelemetryLevel.Detailed);
+        fixture.Present(0, Position(0, 0, 2_300, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        fixture.Present(1, Position(1, 0, 2_300, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        Equal(2, server.TryScheduleDueBundle(works, 3, statuses, out int thirdMessages));
+        Equal(1, thirdMessages);
+        for (int pump = 0; pump < 8 && loopback.Client.ReceivedQueued == 0; pump++)
+            loopback.Pump();
+        True(loopback.Client.TryPeekReceived(
+            out NetworkDeliveredMessage third, out ReadOnlySpan<byte> thirdPayload));
+        True(client.TryProcess(third, thirdPayload));
+        True(loopback.Client.TryConsumeReceived());
+        ulong beforeDetailedRetirement =
+            server.GetOutstandingDiagnosticSlabRetirementOperationsForTesting();
+        Drive(loopback, server, client, () => server.GetSnapshot().AppliedProofs == 6);
+        True(server.GetOutstandingDiagnosticSlabRetirementOperationsForTesting() >
+            beforeDetailedRetirement);
         RemoteChunkCpuAttributionSnapshot detailed = server.GetTimingSnapshot().Cpu;
         True(detailed.DetailedSlabCopies > 0);
         True(detailed.DetailedSlabClears >= 2);
