@@ -695,6 +695,28 @@ body reuse. The selected policy remains `BackgroundPlatformBatch`, `CurrentBundl
 compression disabled. See the
 [PF5-R6 evidence](../../_Benchmarks/Baselines/concept-demo-pf5-r6-compatible-recipient-body-sharing-2026-09-15.md).
 
+### PF5-R7 adversarial recipient-reuse follow-up
+
+Independent review found that PF5-R6's cache lookup still occurred after prepared-chain collapse,
+sorting, and typed record construction. A hit now establishes the exact source range first,
+validates current retained contiguous coverage, and enters the existing recipient-local pending
+transaction without rebuilding records. The cache remains only an optimization: an expired
+`HistoryFloor`, source replacement, subscription change, or missing chain coverage falls back to
+the authoritative Rebase/read path and cannot be authorized by a resident body.
+
+The fixed-capacity body store now retains canonical 43-byte record sections. Recipient-specific
+120/129 headers remain independently materialized, while the immutable record section is copied
+byte-for-byte. Public writers and untrusted decoders retain full validation; no protocol identity,
+wire format, delivery identity, cursor, or proof state is shared. The byte-only store reserves
+2,887,168 bytes, less than PF5-R6's typed-record store.
+
+Detailed telemetry now stops copying and clearing outstanding-delivery diagnostic slabs when set
+to Off, including a Detailed-to-Off transition with live debt. Proof retirement still has a linear
+unrelated-debt scan, but current evidence measures only 1.653 examined entries per proof and an
+outstanding high-water of five at R300. A delivery/chunk index is therefore deferred; permanent
+operation counters will expose any future debt-shape change. See the
+[adversarial follow-up evidence](../../_Benchmarks/Baselines/concept-demo-pf5-r7-adversarial-follow-up-2026-09-16.md).
+
 ### Snapshot / delta / absence
 
 Ordinary MTU-admissible deltas and absence use independent-unreliable WorldState.

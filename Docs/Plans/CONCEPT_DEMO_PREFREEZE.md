@@ -81,8 +81,11 @@ divergence still retains 75.90% reuse. PF5-R7 then closes the requested spatial-
 whole-server attribution: dense shared AOI, not world extent alone, is the dominant amplification;
 at R350 full chaos the paired complete server-owned tick is 6.993 ms p95, comprising 4.384 ms
 Network/remote replication and 2.681 ms locomotion/current Simple Physics. The selected production
-policy remains unchanged. PF6 may resume on the integrated post-PF5-R7 tree after canonical
-closure.
+policy remains unchanged. The PF5-R7 adversarial follow-up then moves compatible-body lookup ahead
+of record reconstruction, shares canonical record bytes, and stops Detailed slab processing while
+telemetry is Off. R300/high schedule p95 falls from 1.960 ms to 1.180 ms without semantic or wire
+format change; measured proof ledgers remain too shallow to justify another index. PF6 may resume
+on the integrated post-follow-up tree after canonical closure.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -2296,7 +2299,7 @@ and its human-readable companion.
 
 ## PF6 — external human validation
 
-**Status: READY TO RESUME after PF5-R7 closure.** PF5-R2-R2 repaired the HTTP-host
+**Status: READY TO RESUME after PF5-R7 and adversarial follow-up closure.** PF5-R2-R2 repaired the HTTP-host
 shutdown race and retained complete unexpected-worker-failure reporting. PF5-R3 leaves Game,
 replication, proof, wire, cadence, AOI, compression, aggregation, and participant policy exact;
 its selected physical egress is covered by focused lifecycle, external Hosted, and full export
@@ -2306,7 +2309,10 @@ PF5-R5 preserves that selected policy after rejecting singleton compression for 
 cost; its trusted prepared-hash hardening changes no wire identity. PF5-R6 shares only exact
 source-derived immutable Delta bodies. It preserves the existing read transaction,
 HistoryFloor/Rebase, queue transaction, and recipient-local delivery/proof state while removing
-repeated materialization/hash work. Singleton compression remains disabled.
+repeated materialization/hash work. The adversarial follow-up makes cache hits skip record
+reconstruction, reuses canonical record bytes, and fixes telemetry-Off slab work; proof-debt scans
+remain measured rather than indexed while outstanding high-water is five. Singleton compression
+remains disabled.
 
 Close when:
 
@@ -2468,11 +2474,13 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
     **CLOSED — PF5-R5 outcome B; bandwidth win measured, default remains canonical 120**
 33. Share exact immutable recipient Delta bodies without sharing recipient knowledge.
     **CLOSED — PF5-R6 outcome A**
-34. Choose/document the default deployment-performance policy. **CLOSED — v29 plus PF5-R3 egress**
-35. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5/PF5-R7**
-36. Full exact-tree verifier and export closure.
-37. Freeze/tag the Concept Demo baseline.
-38. Begin the separate extraction/genericization/ecosystem roadmap.
+34. Close adversarial late-lookup, canonical-byte, telemetry-Off, and proof-debt findings.
+    **CLOSED — PF5-R7 adversarial follow-up; proof index deferred by measured debt**
+35. Choose/document the default deployment-performance policy. **CLOSED — v29 plus PF5-R3 egress**
+36. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5/PF5-R7**
+37. Full exact-tree verifier and export closure.
+38. Freeze/tag the Concept Demo baseline.
+39. Begin the separate extraction/genericization/ecosystem roadmap.
 ```
 
 The intended outcome is not merely a demo that works.

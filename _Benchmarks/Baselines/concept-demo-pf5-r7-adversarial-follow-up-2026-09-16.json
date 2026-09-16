@@ -1,0 +1,131 @@
+{
+  "schema": "ultrasim-concept-demo-pf5-r7-adversarial-follow-up-v1",
+  "checkpoint": "PF5-R7 adversarial recipient-reuse follow-up",
+  "date": "2026-09-16",
+  "startingHead": "4be883250a733110a6a947128f09815e92f00b65",
+  "implementationCommit": "14e729a6ce69179cfbe4b9a3a4c4cdfa21797fa9",
+  "replicationSemanticLineage": "992fc541460f18534da9036c73cb711277de11ce",
+  "productionSemanticsChanged": false,
+  "wireFormatChanged": false,
+  "policyChanged": false,
+  "environment": {
+    "runtime": "8.0.29",
+    "os": "Unix 7.1.5.1",
+    "logicalCpuCount": 16,
+    "warmupTicks": 60,
+    "measuredTicks": 270,
+    "socketIo": "BackgroundPlatformBatch",
+    "representation": "CurrentBundled",
+    "singletonCompression": false
+  },
+  "findings": {
+    "lateBodyLookup": {
+      "verified": true,
+      "repair": "A shallow exact range-identity check precedes lookup; an exact hit then validates retained contiguous coverage and enters the existing recipient-local pending transaction without collapse, sort, or record materialization. Misses retain the old full source path.",
+      "correctnessFences": [
+        "source lifetime and epoch",
+        "chunk key",
+        "from/to revision",
+        "history floor",
+        "subscription and cadence",
+        "recipient owner and source epoch"
+      ]
+    },
+    "perRecipientRecordSerialization": {
+      "verified": true,
+      "repair": "The fixed-capacity body store retains canonical 43-byte record bodies. Recipient-specific 120/129 headers are written independently and immutable record bytes are copied into the selected canonical representation.",
+      "untrustedDecodeUnchanged": true,
+      "manifestChanged": false
+    },
+    "proofRetirementUnrelatedScan": {
+      "verified": true,
+      "productionIndexAdded": false,
+      "reason": "The detailed R300 census found 249920 obsolete-entry checks for 151175 proof retirements (1.653 checks/proof), zero same-chunk matches, and outstanding high-water 5. The work pattern is real but current bounded debt does not justify another per-recipient delivery/chunk index.",
+      "permanentCensusAdded": true
+    },
+    "telemetryOffSlabWork": {
+      "verified": true,
+      "repair": "Outstanding-delivery slab copies and clears now execute only while telemetry is Detailed. Detailed-to-Off retains reusable allocation but performs zero slab maintenance; returning to Detailed reinitializes collection correctly."
+    }
+  },
+  "detailedR300": [
+    {
+      "workload": "low",
+      "candidateRequests": 151175,
+      "cacheHits": 149979,
+      "cacheMisses": 1196,
+      "deltaMaterializations": 1196,
+      "validationHashCalls": 1196,
+      "preparedRangeReadsLifetime": 2397,
+      "preparedRecordsReferencedLifetime": 12178,
+      "encodedBodyBuilds": 1196,
+      "encodedBodyCopies": 149979,
+      "encodedBytesCopied": 22327105,
+      "proofRetirements": 151175,
+      "obsoleteEntryChecks": 249920,
+      "sameChunkObsoleteChecks": 0,
+      "outstandingHighWater": 5
+    },
+    {
+      "workload": "high",
+      "candidateRequests": 151175,
+      "cacheHits": 149979,
+      "cacheMisses": 1196,
+      "deltaMaterializations": 1196,
+      "validationHashCalls": 1196,
+      "preparedRangeReadsLifetime": 2397,
+      "preparedRecordsReferencedLifetime": 65181,
+      "encodedBodyBuilds": 1196,
+      "encodedBodyCopies": 149979,
+      "encodedBytesCopied": 116519594,
+      "proofRetirements": 151175,
+      "obsoleteEntryChecks": 249920,
+      "sameChunkObsoleteChecks": 0,
+      "outstandingHighWater": 5
+    }
+  ],
+  "rated": [
+    { "recipients": 64, "workload": "low", "model": "before", "remoteMeanMs": 0.465241, "remoteP95Ms": 0.513614, "scheduleMeanMs": 0.194777, "scheduleP95Ms": 0.2299 },
+    { "recipients": 64, "workload": "low", "model": "after", "remoteMeanMs": 0.453417, "remoteP95Ms": 0.514463, "scheduleMeanMs": 0.175768, "scheduleP95Ms": 0.2204 },
+    { "recipients": 64, "workload": "high", "model": "before", "remoteMeanMs": 0.458709, "remoteP95Ms": 0.495334, "scheduleMeanMs": 0.195363, "scheduleP95Ms": 0.2258 },
+    { "recipients": 64, "workload": "high", "model": "after", "remoteMeanMs": 0.427565, "remoteP95Ms": 0.459896, "scheduleMeanMs": 0.161868, "scheduleP95Ms": 0.1877 },
+    { "recipients": 300, "workload": "low", "model": "before", "remoteMeanMs": 2.389252, "remoteP95Ms": 2.483998, "scheduleMeanMs": 1.039613, "scheduleP95Ms": 1.087 },
+    { "recipients": 300, "workload": "low", "model": "after", "remoteMeanMs": 2.362614, "remoteP95Ms": 2.478876, "scheduleMeanMs": 0.955266, "scheduleP95Ms": 1.0168 },
+    { "recipients": 300, "workload": "high", "model": "before", "remoteMeanMs": 3.988246, "remoteP95Ms": 4.168449, "scheduleMeanMs": 1.865401, "scheduleP95Ms": 1.9596 },
+    { "recipients": 300, "workload": "high", "model": "after", "remoteMeanMs": 3.364056, "remoteP95Ms": 3.519297, "scheduleMeanMs": 1.103816, "scheduleP95Ms": 1.1803 }
+  ],
+  "semanticReconciliation": {
+    "semanticDigestsEqual": true,
+    "publicationCountsEqual": true,
+    "proofCountsEqual": true,
+    "gameMessageCountsEqual": true,
+    "bundleEntryCountsEqual": true,
+    "logicalApplicationBytesEqual": true,
+    "r300HighWindowBoundaryNote": "The after run retired one additional cache fill and ended with one fewer 17-byte proof frame in flight: one fewer frame/datagram and 84 fewer physical bytes. Semantic digest and all delivery/proof/message work counts match."
+  },
+  "memory": {
+    "beforeBodyStoreReservedBytes": 3214848,
+    "afterBodyStoreReservedBytes": 2887168,
+    "afterTypedRecordStorageBytes": 0,
+    "afterEncodedRecordStorageBytes": 2818048,
+    "bundleEntryAndRecordStagingBytesAfter": 8128
+  },
+  "revertedPrototype": "A typed-plus-encoded store and redundant pre-lookup full validation doubled retained body storage and caused low-change tail regressions. It was not accepted. The final design stores bytes only and performs shallow identity before lookup plus full coverage validation only on a hit.",
+  "focusedTests": {
+    "gameReplication": "pass: 176 tests",
+    "cacheHitNoReconstruction": "pass",
+    "canonical120And129ByteParity": "pass",
+    "historyFloorRebaseWithResidentBody": "pass",
+    "independentProofAndQueueRefusal": "pass",
+    "detailedToOffWithLiveDebt": "pass",
+    "proofScanOperationCount": "pass: 8 distinct chunks drain with 28 unrelated checks and zero same-chunk checks"
+  },
+  "rawCaptureHashes": {
+    "baselineR64": "fbd9f570577969f9e8638a321f57ffe2c1b2cfb9db6d76ad0068fcf9c15fe9fd",
+    "afterR64": "234fb64f987696489984b1badd3b5d422e2a53d7abff0f4736c2b589f25f4f5a",
+    "baselineR300": "a0263d1e2a4fce987eafc706a33dd58f590cbf9ea0cc5fa450f72380cf1f7843",
+    "afterR300": "8965bb881e5de3389bfaead24d7fb9687578ebbe5561dea8fae9e7b55c29969f",
+    "afterR300Detailed": "fa86c28c04f47b6dadf1943bb57bbd27832a376a7ba1ae455e871655e2b62d45"
+  },
+  "candidateDisposition": "Feature-complete correctness and PF5-R2 replication semantic lineage remain unchanged; this is a semantic-preserving performance repair plus a telemetry-Off defect repair."
+}

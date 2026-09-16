@@ -26,6 +26,11 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `concept-demo-pf5-r7-adversarial-follow-up-2026-09-16.json` — independent reproduction and
+  closure of late compatible-body lookup, canonical record-byte reuse, and telemetry-Off slab
+  processing; permanent proof-debt scan census; byte-for-byte 120/129 parity; matched R64/R300
+  rated A/B; unchanged semantic/protocol policy; and the evidence-backed decision to defer an
+  additional proof index while outstanding high-water remains five;
 - `concept-demo-pf5-r2-r1-timing-boundary-closure-2026-09-14.json` — direct per-tick
   `AuthorityMutation`, post-authority `NetworkAndRemoteReplication`, and combined
   `AuthorityThroughNetworkAndRemoteReplication` distributions; structural source-preparation
