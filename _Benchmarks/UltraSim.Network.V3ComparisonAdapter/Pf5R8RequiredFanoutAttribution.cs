@@ -164,6 +164,8 @@ internal static class Pf5R8RequiredFanoutAttribution
                 "reconnect", "history-pressure", "combined-divergence"];
         var divergenceCensus = new Pf5R1ScenarioReport[divergenceNames.Length];
         var divergenceEnabled = new Pf5R1ScenarioReport[divergenceNames.Length];
+        var divergenceVerification =
+            new Pf5R8DivergenceVerification[divergenceNames.Length];
         for (int index = 0; index < divergenceCensus.Length; index++)
         {
             divergenceCensus[index] = Pf5R1HistoryAudit.RunPreparedBodyScenarioForPf5R6(
@@ -171,10 +173,18 @@ internal static class Pf5R8RequiredFanoutAttribution
             divergenceEnabled[index] =
                 Pf5R1HistoryAudit.RunPreparedBodyEnabledScenarioForPf5R8(
                     divergenceNames[index], focused ? 16 : 64, focused ? 40 : 180, Seed);
-            RequireEquivalentDivergence(
+            divergenceVerification[index] = RequireEquivalentDivergence(
                 in divergenceCensus[index], in divergenceEnabled[index]);
         }
         RequireEnabledDivergenceCoverage(divergenceEnabled);
+
+        // Exact logical knowledge is compared in-process above. Do not turn that bounded
+        // assertion into an enormous permanent per-recipient evidence journal.
+        for (int index = 0; index < divergenceCensus.Length; index++)
+        {
+            divergenceCensus[index] = divergenceCensus[index] with { FinalKnowledge = null };
+            divergenceEnabled[index] = divergenceEnabled[index] with { FinalKnowledge = null };
+        }
 
         P03NetworkWorkload windowWorkload = P03NetworkWorkload.ChunkFixedDeliveryTopology(
                 focused ? 8 : 32, focused ? 2 : 8)
@@ -202,7 +212,7 @@ internal static class Pf5R8RequiredFanoutAttribution
         }
 
         var report = new Pf5R8Report(
-            "ultrasim-concept-demo-pf5-r8-required-fanout-v2",
+            "ultrasim-concept-demo-pf5-r8-required-fanout-v3",
             DateTimeOffset.UtcNow,
             StartingHead,
             ReadGitSha(),
@@ -240,6 +250,7 @@ internal static class Pf5R8RequiredFanoutAttribution
             ],
             fanout.ToArray(), topology.ToArray(), fixedDeliveryTopology.ToArray(),
             activity.ToArray(), telemetry.ToArray(), divergenceCensus, divergenceEnabled,
+            divergenceVerification,
             new Pf5R8MeasurementWindowRegression(ordinaryDrain, extraDrain),
             proofDebt.ToArray(), rated.ToArray());
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
@@ -368,7 +379,7 @@ internal static class Pf5R8RequiredFanoutAttribution
         }
     }
 
-    private static void RequireEquivalentDivergence(
+    private static Pf5R8DivergenceVerification RequireEquivalentDivergence(
         in Pf5R1ScenarioReport census,
         in Pf5R1ScenarioReport enabled)
     {
@@ -388,16 +399,19 @@ internal static class Pf5R8RequiredFanoutAttribution
                 left.SourceRevision == right.SourceRevision &&
                 left.SourceRecords == right.SourceRecords;
         }
-        bool equal = census.Scenario == enabled.Scenario &&
-            census.PreparedPublications == enabled.PreparedPublications &&
-            census.CanonicalApplicationBytes == enabled.CanonicalApplicationBytes &&
-            census.ProofsApplied == enabled.ProofsApplied &&
+        bool logicalPublicationsEqual =
+            census.PreparedPublications == enabled.PreparedPublications;
+        bool canonicalBytesEqual =
+            census.CanonicalApplicationBytes == enabled.CanonicalApplicationBytes;
+        bool proofOutcomesEqual = census.ProofsApplied == enabled.ProofsApplied &&
             census.StaleOrDuplicateProofs == enabled.StaleOrDuplicateProofs &&
-            census.DeliberatelyLostProofs == enabled.DeliberatelyLostProofs &&
-            census.Reconnects == enabled.Reconnects &&
+            census.DeliberatelyLostProofs == enabled.DeliberatelyLostProofs;
+        bool snapshotAndReconnectEqual = census.Reconnects == enabled.Reconnects &&
             census.SnapshotOccurrences == enabled.SnapshotOccurrences &&
-            census.SnapshotRecords == enabled.SnapshotRecords &&
-            knowledgeEqual;
+            census.SnapshotRecords == enabled.SnapshotRecords;
+        bool equal = census.Scenario == enabled.Scenario && knowledgeEqual &&
+            logicalPublicationsEqual && canonicalBytesEqual && proofOutcomesEqual &&
+            snapshotAndReconnectEqual;
         if (!equal)
             Console.WriteLine($"PF5-R8 divergence mismatch {census.Scenario}: " +
                 $"publications={census.PreparedPublications}/{enabled.PreparedPublications} " +
@@ -410,6 +424,14 @@ internal static class Pf5R8RequiredFanoutAttribution
                 $"knowledge={knowledgeEqual}");
         Require(equal,
             $"Enabled body sharing changed final truth for {census.Scenario}.");
+        return new Pf5R8DivergenceVerification(
+            census.Scenario,
+            censusKnowledge.Length,
+            knowledgeEqual,
+            logicalPublicationsEqual,
+            canonicalBytesEqual,
+            proofOutcomesEqual,
+            snapshotAndReconnectEqual);
     }
 
     private static void RequireEnabledDivergenceCoverage(Pf5R1ScenarioReport[] rows)
@@ -642,9 +664,19 @@ internal sealed record Pf5R8Report(
     Pf5R8TelemetryRow[] TelemetryControls,
     Pf5R1ScenarioReport[] RecipientDivergencePotential,
     Pf5R1ScenarioReport[] RecipientDivergenceEnabled,
+    Pf5R8DivergenceVerification[] DivergenceVerification,
     Pf5R8MeasurementWindowRegression MeasurementWindowRegression,
     Pf5R8ProofDebtRow[] ProofDebt,
     Pf5R8RatedRow[] RatedAnchors);
+
+internal sealed record Pf5R8DivergenceVerification(
+    string Scenario,
+    int KnowledgeRowsCompared,
+    bool ExactNormalizedKnowledgeEqual,
+    bool LogicalPublicationsEqual,
+    bool CanonicalApplicationBytesEqual,
+    bool ProofOutcomesEqual,
+    bool SnapshotAndReconnectOutcomesEqual);
 
 internal sealed record Pf5R8MeasurementWindowRegression(
     P03WholeFlowRow OrdinaryDrain,

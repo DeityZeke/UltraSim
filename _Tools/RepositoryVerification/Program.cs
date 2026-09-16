@@ -72,7 +72,7 @@ static void VerifyPf5R8RequiredFanout(string root, string configuration)
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(output));
         JsonElement report = document.RootElement;
         if (report.GetProperty("Schema").GetString() !=
-                "ultrasim-concept-demo-pf5-r8-required-fanout-v2")
+                "ultrasim-concept-demo-pf5-r8-required-fanout-v3")
             throw new InvalidOperationException("PF5-R8 emitted an unexpected report schema.");
         JsonElement[] fanout = report.GetProperty("FixedSourceFanout").EnumerateArray()
             .Select(static value => value.Clone()).ToArray();
@@ -147,10 +147,21 @@ static void VerifyPf5R8RequiredFanout(string root, string configuration)
         if (enabledBodies.GetProperty("Mode").GetInt32() != 2 ||
             enabledBodies.GetProperty("BodyCapacity").GetInt32() != 1024 ||
             enabledBodies.GetProperty("EncodedBodyCopies").GetUInt64() == 0 ||
-            enabledBodies.GetProperty("MaterializationsAvoided").GetUInt64() == 0 ||
-            enabledSynchronized.GetProperty("FinalKnowledge").GetArrayLength() == 0)
+            enabledBodies.GetProperty("MaterializationsAvoided").GetUInt64() == 0)
             throw new InvalidOperationException(
                 "PF5-R8 production-capacity sharing did not serve divergent recipients.");
+        JsonElement[] divergenceVerification = report.GetProperty("DivergenceVerification")
+            .EnumerateArray().Select(static value => value.Clone()).ToArray();
+        if (divergenceVerification.Length != enabledDivergence.Length ||
+            divergenceVerification.Any(static row =>
+                row.GetProperty("KnowledgeRowsCompared").GetInt32() <= 0 ||
+                !row.GetProperty("ExactNormalizedKnowledgeEqual").GetBoolean() ||
+                !row.GetProperty("LogicalPublicationsEqual").GetBoolean() ||
+                !row.GetProperty("CanonicalApplicationBytesEqual").GetBoolean() ||
+                !row.GetProperty("ProofOutcomesEqual").GetBoolean() ||
+                !row.GetProperty("SnapshotAndReconnectOutcomesEqual").GetBoolean()))
+            throw new InvalidOperationException(
+                "PF5-R8 divergence equality verification was absent or failed.");
         JsonElement window = report.GetProperty("MeasurementWindowRegression");
         JsonElement ordinary = window.GetProperty("OrdinaryDrain");
         JsonElement extra = window.GetProperty("ExtraDrain");
