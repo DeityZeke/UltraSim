@@ -77,8 +77,12 @@ p95 by 7–15% at several larger measured points. The selected production policy
 policy. PF5-R6 then selects bounded source-lifetime-owned immutable Delta-body sharing: exact
 recipient proof and knowledge remain independent, while repeated materialization/hash work falls
 to one preparation per compatible body. R300/high body reuse is 99.21%, and deliberately combined
-divergence still retains 75.90% reuse. PF6 may resume on the integrated post-PF5-R6 tree after
-canonical closure.
+divergence still retains 75.90% reuse. PF5-R7 then closes the requested spatial-topology and
+whole-server attribution: dense shared AOI, not world extent alone, is the dominant amplification;
+at R350 full chaos the paired complete server-owned tick is 6.993 ms p95, comprising 4.384 ms
+Network/remote replication and 2.681 ms locomotion/current Simple Physics. The selected production
+policy remains unchanged. PF6 may resume on the integrated post-PF5-R7 tree after canonical
+closure.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -2268,9 +2272,31 @@ prerequisite. Canonical Release verification independently reproduced a pre-exis
 source is unchanged from the checkpoint's starting HEAD, and this measurement-only task does not
 repair it.
 
+## PF5-R7 — spatial topology and whole-server attribution
+
+**Status: CLOSED — characterization; production policy unchanged.** The fixed-total-work topology
+matrix proves that recipient count alone is not a replication cost model. At R512, one dense shared
+region produces 87,810 dirty-chunk fanout references and 7.867 ms remote-replication p95, while 512
+sparse one-recipient regions produce 5,370 references and 1.819 ms p95. A controlled R64 fanout
+suite keeps recipient reads near 600–720 while varying prepared-body cardinality from 10 to 600;
+mean remote cost stays within 0.038 ms, showing that shared immutable body lookup is not the
+remaining dominant cost. Extending an unchanged 8-cluster world with 4,096 inactive entities does
+not change membership, recipient-read, or prepared-body work.
+
+The paired current whole-server matrix separately retains authority input, Chat, locomotion/current
+Simple Physics, world commit, remote replication, and complete server-owned tick clocks. The
+R200/R350 full-chaos complete p95 values are 3.524/6.993 ms; remote replication is 2.118/4.384 ms
+and locomotion/current Simple Physics is 1.424/2.681 ms. Current Simple Physics has no actor-contact
+work, while Sim Core, pathfinding, and Dungeon Core are not implemented performance surfaces, so
+no fictitious subsystem budget is inferred. Historical V2 results remain contextual rather than
+equivalent: current sparse V3 reconstruction falls within the archived V2 main-tick range, while
+current dense V3 remains materially costlier. Permanent evidence is in
+`_Benchmarks/Baselines/concept-demo-pf5-r7-spatial-topology-and-server-cost-attribution-2026-09-16.json`
+and its human-readable companion.
+
 ## PF6 — external human validation
 
-**Status: READY TO RESUME after PF5-R6 closure.** PF5-R2-R2 repaired the HTTP-host
+**Status: READY TO RESUME after PF5-R7 closure.** PF5-R2-R2 repaired the HTTP-host
 shutdown race and retained complete unexpected-worker-failure reporting. PF5-R3 leaves Game,
 replication, proof, wire, cadence, AOI, compression, aggregation, and participant policy exact;
 its selected physical egress is covered by focused lifecycle, external Hosted, and full export
@@ -2443,7 +2469,7 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 33. Share exact immutable recipient Delta bodies without sharing recipient knowledge.
     **CLOSED — PF5-R6 outcome A**
 34. Choose/document the default deployment-performance policy. **CLOSED — v29 plus PF5-R3 egress**
-35. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5/PF5-R6**
+35. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5/PF5-R7**
 36. Full exact-tree verifier and export closure.
 37. Freeze/tag the Concept Demo baseline.
 38. Begin the separate extraction/genericization/ecosystem roadmap.

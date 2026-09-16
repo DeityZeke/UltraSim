@@ -1,0 +1,119 @@
+{
+  "schema": "ultrasim-concept-demo-pf5-r7-closure-v1",
+  "checkpoint": "PF5-R7 Spatial Topology & Whole-Server Cost Attribution",
+  "date": "2026-09-16",
+  "startingHead": "a6dfccc04c9253df266dd4fb582aa23a12fe8eae",
+  "measurementHead": "4d5d7ca4bfad168f4657c231fc92a8a67ae320b9",
+  "replicationSemanticLineage": "992fc541460f18534da9036c73cb711277de11ce",
+  "pf5R6BodySharingImplementation": "eca422171c6a1c27c6a0e022a9ff493ece5da597",
+  "productionSemanticsChanged": false,
+  "policy": {
+    "socketIo": "BackgroundPlatformBatch",
+    "representation": "CurrentBundled",
+    "bodySharing": true,
+    "singletonCompression": false,
+    "cadence": "1/2/4",
+    "aggregation": "CrossLane cap 2",
+    "gameManifest": 29,
+    "transportRevision": 2,
+    "productParticipantCap": 64
+  },
+  "environment": {
+    "runtime": "8.0.29",
+    "os": "Unix 7.1.5.1",
+    "logicalCpuCount": 16,
+    "warmupTicks": 30,
+    "measuredTicks": 270,
+    "diagnosticCensusTicks": 30,
+    "processTopology": "in-process secure UDP; server-owned clocks exclude measured client slices; process CPU/RSS include both sides"
+  },
+  "raw": {
+    "path": "_Benchmarks/results/pf5-r7-spatial-topology-and-server-cost-attribution-2026-09-15.json",
+    "bytes": 1414117,
+    "sha256": "9a78fafa9ff26054ad619c0b4ae5b8b1e464ce676770815ab69a619971255011"
+  },
+  "headline": {
+    "spatialModel": "cost follows dirty chunks + source/body cardinality + membership/fanout + recipient obligations + bytes/messages; recipient count alone is insufficient",
+    "fixed512DenseRemoteP95Ms": 7.867,
+    "fixed512SparseRemoteP95Ms": 1.819,
+    "fixed512DenseBodyHitPercent": 98.96,
+    "fixed512SparseBodyHitPercent": 0.0,
+    "lowChangeFourMsCrossing": "between R384 (3.856 ms) and R400 (4.099 ms)",
+    "r200ChaosServerP95Ms": 3.524,
+    "r350ChaosServerP95Ms": 6.993,
+    "r350ChaosRemoteP95Ms": 4.384,
+    "r350ChaosLocomotionPhysicsP95Ms": 2.681,
+    "desiredServerEnvelopeMs": "12-14",
+    "absoluteFrameMs": 16.67
+  },
+  "topologyR350": [
+    { "layout": "dense", "memberships": 10401, "dirtyFanout": 57270, "distinctBodies": 363, "bodyHitPercent": 98.82, "recipientReads": 30666, "remoteP95Ms": 4.322, "wholeFlowP95Ms": 18.746 },
+    { "layout": "medium-8", "memberships": 10416, "dirtyFanout": 10470, "distinctBodies": 355, "bodyHitPercent": 95.81, "recipientReads": 8472, "remoteP95Ms": 1.769, "wholeFlowP95Ms": 7.144 },
+    { "layout": "sparse", "memberships": 11200, "dirtyFanout": 3660, "distinctBodies": 3660, "bodyHitPercent": 0.0, "recipientReads": 3660, "remoteP95Ms": 1.225, "wholeFlowP95Ms": 4.032 }
+  ],
+  "topologyR512": [
+    { "layout": "1x512", "dirtyFanout": 87810, "distinctBodies": 465, "recipientReads": 44644, "remoteP95Ms": 7.867, "udpPayloadBytes": 413241671 },
+    { "layout": "8x64", "dirtyFanout": 21120, "distinctBodies": 489, "recipientReads": 16308, "remoteP95Ms": 3.069, "udpPayloadBytes": 116317632 },
+    { "layout": "64x8", "dirtyFanout": 5520, "distinctBodies": 690, "recipientReads": 5520, "remoteP95Ms": 1.916, "udpPayloadBytes": 29890080 },
+    { "layout": "512x1", "dirtyFanout": 5370, "distinctBodies": 5370, "recipientReads": 5370, "remoteP95Ms": 1.819, "udpPayloadBytes": 14982300 }
+  ],
+  "controlledFanoutR64": [
+    { "layout": "1x64-period6", "recipientReads": 640, "sourceRecords": 100, "distinctBodies": 10, "remoteMeanMs": 0.184, "remoteP95Ms": 0.543 },
+    { "layout": "8x8", "recipientReads": 720, "sourceRecords": 600, "distinctBodies": 90, "remoteMeanMs": 0.222, "remoteP95Ms": 0.235 },
+    { "layout": "64x1", "recipientReads": 600, "sourceRecords": 600, "distinctBodies": 600, "remoteMeanMs": 0.202, "remoteP95Ms": 0.216 }
+  ],
+  "worldExtent": {
+    "inactiveChunksAdded": 4096,
+    "smallRemoteP95Ms": 0.233,
+    "largeRemoteP95Ms": 0.235,
+    "membershipsBoth": 1944,
+    "recipientReadsBoth": 720,
+    "conclusion": "no material inactive-world scan"
+  },
+  "factorialMeanEffectsMs": [
+    { "recipients": 200, "N": 1.481, "M": 1.007, "C": 0.003, "movementAtN0": 0.777, "networkAtM0": 1.251, "NxM": 0.460, "NxC": -0.003, "MxC": -0.001, "NxMxC": -0.005 },
+    { "recipients": 350, "N": 2.931, "M": 2.052, "C": 0.002, "movementAtN0": 1.395, "networkAtM0": 2.274, "NxM": 1.313, "NxC": -0.010, "MxC": 0.011, "NxMxC": -0.007 }
+  ],
+  "historicalV2": {
+    "artifact": "_Archive/_V2/_Benchmarks/results/dense_hotspot_new_runner_4families_60s/sharded_20260428_031706/aggregate.json",
+    "sha256": "4a93c44883924fa53dc20814faaca22377d8121d3da13135871fd0c83dac93d5",
+    "sparseArtifactFound": false,
+    "rows": [
+      { "R": 256, "v2MainTickP95Ms": 2.350, "v2AsyncSendP95Ms": 2.584, "v3DenseServerP95Ms": 4.840, "v3SparseServerP95Ms": 2.726 },
+      { "R": 300, "v2MainTickP95Ms": 2.913, "v2AsyncSendP95Ms": 3.374, "v3DenseServerP95Ms": 5.761, "v3SparseServerP95Ms": 3.270 },
+      { "R": 350, "v2MainTickP95Ms": 4.018, "v2AsyncSendP95Ms": 4.522, "v3DenseServerP95Ms": 6.945, "v3SparseServerP95Ms": 3.911 }
+    ],
+    "interpretation": "V2 main tick and async send are separate; V3 sparse reconstruction is contextual, not a historical V2 sparse benchmark or semantic equivalence"
+  },
+  "physics": {
+    "actorVsActorCollisionImplemented": false,
+    "pathfindingImplemented": false,
+    "r200FreeMovementCombinedP95Ms": 1.400,
+    "r350FreeMovementCombinedP95Ms": 2.637,
+    "r200DenseConvergenceCombinedP95Ms": 1.338,
+    "r350DenseConvergenceCombinedP95Ms": 2.376,
+    "qualification": "combined locomotion and current Simple Physics; no actor-contact counter"
+  },
+  "inactiveSystems": {
+    "simCore": "not implemented/performance-characterizable",
+    "dungeonCore": "not implemented/performance-characterizable",
+    "persistence": "event-driven and inactive in rated ticks",
+    "content": "event-driven and inactive in warmed rated ticks",
+    "diagnostics": "cold reads"
+  },
+  "limitations": [
+    "populations above 64 are benchmark capacity, not product CCU",
+    "Game movement and replication mirror are composed but not position-coupled",
+    "Chat authority is timed but remote Chat encoding/delivery is excluded",
+    "process CPU/RSS include in-process clients and background sender",
+    "current physics has no actor-vs-actor contact system",
+    "independent phase p95 values are not additive"
+  ],
+  "outcome": "characterization closed; production policy retained; PF6 remains unblocked",
+  "verification": {
+    "pf5R7Focused": "PASS",
+    "canonicalRelease": "PASS",
+    "focusedCommand": "dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj -c Release -- --pf5-r7-only",
+    "canonicalCommand": "./verify.sh --configuration=Release"
+  }
+}

@@ -115,7 +115,13 @@ authority-critical p95 enough to retain canonical message 120. PF5-R6 selects a 
 source-lifetime-owned immutable Delta-body store. Compatible recipients reuse canonical records
 and their validated content hash, while their application epochs, delivery IDs, admission, cursors,
 retry, debt, and exact proofs remain independent. The R300/high rated server-owned p95 falls from
-9.997 ms to 5.121 ms with canonical semantics and representation choices unchanged.
+9.997 ms to 5.121 ms with canonical semantics and representation choices unchanged. PF5-R7 then
+characterizes spatial topology and the current complete server-owned tick without changing
+production policy. At R350 full chaos, complete server-owned p95 is 6.993 ms: 4.384 ms remote
+replication and 2.681 ms locomotion/current Simple Physics. Dense shared AOI is the dominant
+replication amplifier; inactive world extent alone adds no publication work. Sim Core,
+pathfinding, Dungeon Core, and actor-contact Physics remain unimplemented rather than assigned
+speculative budgets.
 A post-F0.8 defensive UI correction
 also makes
 local shutdown independent from a saturated presentation queue, contains expected view-capacity
@@ -1825,6 +1831,7 @@ then close:
     PF5-R4 recipient preparation / encoding flattening                  CLOSED (outcome A)
     PF5-R5 singleton compression / prepared-hash hardening              CLOSED (outcome B)
     PF5-R6 compatible immutable recipient-body sharing                  CLOSED (outcome A)
+    PF5-R7 spatial topology / whole-server attribution                  CLOSED (characterization)
     PF6 external human validation                                       READY TO RESUME
 ```
 
