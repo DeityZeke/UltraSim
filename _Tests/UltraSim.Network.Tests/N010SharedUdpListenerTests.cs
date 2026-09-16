@@ -564,20 +564,25 @@ internal static class N010SharedUdpListenerTests
 
     private static SharedUdpProtocolHost CreateHost(
         int maximumSessions,
-        SharedUdpSocketIoMode mode = SharedUdpSocketIoMode.Scalar) =>
+        SharedUdpSocketIoMode mode = SharedUdpSocketIoMode.Scalar,
+        bool backgroundEgressTimingEnabled = false) =>
         SharedUdpProtocolHost.CreateSelfTrustedLoopback(
             s_protocol,
             s_udp,
             new SharedUdpProtocolLimits(
-                maximumSessions, 4, checked(maximumSessions * 16), mode, 32),
+                maximumSessions, 4, checked(maximumSessions * 16), mode, 32,
+                BackgroundEgressTimingEnabled: backgroundEgressTimingEnabled),
             s_manifest);
 
     private static void SharedUdpBackgroundScalarCopiesAndSendsIndependentDatagrams() =>
         AssertBackgroundCopiesAndSends(SharedUdpSocketIoMode.BackgroundScalar);
 
-    private static void SharedUdpDefaultUsesSelectedBackgroundEgress() =>
+    private static void SharedUdpDefaultUsesSelectedBackgroundEgress()
+    {
         Equal(SharedUdpSocketIoMode.BackgroundPlatformBatch,
             SharedUdpProtocolLimits.Default.SocketIoMode);
+        False(SharedUdpProtocolLimits.Default.BackgroundEgressTimingEnabled);
+    }
 
     private static void SharedUdpBackgroundNativeBatchCopiesAndSendsIndependentDatagrams()
     {
@@ -591,7 +596,8 @@ internal static class N010SharedUdpListenerTests
         using var gate = new BlockingEgressHook();
         using var listener = new SharedUdpServerListener(
             s_udp,
-            new SharedUdpProtocolLimits(1, 4, 16, mode, 8),
+            new SharedUdpProtocolLimits(1, 4, 16, mode, 8,
+                BackgroundEgressTimingEnabled: true),
             new IPEndPoint(IPAddress.Loopback, 0),
             unknownDatagramHandler: null,
             gate);
@@ -626,7 +632,8 @@ internal static class N010SharedUdpListenerTests
 
         static void AssertMode(SharedUdpSocketIoMode mode)
         {
-            using SharedUdpProtocolHost host = CreateHost(4, mode);
+            using SharedUdpProtocolHost host = CreateHost(4, mode,
+                backgroundEgressTimingEnabled: true);
             var sessions = new SharedUdpProtocolSession[4];
             Span<byte> queuedPayload = stackalloc byte[2];
             for (int index = 0; index < sessions.Length; index++)
@@ -667,7 +674,8 @@ internal static class N010SharedUdpListenerTests
         using var listener = new SharedUdpServerListener(
             s_udp,
             new SharedUdpProtocolLimits(1, 1, 16,
-                SharedUdpSocketIoMode.BackgroundScalar, 8),
+                SharedUdpSocketIoMode.BackgroundScalar, 8,
+                BackgroundEgressTimingEnabled: true),
             new IPEndPoint(IPAddress.Loopback, 0), null, gate);
         True(listener.TryRegister((IPEndPoint)remote.LocalEndPoint!, out SharedUdpServerEndpoint? endpoint));
         Equal(DatagramSendStatus.Accepted,
@@ -964,7 +972,8 @@ internal static class N010SharedUdpListenerTests
         var listener = new SharedUdpServerListener(
             s_udp,
             new SharedUdpProtocolLimits(1, 2, 16,
-                SharedUdpSocketIoMode.BackgroundScalar, 8),
+                SharedUdpSocketIoMode.BackgroundScalar, 8,
+                BackgroundEgressTimingEnabled: true),
             new IPEndPoint(IPAddress.Loopback, 0), null, hook);
         True(listener.TryRegister((IPEndPoint)remote.LocalEndPoint!, out SharedUdpServerEndpoint? endpoint));
         Equal(DatagramSendStatus.Accepted,

@@ -52,7 +52,7 @@ public readonly record struct SharedUdpProtocolLimits(
     int MaximumNativeReceiveBatchDatagrams = 32,
     int AggregateSocketSendBufferBytes = 0,
     int AggregateSocketReceiveBufferBytes = 0,
-    bool BackgroundEgressTimingEnabled = true)
+    bool BackgroundEgressTimingEnabled = false)
 {
     public static SharedUdpProtocolLimits Default => new(
         MaximumSessions: 256,
@@ -63,7 +63,7 @@ public readonly record struct SharedUdpProtocolLimits(
         MaximumNativeReceiveBatchDatagrams: 32,
         AggregateSocketSendBufferBytes: 0,
         AggregateSocketReceiveBufferBytes: 0,
-        BackgroundEgressTimingEnabled: true);
+        BackgroundEgressTimingEnabled: false);
 
     internal void Validate(UdpProtocolLimits udp)
     {
