@@ -1244,6 +1244,7 @@ internal enum P03MutationPattern : byte
     FixedPrefix = 5,
     MatchedDistributedPrefix = 6,
     BurstChunkStripe = 7,
+    SingleAcrossChunkStripe = 8,
 }
 
 internal readonly record struct P03NetworkWorkload(
@@ -1454,6 +1455,18 @@ internal readonly record struct P03NetworkWorkload(
                     int row = (burst + stripeChunk + round * chunksPerBurst) % entitiesPerChunk;
                     selected[offset] = chunk * entitiesPerChunk + row;
                 }
+                break;
+            }
+            case P03MutationPattern.SingleAcrossChunkStripe:
+            {
+                const int entitiesPerChunk = 20;
+                if (DirtyEntitiesPerTick != 1 || Entities % entitiesPerChunk != 0)
+                    throw new InvalidOperationException(
+                        "The single-record chunk stripe requires complete 20-row chunks.");
+                int chunkCount = Entities / entitiesPerChunk;
+                int chunk = (tick - 1) % chunkCount;
+                int row = ((tick - 1) / chunkCount) % entitiesPerChunk;
+                selected[0] = chunk * entitiesPerChunk + row;
                 break;
             }
             case P03MutationPattern.ActiveDistributed:

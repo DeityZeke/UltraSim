@@ -76,16 +76,29 @@ internal static class Pf5R8RequiredFanoutAttribution
                     }));
         }
 
-        int telemetryRecipients = focused ? 16 : 128;
-        int telemetryDirty = focused ? 6 : 45;
-        P03NetworkWorkload telemetryWorkload = P03NetworkWorkload.ChunkTopology(
-            telemetryRecipients, focused ? 32 : 1_000, telemetryDirty, 1)
-            .WithServerTickAndAoICadence(16, P03AoICadencePolicy.Selected124);
-        foreach (GameTelemetryLevel level in Enum.GetValues<GameTelemetryLevel>())
+        (string Label, int Dirty)[] telemetryActivities = focused
+            ? [("focused", 6)]
+            : [("low", 20), ("high", 45)];
+        int telemetryRepetitions = focused ? 1 : 3;
+        foreach ((string activityLabel, int telemetryDirty) in telemetryActivities)
+        for (int repetition = 0; repetition < telemetryRepetitions; repetition++)
         {
-            P03WholeFlowRow row = RunHarness(telemetryWorkload, matrixWarmup, matrixTicks,
-                level, retainRaw: true);
-            telemetry.Add(new Pf5R8TelemetryRow(level.ToString(), row));
+            int telemetryRecipients = focused ? 16 : 128;
+            P03NetworkWorkload telemetryWorkload = P03NetworkWorkload.ChunkTopology(
+                telemetryRecipients, focused ? 32 : 1_000, telemetryDirty, 1)
+                .WithServerTickAndAoICadence(16, P03AoICadencePolicy.Selected124);
+            GameTelemetryLevel[] order = (repetition & 1) == 0
+                ? [GameTelemetryLevel.Off, GameTelemetryLevel.Basic,
+                    GameTelemetryLevel.Detailed]
+                : [GameTelemetryLevel.Detailed, GameTelemetryLevel.Basic,
+                    GameTelemetryLevel.Off];
+            foreach (GameTelemetryLevel level in order)
+            {
+                P03WholeFlowRow row = RunHarness(telemetryWorkload, matrixWarmup,
+                    matrixTicks, level, retainRaw: true);
+                telemetry.Add(new Pf5R8TelemetryRow(
+                    activityLabel, repetition, level.ToString(), row));
+            }
         }
 
         int[] debtDepths = focused ? [1, 4] : [1, 4, 16, 64];
@@ -97,7 +110,11 @@ internal static class Pf5R8RequiredFanoutAttribution
                     {
                         MutationPattern = P03MutationPattern.FixedPrefix,
                     }
-                    : P03NetworkWorkload.ChunkProductionDense(1))
+                    : P03NetworkWorkload.ChunkProductionDense(1) with
+                    {
+                        DirtyEntitiesPerTick = 1,
+                        MutationPattern = P03MutationPattern.SingleAcrossChunkStripe,
+                    })
                 .WithServerTickAndAoICadence(16, P03AoICadencePolicy.Selected124) with
                 {
                     Id = $"proof-debt-{(sameChunk ? "same" : "multi")}-{depth}",
@@ -438,6 +455,8 @@ internal sealed record Pf5R8MeasuredRow(
     Pf5R8ExclusiveAttribution Exclusive);
 
 internal sealed record Pf5R8TelemetryRow(
+    string Activity,
+    int Repetition,
     string Level,
     P03WholeFlowRow Row);
 
