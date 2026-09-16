@@ -3086,12 +3086,63 @@ internal static class N1OfflineDirectChunkTests
         Equal(2UL, compression.SingletonAttempts);
         Equal(2UL, compression.SingletonCodecSuccesses);
         Equal(1UL, compression.SingletonSelected);
+        Equal(0UL, compression.StandaloneFallbackWrites);
+        Equal(0UL, server.GetTimingSnapshot().Cpu.Encoder.PreparedStandaloneWrites);
         True(compression.SingletonBytesSavedVs120 >= 32);
         Console.WriteLine($"EVIDENCE PF5-R5 singleton_transaction attempts=" +
             $"{compression.SingletonAttempts} selected={compression.SingletonSelected} " +
             $"canonical129={compression.SingletonCanonical129Bytes} " +
             $"selected_bytes={compression.SingletonSelectedBytes} " +
             $"saved_vs120={compression.SingletonBytesSavedVs120} proof=1");
+    }
+
+    internal static void SingletonCompressionLazyStandaloneWritesOnlyOnFallback()
+    {
+        using var fixture = new Fixture(historyCapacity: 32);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        using ProtocolLoopback loopback = CreateLoopback(default);
+        var recipient = Recipient(maximumRecords: 8);
+        var cache = Cache(fixture, maximumPublicRecords: 8);
+        SpatialChunkKey key = Key(0, 0);
+        ReconcileAndStageInitial(fixture, recipient, cache, Position(0, 0, 8_000, 8_000));
+        fixture.Present(0, Position(0, 0, 2_100, 2_000),
+            GameWorldPublicPrefabIds.Character);
+        var server = new RemoteChunkWorldStateServer(
+            loopback.Server, recipient, fixture.Store, 0xF5_0603,
+            new RemoteChunkWorldStateTransportLimits(
+                8, 64, RemoteChunkBundleCompressionPolicy.Selected,
+                RemoteChunkSingletonDeltaCompression.WhenBeneficial));
+        server.ConfigureTelemetry(GameTelemetryLevel.Detailed);
+        var client = new RemoteChunkWorldStateClient(
+            loopback.Client, cache, 0xF5_0603, maximumDeltaRecords: 8,
+            maximumPendingProofs: 8);
+        ChunkPublicationWork[] works =
+        [
+            new(default, key, ChunkInterestTier.Immediate,
+                ChunkPublicationWorkKind.Dirty, 1, 1),
+        ];
+        Span<RemoteChunkWorldStateScheduleStatus> statuses =
+            stackalloc RemoteChunkWorldStateScheduleStatus[1];
+
+        Equal(1, server.TryScheduleDueBundle(works, 1, statuses, out int messages));
+        Equal(1, messages);
+        Equal(RemoteChunkWorldStateScheduleStatus.QueuedDelta, statuses[0]);
+        for (int pump = 0; pump < 8 && loopback.Client.ReceivedQueued == 0; pump++)
+            loopback.Pump();
+        True(loopback.Client.TryPeekReceived(
+            out NetworkDeliveredMessage delivered, out ReadOnlySpan<byte> payload));
+        Equal(RemoteChunkDeltaHeaderCodec.Descriptor.Id, delivered.MessageId);
+        True(client.TryProcess(delivered, payload));
+        True(loopback.Client.TryConsumeReceived());
+        Drive(loopback, server, client, () => server.GetSnapshot().AppliedProofs == 1);
+
+        RemoteChunkReplicationTimingSnapshot timing = server.GetTimingSnapshot();
+        Equal(1UL, timing.Knowledge.Compression.StandaloneFallbackWrites);
+        Equal(1UL, timing.Cpu.Encoder.PreparedStandaloneWrites);
+        Equal(0UL, timing.Knowledge.Compression.SingletonSelected);
+        Console.WriteLine("EVIDENCE PF5-R6 lazy120 selected_writes=0 fallback_writes=1 " +
+            "queue_attempts=1 proof=1");
     }
 
     internal static void SingletonCompressionMtuAndProfitabilityAreExact()

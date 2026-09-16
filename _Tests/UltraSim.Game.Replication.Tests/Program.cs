@@ -168,6 +168,7 @@ var tests = new (string Name, Action Body)[]
     ("PF4FCompressedBundleCodecIsExactBoundedHostileSafeAndAllocationFree", N1OfflineDirectChunkTests.CompressedBundleCodecIsExactBoundedHostileSafeAndAllocationFree),
     ("PF4FSelectedCompressionPreservesQueueTransactionAndProofs", N1OfflineDirectChunkTests.SelectedCompressionPreservesQueueTransactionAndProofs),
     ("PF5R5SingletonCompressionIsExactTransactionalAndBounded", N1OfflineDirectChunkTests.SingletonCompressionIsExactTransactionalAndBounded),
+    ("PF5R6SingletonCompressionLazyStandaloneWritesOnlyOnFallback", N1OfflineDirectChunkTests.SingletonCompressionLazyStandaloneWritesOnlyOnFallback),
     ("PF5R5SingletonCompressionMtuAndProfitabilityAreExact", N1OfflineDirectChunkTests.SingletonCompressionMtuAndProfitabilityAreExact),
     ("PF5R5SingletonCompressionPoorDataFallsBack", N1OfflineDirectChunkTests.SingletonCompressionPoorDataFallsBack),
     ("PF5R5SingletonCompressionPreservesRemovalAndMasks", N1OfflineDirectChunkTests.SingletonCompressionPreservesRemovalAndMasks),

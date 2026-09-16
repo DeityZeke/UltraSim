@@ -192,6 +192,7 @@ internal static class P03WholeFlowNetworkSuite
         int[] populations = ParseOptionalPositiveIntegers(ReadText(args, "--populations")) ??
             [64, 128, 192, 256, 300, 350];
         bool detailed = args.Contains("--game-detailed", StringComparer.Ordinal);
+        bool highOnly = args.Contains("--high-only", StringComparer.Ordinal);
         bool egressTiming = !string.Equals(
             ReadText(args, "--egress-timing"), "off", StringComparison.OrdinalIgnoreCase);
         string output = ReadText(args, "--output") ??
@@ -207,7 +208,7 @@ internal static class P03WholeFlowNetworkSuite
         var cases = new List<(int Population, bool High,
             RemoteChunkSingletonDeltaCompression Policy)>(populations.Length * 4);
         foreach (int population in populations)
-        foreach (bool high in new[] { false, true })
+        foreach (bool high in highOnly ? new[] { true } : new[] { false, true })
         foreach (RemoteChunkSingletonDeltaCompression policy in policies)
             cases.Add((population, high, policy));
         var random = new Random(ExecutionSeed ^ 0x5F50_5005);
@@ -247,6 +248,7 @@ internal static class P03WholeFlowNetworkSuite
                 $"remote p95={row.Timing.ServerOwnedRemoteReplicationBudget.P95:F3}ms " +
                 $"120={row.ProfileCounters.Compression.SingletonDeltaCandidates - row.ProfileCounters.Compression.SingletonSelected:N0} " +
                 $"singleton148={row.ProfileCounters.Compression.SingletonSelected:N0} " +
+                $"fallback_writes={row.ProfileCounters.Compression.StandaloneFallbackWrites:N0} " +
                 $"app={row.ProfileCounters.ApplicationBytesQueued:N0} " +
                 $"wire={row.Transport.WireBytes:N0}");
         }
@@ -4134,6 +4136,7 @@ internal readonly record struct P03CompressionCounters(
     ulong SingletonSelected,
     ulong SingletonCanonical129Bytes,
     ulong SingletonStandalone120Bytes,
+    ulong StandaloneFallbackWrites,
     ulong SingletonSelectedBytes,
     ulong SingletonBytesSavedVs120,
     ulong SingletonCompressionStopwatchTicks,
@@ -4164,6 +4167,7 @@ internal readonly record struct P03CompressionCounters(
         Add(SingletonSelected, value.SingletonSelected),
         Add(SingletonCanonical129Bytes, value.SingletonCanonical129Bytes),
         Add(SingletonStandalone120Bytes, value.SingletonStandalone120Bytes),
+        Add(StandaloneFallbackWrites, value.StandaloneFallbackWrites),
         Add(SingletonSelectedBytes, value.SingletonSelectedBytes),
         Add(SingletonBytesSavedVs120, value.SingletonBytesSavedVs120),
         Add(SingletonCompressionStopwatchTicks,

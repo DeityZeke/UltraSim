@@ -232,6 +232,7 @@ public readonly record struct RemoteChunkCompressionCensusSnapshot(
     ulong SingletonSelected,
     ulong SingletonCanonical129Bytes,
     ulong SingletonStandalone120Bytes,
+    ulong StandaloneFallbackWrites,
     ulong SingletonSelectedBytes,
     ulong SingletonBytesSavedVs120,
     GameTimingDistribution SingletonCompression);
@@ -486,6 +487,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     private ulong _timedSingletonCompressionSelected;
     private ulong _timedSingletonCanonical129Bytes;
     private ulong _timedSingletonStandalone120Bytes;
+    private ulong _timedSingletonStandaloneFallbackWrites;
     private ulong _timedSingletonSelectedBytes;
     private ulong _timedSingletonBytesSavedVs120;
     private GameValueDistributionWindow? _bundleOccupancy;
@@ -695,6 +697,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         _timedSingletonProfitableVsStandalone120 = 0;
         _timedSingletonCompressionSelected = 0;
         _timedSingletonCanonical129Bytes = _timedSingletonStandalone120Bytes = 0;
+        _timedSingletonStandaloneFallbackWrites = 0;
         _timedSingletonSelectedBytes = _timedSingletonBytesSavedVs120 = 0;
         if (level == GameTelemetryLevel.Detailed)
         {
@@ -1372,8 +1375,8 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         }
 
         if (staged == 0) return processed;
-        NetworkMessageId messageId;
-        int written;
+        NetworkMessageId messageId = default;
+        int written = 0;
         bool bundled = staged >= 2 && bundleBytes < standaloneBytes;
         bool compressed = false;
         bool singletonCompressed = false;
@@ -1455,20 +1458,12 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                     ? _bundleDeltaRecords.AsSpan(
                         _bundleEntries[0].RecordOffset, _bundleEntries[0].RecordCount)
                     : [];
-            if (!_encoder.TryEncodePreparedStandalone(
-                    in _bundleResults[0], records, _messageScratch, out written))
-                throw new InvalidOperationException(
-                    "A validated selected-profile publication failed canonical standalone encoding.");
-            standaloneScratch = true;
-            messageId = _bundleResults[0].Kind == RemoteChunkPublicationKind.Delta
-                ? RemoteChunkDeltaHeaderCodec.Descriptor.Id
-                : RemoteChunkAbsenceMessageCodec.Descriptor.Id;
-
             if (_bundleResults[0].Kind == RemoteChunkPublicationKind.Delta)
             {
                 SaturatingIncrement(ref _timedSingletonCandidates);
-                SaturatingAdd(ref _timedSingletonStandalone120Bytes, checked((ulong)written));
-                singletonStandaloneBytes = written;
+                singletonStandaloneBytes = _bundleResults[0].Written;
+                SaturatingAdd(ref _timedSingletonStandalone120Bytes,
+                    checked((ulong)singletonStandaloneBytes));
                 if (_singletonDeltaCompression ==
                     RemoteChunkSingletonDeltaCompression.WhenBeneficial)
                 {
@@ -1554,6 +1549,21 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                         }
                     }
                 }
+            }
+            if (!singletonCompressed)
+            {
+                if (!_encoder.TryEncodePreparedStandalone(
+                        in _bundleResults[0], records, _messageScratch, out written))
+                    throw new InvalidOperationException(
+                        "A validated selected-profile publication failed canonical standalone encoding.");
+                standaloneScratch = true;
+                messageId = _bundleResults[0].Kind == RemoteChunkPublicationKind.Delta
+                    ? RemoteChunkDeltaHeaderCodec.Descriptor.Id
+                    : RemoteChunkAbsenceMessageCodec.Descriptor.Id;
+                if (_bundleResults[0].Kind == RemoteChunkPublicationKind.Delta &&
+                    _singletonDeltaCompression ==
+                        RemoteChunkSingletonDeltaCompression.WhenBeneficial)
+                    SaturatingIncrement(ref _timedSingletonStandaloneFallbackWrites);
             }
         }
 
@@ -2819,6 +2829,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                 _timedSingletonCompressionSelected,
                 _timedSingletonCanonical129Bytes,
                 _timedSingletonStandalone120Bytes,
+                _timedSingletonStandaloneFallbackWrites,
                 _timedSingletonSelectedBytes,
                 _timedSingletonBytesSavedVs120,
                 _singletonCompressionTiming.Capture()),
