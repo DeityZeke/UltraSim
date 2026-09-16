@@ -261,8 +261,8 @@
     "pf5R2R2Only": "PASS",
     "pf5R3Only": "PASS",
     "pf5R4Only": "PASS before final evidence commit; repeated at closure",
-    "canonicalRelease": "PENDING",
-    "exportsAndComposition": "PENDING"
+    "canonicalRelease": "PASS at c68454ea1e110f73b86834e95e29fbb54c885e42",
+    "exportsAndComposition": "PASS at c68454ea1e110f73b86834e95e29fbb54c885e42; physical Single Player/Online/Complete exports, Contentless Online cold/warm, mixed exported-client/bot accounting, Complete hosting, and mixed-session lifecycle"
   },
   "disposition": {
     "finding1": "accepted",

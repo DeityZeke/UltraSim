@@ -160,7 +160,9 @@ out-of-order/duplicate/stale proof, coverage gap, tombstone/absence, slot reuse,
 slow recipient, AOI leave/reentry, source replacement, reconnect, custom MTU, compression,
 packet split, canonical standalone bytes, warmed allocation, and the new queue-refusal test.
 Focused PF5-R2, PF5-R2-R1, PF5-R2-R2, PF5-R3, and PF5-R4 gates pass. Canonical Release/export
-closure is recorded in the companion JSON after the closure run.
+verification also passes at evidence commit `c68454ea1e110f73b86834e95e29fbb54c885e42`, including
+the physical Single Player/Online/Complete exports, Contentless Online cold/warm application,
+mixed exported-client plus bot accounting, Complete hosting, and mixed-session lifecycle gates.
 
 ## Disposition
 
