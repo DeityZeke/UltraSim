@@ -423,8 +423,13 @@ internal static class Pf5R7SpatialTopologyAttribution
             path,
             Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
             "Separate server plus four client-worker processes; one session-owned movement entity " +
-                "per accepted client; dense hotspot; four historical semantic families. Main " +
-                "server tick and previous async send are separate distributions and are not added.",
+                "per accepted client and no separately evidenced ambient population; dense 1 m " +
+                "spawn grid (width 20); 35% active; 20 Hz phased input with held movement applied " +
+                "by the 62 Hz server; AOI 7.5/23.5/39.5 m; ring cadence 1/2/3; movement, visual, " +
+                "bulk-every-16-ticks, and ordered-event-every-8-ticks families; latest-state " +
+                "recipient phasing cadence 2; latest-state batching disabled; Chat disabled; " +
+                "asynchronous server flush enabled. Main server tick and previous async send are " +
+                "separate distributions and are not added.",
             stages);
     }
 

@@ -1707,7 +1707,12 @@ internal sealed class P03WholeFlowHarness : IDisposable
         P03TransportTotals before = CaptureTransport();
         SharedUdpListenerSnapshot listenerBefore = _host.GetSnapshot().Listener;
         using Process measuredProcess = Process.GetCurrentProcess();
+        measuredProcess.Refresh();
         TimeSpan processCpuBefore = measuredProcess.TotalProcessorTime;
+        long processWorkingSetBefore = measuredProcess.WorkingSet64;
+        int gen0Before = GC.CollectionCount(0);
+        int gen1Before = GC.CollectionCount(1);
+        int gen2Before = GC.CollectionCount(2);
         long processWallStarted = Stopwatch.GetTimestamp();
         long allocatedBefore = GC.GetTotalAllocatedBytes(true);
         for (int tick = 1; tick <= ticks; tick++) RunTick(warmup + tick, measure: true);
@@ -1716,6 +1721,8 @@ internal sealed class P03WholeFlowHarness : IDisposable
             .TotalMilliseconds;
         double processCpuMilliseconds =
             (measuredProcess.TotalProcessorTime - processCpuBefore).TotalMilliseconds;
+        measuredProcess.Refresh();
+        long processWorkingSetAfter = measuredProcess.WorkingSet64;
         long processPeakWorkingSetBytes = measuredProcess.PeakWorkingSet64;
         long allocated = GC.GetTotalAllocatedBytes(false) - allocatedBefore;
         P03TransportTotals after = CaptureTransport();
@@ -1786,7 +1793,12 @@ internal sealed class P03WholeFlowHarness : IDisposable
                 processCpuMilliseconds,
                 processWallMilliseconds <= 0 ? 0 :
                     processCpuMilliseconds / processWallMilliseconds,
-                processPeakWorkingSetBytes),
+                processPeakWorkingSetBytes,
+                processWorkingSetBefore,
+                processWorkingSetAfter,
+                GC.CollectionCount(0) - gen0Before,
+                GC.CollectionCount(1) - gen1Before,
+                GC.CollectionCount(2) - gen2Before),
             new P03ListenerConfigurationSummary(
                 listenerAfter.ConfiguredSocketBufferBytes,
                 listenerAfter.ActualSocketBufferBytes,
@@ -3888,7 +3900,12 @@ internal readonly record struct P03ProcessWindowSummary(
     double WallMilliseconds,
     double CpuMilliseconds,
     double CpuCores,
-    long PeakWorkingSetBytes);
+    long PeakWorkingSetBytes,
+    long StartingWorkingSetBytes,
+    long EndingWorkingSetBytes,
+    int Gen0Collections,
+    int Gen1Collections,
+    int Gen2Collections);
 
 internal readonly record struct P03ListenerConfigurationSummary(
     long ConfiguredSocketBufferBytes,
