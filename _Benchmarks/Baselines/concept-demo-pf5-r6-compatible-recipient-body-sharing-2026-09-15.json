@@ -1,0 +1,137 @@
+{
+  "schema": "ultrasim-concept-demo-pf5-r6-compatible-recipient-body-sharing-v1",
+  "checkpoint": "PF5-R6",
+  "date": "2026-09-15",
+  "outcome": "A",
+  "startingHead": "5f416167bcc89e6b68cc1705c92c13460ba3dbd5",
+  "replicationSemanticLineage": "992fc541460f18534da9036c73cb711277de11ce",
+  "productionImplementationCandidate": "eca422171c6a1c27c6a0e022a9ff493ece5da597",
+  "experimentalCleanupCommit": "ddf454b36e387f84ebfeae70a665acf765d76402",
+  "productionPolicy": {
+    "egress": "BackgroundPlatformBatch",
+    "representation": "CurrentBundled",
+    "singletonCompression": "Disabled",
+    "cadence": "1/2/4",
+    "aggregation": "CrossLane cap 2",
+    "gameManifest": 29,
+    "transportRevision": 2
+  },
+  "identity": [
+    "physical ChunkPublicationStore lifetime",
+    "SourceEpoch",
+    "SpatialChunkKey",
+    "BaseRevision",
+    "CurrentRevision",
+    "HistoryFloor"
+  ],
+  "store": {
+    "bodySlots": 1024,
+    "recordSlots": 65536,
+    "maximumRecordsPerBody": 64,
+    "associativity": 4,
+    "maximumLookupProbes": 4,
+    "metadataBytes": 60928,
+    "recordStorageBytes": 3145728,
+    "diagnosticBytes": 8192,
+    "totalReservedBytes": 3214848,
+    "disabledReservedBytes": 0,
+    "warmedManagedAllocationBytes": 0
+  },
+  "environment": {
+    "runtime": ".NET 8.0.129",
+    "os": "Linux x86-64",
+    "processor": "AMD Ryzen 7 7800X3D",
+    "logicalProcessors": 16,
+    "configuration": "Release",
+    "seed": 84111361
+  },
+  "method": {
+    "entities": 1000,
+    "lowDirty": 20,
+    "highDirty": "round(35% of recipients)",
+    "warmupTicks": 60,
+    "measuredTicks": 270,
+    "transport": "real secure loopback UDP",
+    "detailedMeasuredTicks": 90
+  },
+  "rawSha256": {
+    "rated": "ec2b4545ec20c23cb729529045a8df442f0f01876ab310d4dfb1cb9fcd9e74a9",
+    "detailedR300": "3b83ff1874aff45ca1b130c836fad3fe3be611b31aaeae14ce83f3c440980ce0",
+    "divergence": "9986d60c37ad6e6b53f2179f18b71d6f4eafb70834a9f3b852d1ecc8cb912833",
+    "singletonRecheck": "d81cd01352f94c5718901e75bf93d291893fed1b00d4b1c8a557914fb0a39f59",
+    "r64Confirmation": "0a178f2d19eb8f54a55bdb93b9e34d06e1b3ef7c6e8c2ab19d6161aebeef30c0"
+  },
+  "rated": [
+    {"r":128,"dirty":20,"offP95Ms":1.533397,"onP95Ms":1.072950,"onRequests":80772,"onFills":1282,"onHits":79490,"onBuiltRecords":8370,"onServedRecords":547542},
+    {"r":128,"dirty":45,"offP95Ms":2.388937,"onP95Ms":1.256809,"onRequests":80772,"onFills":1281,"onHits":79491,"onBuiltRecords":18744,"onServedRecords":1241664},
+    {"r":192,"dirty":20,"offP95Ms":2.424388,"onP95Ms":1.820863,"onRequests":219603,"onFills":2629,"onHits":216974,"onBuiltRecords":8427,"onServedRecords":807082},
+    {"r":192,"dirty":67,"offP95Ms":5.193464,"onP95Ms":2.603986,"onRequests":219603,"onFills":2629,"onHits":216974,"onBuiltRecords":28317,"onServedRecords":2692264},
+    {"r":256,"dirty":20,"offP95Ms":3.515445,"onP95Ms":2.374130,"onRequests":294707,"onFills":2696,"onHits":292011,"onBuiltRecords":8897,"onServedRecords":1023647},
+    {"r":256,"dirty":90,"offP95Ms":8.106843,"onP95Ms":4.230609,"onRequests":294707,"onFills":2696,"onHits":292011,"onBuiltRecords":39973,"onServedRecords":4616064},
+    {"r":300,"dirty":20,"offP95Ms":3.931152,"onP95Ms":3.014023,"onRequests":339560,"onFills":2696,"onHits":336864,"onBuiltRecords":8830,"onServedRecords":1166404},
+    {"r":300,"dirty":105,"offP95Ms":9.997172,"onP95Ms":5.121025,"onRequests":339560,"onFills":2696,"onHits":336864,"onBuiltRecords":46714,"onServedRecords":6087128},
+    {"r":350,"dirty":20,"offP95Ms":5.180371,"onP95Ms":3.930535,"onRequests":476981,"onFills":3707,"onHits":473274,"onBuiltRecords":9167,"onServedRecords":1276650},
+    {"r":350,"dirty":122,"offP95Ms":14.254939,"onP95Ms":7.526922,"onRequests":528509,"onFills":4179,"onHits":524330,"onBuiltRecords":56077,"onServedRecords":7896063}
+  ],
+  "r300HighDetailed": {
+    "requests": 113570,
+    "distinctBodies": 896,
+    "hits": 112674,
+    "recordsRequested": 2050452,
+    "recordsBuilt": 15529,
+    "recordsServed": 2034923,
+    "materializationCallsOff": 113570,
+    "materializationCallsOn": 896,
+    "validationHashCallsOff": 113570,
+    "validationHashCallsOn": 896,
+    "validationHashTicksOff": 443218130,
+    "validationHashTicksOn": 3388057,
+    "lookupTicks": 4078106,
+    "copyTicks": 4283191,
+    "fillTicks": 373816,
+    "sourceReadTicksOff": 104470750,
+    "sourceReadTicksOn": 106724971,
+    "scheduleTicksOff": 807570725,
+    "scheduleTicksOn": 375883664,
+    "serverP95MsOff": 13.523457,
+    "serverP95MsOn": 8.631090,
+    "requestsPerBody": {"p50":139,"p95":182,"p99":182,"max":300}
+  },
+  "divergenceHitPercent": {
+    "synchronized": 98.44,
+    "staggeredJoins": 98.14,
+    "cadencePhases": 93.82,
+    "controlledLoss": 96.92,
+    "controlledReorder": 96.89,
+    "proofDelay": 98.44,
+    "temporaryStalls": 98.28,
+    "aoiChurn": 97.63,
+    "reconnect": 98.44,
+    "historyPressure": 98.29,
+    "combinedDivergence": 75.90
+  },
+  "semanticEquality": {
+    "semanticDigest": true,
+    "publications": true,
+    "proofs": true,
+    "gameMessages": true,
+    "bundleChoices": true,
+    "compressionChoices": true,
+    "canonicalApplicationBytes": true,
+    "recipientProofStateShared": false,
+    "historyFloorBypass": false
+  },
+  "singletonRecheck": [
+    {"r":128,"canonicalP95Ms":1.207979,"experimentalP95Ms":1.329418,"selected":37004,"fallbackWrites":0},
+    {"r":192,"canonicalP95Ms":2.395039,"experimentalP95Ms":2.715694,"selected":54656,"fallbackWrites":133},
+    {"r":256,"canonicalP95Ms":3.669458,"experimentalP95Ms":4.897276,"selected":173035,"fallbackWrites":114},
+    {"r":300,"canonicalP95Ms":4.493269,"experimentalP95Ms":5.574609,"selected":287862,"fallbackWrites":0}
+  ],
+  "verification": {
+    "pf5R6Focused": "pass: 175 replication tests plus real-UDP Off/Census/On and 11 divergence scenarios",
+    "canonicalRelease": "pass: all suites, actual exports, contentless cold/warm, Complete-hosted, mixed exported-client/bot, accounting, lifecycle, and F0.8 parity",
+    "nonReproducingFirstRunObservation": "WorldPackBoundsRejectBeforeProportionalAllocation reported 6192 warmed bytes once; the focused World suite and complete canonical rerun passed without source changes"
+  },
+  "optionalB2": "not implemented",
+  "recommendedNextCheckpoint": "PF6 external human validation; source-read/collapse remains an optional later performance investigation"
+}

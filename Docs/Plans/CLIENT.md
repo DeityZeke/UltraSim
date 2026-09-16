@@ -2745,6 +2745,7 @@ PF5-R2-R2 HTTP shutdown + normalized scaling attribution                     CLO
 PF5-R3 bounded background UDP egress                                         CLOSED (outcome A)
 PF5-R4 recipient preparation / encoding flattening                           CLOSED (outcome A)
 PF5-R5 singleton compression / prepared-hash hardening                       CLOSED (outcome B)
+PF5-R6 compatible immutable recipient-body sharing                           CLOSED (outcome A)
 PF6 external human validation                                                READY TO RESUME
         |
         v

@@ -673,6 +673,28 @@ compression disabled; manifest v29, transport revision 2, selected multi-entry c
 cadence, AOI, aggregation, and `BackgroundPlatformBatch` remain unchanged. See the
 [PF5-R5 evidence](../../_Benchmarks/Baselines/concept-demo-pf5-r5-singleton-compression-2026-09-15.md).
 
+### PF5-R6 compatible immutable recipient bodies
+
+PF5-R6 retains the accepted post-`TryBeginRead` transaction and shares only immutable authoritative
+Delta bodies across recipients covering the exact same source lifetime, epoch, chunk, revision
+range, and history floor. Application session, delivery id, queue admission, retry, cursor,
+outstanding debt, and applied proof remain recipient-local. Lookup therefore cannot bypass a
+current `HistoryFloor`/Rebase decision or make cache residency part of correctness.
+
+The source-lifetime-owned store is fixed at 1,024 bodies, 65,536 records, 64 records/body, and
+four probes. Its enabled reservation is 3,214,848 bytes; disabled mode reserves no body arrays.
+Publication uses an explicit valid bit, including for valid hash zero, and bounded set-local
+replacement. It lives in Game remote-replication composition rather than Network and adds no
+dependency to packet-free local Game.
+
+Matched real-UDP R128–R350 rows retain canonical semantic/message work. Low-change server-owned
+p95 improves 23–33%; high-change improves 47–50%. R300/high serves 112,674 of 113,570 detailed
+requests from 896 bodies, reducing validation/hash calls from 113,570 to 896 and schedule p95 from
+9.705 ms to 4.801 ms. Deliberately combined proof/cursor divergence still retains 75.90% exact
+body reuse. The selected policy remains `BackgroundPlatformBatch`, `CurrentBundled`, and singleton
+compression disabled. See the
+[PF5-R6 evidence](../../_Benchmarks/Baselines/concept-demo-pf5-r6-compatible-recipient-body-sharing-2026-09-15.md).
+
 ### Snapshot / delta / absence
 
 Ordinary MTU-admissible deltas and absence use independent-unreliable WorldState.

@@ -74,7 +74,11 @@ and physical wire output. Inline `PlatformBatch` is the serial control for the a
 prepared-hash contract and evaluates existing one-entry 129/148 capability. The representation is
 not selected: high-change bytes fall materially, but recipient-local LZ4 raises the server-owned
 p95 by 7–15% at several larger measured points. The selected production policy remains the PF5-R4
-policy, and PF6 may resume on the integrated post-PF5-R5 tree after canonical closure.
+policy. PF5-R6 then selects bounded source-lifetime-owned immutable Delta-body sharing: exact
+recipient proof and knowledge remain independent, while repeated materialization/hash work falls
+to one preparation per compatible body. R300/high body reuse is 99.21%, and deliberately combined
+divergence still retains 75.90% reuse. PF6 may resume on the integrated post-PF5-R6 tree after
+canonical closure.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -2266,14 +2270,17 @@ repair it.
 
 ## PF6 — external human validation
 
-**Status: READY TO RESUME after PF5-R5 closure.** PF5-R2-R2 repaired the HTTP-host
+**Status: READY TO RESUME after PF5-R6 closure.** PF5-R2-R2 repaired the HTTP-host
 shutdown race and retained complete unexpected-worker-failure reporting. PF5-R3 leaves Game,
 replication, proof, wire, cadence, AOI, compression, aggregation, and participant policy exact;
 its selected physical egress is covered by focused lifecycle, external Hosted, and full export
 verification. PF5-R4 removes redundant recipient preparation/encoding while retaining the same
 semantic digest, publications, proofs, Game messages, bundle entries, UDP datagrams, and bytes.
 PF5-R5 preserves that selected policy after rejecting singleton compression for authority-thread
-cost; its trusted prepared-hash hardening changes no wire identity.
+cost; its trusted prepared-hash hardening changes no wire identity. PF5-R6 shares only exact
+source-derived immutable Delta bodies. It preserves the existing read transaction,
+HistoryFloor/Rebase, queue transaction, and recipient-local delivery/proof state while removing
+repeated materialization/hash work. Singleton compression remains disabled.
 
 Close when:
 
@@ -2433,11 +2440,13 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
     **CLOSED — PF5-R4 outcome A**
 32. Evaluate one-entry 129/148 only as a separate representation checkpoint if selected.
     **CLOSED — PF5-R5 outcome B; bandwidth win measured, default remains canonical 120**
-33. Choose/document the default deployment-performance policy. **CLOSED — v29 plus PF5-R3 egress**
-34. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5/PF5-R5**
-35. Full exact-tree verifier and export closure.
-36. Freeze/tag the Concept Demo baseline.
-37. Begin the separate extraction/genericization/ecosystem roadmap.
+33. Share exact immutable recipient Delta bodies without sharing recipient knowledge.
+    **CLOSED — PF5-R6 outcome A**
+34. Choose/document the default deployment-performance policy. **CLOSED — v29 plus PF5-R3 egress**
+35. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5/PF5-R6**
+36. Full exact-tree verifier and export closure.
+37. Freeze/tag the Concept Demo baseline.
+38. Begin the separate extraction/genericization/ecosystem roadmap.
 ```
 
 The intended outcome is not merely a demo that works.
