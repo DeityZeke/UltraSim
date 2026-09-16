@@ -39,6 +39,12 @@ if (args.Contains("--pf5-r8-required-fanout", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--pf5-r9-packet-producer", StringComparer.Ordinal))
+{
+    Pf5R9PacketProducerAudit.Run(args);
+    return;
+}
+
 if (args.Contains("--pf5-r4-sort-micro", StringComparer.Ordinal))
 {
     Pf5R4SortMicrobenchmark.Run(args);

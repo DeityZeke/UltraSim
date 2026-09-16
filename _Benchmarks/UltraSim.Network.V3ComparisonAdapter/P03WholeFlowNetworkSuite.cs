@@ -1642,6 +1642,9 @@ internal sealed class P03WholeFlowHarness : IDisposable
     private readonly List<double> _serverApplication = new();
     private readonly List<double> _clientApplication = new();
     private readonly List<double> _networkAndRemoteReplication = new();
+    private readonly List<double> _serverOutboundProtocol = new();
+    private readonly List<double> _serverInboundProtocol = new();
+    private readonly List<double> _networkOtherResidual = new();
     private readonly List<double> _serverOwnedRemoteReplicationBudget = new();
     private readonly List<double> _authorityThroughNetworkAndRemoteReplication = new();
     private readonly List<double> _serverRole = new();
@@ -1861,7 +1864,10 @@ internal sealed class P03WholeFlowHarness : IDisposable
                 P03Metric.From(_authorityAndEcs),
                 P03Metric.From(_locomotionAndPhysics),
                 P03Metric.From(_inventoryAndItems),
-                P03Metric.From(_worldCommit)),
+                P03Metric.From(_worldCommit),
+                P03Metric.From(_serverOutboundProtocol),
+                P03Metric.From(_serverInboundProtocol),
+                P03Metric.From(_networkOtherResidual)),
             _timingBoundary,
             transport, profile, _adapter.SemanticDigest(), allocated,
             checked(profileServerReserved + profileClientReserved),
@@ -1894,7 +1900,10 @@ internal sealed class P03WholeFlowHarness : IDisposable
                     _serverApplication.ToArray(),
                     _networkAndRemoteReplication.ToArray(),
                     ExclusiveResidualSamples(
-                        _networkAndRemoteReplication, _schedule, _serverApplication),
+                        _networkAndRemoteReplication, _schedule, _serverApplication,
+                        _serverOutboundProtocol, _serverInboundProtocol),
+                    _serverOutboundProtocol.ToArray(),
+                    _serverInboundProtocol.ToArray(),
                     _serverOwnedRemoteReplicationBudget.ToArray(),
                     _serverOwnedTick.ToArray(),
                     _tick.ToArray())
@@ -1911,13 +1920,17 @@ internal sealed class P03WholeFlowHarness : IDisposable
     private static double[] ExclusiveResidualSamples(
         IReadOnlyList<double> parent,
         IReadOnlyList<double> first,
-        IReadOnlyList<double> second)
+        IReadOnlyList<double> second,
+        IReadOnlyList<double> third,
+        IReadOnlyList<double> fourth)
     {
-        if (parent.Count != first.Count || parent.Count != second.Count)
+        if (parent.Count != first.Count || parent.Count != second.Count ||
+            parent.Count != third.Count || parent.Count != fourth.Count)
             throw new InvalidOperationException("Whole-flow phase sample counts diverged.");
         var result = new double[parent.Count];
         for (int index = 0; index < result.Length; index++)
-            result[index] = Math.Max(0, parent[index] - first[index] - second[index]);
+            result[index] = parent[index] - first[index] - second[index] -
+                third[index] - fourth[index];
         return result;
     }
 
@@ -2020,6 +2033,14 @@ internal sealed class P03WholeFlowHarness : IDisposable
                 false);
         }
         P03ProtocolTiming current = CaptureProtocolTiming();
+        double serverOutbound = current.ServerOutboundMilliseconds -
+            protocolBefore.ServerOutboundMilliseconds;
+        double serverInbound = current.ServerInboundMilliseconds -
+            protocolBefore.ServerInboundMilliseconds;
+        _serverOutboundProtocol.Add(serverOutbound);
+        _serverInboundProtocol.Add(serverInbound);
+        _networkOtherResidual.Add(ToMilliseconds(networkReplicationTicks) - schedule - serverApp -
+            serverOutbound - serverInbound);
         _serverRole.Add(authority + schedule + serverApp +
             Math.Max(0, current.ServerMilliseconds - protocolBefore.ServerMilliseconds));
         _clientRole.Add(clientApp + ToMilliseconds(_tickClientNetwork) +
@@ -2131,6 +2152,8 @@ internal sealed class P03WholeFlowHarness : IDisposable
         _recipientCommitObservation.Clear();
         _serverApplication.Clear(); _clientApplication.Clear();
         _networkAndRemoteReplication.Clear();
+        _serverOutboundProtocol.Clear(); _serverInboundProtocol.Clear();
+        _networkOtherResidual.Clear();
         _serverOwnedRemoteReplicationBudget.Clear();
         _authorityThroughNetworkAndRemoteReplication.Clear();
         _serverRole.Clear(); _clientRole.Clear();
@@ -2146,6 +2169,9 @@ internal sealed class P03WholeFlowHarness : IDisposable
         _schedule.EnsureCapacity(ticks); _pump.EnsureCapacity(ticks);
         _serverApplication.EnsureCapacity(ticks); _clientApplication.EnsureCapacity(ticks);
         _networkAndRemoteReplication.EnsureCapacity(ticks);
+        _serverOutboundProtocol.EnsureCapacity(ticks);
+        _serverInboundProtocol.EnsureCapacity(ticks);
+        _networkOtherResidual.EnsureCapacity(ticks);
         _serverOwnedRemoteReplicationBudget.EnsureCapacity(ticks);
         _authorityThroughNetworkAndRemoteReplication.EnsureCapacity(ticks);
         _serverRole.EnsureCapacity(ticks); _clientRole.EnsureCapacity(ticks);
@@ -2176,7 +2202,11 @@ internal sealed class P03WholeFlowHarness : IDisposable
         return new P03ProtocolTiming(
             Stage(server), Stage(client),
             ToMilliseconds(server.EmitTicks + server.InboundTicks),
-            ToMilliseconds(client.EmitTicks + client.InboundTicks));
+            ToMilliseconds(client.EmitTicks + client.InboundTicks),
+            ToMilliseconds(server.EmitTicks),
+            ToMilliseconds(server.InboundTicks),
+            ToMilliseconds(client.EmitTicks),
+            ToMilliseconds(client.InboundTicks));
     }
 
     private P03TransportTotals CaptureTransport()
@@ -3991,6 +4021,8 @@ internal struct P03TransportTotals
     internal ulong ReceivedPackets;
     internal ulong DataPackets;
     internal ulong AcknowledgementPackets;
+    internal ulong EncryptionInvocations;
+    internal ulong EncryptionPlaintextBytesAttempted;
     internal ulong PlaintextBytes;
     internal ulong DecryptedBytes;
     internal ulong Frames;
@@ -4014,6 +4046,8 @@ internal struct P03TransportTotals
         ReceivedPackets += value.ReceivedPackets;
         DataPackets += value.DataPacketsSent;
         AcknowledgementPackets += value.AcknowledgementPacketsSent;
+        EncryptionInvocations += value.EncryptionInvocations;
+        EncryptionPlaintextBytesAttempted += value.EncryptionPlaintextBytesAttempted;
         PlaintextBytes += value.EncryptedPlaintextBytes;
         DecryptedBytes += value.DecryptedPlaintextBytes;
         CapacityDrops += value.CapacityDrops + value.RetainedPayloads.ByteCapacityFailures;
@@ -4302,6 +4336,8 @@ internal sealed record P03WholeFlowRawSamples(
     double[] ServerGameProofApplyMilliseconds,
     double[] NetworkAndRemoteReplicationMilliseconds,
     double[] NetworkProtocolAndOtherMilliseconds,
+    double[] ServerOutboundProtocolMilliseconds,
+    double[] ServerInboundProtocolMilliseconds,
     double[] ServerOwnedRemoteReplicationBudgetMilliseconds,
     double[] ServerOwnedTickMilliseconds,
     double[] WholeFixtureMilliseconds);
@@ -4368,6 +4404,10 @@ internal readonly record struct P03BackgroundEgressSummary(
     int DrainBatchP95,
     int MaximumBatch,
     NetworkTimingDistribution ProducerEnqueue,
+    NetworkTimingDistribution ProducerEnqueueComplete,
+    NetworkTimingDistribution ProducerEnqueueAcceptedComplete,
+    NetworkTimingDistribution ProducerEnqueueRefusedComplete,
+    NetworkTimingDistribution ProducerEnqueueFaultedComplete,
     NetworkTimingDistribution QueueResidence,
     double OldestQueuedMilliseconds,
     double PhysicalSendSystemCallMilliseconds,
@@ -4406,8 +4446,15 @@ internal readonly record struct P03BackgroundEgressSummary(
         after.DrainBatchP50,
         after.DrainBatchP95,
         after.MaximumBatch,
-        after.ProducerEnqueue,
-        after.QueueResidence,
+        WindowDistribution(after.ProducerEnqueue, before.ProducerEnqueue),
+        WindowDistribution(after.ProducerEnqueueComplete, before.ProducerEnqueueComplete),
+        WindowDistribution(
+            after.ProducerEnqueueAcceptedComplete, before.ProducerEnqueueAcceptedComplete),
+        WindowDistribution(
+            after.ProducerEnqueueRefusedComplete, before.ProducerEnqueueRefusedComplete),
+        WindowDistribution(
+            after.ProducerEnqueueFaultedComplete, before.ProducerEnqueueFaultedComplete),
+        WindowDistribution(after.QueueResidence, before.QueueResidence),
         after.OldestQueuedStopwatchTicks * 1_000d / Stopwatch.Frequency,
         D(after.PhysicalSendSystemCallStopwatchTicks,
             before.PhysicalSendSystemCallStopwatchTicks) * 1_000d / Stopwatch.Frequency,
@@ -4417,6 +4464,19 @@ internal readonly record struct P03BackgroundEgressSummary(
         after.LastSocketError.ToString());
 
     private static ulong D(ulong after, ulong before) => after >= before ? after - before : 0;
+
+    // Count and total are exact measurement-window deltas. Histogram percentiles and the
+    // maximum remain explicitly lifetime-scoped because the production snapshot exposes a
+    // cumulative bounded histogram rather than mutable/resettable benchmark counters.
+    private static NetworkTimingDistribution WindowDistribution(
+        in NetworkTimingDistribution after,
+        in NetworkTimingDistribution before) => new(
+        D(after.Count, before.Count),
+        D(after.TotalStopwatchTicks, before.TotalStopwatchTicks),
+        after.P50StopwatchTicks,
+        after.P95StopwatchTicks,
+        after.P99StopwatchTicks,
+        after.MaximumStopwatchTicks);
 }
 
 internal readonly record struct P03NormalizedCost(
@@ -4499,7 +4559,10 @@ internal readonly record struct P03WholeFlowTiming(
     P03Metric AuthorityAndEcs = default,
     P03Metric LocomotionAndPhysics = default,
     P03Metric InventoryAndItems = default,
-    P03Metric WorldCommit = default);
+    P03Metric WorldCommit = default,
+    P03Metric ServerOutboundProtocol = default,
+    P03Metric ServerInboundProtocol = default,
+    P03Metric NetworkOtherResidual = default);
 
 internal readonly record struct P03ExternalServerPhaseSample(
     long ServerOwnedTicks,
@@ -4537,7 +4600,11 @@ internal readonly record struct P03ProtocolTiming(
     P03ProtocolStage Server,
     P03ProtocolStage Client,
     double ServerMilliseconds,
-    double ClientMilliseconds);
+    double ClientMilliseconds,
+    double ServerOutboundMilliseconds,
+    double ServerInboundMilliseconds,
+    double ClientOutboundMilliseconds,
+    double ClientInboundMilliseconds);
 
 internal readonly record struct P03ProtocolStage(
     double SelectionMilliseconds,
@@ -4573,6 +4640,8 @@ internal readonly record struct P03TransportSummary(
     double MultiFramePercent,
     ulong GamePayloadBytes,
     ulong NetworkFrameHeaderBytes,
+    ulong EncryptionInvocations,
+    ulong EncryptionPlaintextBytesAttempted,
     ulong EncryptedPlaintextBytes,
     ulong DecryptedPlaintextBytes,
     ulong WireDatagrams,
@@ -4620,6 +4689,11 @@ internal readonly record struct P03TransportSummary(
         ulong frames = D(after.Frames, before.Frames);
         ulong datagrams = D(after.UnreliableDatagrams, before.UnreliableDatagrams);
         ulong multi = D(after.MultiFrameDatagrams, before.MultiFrameDatagrams);
+        ulong encryptionInvocations = D(
+            after.EncryptionInvocations, before.EncryptionInvocations);
+        ulong encryptionAttemptedBytes = D(
+            after.EncryptionPlaintextBytesAttempted,
+            before.EncryptionPlaintextBytesAttempted);
         ulong plaintext = D(after.PlaintextBytes, before.PlaintextBytes);
         ulong decrypted = D(after.DecryptedBytes, before.DecryptedBytes);
         ulong clientWireDatagrams = D(after.ClientWireDatagrams, before.ClientWireDatagrams);
@@ -4650,7 +4724,8 @@ internal readonly record struct P03TransportSummary(
             packets, data, acks, frames, datagrams, multi,
             datagrams == 0 ? 0 : frames / (double)datagrams,
             datagrams == 0 ? 0 : multi * 100d / datagrams,
-            gamePayloadBytes, frameHeaders, plaintext, decrypted, wireDatagrams, wireBytes,
+            gamePayloadBytes, frameHeaders, encryptionInvocations,
+            encryptionAttemptedBytes, plaintext, decrypted, wireDatagrams, wireBytes,
             checked((long)wireBytes - (long)plaintext),
             D(after.CapacityDrops, before.CapacityDrops) +
                 D(listenerAfter.CapacityDrops, listenerBefore.CapacityDrops),

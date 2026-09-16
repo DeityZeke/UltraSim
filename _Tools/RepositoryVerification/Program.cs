@@ -46,6 +46,75 @@ if (options.Pf5R8Only)
     return 0;
 }
 
+if (options.Pf5R9Only)
+{
+    VerifyPf5R9PacketProducer(root, options.Configuration);
+    Console.WriteLine("PASS PF5-R9 focused packet-producer assurance verification");
+    return 0;
+}
+
+static void VerifyPf5R9PacketProducer(string root, string configuration)
+{
+    Run(root, "dotnet",
+    [
+        "run", "--project", "_Tests/UltraSim.Network.Tests/UltraSim.Network.Tests.csproj",
+        "-c", configuration,
+    ]);
+    Run(root, "dotnet",
+    [
+        "run", "--project",
+        "_Tests/UltraSim.Game.Replication.Tests/UltraSim.Game.Replication.Tests.csproj",
+        "-c", configuration,
+    ]);
+
+    string scope = Path.Combine(Path.GetTempPath(), "ultrasim-repository-verification",
+        Environment.ProcessId.ToString(), "pf5-r9");
+    if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    Directory.CreateDirectory(scope);
+    try
+    {
+        string output = Path.Combine(scope, "packet-producer.json");
+        Run(root, "dotnet",
+        [
+            "run", "--project",
+            "_Benchmarks/UltraSim.Network.V3ComparisonAdapter/UltraSim.Network.V3ComparisonAdapter.csproj",
+            "-c", configuration, "--", "--pf5-r9-packet-producer", "--focused",
+            "--output", output,
+        ]);
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(output));
+        JsonElement report = document.RootElement;
+        if (report.GetProperty("Schema").GetString() !=
+                "ultrasim-concept-demo-pf5-r9-packet-producer-audit-v1")
+            throw new InvalidOperationException("PF5-R9 emitted an unexpected report schema.");
+        JsonElement[] timing = report.GetProperty("TimingToggle").EnumerateArray()
+            .Select(static value => value.Clone()).ToArray();
+        if (timing.Length != 2 || !timing.Any(static row =>
+                row.GetProperty("BackgroundTimingEnabled").GetBoolean()) ||
+            !timing.Any(static row =>
+                !row.GetProperty("BackgroundTimingEnabled").GetBoolean()) ||
+            timing.Any(static row => !row.GetProperty("Row")
+                .GetProperty("Converged").GetBoolean()))
+            throw new InvalidOperationException("PF5-R9 timing toggle was incomplete.");
+        JsonElement attribution = report.GetProperty("Attribution")[0]
+            .GetProperty("Attribution");
+        double parent = attribution.GetProperty("ParentMilliseconds").GetDouble();
+        double reconciled = attribution.GetProperty("ScheduleCodecQueueMilliseconds").GetDouble() +
+            attribution.GetProperty("ProofApplicationMilliseconds").GetDouble() +
+            attribution.GetProperty("ServerOutboundProtocolMilliseconds").GetDouble() +
+            attribution.GetProperty("ServerInboundProtocolMilliseconds").GetDouble() +
+            attribution.GetProperty("SignedResidualMilliseconds").GetDouble();
+        if (Math.Abs(parent - reconciled) >= 0.000_001)
+            throw new InvalidOperationException("PF5-R9 attribution did not reconcile.");
+        if (report.GetProperty("Primitives").EnumerateArray().Any(static row =>
+                row.GetProperty("WarmedManagedBytes").GetInt64() != 0))
+            throw new InvalidOperationException("PF5-R9 primitive path allocated after warmup.");
+    }
+    finally
+    {
+        if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    }
+}
+
 static void VerifyPf5R8RequiredFanout(string root, string configuration)
 {
     Run(root, "dotnet",
@@ -5580,6 +5649,7 @@ internal sealed record VerificationOptions(
     bool Pf5R6Only,
     bool Pf5R7Only,
     bool Pf5R8Only,
+    bool Pf5R9Only,
     bool Pf3Only,
     bool Pf3NativeOnly,
     bool Pf25LongNative,
@@ -5604,7 +5674,7 @@ internal sealed record VerificationOptions(
             pf5R1Only = false, pf5R2Only = false, pf5R2R1Only = false,
             pf5R2R2Only = false, pf5R3Only = false, pf5R4Only = false,
             pf5R5Only = false, pf5R6Only = false, pf5R7Only = false,
-            pf5R8Only = false,
+            pf5R8Only = false, pf5R9Only = false,
             pf25LongNative = false,
             allConfigurations = false;
         bool skipGodot = false, noRestore = false;
@@ -5640,6 +5710,7 @@ internal sealed record VerificationOptions(
             else if (argument == "--pf5-r6-only") pf5R6Only = true;
             else if (argument == "--pf5-r7-only") pf5R7Only = true;
             else if (argument == "--pf5-r8-only") pf5R8Only = true;
+            else if (argument == "--pf5-r9-only") pf5R9Only = true;
             else if (argument == "--pf2.5-long-native") pf25LongNative = true;
             else if (argument == "--all-configurations") allConfigurations = true;
             else if (argument == "--skip-godot") skipGodot = true;
@@ -5749,7 +5820,7 @@ internal sealed record VerificationOptions(
              pf4bOnly || pf4cOnly || pf4dOnly || pf4eOnly || pf4eR1Only || pf4eR2Only ||
              pf4fOnly || pf5Only || pf5R1Only || pf5R2Only || pf5R2R1Only ||
              pf5R2R2Only || pf5R3Only || pf5R4Only || pf5R5Only || pf5R6Only ||
-             pf5R7Only || pf5R8Only) &&
+             pf5R7Only || pf5R8Only || pf5R9Only) &&
             architectureOnly)
             throw new ArgumentException("Focused PF verification cannot be architecture-only.");
         if ((pf1Only ? 1 : 0) + (pf2Only ? 1 : 0) + (pf25Only ? 1 : 0) +
@@ -5760,7 +5831,8 @@ internal sealed record VerificationOptions(
             (pf5R2Only ? 1 : 0) + (pf5R2R1Only ? 1 : 0) +
             (pf5R2R2Only ? 1 : 0) + (pf5R3Only ? 1 : 0) +
             (pf5R4Only ? 1 : 0) + (pf5R5Only ? 1 : 0) + (pf5R6Only ? 1 : 0) +
-            (pf5R7Only ? 1 : 0) + (pf5R8Only ? 1 : 0) > 1)
+            (pf5R7Only ? 1 : 0) + (pf5R8Only ? 1 : 0) +
+            (pf5R9Only ? 1 : 0) > 1)
             throw new ArgumentException("Choose one focused PF verification mode.");
         if ((pf25LongNative || pf25EvidenceOutputDirectory is not null) && !pf25Only)
             throw new ArgumentException(
@@ -5786,7 +5858,7 @@ internal sealed record VerificationOptions(
             throw new ArgumentException(
                 "Native PF options require --pf3-only, --pf3-native-only, --pf4a-only, --pf4b-only, --pf4c-only, --pf4d-only, --pf4e-only, --pf4f-only, or --pf5-only.");
         return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only, pf4fOnly, pf5Only, pf5R1Only, pf5R2Only, pf5R2R1Only, pf5R2R2Only, pf5R3Only, pf5R4Only, pf5R5Only, pf5R6Only, pf5R7Only, pf5R8Only,
-            pf3Only, pf3NativeOnly,
+            pf5R9Only, pf3Only, pf3NativeOnly,
             pf25LongNative,
             allConfigurations, configuration, skipGodot, noRestore, godot,
             pf25EvidenceOutputDirectory, pf3NativeWarmupSeconds,
