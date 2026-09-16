@@ -25,6 +25,83 @@ Console.WriteLine("PASS documentation architecture and links");
 if (options.ArchitectureOnly)
     return 0;
 
+if (options.Pf5R5Only)
+{
+    VerifyPf5R5SingletonCompression(root, options.Configuration);
+    Console.WriteLine("PASS PF5-R5 focused singleton-compression verification");
+    return 0;
+}
+
+static void VerifyPf5R5SingletonCompression(string root, string configuration)
+{
+    Run(root, "dotnet",
+    [
+        "run", "--project",
+        "_Tests/UltraSim.Game.Replication.Tests/UltraSim.Game.Replication.Tests.csproj",
+        "-c", configuration,
+    ]);
+
+    string scope = Path.Combine(Path.GetTempPath(), "ultrasim-repository-verification",
+        Environment.ProcessId.ToString(), "pf5-r5");
+    if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    Directory.CreateDirectory(scope);
+    try
+    {
+        string udpOutput = Path.Combine(scope, "real-udp.json");
+        Run(root, "dotnet",
+        [
+            "run", "--project",
+            "_Benchmarks/UltraSim.Network.V3ComparisonAdapter/UltraSim.Network.V3ComparisonAdapter.csproj",
+            "-c", configuration, "--", "--p03-whole-flow",
+            "--pf5-r5-singleton-compression", "--populations=64",
+            "--warmup=6", "--ticks=30", "--egress-timing=off",
+            $"--output={udpOutput}",
+        ]);
+        using JsonDocument udp = JsonDocument.Parse(File.ReadAllText(udpOutput));
+        if (udp.RootElement.GetProperty("Schema").GetString() !=
+                "ultrasim-network-pf5-r5-singleton-compression-v1")
+            throw new InvalidOperationException("PF5-R5 report schema was not canonical.");
+        JsonElement[] rows = udp.RootElement.GetProperty("Rows").EnumerateArray()
+            .Select(static value => value.Clone()).ToArray();
+        if (rows.Length != 4 || rows.Any(static row =>
+                !row.GetProperty("Converged").GetBoolean() ||
+                row.GetProperty("SocketIoMode").GetString() !=
+                    "BackgroundPlatformBatch" ||
+                row.GetProperty("Transport").GetProperty("CapacityDrops").GetUInt64() != 0))
+            throw new InvalidOperationException("PF5-R5 real-UDP matrix was incomplete.");
+        foreach (IGrouping<int, JsonElement> workload in rows.GroupBy(static row =>
+                     row.GetProperty("DirtyEntitiesPerTick").GetInt32()))
+        {
+            JsonElement[] pair = workload.ToArray();
+            if (pair.Length != 2)
+                throw new InvalidOperationException("PF5-R5 OFF/ON pair was incomplete.");
+            JsonElement off = pair.Single(static row => row.GetProperty("Curve").GetString()!
+                .EndsWith("-Disabled", StringComparison.Ordinal));
+            JsonElement on = pair.Single(static row => row.GetProperty("Curve").GetString()!
+                .EndsWith("-WhenBeneficial", StringComparison.Ordinal));
+            JsonElement offCounters = off.GetProperty("ProfileCounters");
+            JsonElement onCounters = on.GetProperty("ProfileCounters");
+            JsonElement compression = onCounters.GetProperty("Compression");
+            if (off.GetProperty("SemanticDigest").GetString() !=
+                    on.GetProperty("SemanticDigest").GetString() ||
+                offCounters.GetProperty("SuccessfulSemanticPublications").GetUInt64() !=
+                    onCounters.GetProperty("SuccessfulSemanticPublications").GetUInt64() ||
+                offCounters.GetProperty("ProofEntries").GetUInt64() !=
+                    onCounters.GetProperty("ProofEntries").GetUInt64() ||
+                compression.GetProperty("SingletonAttempts").GetUInt64() == 0 ||
+                compression.GetProperty("SingletonSelected").GetUInt64() == 0 ||
+                onCounters.GetProperty("ApplicationBytesQueued").GetUInt64() >=
+                    offCounters.GetProperty("ApplicationBytesQueued").GetUInt64())
+                throw new InvalidOperationException(
+                    "PF5-R5 changed semantic work or failed to select a beneficial singleton.");
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    }
+}
+
 if (options.Pf5R4Only)
 {
     VerifyPf5R4RecipientFlattening(root, options.Configuration);
@@ -5167,6 +5244,7 @@ internal sealed record VerificationOptions(
     bool Pf5R2R2Only,
     bool Pf5R3Only,
     bool Pf5R4Only,
+    bool Pf5R5Only,
     bool Pf3Only,
     bool Pf3NativeOnly,
     bool Pf25LongNative,
@@ -5190,6 +5268,7 @@ internal sealed record VerificationOptions(
             pf4eR2Only = false, pf4fOnly = false, pf5Only = false,
             pf5R1Only = false, pf5R2Only = false, pf5R2R1Only = false,
             pf5R2R2Only = false, pf5R3Only = false, pf5R4Only = false,
+            pf5R5Only = false,
             pf25LongNative = false,
             allConfigurations = false;
         bool skipGodot = false, noRestore = false;
@@ -5221,6 +5300,7 @@ internal sealed record VerificationOptions(
             else if (argument == "--pf5-r2-r2-only") pf5R2R2Only = true;
             else if (argument == "--pf5-r3-only") pf5R3Only = true;
             else if (argument == "--pf5-r4-only") pf5R4Only = true;
+            else if (argument == "--pf5-r5-only") pf5R5Only = true;
             else if (argument == "--pf2.5-long-native") pf25LongNative = true;
             else if (argument == "--all-configurations") allConfigurations = true;
             else if (argument == "--skip-godot") skipGodot = true;
@@ -5363,7 +5443,7 @@ internal sealed record VerificationOptions(
             !pf4cOnly && !pf4dOnly && !pf4eOnly && !pf4fOnly && !pf5Only)
             throw new ArgumentException(
                 "Native PF options require --pf3-only, --pf3-native-only, --pf4a-only, --pf4b-only, --pf4c-only, --pf4d-only, --pf4e-only, --pf4f-only, or --pf5-only.");
-        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only, pf4fOnly, pf5Only, pf5R1Only, pf5R2Only, pf5R2R1Only, pf5R2R2Only, pf5R3Only, pf5R4Only,
+        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only, pf4fOnly, pf5Only, pf5R1Only, pf5R2Only, pf5R2R1Only, pf5R2R2Only, pf5R3Only, pf5R4Only, pf5R5Only,
             pf3Only, pf3NativeOnly,
             pf25LongNative,
             allConfigurations, configuration, skipGodot, noRestore, godot,

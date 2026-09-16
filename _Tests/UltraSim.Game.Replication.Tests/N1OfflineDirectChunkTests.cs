@@ -2733,6 +2733,11 @@ internal static class N1OfflineDirectChunkTests
 
     internal static void SingletonCompressionIsExactTransactionalAndBounded()
     {
+        Equal(RemoteChunkSingletonDeltaCompression.Disabled,
+            RemoteChunkPublicationPolicy.CurrentBundled.SingletonDeltaCompression);
+        Equal(RemoteChunkSingletonDeltaCompression.WhenBeneficial,
+            RemoteChunkPublicationPolicy.ExperimentalSingletonCompression.
+                SingletonDeltaCompression);
         const int recordCount = 30;
         using var fixture = new Fixture(historyCapacity: 256, entityCount: recordCount);
         fixture.PresentAll(2_000, GameWorldPublicPrefabIds.Character);
