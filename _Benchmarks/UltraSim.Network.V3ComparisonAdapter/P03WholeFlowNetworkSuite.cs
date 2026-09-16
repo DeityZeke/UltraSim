@@ -1232,6 +1232,7 @@ internal enum P03EntityLayout : byte
     GridFourMeters = 1,
     TwentyEntitiesPerChunk = 2,
     V2DenseClosestTwoMeterGrid = 3,
+    TopologyChunkGroups = 4,
 }
 
 internal enum P03MutationPattern : byte
@@ -1260,7 +1261,9 @@ internal readonly record struct P03NetworkWorkload(
     int ActiveEntities = 0,
     int InputIntervalTicks = 1,
     string SemanticFamilies = "public-world-latest-state",
-    int MutationPeriodTicks = 1)
+    int MutationPeriodTicks = 1,
+    int TopologyGroups = 0,
+    int InactiveStoredChunks = 0)
 {
     internal static P03NetworkWorkload Dense(int recipients, int entities) => new(
         $"dense-{recipients}", recipients, entities, Math.Max(1, entities * 2 / 100), false,
@@ -1356,6 +1359,34 @@ internal readonly record struct P03NetworkWorkload(
             DirtyEntitiesPerTick = dirtyEntitiesPerTick,
             MutationPattern = P03MutationPattern.MatchedDistributedPrefix,
             ActiveEntities = recipients,
+        };
+    }
+
+    internal static P03NetworkWorkload ChunkTopology(
+        int recipients,
+        int entities,
+        int dirtyEntitiesPerTick,
+        int groups,
+        int inactiveStoredChunks = 0)
+    {
+        if (recipients <= 0 || entities < recipients || dirtyEntitiesPerTick <= 0 ||
+            dirtyEntitiesPerTick > entities || groups <= 0 || groups > recipients ||
+            inactiveStoredChunks < 0)
+            throw new ArgumentOutOfRangeException(nameof(groups));
+        int active = Math.Max(dirtyEntitiesPerTick,
+            (int)Math.Round(entities * .35, MidpointRounding.AwayFromZero));
+        P03NetworkWorkload basis = ChunkV2Shaped(
+            recipients, entities, v2Activity: false);
+        return basis with
+        {
+            Id = $"topology-r{recipients}-e{entities}-g{groups}-dirty{dirtyEntitiesPerTick}" +
+                (inactiveStoredChunks == 0 ? string.Empty : $"-inactive{inactiveStoredChunks}"),
+            DirtyEntitiesPerTick = dirtyEntitiesPerTick,
+            EntityLayout = P03EntityLayout.TopologyChunkGroups,
+            MutationPattern = P03MutationPattern.MatchedDistributedPrefix,
+            ActiveEntities = active,
+            TopologyGroups = groups,
+            InactiveStoredChunks = inactiveStoredChunks,
         };
     }
 
@@ -1542,6 +1573,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
     private readonly bool _gameDetailedAttribution;
     private readonly bool _authorityThroughNetworkTimingEnabled;
     private readonly bool _serverOwnedRemoteTimingEnabled;
+    private readonly IP03ExternalServerWorkload? _externalServerWorkload;
     private readonly SharedUdpSocketIoMode _socketIoMode;
     private readonly NetworkProtocolLimits _protocolLimits;
     private readonly SharedUdpProtocolHost _host;
@@ -1564,6 +1596,15 @@ internal sealed class P03WholeFlowHarness : IDisposable
     private readonly List<double> _authorityThroughNetworkAndRemoteReplication = new();
     private readonly List<double> _serverRole = new();
     private readonly List<double> _clientRole = new();
+    private readonly List<double> _serverOwnedTick = new();
+    private readonly List<double> _attributedMainThread = new();
+    private readonly List<double> _unattributedResidual = new();
+    private readonly List<double> _inputAndSession = new();
+    private readonly List<double> _chatAndCommands = new();
+    private readonly List<double> _authorityAndEcs = new();
+    private readonly List<double> _locomotionAndPhysics = new();
+    private readonly List<double> _inventoryAndItems = new();
+    private readonly List<double> _worldCommit = new();
     private P03TimingBoundaryEvidence _timingBoundary;
     private bool _disposed;
     private long _tickServerApplication;
@@ -1587,7 +1628,8 @@ internal sealed class P03WholeFlowHarness : IDisposable
             PreparedChunkPublicationReadModel.PreparedLatestState,
         SharedUdpSocketIoMode socketIoMode =
             SharedUdpSocketIoMode.PlatformSendReceiveBatch,
-        bool backgroundEgressTimingEnabled = true)
+        bool backgroundEgressTimingEnabled = true,
+        IP03ExternalServerWorkload? externalServerWorkload = null)
     {
         _workload = workload;
         _profile = profile;
@@ -1597,6 +1639,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
         _authorityThroughNetworkTimingEnabled = authorityThroughNetworkTimingEnabled;
         _serverOwnedRemoteTimingEnabled = serverOwnedRemoteTimingEnabled;
         _socketIoMode = socketIoMode;
+        _externalServerWorkload = externalServerWorkload;
         _x = new long[workload.Entities];
         _z = new long[workload.Entities];
         _versions = new ulong[workload.Entities];
@@ -1719,7 +1762,16 @@ internal sealed class P03WholeFlowHarness : IDisposable
                 P03Metric.From(_serverOwnedRemoteReplicationBudget),
                 P03Metric.From(_authorityThroughNetworkAndRemoteReplication),
                 P03Metric.From(_serverRole),
-                P03Metric.From(_clientRole), protocol),
+                P03Metric.From(_clientRole), protocol,
+                P03Metric.From(_serverOwnedTick),
+                P03Metric.From(_attributedMainThread),
+                P03Metric.From(_unattributedResidual),
+                P03Metric.From(_inputAndSession),
+                P03Metric.From(_chatAndCommands),
+                P03Metric.From(_authorityAndEcs),
+                P03Metric.From(_locomotionAndPhysics),
+                P03Metric.From(_inventoryAndItems),
+                P03Metric.From(_worldCommit)),
             _timingBoundary,
             transport, profile, _adapter.SemanticDigest(), allocated,
             checked(profileServerReserved + profileClientReserved),
@@ -1745,6 +1797,8 @@ internal sealed class P03WholeFlowHarness : IDisposable
     {
         P03ProtocolTiming protocolBefore = measure ? CaptureProtocolTiming() : default;
         long totalStarted = measure ? Stopwatch.GetTimestamp() : 0;
+        P03ExternalServerPhaseSample external = _externalServerWorkload?.RunTick(tick, measure)
+            ?? default;
         bool captureBoundary = measure && _authorityThroughNetworkTimingEnabled &&
             !_timingBoundary.Captured;
         int boundaryOrder = 0;
@@ -1841,6 +1895,22 @@ internal sealed class P03WholeFlowHarness : IDisposable
             Math.Max(0, current.ServerMilliseconds - protocolBefore.ServerMilliseconds));
         _clientRole.Add(clientApp + ToMilliseconds(_tickClientNetwork) +
             Math.Max(0, current.ClientMilliseconds - protocolBefore.ClientMilliseconds));
+        long remoteTicks = checked(publicationPreparationTicks + recipientWakeupTicks +
+            networkReplicationTicks);
+        long attributedTicks = checked(external.InputAndSessionTicks +
+            external.ChatAndCommandsTicks + external.AuthorityAndEcsTicks +
+            external.LocomotionAndPhysicsTicks + external.InventoryAndItemTicks +
+            external.WorldCommitTicks + remoteTicks);
+        long serverOwnedTicks = checked(external.ServerOwnedTicks + remoteTicks);
+        _serverOwnedTick.Add(ToMilliseconds(serverOwnedTicks));
+        _attributedMainThread.Add(ToMilliseconds(attributedTicks));
+        _unattributedResidual.Add(ToMilliseconds(Math.Max(0, serverOwnedTicks - attributedTicks)));
+        _inputAndSession.Add(ToMilliseconds(external.InputAndSessionTicks));
+        _chatAndCommands.Add(ToMilliseconds(external.ChatAndCommandsTicks));
+        _authorityAndEcs.Add(ToMilliseconds(external.AuthorityAndEcsTicks));
+        _locomotionAndPhysics.Add(ToMilliseconds(external.LocomotionAndPhysicsTicks));
+        _inventoryAndItems.Add(ToMilliseconds(external.InventoryAndItemTicks));
+        _worldCommit.Add(ToMilliseconds(external.WorldCommitTicks));
     }
 
     private void Mutate(int tick)
@@ -1932,6 +2002,10 @@ internal sealed class P03WholeFlowHarness : IDisposable
         _serverOwnedRemoteReplicationBudget.Clear();
         _authorityThroughNetworkAndRemoteReplication.Clear();
         _serverRole.Clear(); _clientRole.Clear();
+        _serverOwnedTick.Clear(); _attributedMainThread.Clear();
+        _unattributedResidual.Clear(); _inputAndSession.Clear();
+        _chatAndCommands.Clear(); _authorityAndEcs.Clear();
+        _locomotionAndPhysics.Clear(); _inventoryAndItems.Clear(); _worldCommit.Clear();
         _timingBoundary = default;
         _tick.EnsureCapacity(ticks); _authority.EnsureCapacity(ticks);
         _baseAuthoritativeMutation.EnsureCapacity(ticks);
@@ -1943,6 +2017,11 @@ internal sealed class P03WholeFlowHarness : IDisposable
         _serverOwnedRemoteReplicationBudget.EnsureCapacity(ticks);
         _authorityThroughNetworkAndRemoteReplication.EnsureCapacity(ticks);
         _serverRole.EnsureCapacity(ticks); _clientRole.EnsureCapacity(ticks);
+        _serverOwnedTick.EnsureCapacity(ticks); _attributedMainThread.EnsureCapacity(ticks);
+        _unattributedResidual.EnsureCapacity(ticks); _inputAndSession.EnsureCapacity(ticks);
+        _chatAndCommands.EnsureCapacity(ticks); _authorityAndEcs.EnsureCapacity(ticks);
+        _locomotionAndPhysics.EnsureCapacity(ticks); _inventoryAndItems.EnsureCapacity(ticks);
+        _worldCommit.EnsureCapacity(ticks);
         for (int index = 0; index < _sessions.Length; index++)
         {
             _sessions[index].Server.ResetStageTiming(_stageTimingEnabled);
@@ -1950,6 +2029,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
         }
         _host.ResetListenerStageTiming(_stageTimingEnabled);
         _adapter.ResetCounters();
+        _externalServerWorkload?.ResetMeasurement();
     }
 
     private P03ProtocolTiming CaptureProtocolTiming()
@@ -1983,7 +2063,39 @@ internal sealed class P03WholeFlowHarness : IDisposable
 
     private void InitializePositions()
     {
-        if (_workload.EntityLayout == P03EntityLayout.V2DenseClosestTwoMeterGrid)
+        if (_workload.EntityLayout == P03EntityLayout.TopologyChunkGroups)
+        {
+            const int entitiesPerChunk = 20;
+            const long groupStride = 192_000;
+            int groupColumns = checked((int)Math.Ceiling(Math.Sqrt(_workload.TopologyGroups)));
+            for (int group = 0; group < _workload.TopologyGroups; group++)
+            {
+                int start = checked((int)((long)group * _workload.Entities /
+                    _workload.TopologyGroups));
+                int end = checked((int)((long)(group + 1) * _workload.Entities /
+                    _workload.TopologyGroups));
+                int count = end - start;
+                int chunkCount = Math.Max(1,
+                    (count + entitiesPerChunk - 1) / entitiesPerChunk);
+                int chunkColumns = checked((int)Math.Ceiling(Math.Sqrt(chunkCount)));
+                long originX = checked((long)(group % groupColumns) * groupStride);
+                long originZ = checked((long)(group / groupColumns) * groupStride);
+                for (int index = start; index < end; index++)
+                {
+                    int local = index - start;
+                    int chunk = local / entitiesPerChunk;
+                    int row = local % entitiesPerChunk;
+                    _x[index] = checked(originX + (long)(chunk % chunkColumns) *
+                        GameWorldSpatialProfile.WorldChunkEdgeUnits + 1_000L +
+                        row % 5 * 2_500L);
+                    _z[index] = checked(originZ + (long)(chunk / chunkColumns) *
+                        GameWorldSpatialProfile.WorldChunkEdgeUnits + 1_000L +
+                        row / 5 * 2_500L);
+                    _versions[index] = 1;
+                }
+            }
+        }
+        else if (_workload.EntityLayout == P03EntityLayout.V2DenseClosestTwoMeterGrid)
         {
             const int width = 20;
             for (int index = 0; index < _workload.Entities; index++)
@@ -2035,6 +2147,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
         if (_disposed) return;
         _disposed = true;
         _adapter.Dispose();
+        _externalServerWorkload?.Dispose();
         _host.Dispose();
     }
 
@@ -2825,6 +2938,42 @@ internal abstract class P03ChunkRemoteAdapterBase : P03RemoteProfileAdapter
         ReadOnlySpan<long> x,
         ReadOnlySpan<long> z)
     {
+        if (workload.EntityLayout == P03EntityLayout.TopologyChunkGroups)
+        {
+            var topologyKeys = new HashSet<SpatialChunkKey>();
+            var entries = new ChunkInterestEntry[1_024];
+            for (int index = 0; index < workload.Recipients; index++)
+            {
+                ChunkInterestQueryStatus status = ChunkInterestQuery.TryQuery(
+                    GameWorldState.DefaultSpace,
+                    P03WholeFlowHarness.Position(x[index], z[index]),
+                    workload.ChunkInterest,
+                    [], entries,
+                    out int count,
+                    out _);
+                P03WholeFlowHarness.Require(status == ChunkInterestQueryStatus.Success,
+                    "Topology terrain interest query exceeded its bounded scratch.");
+                for (int entry = 0; entry < count; entry++)
+                    topologyKeys.Add(entries[entry].Key);
+            }
+            for (int index = 0; index < x.Length; index++)
+                topologyKeys.Add(P03WholeFlowHarness.Position(x[index], z[index])
+                    .ToChunkKey(GameWorldState.DefaultSpace));
+            int inactive = workload.InactiveStoredChunks;
+            int offset = 0;
+            while (inactive > 0)
+            {
+                var candidate = new SpatialChunkKey(
+                    GameWorldState.DefaultSpace,
+                    250_000 + offset,
+                    250_000 + offset / 1_024);
+                offset++;
+                if (topologyKeys.Add(candidate)) inactive--;
+            }
+            SpatialChunkKey[] result = topologyKeys.ToArray();
+            Array.Sort(result);
+            return result;
+        }
         const long movementAndBoundaryMargin = GameWorldSpatialProfile.WorldChunkEdgeUnits * 4L;
         long margin = checked(workload.ChunkInterest.FarLeaveRadiusMillimeters +
             movementAndBoundaryMargin);
@@ -3233,6 +3382,10 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
             PreparedPublication = DifferencePreparedPublication(
                 Source.GetPreparedPublicationSnapshot(), _preparedBaseline),
             DeltaBodies = _bodyStore.GetSnapshot(),
+            ResidentSourceChunks = source.ResidentChunkCount,
+            CurrentSharedSubscriptionChunks = scheduler.SharedChunkCount,
+            CurrentMemberships = scheduler.MembershipCount,
+            Topology = scheduler.Topology,
         };
     }
     internal override void ResetCounters()
@@ -3910,7 +4063,34 @@ internal readonly record struct P03WholeFlowTiming(
     P03Metric AuthorityThroughNetworkAndRemoteReplication,
     P03Metric ServerRole,
     P03Metric ClientRole,
-    P03ProtocolTiming Protocol);
+    P03ProtocolTiming Protocol,
+    P03Metric ServerOwnedTick = default,
+    P03Metric AttributedMainThread = default,
+    P03Metric UnattributedResidual = default,
+    P03Metric InputAndSession = default,
+    P03Metric ChatAndCommands = default,
+    P03Metric AuthorityAndEcs = default,
+    P03Metric LocomotionAndPhysics = default,
+    P03Metric InventoryAndItems = default,
+    P03Metric WorldCommit = default);
+
+internal readonly record struct P03ExternalServerPhaseSample(
+    long ServerOwnedTicks,
+    long InputAndSessionTicks,
+    long ChatAndCommandsTicks,
+    long AuthorityAndEcsTicks,
+    long LocomotionAndPhysicsTicks,
+    long InventoryAndItemTicks,
+    long WorldCommitTicks);
+
+internal interface IP03ExternalServerWorkload : IDisposable
+{
+    P03ExternalServerPhaseSample RunTick(int tick, bool measure);
+
+    void ResetMeasurement();
+
+    object CaptureSummary();
+}
 
 internal readonly record struct P03TimingBoundaryEvidence(
     bool Captured,
@@ -4109,7 +4289,11 @@ internal readonly record struct P03ProfileCounters(
     P03ProofHealth ProofHealth = default,
     ChunkPublicationHistoryAuditSnapshot? HistoryAudit = null,
     PreparedChunkPublicationSnapshot PreparedPublication = default,
-    RemoteChunkDeltaBodyStoreSnapshot DeltaBodies = default);
+    RemoteChunkDeltaBodyStoreSnapshot DeltaBodies = default,
+    int ResidentSourceChunks = 0,
+    int CurrentSharedSubscriptionChunks = 0,
+    int CurrentMemberships = 0,
+    ChunkPublicationTopologyCensusSnapshot Topology = default);
 
 internal readonly record struct P03CompressionCounters(
     ulong Attempts,

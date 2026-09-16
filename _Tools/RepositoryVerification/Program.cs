@@ -32,6 +32,80 @@ if (options.Pf5R6Only)
     return 0;
 }
 
+if (options.Pf5R7Only)
+{
+    VerifyPf5R7Attribution(root, options.Configuration);
+    Console.WriteLine("PASS PF5-R7 focused topology/server-cost attribution verification");
+    return 0;
+}
+
+static void VerifyPf5R7Attribution(string root, string configuration)
+{
+    string scope = Path.Combine(Path.GetTempPath(), "ultrasim-repository-verification",
+        Environment.ProcessId.ToString(), "pf5-r7");
+    if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    Directory.CreateDirectory(scope);
+    try
+    {
+        string output = Path.Combine(scope, "attribution.json");
+        Run(root, "dotnet",
+        [
+            "run", "--project",
+            "_Benchmarks/UltraSim.Network.V3ComparisonAdapter/UltraSim.Network.V3ComparisonAdapter.csproj",
+            "-c", configuration, "--", "--pf5-r7-attribution", "--focused",
+            "--warmup", "8", "--ticks", "12", "--census-ticks", "8",
+            "--output", output,
+        ]);
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(output));
+        JsonElement report = document.RootElement;
+        if (report.GetProperty("Checkpoint").GetString() !=
+                "ultrasim-concept-demo-pf5-r7-spatial-topology-v1")
+            throw new InvalidOperationException("PF5-R7 emitted an unexpected report schema.");
+        JsonElement[] topology = report.GetProperty("TopologyRows").EnumerateArray()
+            .Select(static value => value.Clone()).ToArray();
+        if (topology.Length != 4 || topology.Any(static row =>
+                !row.GetProperty("Rated").GetProperty("Converged").GetBoolean() ||
+                row.GetProperty("Rated").GetProperty("Transport")
+                    .GetProperty("CapacityDrops").GetUInt64() != 0 ||
+                row.GetProperty("DiagnosticCensus").GetProperty("CurrentMemberships")
+                    .GetInt32() == 0))
+            throw new InvalidOperationException("PF5-R7 topology canary was incomplete.");
+        JsonElement denseBodies = topology.Single(static row =>
+                row.GetProperty("Groups").GetInt32() == 1)
+            .GetProperty("DiagnosticCensus").GetProperty("DeltaBodies");
+        JsonElement sparseBodies = topology.Single(static row =>
+                row.GetProperty("Groups").GetInt32() == 16)
+            .GetProperty("DiagnosticCensus").GetProperty("DeltaBodies");
+        if (denseBodies.GetProperty("BodyHits").GetUInt64() == 0 ||
+            sparseBodies.GetProperty("DistinctBodyIdentities").GetUInt64() <=
+                denseBodies.GetProperty("DistinctBodyIdentities").GetUInt64())
+            throw new InvalidOperationException(
+                "PF5-R7 did not distinguish dense reuse from sparse source bodies.");
+        JsonElement[] whole = report.GetProperty("WholeServerRows").EnumerateArray()
+            .Select(static value => value.Clone()).ToArray();
+        if (whole.Length != 8 || whole.Any(static row =>
+                row.GetProperty("Flow").GetProperty("Timing")
+                    .GetProperty("ServerOwnedTick").GetProperty("Samples").GetInt32() != 12 ||
+                row.GetProperty("Flow").GetProperty("Timing")
+                    .GetProperty("UnattributedResidual").GetProperty("Samples").GetInt32() != 12))
+            throw new InvalidOperationException("PF5-R7 whole-server phase clocks were incomplete.");
+        if (whole.Where(static row => row.GetProperty("MovementAndPhysics").GetBoolean())
+                .Any(static row => row.GetProperty("Game").GetProperty("InputAccepted")
+                    .GetUInt64() == 0) ||
+            whole.Where(static row => row.GetProperty("Chat").GetBoolean())
+                .Any(static row => row.GetProperty("Game").GetProperty("ChatAccepted")
+                    .GetUInt64() == 0))
+            throw new InvalidOperationException("PF5-R7 did not exercise real Game input/Chat.");
+        if (report.GetProperty("AuthorityOnlyRows").GetArrayLength() != 1 ||
+            report.GetProperty("PhysicsRows").GetArrayLength() != 1)
+            throw new InvalidOperationException("PF5-R7 baseline/physics controls were absent.");
+    }
+    finally
+    {
+        if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    }
+}
+
 static void VerifyPf5R6CompatibleBodySharing(string root, string configuration)
 {
     Run(root, "dotnet",
@@ -5351,6 +5425,7 @@ internal sealed record VerificationOptions(
     bool Pf5R4Only,
     bool Pf5R5Only,
     bool Pf5R6Only,
+    bool Pf5R7Only,
     bool Pf3Only,
     bool Pf3NativeOnly,
     bool Pf25LongNative,
@@ -5374,7 +5449,7 @@ internal sealed record VerificationOptions(
             pf4eR2Only = false, pf4fOnly = false, pf5Only = false,
             pf5R1Only = false, pf5R2Only = false, pf5R2R1Only = false,
             pf5R2R2Only = false, pf5R3Only = false, pf5R4Only = false,
-            pf5R5Only = false, pf5R6Only = false,
+            pf5R5Only = false, pf5R6Only = false, pf5R7Only = false,
             pf25LongNative = false,
             allConfigurations = false;
         bool skipGodot = false, noRestore = false;
@@ -5408,6 +5483,7 @@ internal sealed record VerificationOptions(
             else if (argument == "--pf5-r4-only") pf5R4Only = true;
             else if (argument == "--pf5-r5-only") pf5R5Only = true;
             else if (argument == "--pf5-r6-only") pf5R6Only = true;
+            else if (argument == "--pf5-r7-only") pf5R7Only = true;
             else if (argument == "--pf2.5-long-native") pf25LongNative = true;
             else if (argument == "--all-configurations") allConfigurations = true;
             else if (argument == "--skip-godot") skipGodot = true;
@@ -5516,7 +5592,8 @@ internal sealed record VerificationOptions(
         if ((pf1Only || pf2Only || pf25Only || pf3Only || pf3NativeOnly || pf4aOnly ||
              pf4bOnly || pf4cOnly || pf4dOnly || pf4eOnly || pf4eR1Only || pf4eR2Only ||
              pf4fOnly || pf5Only || pf5R1Only || pf5R2Only || pf5R2R1Only ||
-             pf5R2R2Only || pf5R3Only || pf5R4Only || pf5R5Only || pf5R6Only) &&
+             pf5R2R2Only || pf5R3Only || pf5R4Only || pf5R5Only || pf5R6Only ||
+             pf5R7Only) &&
             architectureOnly)
             throw new ArgumentException("Focused PF verification cannot be architecture-only.");
         if ((pf1Only ? 1 : 0) + (pf2Only ? 1 : 0) + (pf25Only ? 1 : 0) +
@@ -5526,7 +5603,8 @@ internal sealed record VerificationOptions(
             (pf4fOnly ? 1 : 0) + (pf5Only ? 1 : 0) + (pf5R1Only ? 1 : 0) +
             (pf5R2Only ? 1 : 0) + (pf5R2R1Only ? 1 : 0) +
             (pf5R2R2Only ? 1 : 0) + (pf5R3Only ? 1 : 0) +
-            (pf5R4Only ? 1 : 0) + (pf5R5Only ? 1 : 0) + (pf5R6Only ? 1 : 0) > 1)
+            (pf5R4Only ? 1 : 0) + (pf5R5Only ? 1 : 0) + (pf5R6Only ? 1 : 0) +
+            (pf5R7Only ? 1 : 0) > 1)
             throw new ArgumentException("Choose one focused PF verification mode.");
         if ((pf25LongNative || pf25EvidenceOutputDirectory is not null) && !pf25Only)
             throw new ArgumentException(
@@ -5551,7 +5629,7 @@ internal sealed record VerificationOptions(
             !pf4cOnly && !pf4dOnly && !pf4eOnly && !pf4fOnly && !pf5Only)
             throw new ArgumentException(
                 "Native PF options require --pf3-only, --pf3-native-only, --pf4a-only, --pf4b-only, --pf4c-only, --pf4d-only, --pf4e-only, --pf4f-only, or --pf5-only.");
-        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only, pf4fOnly, pf5Only, pf5R1Only, pf5R2Only, pf5R2R1Only, pf5R2R2Only, pf5R3Only, pf5R4Only, pf5R5Only, pf5R6Only,
+        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only, pf4fOnly, pf5Only, pf5R1Only, pf5R2Only, pf5R2R1Only, pf5R2R2Only, pf5R3Only, pf5R4Only, pf5R5Only, pf5R6Only, pf5R7Only,
             pf3Only, pf3NativeOnly,
             pf25LongNative,
             allConfigurations, configuration, skipGodot, noRestore, godot,

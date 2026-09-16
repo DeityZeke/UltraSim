@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using UltraSim.ECS;
 using UltraSim.Game.Accounting;
 using UltraSim.Game.Inventory;
@@ -6,6 +7,19 @@ using UltraSim.Game.World;
 using UltraSim.Server.Runtime;
 
 namespace UltraSim.Game.Composition;
+
+/// <summary>
+/// Opt-in owner-thread timing of the concrete post-ECS Game maintenance phases. Values are the
+/// most recent fixed step in raw <see cref="Stopwatch"/> ticks. This is diagnostic state only;
+/// it does not participate in simulation, publication, persistence, or replication decisions.
+/// </summary>
+public readonly record struct GameGenerationStepTimingSample(
+    bool Enabled,
+    ulong Sequence,
+    long LocomotionAndPhysicsTicks,
+    long InventoryAndItemTicks,
+    long WorldCommitTicks,
+    long CompletePostEcsTicks);
 
 /// <summary>Capability for the concrete coherent game generation.</summary>
 public interface IGameGenerationStateProvider :
@@ -44,6 +58,9 @@ public sealed class GameGenerationState :
     IDisposable
 {
     private bool _disposed;
+    private bool _stepTimingEnabled;
+    private ulong _stepTimingSequence;
+    private GameGenerationStepTimingSample _lastStepTiming;
 
     public GameGenerationState(
         AccountingStore accounting,
@@ -84,6 +101,19 @@ public sealed class GameGenerationState :
 
     /// <summary>Gets generation-bound replication capabilities when the network profile was selected.</summary>
     public GameReplicationBindings? Replication { get; }
+
+    /// <summary>Selects exact per-step phase timestamps for cold benchmark/diagnostic use.</summary>
+    public void ConfigureStepTiming(bool enabled)
+    {
+        _stepTimingEnabled = enabled;
+        _stepTimingSequence = 0;
+        _lastStepTiming = enabled
+            ? new GameGenerationStepTimingSample(true, 0, 0, 0, 0, 0)
+            : default;
+    }
+
+    /// <summary>Returns the last complete post-ECS timing sample without mutating Game state.</summary>
+    public GameGenerationStepTimingSample GetLastStepTiming() => _lastStepTiming;
 
     private readonly ComponentLookup<GameSimulationState> _simulationLookup;
     private GameWorldActions? _worldActions;
@@ -171,9 +201,31 @@ public sealed class GameGenerationState :
         EcsWorld world,
         in SimulationStepDelta delta)
     {
+        if (!_stepTimingEnabled)
+        {
+            WorldActions.CommitLocomotionAfterEcsStep(world, WorldState, delta);
+            Items.CommitAfterEcsStep(world, WorldState, Inventory);
+            WorldState.CommitAfterEcsStep(world);
+            return;
+        }
+
+        long completeStarted = Stopwatch.GetTimestamp();
+        long started = completeStarted;
         WorldActions.CommitLocomotionAfterEcsStep(world, WorldState, delta);
+        long locomotionTicks = Stopwatch.GetTimestamp() - started;
+        started = Stopwatch.GetTimestamp();
         Items.CommitAfterEcsStep(world, WorldState, Inventory);
+        long inventoryTicks = Stopwatch.GetTimestamp() - started;
+        started = Stopwatch.GetTimestamp();
         WorldState.CommitAfterEcsStep(world);
+        long worldTicks = Stopwatch.GetTimestamp() - started;
+        _lastStepTiming = new GameGenerationStepTimingSample(
+            true,
+            checked(++_stepTimingSequence),
+            locomotionTicks,
+            inventoryTicks,
+            worldTicks,
+            Stopwatch.GetTimestamp() - completeStarted);
     }
 
     public void Dispose()
