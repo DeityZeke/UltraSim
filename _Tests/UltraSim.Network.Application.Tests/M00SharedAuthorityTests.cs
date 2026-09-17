@@ -97,6 +97,9 @@ internal static class M00SharedAuthorityTests
                 stackalloc RemotePublicItemPresentationCensus[maximumParticipants];
             Equal(maximumParticipants,
                 authority.CopyRemotePublicItemPresentationCensus(remoteItemStable));
+            ulong itemProofWakeupsBefore = 0;
+            for (int index = 0; index < maximumParticipants; index++)
+                itemProofWakeupsBefore += remoteItemStable[index].ProofWakeups;
             ulong progressDelta = 0;
             ulong reconciliationDelta = 0;
             ulong skipDelta = 0;
@@ -258,15 +261,9 @@ internal static class M00SharedAuthorityTests
                 client.Session.PublicPresentationState.TryGet(
                     swordId, out ClientPublicPresentationMetadata metadata) &&
                 (metadata.Flags & ClientPublicPresentationFlags.ItemProperties) != 0));
-            Span<RemotePublicItemPresentationCensus> remoteItemAfter =
-                stackalloc RemotePublicItemPresentationCensus[maximumParticipants];
-            Equal(maximumParticipants,
-                authority.CopyRemotePublicItemPresentationCensus(remoteItemAfter));
-            ulong itemProofWakeups = 0;
-            for (int index = 0; index < maximumParticipants; index++)
-                itemProofWakeups += remoteItemAfter[index].ProofWakeups -
-                    remoteItemStable[index].ProofWakeups;
-            True(itemProofWakeups >= (ulong)maximumParticipants);
+            DriveUntil(host, authority, clients, () =>
+                CopyPublicItemProofWakeups(authority, maximumParticipants) -
+                    itemProofWakeupsBefore >= (ulong)maximumParticipants);
         }
         finally
         {
@@ -294,6 +291,19 @@ internal static class M00SharedAuthorityTests
         world.TryResolvePersistentEntity(id, out Entity entity)
             ? entity
             : throw new InvalidOperationException($"Persistent entity {id} was unavailable.");
+
+    private static ulong CopyPublicItemProofWakeups(
+        SharedPlayableAuthority authority,
+        int maximumParticipants)
+    {
+        Span<RemotePublicItemPresentationCensus> census =
+            stackalloc RemotePublicItemPresentationCensus[maximumParticipants];
+        Equal(maximumParticipants, authority.CopyRemotePublicItemPresentationCensus(census));
+        ulong result = 0;
+        for (int index = 0; index < maximumParticipants; index++)
+            result += census[index].ProofWakeups;
+        return result;
+    }
 
     private static void ExistingLocalAuthorityAddsAndRetiresRemoteRecipients()
     {
