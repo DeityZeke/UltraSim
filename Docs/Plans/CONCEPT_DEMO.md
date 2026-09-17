@@ -128,6 +128,11 @@ fixed-delivery topology control. The result supports that earlier reconstruction
 gone, while explicitly leaving the remaining per-recipient efficiency question open. All three
 final R300/high runs pass the approximate 4 ms remote p95 boundary, while R350 clearly fails; this
 is a synthetic boundary, not CCU or a promise that another 50–100 recipients can be recovered.
+PF5-R10 separately closes an actual-product sampled presentation hotspot: shared bounded source
+preparation, direct slot lookup, and proof-woken unchanged-source skipping reduce the matched
+64-client crowd server from 0.504 to 0.334 core without changing delivery/proof or wire policy.
+That application path is not present in the synthetic R300/R350 adapter, so its established
+subsystem boundary does not move.
 A post-F0.8 defensive UI correction
 also makes
 local shutdown independent from a saturated presentation queue, contains expected view-capacity

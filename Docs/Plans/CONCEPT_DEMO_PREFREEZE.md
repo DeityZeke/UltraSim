@@ -92,6 +92,13 @@ admitted obligation; dense topology is expensive chiefly because it requires man
 records. Compatible-body reuse remains 75.90–98.44% under divergence. The only newly confirmed
 avoidable work is a small Off-mode typed diagnostic-slab clear; no production optimization or
 policy change is accepted, and PF6 remains ready.
+PF5-R10 then closes the sampled actual-product presentation hotspot as outcome A. One bounded
+slot-indexed actor-presentation source view is prepared per valid source revision; recipient
+progress uses direct slot lookup and skips unchanged reconciliation while exact delivery/proof
+state remains recipient-local. In the matched 64-client crowd control, server CPU falls from
+0.504 to 0.334 core (-33.8%) while message-148 and UDP traffic increase, and the profiled source
+capture plus reconciliation footprint falls from 35.27% to 0.554% of main-thread cycles. This path
+is absent from the synthetic R300/R350 ChunkPublication fixture, whose boundary is unchanged.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -2520,6 +2527,8 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
     **FOLLOW-UP RECORDED — PF5-R9-R1 closes independent-epoch propagation and primitive timestamp
     precision; real concurrent handoff and packet-boundary carry are measured; the remaining
     observer-sensitive residual stays an optional profiling question and does not block PF6**
+36a. Share compatible authoritative actor-presentation preparation in the actual product.
+    **CLOSED — PF5-R10 outcome A; direct slot lookup and proof-woken unchanged-source skip selected**
 37. Choose/document the default deployment-performance policy.
     **CLOSED — v29 plus PF5-R3 egress and PF5-R9 opt-in detailed egress timing**
 38. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5/PF5-R8/PF5-R9**
