@@ -84,8 +84,14 @@ static void VerifyPf5R9PacketProducer(string root, string configuration)
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(output));
         JsonElement report = document.RootElement;
         if (report.GetProperty("Schema").GetString() !=
-                "ultrasim-concept-demo-pf5-r9-packet-producer-audit-v1")
+                "ultrasim-concept-demo-pf5-r9-packet-producer-audit-v2")
             throw new InvalidOperationException("PF5-R9 emitted an unexpected report schema.");
+        JsonElement conversion = report.GetProperty("TimestampConversionProbe");
+        if (conversion.GetProperty("StopwatchTicks").GetInt64() != 450 ||
+            conversion.GetProperty("Frequency").GetInt64() != 1_000_000_000 ||
+            conversion.GetProperty("Nanoseconds").GetDouble() != 450d)
+            throw new InvalidOperationException(
+                "PF5-R9 primitive timestamp conversion discarded sub-100ns precision.");
         JsonElement[] timing = report.GetProperty("TimingToggle").EnumerateArray()
             .Select(static value => value.Clone()).ToArray();
         if (timing.Length != 2 || !timing.Any(static row =>
@@ -108,31 +114,110 @@ static void VerifyPf5R9PacketProducer(string root, string configuration)
         if (report.GetProperty("Primitives").EnumerateArray().Any(static row =>
                 row.GetProperty("WarmedManagedBytes").GetInt64() != 0))
             throw new InvalidOperationException("PF5-R9 primitive path allocated after warmup.");
+        JsonElement[] handoffs = report.GetProperty("HandoffPrimitives").EnumerateArray()
+            .Select(static value => value.Clone()).ToArray();
+        if (handoffs.Length == 0 || handoffs.Any(static row =>
+                row.GetProperty("WarmedManagedBytes").GetInt64() != 0 ||
+                row.GetProperty("AcceptedDatagrams").GetUInt64() !=
+                    (ulong)row.GetProperty("Iterations").GetInt32() ||
+                row.GetProperty("PhysicallySentDatagrams").GetUInt64() !=
+                    checked((ulong)(row.GetProperty("Iterations").GetInt32() +
+                        row.GetProperty("PreloadedDatagrams").GetInt32())) ||
+                row.GetProperty("CapacityRefusals").GetUInt64() != 0))
+            throw new InvalidOperationException(
+                "PF5-R9 concurrent handoff primitive did not reconcile.");
+        if (handoffs.Where(static row => row.GetProperty("Mode").GetString() ==
+                "sustained-nonempty").Any(static row =>
+                !row.GetProperty("NoAdditionalWorkerWakeDuringProducerWindow").GetBoolean()))
+            throw new InvalidOperationException(
+                "PF5-R9 sustained handoff did not remain continuously serviceable.");
+
+        AssertPf5R9EpochShape(timing.Select(static row => row.GetProperty("Row")),
+            requireDistinct: true);
+        AssertPf5R9EpochShape(report.GetProperty("FixedDeliveryTopology").EnumerateArray()
+            .Select(static row => row.GetProperty("Row")), requireDistinct: true);
+        AssertPf5R9EpochShape(report.GetProperty("Attribution").EnumerateArray()
+            .Select(static row => row.GetProperty("Row")), requireDistinct: true);
+        JsonElement[] sparse = report.GetProperty("SparseAttribution").EnumerateArray()
+            .Select(static value => value.Clone()).ToArray();
+        if (sparse.Length == 0)
+            throw new InvalidOperationException("PF5-R9 sparse attribution was not exercised.");
+        AssertPf5R9EpochShape(sparse.Select(static row => row.GetProperty("NetworkOnly")),
+            requireDistinct: true);
+        AssertPf5R9EpochShape(sparse.Select(static row => row.GetProperty("GameOff")),
+            requireDistinct: true);
+        AssertPf5R9EpochShape(sparse.Select(static row => row.GetProperty("GameDetailed")),
+            requireDistinct: true);
+        foreach (JsonElement sparseRow in sparse)
+        {
+            JsonElement sparseTiming = sparseRow.GetProperty("NetworkOnlyAttribution");
+            double sparseParent = sparseTiming.GetProperty("ParentMilliseconds").GetDouble();
+            double sparseChildren =
+                sparseTiming.GetProperty("ScheduleCodecQueueMilliseconds").GetDouble() +
+                sparseTiming.GetProperty("ProofApplicationMilliseconds").GetDouble() +
+                sparseTiming.GetProperty("ServerOutboundProtocolMilliseconds").GetDouble() +
+                sparseTiming.GetProperty("ServerInboundProtocolMilliseconds").GetDouble() +
+                sparseTiming.GetProperty("SignedResidualMilliseconds").GetDouble();
+            if (Math.Abs(sparseParent - sparseChildren) >= 0.000_001)
+                throw new InvalidOperationException(
+                    "PF5-R9 sparse Network attribution did not reconcile.");
+            JsonElement offCpu = sparseRow.GetProperty("GameOff")
+                .GetProperty("ProfileCounters").GetProperty("ChunkCpu");
+            JsonElement detailedCpu = sparseRow.GetProperty("GameDetailed")
+                .GetProperty("ProfileCounters").GetProperty("ChunkCpu");
+            if (offCpu.GetProperty("Enabled").GetBoolean() ||
+                !detailedCpu.GetProperty("Enabled").GetBoolean())
+                throw new InvalidOperationException(
+                    "PF5-R9 sparse Game attribution did not isolate Detailed-only work.");
+        }
 
         JsonElement compressionAttribution = report.GetProperty("Attribution")[0];
-        AssertPf5R9CompressionCensus(compressionAttribution, requireDistinct: false);
+        AssertPf5R9CompressionCensus(
+            compressionAttribution, requireDistinct: true, requireRepeated: false);
 
-        string uniqueEpochOutput = Path.Combine(scope, "compression-unique-epochs.json");
+        string sharedEpochOutput = Path.Combine(scope, "compression-shared-epoch.json");
         Run(root, "dotnet",
         [
             "run", "--project",
             "_Benchmarks/UltraSim.Network.V3ComparisonAdapter/UltraSim.Network.V3ComparisonAdapter.csproj",
             "-c", configuration, "--", "--pf5-r9-packet-producer", "--focused",
-            "--diagnostic-only", "--unique-epochs", "--output", uniqueEpochOutput,
+            "--diagnostic-only", "--shared-epoch-control", "--output", sharedEpochOutput,
         ]);
-        using JsonDocument uniqueDocument = JsonDocument.Parse(File.ReadAllText(uniqueEpochOutput));
-        JsonElement uniqueReport = uniqueDocument.RootElement;
-        if (!uniqueReport.GetProperty("UniqueApplicationEpochs").GetBoolean())
-            throw new InvalidOperationException("PF5-R9 unique-epoch control was not enabled.");
-        JsonElement uniqueAttribution = uniqueReport.GetProperty("Attribution")[0];
-        AssertPf5R9CompressionCensus(uniqueAttribution, requireDistinct: true);
+        using JsonDocument sharedDocument = JsonDocument.Parse(File.ReadAllText(sharedEpochOutput));
+        JsonElement sharedReport = sharedDocument.RootElement;
+        if (sharedReport.GetProperty("UniqueApplicationEpochs").GetBoolean())
+            throw new InvalidOperationException("PF5-R9 shared-epoch control was not enabled.");
+        JsonElement sharedAttribution = sharedReport.GetProperty("Attribution")[0];
+        AssertPf5R9EpochShape([sharedAttribution.GetProperty("Row")], requireDistinct: false);
+        AssertPf5R9CompressionCensus(
+            sharedAttribution, requireDistinct: false, requireRepeated: true);
     }
     finally
     {
         if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
     }
 
-    static void AssertPf5R9CompressionCensus(JsonElement attribution, bool requireDistinct)
+    static void AssertPf5R9EpochShape(
+        IEnumerable<JsonElement> rows,
+        bool requireDistinct)
+    {
+        foreach (JsonElement row in rows)
+        {
+            JsonElement epochs = row.GetProperty("ApplicationEpochs");
+            int recipients = row.GetProperty("Recipients").GetInt32();
+            int expected = requireDistinct ? recipients : 1;
+            if (!epochs.GetProperty("Applicable").GetBoolean() ||
+                epochs.GetProperty("RecipientCount").GetInt32() != recipients ||
+                epochs.GetProperty("DistinctEpochCount").GetInt32() != expected)
+                throw new InvalidOperationException(
+                    "PF5-R9 did not realize the requested application-epoch shape.");
+        }
+    }
+
+    static void AssertPf5R9CompressionCensus(
+        JsonElement attribution,
+        bool requireDistinct,
+        bool requireRepeated)
     {
         JsonElement census = attribution.GetProperty("CompressionInputs");
         ulong attempts = census.GetProperty("Attempts").GetUInt64();
@@ -147,6 +232,9 @@ static void VerifyPf5R9PacketProducer(string root, string configuration)
              census.GetProperty("DistinctInputs").GetUInt64() != attempts))
             throw new InvalidOperationException(
                 "PF5-R9 independent application lifetimes shared a compression input.");
+        if (requireRepeated && census.GetProperty("ExactRepeatedInputs").GetUInt64() == 0)
+            throw new InvalidOperationException(
+                "PF5-R9 shared-epoch compatibility control produced no repeated input.");
     }
 }
 

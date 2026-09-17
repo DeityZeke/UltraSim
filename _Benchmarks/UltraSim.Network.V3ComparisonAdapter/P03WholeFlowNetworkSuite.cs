@@ -1916,7 +1916,8 @@ internal sealed class P03WholeFlowHarness : IDisposable
                 ProtocolTimingCapturedBeforeDrain: true,
                 TransportCapturedBeforeDrain: true,
                 ProcessWindowCapturedBeforeDrain: true,
-                ticks));
+                ticks),
+            _adapter.ApplicationEpochs);
     }
 
     private static double[] ExclusiveResidualSamples(
@@ -2429,6 +2430,7 @@ internal abstract class P03RemoteProfileAdapter : IDisposable
     internal virtual ulong PreparedSourcePublicationCount => 0;
     internal virtual ulong LastPreparedSourcePreparationTicks => 0;
     internal virtual ulong LastRecipientCommitObservationTicks => 0;
+    internal virtual P03ApplicationEpochSummary ApplicationEpochs => default;
     internal abstract void Schedule(ulong step);
     internal abstract bool ProcessServer(int recipient, in NetworkDeliveredMessage message,
         ReadOnlySpan<byte> payload);
@@ -3232,6 +3234,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
     private readonly ChunkPublicationWorkScheduler _scheduler;
     private readonly RemoteChunkWorldStateServer[] _servers;
     private readonly RemoteChunkWorldStateClient[] _clients;
+    private readonly ulong[] _applicationEpochs;
     private readonly OfflineDirectChunkSubscriptionChange[] _changes;
     private readonly ChunkPublicationWork[] _dueWorks;
     private readonly RemoteChunkWorldStateScheduleStatus[] _dueStatuses;
@@ -3294,6 +3297,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
                 checked(workload.Recipients * subscriptions)));
         _servers = new RemoteChunkWorldStateServer[workload.Recipients];
         _clients = new RemoteChunkWorldStateClient[workload.Recipients];
+        _applicationEpochs = new ulong[workload.Recipients];
         _changes = new OfflineDirectChunkSubscriptionChange[subscriptions * 2];
         _dueWorks = new ChunkPublicationWork[checked(workload.Recipients * MaximumDuePerRecipient)];
         _dueStatuses = new RemoteChunkWorldStateScheduleStatus[_dueWorks.Length];
@@ -3327,6 +3331,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
             ulong applicationEpoch = uniqueApplicationEpochs
                 ? checked(ApplicationEpoch + (ulong)index)
                 : ApplicationEpoch;
+            _applicationEpochs[index] = applicationEpoch;
             _servers[index] = new RemoteChunkWorldStateServer(
                 sessions[index].Server, recipient, Source, applicationEpoch,
                 new RemoteChunkWorldStateTransportLimits(
@@ -3339,6 +3344,32 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
         while (_scheduler.TryDequeueDue(0, out _)) { }
         if (_historyAuditEnabled)
             Source.ConfigureHistoryAudit(new ChunkPublicationHistoryAuditLimits(65_536));
+    }
+
+    internal override P03ApplicationEpochSummary ApplicationEpochs
+    {
+        get
+        {
+            if (_applicationEpochs.Length == 0) return new(true, 0, 0, 0, 0);
+            ulong minimum = ulong.MaxValue;
+            ulong maximum = 0;
+            int distinct = 0;
+            for (int index = 0; index < _applicationEpochs.Length; index++)
+            {
+                ulong candidate = _applicationEpochs[index];
+                minimum = Math.Min(minimum, candidate);
+                maximum = Math.Max(maximum, candidate);
+                bool seen = false;
+                for (int prior = 0; prior < index; prior++)
+                    if (_applicationEpochs[prior] == candidate)
+                    {
+                        seen = true;
+                        break;
+                    }
+                if (!seen) distinct++;
+            }
+            return new(true, _applicationEpochs.Length, distinct, minimum, maximum);
+        }
     }
 
     internal override void ConfigureTelemetry(GameTelemetryLevel level)
@@ -4148,7 +4179,15 @@ internal readonly record struct P03WholeFlowRow(
     P03ListenerConfigurationSummary ListenerConfiguration,
     P03WholeFlowRawSamples? RawSamples = null,
     P03DrainSummary Drain = default,
-    P03MeasurementWindowBoundary MeasurementWindow = default);
+    P03MeasurementWindowBoundary MeasurementWindow = default,
+    P03ApplicationEpochSummary ApplicationEpochs = default);
+
+internal readonly record struct P03ApplicationEpochSummary(
+    bool Applicable,
+    int RecipientCount,
+    int DistinctEpochCount,
+    ulong MinimumEpoch,
+    ulong MaximumEpoch);
 
 internal readonly record struct P03MeasurementWindowBoundary(
     bool CountersCapturedBeforeDrain,
