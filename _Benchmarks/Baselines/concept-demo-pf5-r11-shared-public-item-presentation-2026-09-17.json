@@ -1,0 +1,123 @@
+{
+  "schema": "ultrasim-concept-demo-pf5-r11-shared-public-item-presentation-v1",
+  "checkpoint": "PF5-R11",
+  "date": "2026-09-17",
+  "outcome": "A",
+  "startingHead": "506f217c571c7d0ca0f46e34c01488c392a77cd6",
+  "actorFailureRepairCommit": "afe257c42b0f6e0c75f514dbda3a7fc66767fb83",
+  "itemImplementationCommit": "e2a9be3065133abbe4646fa3becb6ea781a46d83",
+  "deterministicProofRegressionCommit": "3e94c3dfa64d94e3162e6963a3575906978b0bdb",
+  "replicationSemanticCandidate": "14e729a6ce69179cfbe4b9a3a4c4cdfa21797fa9",
+  "integratedCorrectnessCandidate": "e2a9be3065133abbe4646fa3becb6ea781a46d83",
+  "performanceOptimizationChangesIntendedSemantics": false,
+  "correctnessBehaviorRepaired": true,
+  "correctnessRepairs": [
+    {
+      "name": "failed actor source preparation invalidates retained view",
+      "severity": "medium",
+      "coverage": ["false capture", "exception", "retry without new mutation", "real UDP delivery"]
+    },
+    {
+      "name": "same item reappearance advances metadata revision",
+      "severity": "medium",
+      "coverage": ["pending removal", "exact proof wake", "newer present", "client stale-revision rejection regression"]
+    }
+  ],
+  "environment": {
+    "configuration": "Release",
+    "dotnetSdk": "8.0.131",
+    "dotnetRuntime": "8.0.31",
+    "os": "CachyOS Linux 7.2.6-1-cachyos",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "physicalCores": 8,
+    "logicalCpus": 16,
+    "profiler": "perf 7.2.6-1 cycles:u 997Hz frame-pointer",
+    "server": "dedicated ServerOnly",
+    "clients": "64 real ClientOnly NetworkBots",
+    "telemetry": "Off"
+  },
+  "policy": {
+    "replication": "ChunkPublication",
+    "representation": "CurrentBundled",
+    "compression": "message148 LZ4 384/32; singleton off",
+    "cadence": "1/2/4",
+    "aggregation": "CrossLane cap 2",
+    "egress": "BackgroundPlatformBatch",
+    "manifest": 29,
+    "transportRevision": 2,
+    "authorityHz": 60,
+    "participantCap": 64
+  },
+  "scenario": {
+    "name": "crowd",
+    "seed": 509921,
+    "clients": 64,
+    "warmupSeconds": 60,
+    "measurementSeconds": 120,
+    "content": "warm"
+  },
+  "before": {
+    "durationMilliseconds": 120237,
+    "processCpuMilliseconds": 40270,
+    "cpuCoreEquivalent": 0.33492186182289974,
+    "workingSetHighWaterBytes": 283439104,
+    "managedHeapHighWaterBytes": 162371304,
+    "allocatedBytes": 400676096,
+    "authorityTicks": 7215,
+    "udpDatagramsSent": 802327,
+    "udpPayloadBytesSent": 445751986,
+    "presentation144Sent": 108096,
+    "presentationProof145Received": 108096
+  },
+  "afterRuns": [
+    {"cpuCoreEquivalent": 0.2291174611623033, "processCpuMilliseconds": 27550, "allocatedBytes": 76067992, "udpDatagramsSent": 813362, "udpPayloadBytesSent": 449433348, "presentation144Sent": 107520, "presentationProof145Received": 107520},
+    {"cpuCoreEquivalent": 0.21788485367618318, "processCpuMilliseconds": 26200, "allocatedBytes": 75993064, "udpDatagramsSent": 779862, "udpPayloadBytesSent": 415344756, "presentation144Sent": 106496, "presentationProof145Received": 106496},
+    {"cpuCoreEquivalent": 0.22236266569095414, "processCpuMilliseconds": 26740, "allocatedBytes": 76080960, "udpDatagramsSent": 776981, "udpPayloadBytesSent": 409563217, "presentation144Sent": 107264, "presentationProof145Received": 107264}
+  ],
+  "afterMean": {
+    "cpuCoreEquivalent": 0.22312166017648022,
+    "cpuChangePercent": -33.380980577952634,
+    "processCpuMilliseconds": 26830,
+    "allocatedBytes": 76047338.66666667,
+    "allocatedChangePercent": -81.02024567328652,
+    "workingSetHighWaterBytes": 279121920,
+    "managedHeapHighWaterBytes": 172119432,
+    "authorityTicks": 7215.333333333333,
+    "udpDatagramsSent": 790068.3333333334,
+    "udpPayloadBytesSent": 424780440.3333333
+  },
+  "profile": {
+    "before": {"processCore": 0.3420279267462518, "mainSamples": 13967, "lostSamples": 0, "isSubscribedPercent": 6.2075, "reconcilePercent": 1.3890, "sourceCapturePercent": 1.2100, "queuePercent": 0.7661, "selectedPercent": 9.5726},
+    "after": {"processCore": 0.23414148123546993, "mainSamples": 9348, "lostSamples": 0, "isSubscribedPercent": 0.0535, "reconcilePercent": 0.2353, "sourceCapturePercent": 0.0214, "queuePercent": 3.0381, "selectedPercent": 3.3483}
+  },
+  "mixedChaos": {
+    "seed": 731911,
+    "clients": 64,
+    "warmupSeconds": 30,
+    "measurementSeconds": 60,
+    "freshProofLifetimes": 65,
+    "successfulReconnects": 1,
+    "swordAttempts": 268,
+    "swordPickupObserved": 1,
+    "swordEquipObserved": 1,
+    "swordDropObserved": 1,
+    "faults": 0,
+    "sourceGaps": 0,
+    "cleanRetirement": true
+  },
+  "discardedControls": {
+    "paths": ["after-control-1", "after-control-2", "after-control-3", "after-perf"],
+    "reason": "runner uses --no-build and these runs used the prior ServerOnly binary",
+    "acceptedAfterPrefix": "after-built-"
+  },
+  "verification": {
+    "gameReplicationTests": 180,
+    "networkApplicationFocusedRuns": 3,
+    "canonicalRelease": "pass",
+    "exports": "pass",
+    "contentlessOnline": "pass",
+    "mixedNativeBots": "pass",
+    "worktreeAtEvidenceWrite": "documentation changes only"
+  },
+  "rawArtifacts": "_Benchmarks/results/pf5-r11-item-presentation-20260917/ (ignored)"
+}

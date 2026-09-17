@@ -133,6 +133,12 @@ preparation, direct slot lookup, and proof-woken unchanged-source skipping reduc
 64-client crowd server from 0.504 to 0.334 core without changing delivery/proof or wire policy.
 That application path is not present in the synthetic R300/R350 adapter, so its established
 subsystem boundary does not move.
+PF5-R10-R1 repairs failed actor-presentation preparation so a partial failed capture cannot expose
+changed rows behind an old source version. PF5-R11 then shares bounded public ground-item source
+preparation and skips unchanged per-recipient item reconciliation while preserving independent
+interest, delivery, retry, removal, and exact proof. The matched 64-client crowd mean falls from
+0.335 to 0.223 server core with no wire-policy change; mixed chaos proves sword lifecycle,
+reconnect, and clean proof/retirement behavior.
 A post-F0.8 defensive UI correction
 also makes
 local shutdown independent from a saturated presentation queue, contains expected view-capacity

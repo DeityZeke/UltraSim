@@ -99,6 +99,14 @@ state remains recipient-local. In the matched 64-client crowd control, server CP
 0.504 to 0.334 core (-33.8%) while message-148 and UDP traffic increase, and the profiled source
 capture plus reconciliation footprint falls from 35.27% to 0.554% of main-thread cycles. This path
 is absent from the synthetic R300/R350 ChunkPublication fixture, whose boundary is unchanged.
+PF5-R10-R1 then repairs failed actor-source preparation so partial retained-row changes can never
+remain behind an unchanged shared source version. PF5-R11 applies the same bounded shared-source
+principle to public ground-item presentation while retaining recipient-local interest, delivery,
+retry, and exact proof. It also repairs stale metadata revision on same-item reappearance after a
+proven removal. Three matched 64-client crowd runs average 0.223 core versus 0.335 before (-33.4%)
+and 76.0 MB allocated versus 400.7 MB (-81.0%); a higher-wire after run still uses 31.6% less
+CPU. A 64-client mixed-chaos control covers pickup/equip/drop, reconnect, proof lifetimes, and
+clean retirement. No wire or deployment policy changes.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -2529,6 +2537,9 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
     observer-sensitive residual stays an optional profiling question and does not block PF6**
 36a. Share compatible authoritative actor-presentation preparation in the actual product.
     **CLOSED — PF5-R10 outcome A; direct slot lookup and proof-woken unchanged-source skip selected**
+36b. Repair actor preparation failure atomicity and share bounded public-item presentation.
+    **CLOSED — PF5-R10-R1/PF5-R11 outcome A; transactional source preparation, proof-woken item
+    reconciliation, and monotonic same-item reappearance revision selected**
 37. Choose/document the default deployment-performance policy.
     **CLOSED — v29 plus PF5-R3 egress and PF5-R9 opt-in detailed egress timing**
 38. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5/PF5-R8/PF5-R9**
