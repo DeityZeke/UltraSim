@@ -2517,6 +2517,9 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 36. Assure and attribute the ChunkPublication packet producer and background handoff.
     **CLOSED — PF5-R9 outcome A; refused-encryption nonce repair, exact enqueue boundary,
     dormant diagnostic clearing repair, detailed egress timing opt-in, no compression-result cache**
+    **FOLLOW-UP RECORDED — PF5-R9-R1 closes independent-epoch propagation and primitive timestamp
+    precision; real concurrent handoff and packet-boundary carry are measured; the remaining
+    observer-sensitive residual stays an optional profiling question and does not block PF6**
 37. Choose/document the default deployment-performance policy.
     **CLOSED — v29 plus PF5-R3 egress and PF5-R9 opt-in detailed egress timing**
 38. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5/PF5-R8/PF5-R9**

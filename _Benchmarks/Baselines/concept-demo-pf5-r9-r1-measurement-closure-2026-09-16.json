@@ -1,0 +1,139 @@
+{
+  "schema": "ultrasim-concept-demo-pf5-r9-r1-measurement-closure-v1",
+  "checkpoint": "PF5-R9-R1",
+  "date": "2026-09-16",
+  "startingHead": "f9395027083abe4d674acae853bd8b7cb598e2cd",
+  "measurementHead": "0e96535cabc9750620c85d373128c7497bfd294f",
+  "replicationSemanticCandidate": "14e729a6ce69179cfbe4b9a3a4c4cdfa21797fa9",
+  "integratedProductionCandidate": "f9b0a44d2e583b75c8511dbebe74bcbfbf653101",
+  "productionSemanticsChanged": false,
+  "confirmedMeasurementRepairs": {
+    "applicationEpochPropagation": {
+      "disposition": "confirmed and repaired",
+      "productionShapedDefault": "one distinct application epoch per recipient",
+      "sharedEpochMode": "explicit --shared-epoch-control only",
+      "realizedShapeRecordedPerRow": true
+    },
+    "primitiveTimestampPrecision": {
+      "disposition": "confirmed and repaired",
+      "oldConversion": "Stopwatch.GetElapsedTime(...).TotalNanoseconds via 100ns TimeSpan ticks",
+      "newConversion": "raw timestamp delta * 1e9 / Stopwatch.Frequency",
+      "conversionProbe": {
+        "ticks": 450,
+        "frequency": 1000000000,
+        "nanoseconds": 450
+      }
+    }
+  },
+  "environment": {
+    "configuration": "Release",
+    "runtime": ".NET 8.0.29",
+    "os": "CachyOS Linux x64",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "logicalProcessors": 16,
+    "stopwatchFrequency": 1000000000,
+    "externalSamplingProfiler": "unavailable"
+  },
+  "independentEpochRatedOff": [
+    { "workload": "R128/high", "meanMs": 0.947283, "p95Ms": 1.067546, "runP95Ms": [1.088889, 1.060439, 1.053309] },
+    { "workload": "R300/low", "meanMs": 2.434968, "p95Ms": 2.554283, "runP95Ms": [2.718271, 2.434719, 2.509859] },
+    { "workload": "R300/high", "meanMs": 3.356877, "p95Ms": 3.631478, "runP95Ms": [3.851956, 3.519995, 3.522484] },
+    { "workload": "R350/high", "meanMs": 4.952909, "p95Ms": 5.432809, "runP95Ms": [5.576395, 5.376465, 5.345566] }
+  ],
+  "sameCodeEpochComparisonOff": [
+    { "workload": "R128/high", "independentMeanMs": 0.947283, "sharedMeanMs": 0.940585, "independentP95Ms": 1.067546, "sharedP95Ms": 1.053638 },
+    { "workload": "R300/low", "independentMeanMs": 2.434968, "sharedMeanMs": 2.461279, "independentP95Ms": 2.554283, "sharedP95Ms": 2.637127 },
+    { "workload": "R300/high", "independentMeanMs": 3.356877, "sharedMeanMs": 3.345501, "independentP95Ms": 3.631478, "sharedP95Ms": 3.628187 },
+    { "workload": "R350/high", "independentMeanMs": 4.952909, "sharedMeanMs": 4.973214, "independentP95Ms": 5.432809, "sharedP95Ms": 5.454994 }
+  ],
+  "backgroundTimingTaxIndependentEpochs": [
+    { "workload": "R128/high", "meanDeltaMs": 0.024144, "p95DeltaMs": 0.023432 },
+    { "workload": "R300/low", "meanDeltaMs": 0.075120, "p95DeltaMs": 0.156284 },
+    { "workload": "R300/high", "meanDeltaMs": 0.170024, "p95DeltaMs": 0.183108 },
+    { "workload": "R350/high", "meanDeltaMs": 0.156399, "p95DeltaMs": 0.184830 }
+  ],
+  "sparseAttribution": [
+    {
+      "workload": "R128/high",
+      "networkOnlyBudgetMeanMs": 1.181719,
+      "networkParentMeanMs": 1.170232,
+      "scheduleMeanMs": 0.344887,
+      "proofMeanMs": 0.073805,
+      "outboundMeanMs": 0.322292,
+      "inboundMeanMs": 0.163939,
+      "signedResidualMeanMs": 0.265309,
+      "matchedGameOffBudgetMeanMs": 0.967118,
+      "gameDetailedBudgetMeanMs": 1.594075,
+      "packetBoundaryCarryCalls": 2700,
+      "packetBoundaryCarryBytes": 2261886,
+      "packetBoundaryCarryMilliseconds": 0.676992,
+      "packetBoundaryCarryNanosecondsPerCall": 250.738
+    },
+    {
+      "workload": "R300/high",
+      "networkOnlyBudgetMeanMs": 3.942378,
+      "networkParentMeanMs": 3.908974,
+      "scheduleMeanMs": 1.094830,
+      "proofMeanMs": 0.258639,
+      "outboundMeanMs": 1.547539,
+      "inboundMeanMs": 0.392933,
+      "signedResidualMeanMs": 0.615032,
+      "matchedGameOffBudgetMeanMs": 3.276335,
+      "gameDetailedBudgetMeanMs": 6.814294,
+      "packetBoundaryCarryCalls": 25862,
+      "packetBoundaryCarryBytes": 23283898,
+      "packetBoundaryCarryMilliseconds": 6.998285,
+      "packetBoundaryCarryNanosecondsPerCall": 270.601
+    }
+  ],
+  "primitiveMeansNanoseconds": [
+    { "operation": "AES-GCM Encrypt", "bytes": 64, "mean": 607.788, "p95": 860 },
+    { "operation": "TryQueue+Emit accepting endpoint", "bytes": 64, "mean": 802.248, "p95": 840 },
+    { "operation": "AES-GCM Encrypt", "bytes": 512, "mean": 618.244, "p95": 620 },
+    { "operation": "TryQueue+Emit accepting endpoint", "bytes": 512, "mean": 842.111, "p95": 870 },
+    { "operation": "AES-GCM Encrypt", "bytes": 1428, "mean": 696.297, "p95": 700 },
+    { "operation": "TryQueue+Emit accepting endpoint", "bytes": 1405, "mean": 931.276, "p95": 970 }
+  ],
+  "concurrentHandoff": [
+    { "mode": "empty-to-nonempty", "bytes": 64, "meanNs": 1118.770, "p95Ns": 2070, "workerWakes": 2048 },
+    { "mode": "sustained-nonempty", "bytes": 64, "meanNs": 525.517, "p95Ns": 1230, "workerWakes": 0 },
+    { "mode": "empty-to-nonempty", "bytes": 512, "meanNs": 1420.336, "p95Ns": 2290, "workerWakes": 2048 },
+    { "mode": "sustained-nonempty", "bytes": 512, "meanNs": 484.654, "p95Ns": 1330, "workerWakes": 0 },
+    { "mode": "empty-to-nonempty", "bytes": 1472, "meanNs": 1353.093, "p95Ns": 2250, "workerWakes": 2048 },
+    { "mode": "sustained-nonempty", "bytes": 1472, "meanNs": 137.191, "p95Ns": 90, "workerWakes": 0 }
+  ],
+  "fixedDeliveryTopology": [
+    { "shape": "1x512", "meanMs": 2.283143, "p95Ms": 2.344337 },
+    { "shape": "8x64", "meanMs": 2.297273, "p95Ms": 2.363605 },
+    { "shape": "64x8", "meanMs": 2.356179, "p95Ms": 2.544123 },
+    { "shape": "512x1", "meanMs": 2.872516, "p95Ms": 3.335067 }
+  ],
+  "compressionInputCensus": {
+    "independentEpochs": [
+      { "workload": "R128/high", "attempts": 2444, "distinct": 2444, "exactRepeats": 0 },
+      { "workload": "R300/high", "attempts": 2863, "distinct": 2863, "exactRepeats": 0 }
+    ],
+    "sharedEpochControl": [
+      { "workload": "R128/high", "attempts": 2444, "distinct": 99, "exactRepeats": 2345 },
+      { "workload": "R300/high", "attempts": 2863, "distinct": 275, "exactRepeats": 2588 }
+    ]
+  },
+  "ratedCrossing": {
+    "metric": "independent-epoch, detailed-timing-Off server-owned remote-replication p95",
+    "between": "R300/high and R350/high",
+    "classification": "synthetic protocol-adapter recipients, not product CCU"
+  },
+  "outcome": "C",
+  "outcomeReason": "The two benchmark defects close and concurrent handoff/carry costs are measured, but a 0.265/0.615 ms sparse Network residual remains inseparable from material Network timing observer tax; no production saving or additional recipient capacity is claimed.",
+  "pf6MayResume": true,
+  "rawEvidence": [
+    { "file": "concept-demo-pf5-r9-r1-packet-producer-audit-2026-09-16.raw.json", "sha256": "9e97ec5fc9aca394b5c29591dd9559225f778970f955fcd0cdf8b625a6aac9b6" },
+    { "file": "concept-demo-pf5-r9-r1-shared-epoch-control-2026-09-16.raw.json", "sha256": "eb322a4603875eba0808c5af7f7004ea0e0c7f6666a9d3857e63ca3275506f18" }
+  ],
+  "verification": {
+    "network": "passed",
+    "replication": "passed",
+    "pf5R9Focused": "passed",
+    "canonicalRelease": "passed; exports, Contentless Online, mixed exported-client/bot swarms, lifecycle, and final composition parity passed"
+  }
+}

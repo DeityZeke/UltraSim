@@ -1088,6 +1088,15 @@ default. Exact canonical message-129 compression inputs do not repeat when recip
 epochs are independent, so no cross-recipient compression-result cache is selected. The current
 synthetic 4 ms crossing remains between R300/high and R350/high and is not a product CCU claim.
 
+PF5-R9-R1 corrects the follow-up measurement boundary: every production-shaped benchmark row now
+uses and records independent application epochs, while a shared epoch requires an explicitly
+labelled control. Primitive timings retain raw Stopwatch ticks until nanosecond conversion, and a
+real concurrent BackgroundPlatformBatch handoff control now covers the bounded payload/address
+copy, accounting, synchronization, wake, native worker, and physical completion contract. The
+independent-epoch curve still crosses the synthetic 4 ms budget between R300/high and R350/high.
+Sparse Network timing leaves an observer-sensitive residual, so no further optimization or
+recipient-count gain is claimed from that residual.
+
 The first such consumer vertical has already validated public actors, and I0.8 has
 validated a very different owner-private UI/Inventory path over the same lower
 Network machinery. Future gameplay should continue to consume these seams before
