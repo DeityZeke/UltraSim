@@ -148,6 +148,69 @@ internal static class M00SharedPlayableAuthorityTests
         Check.True(authority.Leave(alice));
     }
 
+    internal static void PublicItemPresentationPreparationIsSharedTransactionalAndAllocationFree()
+    {
+        using SharedPlayableAuthority authority = SharedPlayableAuthority.CreateConceptDemo(
+            new SharedPlayableAuthorityLimits(1));
+        Check.True(authority.Join(
+            new ParticipantId(321),
+            new GameGuestAdmissionRequest(GameGuestBody.HumanFemale, "Alice"),
+            out SharedPlayableParticipant alice).IsEntered);
+
+        SharedPublicItemPresentationCensus before =
+            authority.GetPublicItemPresentationCensus();
+        SharedPublicItemPresentationView first = authority.GetPublicItemPresentationView();
+        Check.Equal(1, first.Count);
+        GamePublicWeaponPresentation sword = first[0];
+        Check.True(sword.IsValid);
+        for (int read = 0; read < 128; read++)
+            Check.Equal(first.Version, authority.GetPublicItemPresentationView().Version);
+        SharedPublicItemPresentationCensus repeated =
+            authority.GetPublicItemPresentationCensus();
+        Check.Equal(before.Preparations + 1, repeated.Preparations);
+        Check.Equal(before.ViewReads + 129, repeated.ViewReads);
+        Check.Equal(before.SourceRecordsCopied + 1, repeated.SourceRecordsCopied);
+
+        Check.True(authority.Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (world, _, game) =>
+            {
+                Entity actor = Resolve(world, alice.Entities.PlayerId);
+                Entity backpack = Resolve(world, alice.Entities.BackpackId);
+                Check.True(game.WorldState.Publications.TryResolvePublicEntity(sword.Id, out Entity item));
+                Check.Equal(GameWorldActionStatus.Accepted, game.Items.TryPickup(
+                    world, game.WorldState, game.Inventory, actor, item, backpack));
+                return true;
+            }, out bool pickedUp) && pickedUp);
+        authority.ObservePublicItemPresentationMutation();
+        SharedPublicItemPresentationView hidden = authority.GetPublicItemPresentationView();
+        Check.Equal(checked(first.Version + 1), hidden.Version);
+        Check.Equal(0, hidden.Count);
+
+        Check.True(authority.Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (world, _, game) =>
+            {
+                Entity actor = Resolve(world, alice.Entities.PlayerId);
+                Check.True(game.WorldState.Publications.TryResolvePublicEntity(sword.Id, out Entity item));
+                Check.Equal(GameWorldActionStatus.Accepted,
+                    game.Items.TryDrop(world, game.WorldState, game.Inventory, actor, item));
+                return true;
+            }, out bool dropped) && dropped);
+        authority.ObservePublicItemPresentationMutation();
+        SharedPublicItemPresentationView restored = authority.GetPublicItemPresentationView();
+        Check.Equal(checked(hidden.Version + 1), restored.Version);
+        Check.Equal(1, restored.Count);
+        Check.Equal(sword.Id, restored[0].Id);
+
+        long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        for (int iteration = 0; iteration < 128; iteration++)
+        {
+            authority.ObservePublicItemPresentationMutation();
+            Check.Equal(restored.Version, authority.GetPublicItemPresentationView().Version);
+        }
+        Check.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - allocatedBefore);
+        Check.True(authority.Leave(alice));
+    }
+
     internal static void ConfiguredParticipantCapacityReservesParticipantEntities()
     {
         const int participantCapacity = 50;

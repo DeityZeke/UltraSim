@@ -143,6 +143,46 @@ internal readonly record struct SharedActorPresentationCensus(
     ulong ChangedRecords,
     ulong ExplicitInvalidations);
 
+/// <summary>
+/// Owner-thread immutable-until-next-preparation view of the bounded public ground-item source.
+/// Recipient interest, delivery identity, and applied proof never enter this shared source.
+/// </summary>
+internal readonly struct SharedPublicItemPresentationView
+{
+    private readonly GamePublicWeaponPresentation[]? _rows;
+
+    internal SharedPublicItemPresentationView(
+        GamePublicWeaponPresentation[] rows,
+        ulong version,
+        int count)
+    {
+        _rows = rows;
+        Version = version;
+        Count = count;
+    }
+
+    internal ulong Version { get; }
+    internal int Count { get; }
+
+    internal GamePublicWeaponPresentation this[int index]
+    {
+        get
+        {
+            if (_rows is null || (uint)index >= (uint)Count)
+                throw new IndexOutOfRangeException();
+            return _rows[index];
+        }
+    }
+}
+
+internal readonly record struct SharedPublicItemPresentationCensus(
+    ulong SourceVersion,
+    ulong ViewReads,
+    ulong Preparations,
+    ulong SourceRecordsCopied,
+    ulong ChangedPreparations,
+    ulong ExplicitInvalidations);
+
 internal enum SharedActorPresentationPreparationFault : byte
 {
     None = 0,
@@ -212,6 +252,7 @@ public readonly record struct GameTestMarkerResult(
 /// </summary>
 public sealed class SharedPlayableAuthority : IDisposable
 {
+    internal const int MaximumPublicItemPresentations = 64;
     private readonly SharedPlayableAuthorityLimits _limits;
     private readonly SharedPlayableParticipant[] _participants;
     private readonly bool[] _occupied;
@@ -220,8 +261,14 @@ public sealed class SharedPlayableAuthority : IDisposable
     private readonly GamePublicActorActionKind[] _desiredPresentationActions;
     private readonly ulong[] _desiredPresentationActionSequences;
     private readonly GamePublicActorPresentation[] _actorPresentations;
+    private readonly GamePublicWeaponPresentation[] _publicItemPresentations =
+        new GamePublicWeaponPresentation[MaximumPublicItemPresentations];
+    private readonly GamePublicWeaponPresentation[] _publicItemPresentationStaging =
+        new GamePublicWeaponPresentation[MaximumPublicItemPresentations];
     private readonly ServerGenerationStateOperation<IGameGenerationStateProvider, bool>
         _prepareActorPresentationsOperation;
+    private readonly ServerGenerationStateOperation<IGameGenerationStateProvider, int>
+        _preparePublicItemPresentationsOperation;
     private readonly bool _ownsRuntime;
     private readonly GameTickTimingWindow _tickTimings;
     private readonly ChunkPublicationStore _publicationSource;
@@ -262,6 +309,17 @@ public sealed class SharedPlayableAuthority : IDisposable
     private SharedActorPresentationPreparationFault _actorPresentationFaultForTesting;
     private SharedActorPresentationPreparationFault _actorPresentationObservedFaultForTesting;
     private int _actorPresentationFaultSlotForTesting = -1;
+    private ulong _publicItemPresentationVersion;
+    private ulong _publicItemPresentationPreparedGeneration;
+    private ulong _publicItemPresentationPreparedSimulationTick;
+    private ulong _publicItemPresentationViewReads;
+    private ulong _publicItemPresentationPreparations;
+    private ulong _publicItemPresentationSourceRecordsCopied;
+    private ulong _publicItemPresentationChangedPreparations;
+    private ulong _publicItemPresentationExplicitInvalidations;
+    private int _publicItemPresentationCount;
+    private bool _publicItemPresentationPrepared;
+    private bool _publicItemPresentationDirty = true;
     private bool _disposed;
 
     private SharedPlayableAuthority(
@@ -298,6 +356,7 @@ public sealed class SharedPlayableAuthority : IDisposable
         _desiredPresentationActionSequences = new ulong[limits.MaximumParticipants];
         _actorPresentations = new GamePublicActorPresentation[limits.MaximumParticipants];
         _prepareActorPresentationsOperation = PrepareActorPresentationsCore;
+        _preparePublicItemPresentationsOperation = PreparePublicItemPresentationsCore;
         if (!runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider,
                 ChunkPublicationStore>(
                 static (world, _, game) => game.WorldState.Publications,
@@ -836,6 +895,45 @@ public sealed class SharedPlayableAuthority : IDisposable
             _actorPresentationExplicitInvalidations);
     }
 
+    /// <summary>
+    /// Returns the shared bounded public ground-item source. Preparation is transactional and
+    /// shared across every remote recipient; interest and proof remain recipient-owned.
+    /// </summary>
+    internal SharedPublicItemPresentationView GetPublicItemPresentationView()
+    {
+        EnsureOperational();
+        SaturatingIncrement(ref _publicItemPresentationViewReads);
+        ulong generation = Runtime.ActiveGenerationId;
+        ulong simulationTick = Runtime.SimulationTick;
+        if (!_publicItemPresentationPrepared || _publicItemPresentationDirty ||
+            _publicItemPresentationPreparedGeneration != generation ||
+            _publicItemPresentationPreparedSimulationTick != simulationTick)
+            PreparePublicItemPresentations(generation, simulationTick);
+        return new SharedPublicItemPresentationView(
+            _publicItemPresentations,
+            _publicItemPresentationVersion,
+            _publicItemPresentationCount);
+    }
+
+    internal void ObservePublicItemPresentationMutation()
+    {
+        EnsureOperational();
+        _publicItemPresentationDirty = true;
+        SaturatingIncrement(ref _publicItemPresentationExplicitInvalidations);
+    }
+
+    internal SharedPublicItemPresentationCensus GetPublicItemPresentationCensus()
+    {
+        EnsureOperational();
+        return new SharedPublicItemPresentationCensus(
+            _publicItemPresentationVersion,
+            _publicItemPresentationViewReads,
+            _publicItemPresentationPreparations,
+            _publicItemPresentationSourceRecordsCopied,
+            _publicItemPresentationChangedPreparations,
+            _publicItemPresentationExplicitInvalidations);
+    }
+
     internal void SetActorPresentationPreparationFaultForTesting(
         int slot,
         SharedActorPresentationPreparationFault fault)
@@ -981,6 +1079,93 @@ public sealed class SharedPlayableAuthority : IDisposable
         SaturatingIncrement(ref _actorPresentationExplicitInvalidations);
     }
 
+    private void PreparePublicItemPresentations(ulong generation, ulong simulationTick)
+    {
+        int desiredCount;
+        try
+        {
+            bool captured = Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, int>(
+                _preparePublicItemPresentationsOperation, out desiredCount);
+            if (!captured || desiredCount < 0 ||
+                desiredCount > _publicItemPresentationStaging.Length)
+                throw new InvalidOperationException(
+                    "The authoritative public-item presentation source could not be prepared.");
+        }
+        catch
+        {
+            _publicItemPresentationPrepared = false;
+            _publicItemPresentationDirty = true;
+            throw;
+        }
+
+        SaturatingIncrement(ref _publicItemPresentationPreparations);
+        SaturatingAdd(ref _publicItemPresentationSourceRecordsCopied, (ulong)desiredCount);
+        bool changed = !_publicItemPresentationPrepared ||
+            _publicItemPresentationPreparedGeneration != generation ||
+            desiredCount != _publicItemPresentationCount ||
+            !PublicItemPresentationsEqual(desiredCount);
+        if (changed)
+        {
+            _publicItemPresentationStaging.AsSpan(0, desiredCount).CopyTo(
+                _publicItemPresentations);
+            if (desiredCount < _publicItemPresentationCount)
+                Array.Clear(
+                    _publicItemPresentations,
+                    desiredCount,
+                    _publicItemPresentationCount - desiredCount);
+            _publicItemPresentationCount = desiredCount;
+            _publicItemPresentationVersion = checked(_publicItemPresentationVersion + 1);
+            SaturatingIncrement(ref _publicItemPresentationChangedPreparations);
+        }
+        _publicItemPresentationPreparedGeneration = generation;
+        _publicItemPresentationPreparedSimulationTick = simulationTick;
+        _publicItemPresentationPrepared = true;
+        _publicItemPresentationDirty = false;
+    }
+
+    private int PreparePublicItemPresentationsCore(
+        EcsWorld world,
+        ulong _,
+        IGameGenerationStateProvider game)
+    {
+        return game.Items.CopyPublicWeaponPresentations(
+            world,
+            game.WorldState,
+            _publicItemPresentationStaging);
+    }
+
+    private bool PublicItemPresentationsEqual(int count)
+    {
+        for (int index = 0; index < count; index++)
+        {
+            ref readonly GamePublicWeaponPresentation retained =
+                ref _publicItemPresentations[index];
+            ref readonly GamePublicWeaponPresentation staged =
+                ref _publicItemPresentationStaging[index];
+            GameWeaponInstance retainedWeapon = retained.Weapon;
+            GameWeaponInstance stagedWeapon = staged.Weapon;
+            if (retained.Id != staged.Id || retained.Position != staged.Position ||
+                retained.StateFlags != staged.StateFlags ||
+                !WeaponsEqual(in retainedWeapon, in stagedWeapon) ||
+                !string.Equals(retained.DisplayName, staged.DisplayName,
+                    StringComparison.Ordinal) ||
+                !Equals(retained.InspectionProperties, staged.InspectionProperties))
+                return false;
+        }
+        return true;
+    }
+
+    private static bool WeaponsEqual(
+        in GameWeaponInstance left,
+        in GameWeaponInstance right) =>
+        left.DamageMinimum == right.DamageMinimum &&
+        left.DamageMaximum == right.DamageMaximum &&
+        left.MaximumDurability == right.MaximumDurability &&
+        left.CurrentDurability == right.CurrentDurability &&
+        left.Quality == right.Quality &&
+        left.Element == right.Element &&
+        left.SpawnOrdinal == right.SpawnOrdinal;
+
     /// <summary>Copies bounded cold diagnostics for the currently attached remote adapters.</summary>
     public int CopyRemoteSessionSnapshots(Span<RemoteGuestPlayableServerSnapshot> destination)
     {
@@ -1007,6 +1192,21 @@ public sealed class SharedPlayableAuthority : IDisposable
         for (int index = 0; index < _remoteApplications.Length; index++)
             if (_remoteApplications[index] is RemoteGuestPlayableApplication application)
                 destination[count++] = application.GetSharedPresentationCensus();
+        return count;
+    }
+
+    internal int CopyRemotePublicItemPresentationCensus(
+        Span<RemotePublicItemPresentationCensus> destination)
+    {
+        EnsureOperational();
+        int required = 0;
+        for (int index = 0; index < _remoteApplications.Length; index++)
+            if (_remoteApplications[index] is not null) required++;
+        if (destination.Length < required) return -1;
+        int count = 0;
+        for (int index = 0; index < _remoteApplications.Length; index++)
+            if (_remoteApplications[index] is RemoteGuestPlayableApplication application)
+                destination[count++] = application.GetPublicItemPresentationCensus();
         return count;
     }
 

@@ -191,6 +191,7 @@ var tests = new (string Name, Action Body)[]
     ("PF1ConfiguredParticipantCapacityReservesParticipantEntities", M00SharedPlayableAuthorityTests.ConfiguredParticipantCapacityReservesParticipantEntities),
     ("PF5R10SharedActorPresentationPreparationIsVersionedAndSlotIndexed", M00SharedPlayableAuthorityTests.SharedActorPresentationPreparationIsVersionedAndSlotIndexed),
     ("PF5R10R1FailedActorPresentationPreparationCannotHideChangedTruth", M00SharedPlayableAuthorityTests.FailedActorPresentationPreparationCannotHideChangedTruth),
+    ("PF5R11PublicItemPresentationPreparationIsSharedTransactionalAndAllocationFree", M00SharedPlayableAuthorityTests.PublicItemPresentationPreparationIsSharedTransactionalAndAllocationFree),
     ("M00OneGenerationOwnsIndependentParticipantsAndSurvivesLeave", M00SharedPlayableAuthorityTests.OneGenerationOwnsIndependentParticipantsAndSurvivesLeave),
     ("I012SpawnedWeaponRetainsIdentityAcrossWorldInventoryEquipAndAnotherOwner", M00SharedPlayableAuthorityTests.SpawnedWeaponRetainsIdentityAcrossWorldInventoryEquipAndAnotherOwner),
 };

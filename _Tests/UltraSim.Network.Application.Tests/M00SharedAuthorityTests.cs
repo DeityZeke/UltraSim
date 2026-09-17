@@ -2,6 +2,7 @@ using System.Net;
 using UltraSim.Client.Core;
 using UltraSim.Client.Local;
 using UltraSim.Client.Network;
+using UltraSim.ECS;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Application;
 using UltraSim.Game.Composition;
@@ -66,9 +67,15 @@ internal static class M00SharedAuthorityTests
                 client.Session.PublicPresentationState.GetSnapshot().CurrentRecords >= 2));
 
             SharedActorPresentationCensus sourceBefore = authority.GetActorPresentationCensus();
+            SharedPublicItemPresentationCensus itemSourceBefore =
+                authority.GetPublicItemPresentationCensus();
             Span<RemoteSharedPresentationCensus> remoteBefore =
                 stackalloc RemoteSharedPresentationCensus[maximumParticipants];
             Equal(maximumParticipants, authority.CopyRemotePresentationCensus(remoteBefore));
+            Span<RemotePublicItemPresentationCensus> remoteItemBefore =
+                stackalloc RemotePublicItemPresentationCensus[maximumParticipants];
+            Equal(maximumParticipants,
+                authority.CopyRemotePublicItemPresentationCensus(remoteItemBefore));
             for (int step = 0; step < 256; step++)
             {
                 for (int index = 0; index < clients.Count; index++) clients[index].Direct.Pump();
@@ -81,9 +88,15 @@ internal static class M00SharedAuthorityTests
                 }
             }
             SharedActorPresentationCensus sourceStable = authority.GetActorPresentationCensus();
+            SharedPublicItemPresentationCensus itemSourceStable =
+                authority.GetPublicItemPresentationCensus();
             Span<RemoteSharedPresentationCensus> remoteStable =
                 stackalloc RemoteSharedPresentationCensus[maximumParticipants];
             Equal(maximumParticipants, authority.CopyRemotePresentationCensus(remoteStable));
+            Span<RemotePublicItemPresentationCensus> remoteItemStable =
+                stackalloc RemotePublicItemPresentationCensus[maximumParticipants];
+            Equal(maximumParticipants,
+                authority.CopyRemotePublicItemPresentationCensus(remoteItemStable));
             ulong progressDelta = 0;
             ulong reconciliationDelta = 0;
             ulong skipDelta = 0;
@@ -100,6 +113,24 @@ internal static class M00SharedAuthorityTests
             True(reconciliationDelta < progressDelta);
             True(sourceStable.ViewReads - sourceBefore.ViewReads >= progressDelta);
             True(sourceStable.Preparations - sourceBefore.Preparations < progressDelta);
+
+            ulong itemProgressDelta = 0;
+            ulong itemReconciliationDelta = 0;
+            ulong itemSkipDelta = 0;
+            for (int index = 0; index < maximumParticipants; index++)
+            {
+                itemProgressDelta += remoteItemStable[index].ProgressPasses -
+                    remoteItemBefore[index].ProgressPasses;
+                itemReconciliationDelta += remoteItemStable[index].ReconciliationPasses -
+                    remoteItemBefore[index].ReconciliationPasses;
+                itemSkipDelta += remoteItemStable[index].UnchangedSourceAndTopologySkips -
+                    remoteItemBefore[index].UnchangedSourceAndTopologySkips;
+            }
+            True(itemProgressDelta > 0);
+            True(itemSkipDelta > 0);
+            True(itemReconciliationDelta < itemProgressDelta);
+            True(itemSourceStable.ViewReads - itemSourceBefore.ViewReads >= itemProgressDelta);
+            True(itemSourceStable.Preparations - itemSourceBefore.Preparations < itemProgressDelta);
 
             var participants = new SharedPlayableParticipant[maximumParticipants];
             Equal(maximumParticipants, authority.CopyParticipants(participants));
@@ -182,6 +213,60 @@ internal static class M00SharedAuthorityTests
                     out ClientPublicPresentationMetadata metadata) &&
                 metadata.ActorAction == ClientPublicActorActionKind.Primary &&
                 metadata.ActorActionSequence == 4));
+
+            // Source truth may change again while a remove is awaiting exact applied proof. The
+            // proof must wake item reconciliation even though source/AOI versions are unchanged by
+            // the time the row becomes eligible again.
+            SharedPublicItemPresentationView publicItems =
+                authority.GetPublicItemPresentationView();
+            Equal(1, publicItems.Count);
+            WorldPublicEntityId swordId = publicItems[0].Id;
+            True(authority.Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+                (world, _, game) =>
+                {
+                    Entity actor = Resolve(world, aliceParticipant.Entities.PlayerId);
+                    Entity backpack = Resolve(world, aliceParticipant.Entities.BackpackId);
+                    True(game.WorldState.Publications.TryResolvePublicEntity(swordId, out Entity item));
+                    Equal(GameWorldActionStatus.Accepted, game.Items.TryPickup(
+                        world, game.WorldState, game.Inventory, actor, item, backpack));
+                    return true;
+                }, out bool pickedUp) && pickedUp);
+            authority.ObservePublicItemPresentationMutation();
+            for (int step = 0; step < 64; step++)
+            {
+                host.Pump();
+                _ = authority.TickDue();
+                Thread.Yield();
+            }
+            True(authority.Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+                (world, _, game) =>
+                {
+                    Entity actor = Resolve(world, aliceParticipant.Entities.PlayerId);
+                    True(game.WorldState.Publications.TryResolvePublicEntity(swordId, out Entity item));
+                    Equal(GameWorldActionStatus.Accepted,
+                        game.Items.TryDrop(world, game.WorldState, game.Inventory, actor, item));
+                    return true;
+                }, out bool dropped) && dropped);
+            authority.ObservePublicItemPresentationMutation();
+            for (int step = 0; step < 64; step++)
+            {
+                host.Pump();
+                _ = authority.TickDue();
+                Thread.Yield();
+            }
+            DriveUntil(host, authority, clients, () => clients.All(client =>
+                client.Session.PublicPresentationState.TryGet(
+                    swordId, out ClientPublicPresentationMetadata metadata) &&
+                (metadata.Flags & ClientPublicPresentationFlags.ItemProperties) != 0));
+            Span<RemotePublicItemPresentationCensus> remoteItemAfter =
+                stackalloc RemotePublicItemPresentationCensus[maximumParticipants];
+            Equal(maximumParticipants,
+                authority.CopyRemotePublicItemPresentationCensus(remoteItemAfter));
+            ulong itemProofWakeups = 0;
+            for (int index = 0; index < maximumParticipants; index++)
+                itemProofWakeups += remoteItemAfter[index].ProofWakeups -
+                    remoteItemStable[index].ProofWakeups;
+            True(itemProofWakeups >= (ulong)maximumParticipants);
         }
         finally
         {
@@ -204,6 +289,11 @@ internal static class M00SharedAuthorityTests
         catch (TException) { return; }
         throw new InvalidOperationException($"Expected {typeof(TException).Name}.");
     }
+
+    private static Entity Resolve(EcsWorld world, PersistentEntityId id) =>
+        world.TryResolvePersistentEntity(id, out Entity entity)
+            ? entity
+            : throw new InvalidOperationException($"Persistent entity {id} was unavailable.");
 
     private static void ExistingLocalAuthorityAddsAndRetiresRemoteRecipients()
     {

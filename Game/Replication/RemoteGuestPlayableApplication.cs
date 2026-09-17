@@ -68,6 +68,18 @@ internal readonly record struct RemoteSharedPresentationCensus(
     ulong ProofWakeups,
     ulong LastSourceVersion);
 
+/// <summary>Owner-local evidence for shared public-item reconciliation.</summary>
+internal readonly record struct RemotePublicItemPresentationCensus(
+    ulong ProgressPasses,
+    ulong ReconciliationPasses,
+    ulong UnchangedSourceAndTopologySkips,
+    ulong SourceRowsExamined,
+    ulong SubscriptionLookups,
+    ulong SubscriptionComparisons,
+    ulong ProofWakeups,
+    ulong LastSourceVersion,
+    ulong SubscriptionTopologyVersion);
+
 /// <summary>
 /// Cold, bounded attribution for one remote Game/application lifetime. These
 /// observations never participate in admission, ordering, scheduling, or
@@ -287,11 +299,22 @@ public sealed class RemoteGuestPlayableApplication :
     private ulong _sharedPresentationProofWakeups;
     private bool _sharedPresentationReconcileRequired = true;
     private readonly SharedPublicPresentationRow[] _publicItemPresentations =
-        new SharedPublicPresentationRow[64];
+        new SharedPublicPresentationRow[SharedPlayableAuthority.MaximumPublicItemPresentations];
     private readonly GamePublicWeaponPresentation[] _publicItemScratch =
-        new GamePublicWeaponPresentation[64];
+        new GamePublicWeaponPresentation[SharedPlayableAuthority.MaximumPublicItemPresentations];
     private ulong _nextPublicItemPresentationDeliveryId = 1UL << 63;
     private int _publicItemPresentationDeliverySlot = -1;
+    private ulong _publicItemPresentationProgressPasses;
+    private ulong _publicItemPresentationReconciliationPasses;
+    private ulong _publicItemPresentationUnchangedSourceAndTopologySkips;
+    private ulong _publicItemPresentationSourceRowsExamined;
+    private ulong _publicItemPresentationSubscriptionLookups;
+    private ulong _publicItemPresentationSubscriptionComparisons;
+    private ulong _publicItemPresentationProofWakeups;
+    private ulong _lastPublicItemPresentationSourceVersion;
+    private ulong _publicItemPresentationSubscriptionTopologyVersion;
+    private ulong _lastPublicItemPresentationSubscriptionTopologyVersion;
+    private bool _publicItemPresentationReconcileRequired = true;
     private WorldPack? _worldPack;
     private UltraSimGameComposition? _composition;
     private ServerRuntime? _runtime;
@@ -1350,6 +1373,7 @@ public sealed class RemoteGuestPlayableApplication :
         if (!_guestAdmitted || !_admissionResultApplied || _runtime is null ||
             _recipient is null)
             return true;
+        SaturatingIncrement(ref _publicItemPresentationProgressPasses);
         ReconcilePublicItemPresentation();
         int slot = _publicItemPresentationDeliverySlot;
         if (slot < 0)
@@ -1450,17 +1474,45 @@ public sealed class RemoteGuestPlayableApplication :
         row.DeliveryId = 0;
         row.LastQueuedMilliseconds = 0;
         _publicItemPresentationDeliverySlot = -1;
+        _publicItemPresentationReconcileRequired = true;
+        SaturatingIncrement(ref _publicItemPresentationProofWakeups);
     }
 
     private void ReconcilePublicItemPresentation()
     {
         if (_runtime is null) return;
-        if (!_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, int>(
-                (world, _, game) => game.Items.CopyPublicWeaponPresentations(
-                    world, game.WorldState, _publicItemScratch),
-                out int desiredCount) || desiredCount < 0)
+        int desiredCount;
+        ulong sourceVersion = 0;
+        bool sharedSource = _sharedAuthority is not null;
+        if (sharedSource)
+        {
+            SharedPublicItemPresentationView source =
+                _sharedAuthority!.GetPublicItemPresentationView();
+            sourceVersion = source.Version;
+            if (!_publicItemPresentationReconcileRequired &&
+                sourceVersion == _lastPublicItemPresentationSourceVersion &&
+                _publicItemPresentationSubscriptionTopologyVersion ==
+                    _lastPublicItemPresentationSubscriptionTopologyVersion)
+            {
+                SaturatingIncrement(
+                    ref _publicItemPresentationUnchangedSourceAndTopologySkips);
+                return;
+            }
+            desiredCount = source.Count;
+            for (int item = 0; item < desiredCount; item++)
+                _publicItemScratch[item] = source[item];
+        }
+        else if (!_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, int>(
+                     (world, _, game) => game.Items.CopyPublicWeaponPresentations(
+                         world, game.WorldState, _publicItemScratch),
+                     out desiredCount) || desiredCount < 0)
+        {
             throw new InvalidOperationException(
                 "The public-item presentation source exceeded its bounded destination.");
+        }
+
+        SaturatingIncrement(ref _publicItemPresentationReconciliationPasses);
+        SaturatingAdd(ref _publicItemPresentationSourceRowsExamined, (ulong)desiredCount);
 
         for (int slot = 0; slot < _publicItemPresentations.Length; slot++)
         {
@@ -1491,6 +1543,8 @@ public sealed class RemoteGuestPlayableApplication :
             }
             if (WeaponsEqual(row.Weapon, desired.Weapon))
             {
+                if (!row.DesiredPresent)
+                    row.Revision = checked(row.Revision + 1);
                 row.DesiredPresent = true;
                 continue;
             }
@@ -1542,14 +1596,32 @@ public sealed class RemoteGuestPlayableApplication :
                 DesiredPresent = true,
             };
         }
+
+        if (sharedSource)
+        {
+            _lastPublicItemPresentationSourceVersion = sourceVersion;
+            _lastPublicItemPresentationSubscriptionTopologyVersion =
+                _publicItemPresentationSubscriptionTopologyVersion;
+            _publicItemPresentationReconcileRequired = false;
+        }
     }
 
     private bool IsSubscribed(in WorldPosition position)
     {
+        SaturatingIncrement(ref _publicItemPresentationSubscriptionLookups);
         SpatialChunkKey key = new(GameWorldState.DefaultSpace, position.Chunk);
         OfflineDirectChunkSubscriptionView subscriptions = _recipient!.Subscriptions;
-        for (int index = 0; index < subscriptions.Length; index++)
-            if (subscriptions[index].Interest.Key == key) return true;
+        int low = 0;
+        int high = subscriptions.Length - 1;
+        while (low <= high)
+        {
+            SaturatingIncrement(ref _publicItemPresentationSubscriptionComparisons);
+            int middle = low + ((high - low) >> 1);
+            int comparison = subscriptions[middle].Interest.Key.CompareTo(key);
+            if (comparison == 0) return true;
+            if (comparison < 0) low = middle + 1;
+            else high = middle - 1;
+        }
         return false;
     }
 
@@ -1779,6 +1851,21 @@ public sealed class RemoteGuestPlayableApplication :
             _lastSharedPresentationSourceVersion);
     }
 
+    internal RemotePublicItemPresentationCensus GetPublicItemPresentationCensus()
+    {
+        EnsureOperational();
+        return new RemotePublicItemPresentationCensus(
+            _publicItemPresentationProgressPasses,
+            _publicItemPresentationReconciliationPasses,
+            _publicItemPresentationUnchangedSourceAndTopologySkips,
+            _publicItemPresentationSourceRowsExamined,
+            _publicItemPresentationSubscriptionLookups,
+            _publicItemPresentationSubscriptionComparisons,
+            _publicItemPresentationProofWakeups,
+            _lastPublicItemPresentationSourceVersion,
+            _publicItemPresentationSubscriptionTopologyVersion);
+    }
+
     private void HandleInventoryMutationCompleted(InventoryMutationResult result)
     {
         if (!result.Accepted || _sharedAuthority is null || !_sharedParticipant.IsValid)
@@ -1786,6 +1873,7 @@ public sealed class RemoteGuestPlayableApplication :
         if (!_sharedAuthority.ObserveActorPresentationMutation(in _sharedParticipant))
             throw new InvalidOperationException(
                 "An accepted Inventory mutation could not invalidate actor presentation.");
+        _sharedAuthority.ObservePublicItemPresentationMutation();
     }
 
     private bool IsOwnPresentationApplied()
@@ -1901,6 +1989,9 @@ public sealed class RemoteGuestPlayableApplication :
                 !_sharedAuthority.ObserveActorPresentationMutation(in _sharedParticipant))
                 throw new InvalidOperationException(
                     "An admitted command could not invalidate its actor presentation source.");
+            if (_lastCommandResult.Interaction == GameWorldActionStatus.Accepted ||
+                _lastCommandResult.Primary == GameWorldActionStatus.Accepted)
+                _sharedAuthority.ObservePublicItemPresentationMutation();
         }
         SaturatingIncrement(ref _commandsApplied);
         _ = QueueOwnerState();
@@ -2190,6 +2281,9 @@ public sealed class RemoteGuestPlayableApplication :
             out OfflineDirectChunkReconcileResult reconcileResult);
         if (reconcile != OfflineDirectChunkReconcileStatus.Reconciled)
             throw new InvalidOperationException($"Remote public interest failed: {reconcile}.");
+        if (reconcileResult.SourceReset || reconcileResult.ChangeCount != 0)
+            _publicItemPresentationSubscriptionTopologyVersion = checked(
+                _publicItemPresentationSubscriptionTopologyVersion + 1);
         if (!_publicationWork.TryApplyReconciliation(
                 _publicationRecipient,
                 _subscriptionChanges.AsSpan(0, reconcileResult.ChangeCount),
@@ -2574,6 +2668,11 @@ public sealed class RemoteGuestPlayableApplication :
     private static void SaturatingIncrement(ref ulong value)
     {
         if (value != ulong.MaxValue) value++;
+    }
+
+    private static void SaturatingAdd(ref ulong value, ulong amount)
+    {
+        value = amount > ulong.MaxValue - value ? ulong.MaxValue : value + amount;
     }
 
     private void EnsureOperational()
