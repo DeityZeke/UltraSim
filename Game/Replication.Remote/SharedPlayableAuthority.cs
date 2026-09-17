@@ -99,6 +99,50 @@ public readonly record struct GamePublicActorPresentation(
         (Action == GamePublicActorActionKind.None ? ActionSequence == 0 : ActionSequence != 0);
 }
 
+/// <summary>
+/// Owner-thread, slot-indexed view of one prepared authoritative actor-presentation revision.
+/// Recipient delivery and proof state never enter this shared source view.
+/// </summary>
+internal readonly struct SharedActorPresentationView
+{
+    private readonly GamePublicActorPresentation[]? _rows;
+
+    internal SharedActorPresentationView(
+        GamePublicActorPresentation[] rows,
+        ulong version,
+        int count)
+    {
+        _rows = rows;
+        Version = version;
+        Count = count;
+    }
+
+    internal ulong Version { get; }
+    internal int Count { get; }
+    internal int Capacity => _rows?.Length ?? 0;
+
+    internal bool TryGet(int slot, out GamePublicActorPresentation presentation)
+    {
+        if (_rows is null || (uint)slot >= (uint)_rows.Length ||
+            !_rows[slot].IsValid)
+        {
+            presentation = default;
+            return false;
+        }
+        presentation = _rows[slot];
+        return true;
+    }
+}
+
+/// <summary>Bounded owner-local evidence for shared actor-presentation preparation.</summary>
+internal readonly record struct SharedActorPresentationCensus(
+    ulong SourceVersion,
+    ulong ViewReads,
+    ulong Preparations,
+    ulong ParticipantRecordsExamined,
+    ulong ChangedRecords,
+    ulong ExplicitInvalidations);
+
 /// <summary>Read-only evidence for one shared Game/World authority.</summary>
 public readonly record struct SharedPlayableAuthoritySnapshot(
     ulong GenerationId,
@@ -169,6 +213,8 @@ public sealed class SharedPlayableAuthority : IDisposable
     private readonly GamePublicActorActionKind[] _desiredPresentationActions;
     private readonly ulong[] _desiredPresentationActionSequences;
     private readonly GamePublicActorPresentation[] _actorPresentations;
+    private readonly ServerGenerationStateOperation<IGameGenerationStateProvider, bool>
+        _prepareActorPresentationsOperation;
     private readonly bool _ownsRuntime;
     private readonly GameTickTimingWindow _tickTimings;
     private readonly ChunkPublicationStore _publicationSource;
@@ -192,6 +238,20 @@ public sealed class SharedPlayableAuthority : IDisposable
     private ulong _remoteSourceCommitGaps;
     private ulong _remoteDirtyChunksObserved;
     private ulong _remoteDirtyRecipientFanout;
+    private ulong _actorPresentationVersion;
+    private ulong _actorPresentationPreparedGeneration;
+    private ulong _actorPresentationPreparedSimulationTick;
+    private ulong _actorPresentationViewReads;
+    private ulong _actorPresentationPreparations;
+    private ulong _actorPresentationRecordsExamined;
+    private ulong _actorPresentationChangedRecords;
+    private ulong _actorPresentationExplicitInvalidations;
+    private ulong _actorPresentationPreparationGeneration;
+    private ulong _actorPresentationPreparationChangedRecords;
+    private bool _actorPresentationPreparationContentChanged;
+    private bool _actorPresentationPrepared;
+    private bool _actorPresentationDirty = true;
+    private bool _actorPresentationTopologyChanged = true;
     private bool _disposed;
 
     private SharedPlayableAuthority(
@@ -227,6 +287,7 @@ public sealed class SharedPlayableAuthority : IDisposable
         _desiredPresentationActions = new GamePublicActorActionKind[limits.MaximumParticipants];
         _desiredPresentationActionSequences = new ulong[limits.MaximumParticipants];
         _actorPresentations = new GamePublicActorPresentation[limits.MaximumParticipants];
+        _prepareActorPresentationsOperation = PrepareActorPresentationsCore;
         if (!runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider,
                 ChunkPublicationStore>(
                 static (world, _, game) => game.WorldState.Publications,
@@ -351,6 +412,7 @@ public sealed class SharedPlayableAuthority : IDisposable
         authority._externallyOwned[slot] = true;
         authority._participantCount = 1;
         authority._joins = 1;
+        authority.InvalidateActorPresentations(topologyChanged: true);
         return authority;
     }
 
@@ -622,6 +684,7 @@ public sealed class SharedPlayableAuthority : IDisposable
             _desiredPresentationActionSequences[slot] = 0;
             _participantCount++;
             _joins++;
+            InvalidateActorPresentations(topologyChanged: true);
             if (!Chat.RefreshEnteredParticipants())
                 throw new InvalidOperationException("Chat could not admit the shared participant census.");
             return entered;
@@ -664,6 +727,7 @@ public sealed class SharedPlayableAuthority : IDisposable
         _desiredPresentationActionSequences[playable.Slot] = 0;
         _participantCount--;
         _leaves++;
+        InvalidateActorPresentations(topologyChanged: true);
         long started = Stopwatch.GetTimestamp();
         Runtime.Tick();
         ObserveRemotePublicationFanout();
@@ -702,67 +766,157 @@ public sealed class SharedPlayableAuthority : IDisposable
             return false;
         _desiredPresentationActions[participant.Slot] = action;
         _desiredPresentationActionSequences[participant.Slot] = actionSequence;
+        InvalidateActorPresentations(topologyChanged: false);
         return true;
     }
 
     /// <summary>Copies the current bounded public actor appearance/action read model.</summary>
     public int CopyActorPresentations(Span<GamePublicActorPresentation> destination)
     {
-        EnsureOperational();
-        if (destination.Length < _participantCount) return -1;
-        bool captured = Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
-            (world, _, game) =>
-            {
-                for (int slot = 0; slot < _participants.Length; slot++)
-                {
-                    if (!_occupied[slot]) continue;
-                    SharedPlayableParticipant participant = _participants[slot];
-                    Entity actor = Resolve(world, participant.Entities.PlayerId);
-                    uint mainHandPrefab = 0;
-                    if (game.Inventory.Index.TryGetEquipped(
-                            actor, InventoryEquipSlot.MainHand, out Entity item) &&
-                        game.WorldState.TryReadPublic(
-                            world, item, out WorldPublicDescriptor itemPresentation))
-                        mainHandPrefab = itemPresentation.PrefabId;
-                    if (!game.WorldActions.TryReadVerticalMotion(
-                            world, actor, out GameVerticalMotionSnapshot vertical) ||
-                        vertical.Kind == GameVerticalMotionKind.None)
-                        return false;
-                    GamePublicActorVerticalPhase verticalPhase = vertical.Kind switch
-                    {
-                        GameVerticalMotionKind.Grounded => GamePublicActorVerticalPhase.Grounded,
-                        GameVerticalMotionKind.Airborne when
-                            vertical.VelocityMillimetersPerSecond > 0 =>
-                                GamePublicActorVerticalPhase.Rising,
-                        GameVerticalMotionKind.Airborne => GamePublicActorVerticalPhase.Falling,
-                        _ => throw new InvalidOperationException(
-                            "The authoritative vertical state was not presentable."),
-                    };
-
-                    ref GamePublicActorPresentation retained = ref _actorPresentations[slot];
-                    GamePublicActorActionKind action = _desiredPresentationActions[slot];
-                    ulong actionSequence = _desiredPresentationActionSequences[slot];
-                    if (!retained.IsValid || retained.Participant != participant ||
-                        retained.MainHandPrefabId != mainHandPrefab ||
-                        retained.VerticalPhase != verticalPhase ||
-                        retained.Action != action || retained.ActionSequence != actionSequence)
-                    {
-                        ulong revision = retained.IsValid &&
-                            retained.Participant.PublicEntity == participant.PublicEntity
-                                ? checked(retained.Revision + 1)
-                                : 1;
-                        retained = new GamePublicActorPresentation(
-                            participant, revision, mainHandPrefab, verticalPhase,
-                            action, actionSequence);
-                    }
-                }
-                return true;
-            }, out bool complete) && complete;
-        if (!captured) return -1;
+        SharedActorPresentationView view = GetActorPresentationView();
+        if (destination.Length < view.Count) return -1;
         int count = 0;
-        for (int slot = 0; slot < _actorPresentations.Length; slot++)
-            if (_occupied[slot]) destination[count++] = _actorPresentations[slot];
-        return count == _participantCount ? count : -1;
+        for (int slot = 0; slot < view.Capacity; slot++)
+            if (view.TryGet(slot, out GamePublicActorPresentation presentation))
+                destination[count++] = presentation;
+        return count == view.Count ? count : -1;
+    }
+
+    /// <summary>
+    /// Returns one owner-thread shared source view. Preparation is shared across recipients and
+    /// remains independent from every recipient's delivery identity and applied proof.
+    /// </summary>
+    internal SharedActorPresentationView GetActorPresentationView()
+    {
+        EnsureOperational();
+        SaturatingIncrement(ref _actorPresentationViewReads);
+        ulong generation = Runtime.ActiveGenerationId;
+        ulong simulationTick = Runtime.SimulationTick;
+        if (!_actorPresentationPrepared || _actorPresentationDirty ||
+            _actorPresentationPreparedGeneration != generation ||
+            _actorPresentationPreparedSimulationTick != simulationTick)
+            PrepareActorPresentations(generation, simulationTick);
+        return new SharedActorPresentationView(
+            _actorPresentations, _actorPresentationVersion, _participantCount);
+    }
+
+    /// <summary>
+    /// Invalidates shared source facts after an accepted between-tick participant mutation.
+    /// This does not advance any recipient delivery or proof state.
+    /// </summary>
+    internal bool ObserveActorPresentationMutation(in SharedPlayableParticipant participant)
+    {
+        EnsureOperational();
+        if (!participant.IsValid || participant.Slot >= _participants.Length ||
+            !_occupied[participant.Slot] || _participants[participant.Slot] != participant)
+            return false;
+        InvalidateActorPresentations(topologyChanged: false);
+        return true;
+    }
+
+    internal SharedActorPresentationCensus GetActorPresentationCensus()
+    {
+        EnsureOperational();
+        return new SharedActorPresentationCensus(
+            _actorPresentationVersion,
+            _actorPresentationViewReads,
+            _actorPresentationPreparations,
+            _actorPresentationRecordsExamined,
+            _actorPresentationChangedRecords,
+            _actorPresentationExplicitInvalidations);
+    }
+
+    private void PrepareActorPresentations(ulong generation, ulong simulationTick)
+    {
+        _actorPresentationPreparationGeneration = generation;
+        _actorPresentationPreparationContentChanged = !_actorPresentationPrepared ||
+            _actorPresentationPreparedGeneration != generation ||
+            _actorPresentationTopologyChanged;
+        _actorPresentationPreparationChangedRecords = 0;
+        bool captured = Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            _prepareActorPresentationsOperation, out bool complete) && complete;
+        if (!captured)
+            throw new InvalidOperationException(
+                "The authoritative actor-presentation source could not be prepared.");
+        SaturatingIncrement(ref _actorPresentationPreparations);
+        SaturatingAdd(ref _actorPresentationChangedRecords,
+            _actorPresentationPreparationChangedRecords);
+        if (_actorPresentationPreparationContentChanged)
+            _actorPresentationVersion = checked(_actorPresentationVersion + 1);
+        _actorPresentationPreparedGeneration = generation;
+        _actorPresentationPreparedSimulationTick = simulationTick;
+        _actorPresentationPrepared = true;
+        _actorPresentationDirty = false;
+        _actorPresentationTopologyChanged = false;
+    }
+
+    private bool PrepareActorPresentationsCore(
+        EcsWorld world,
+        ulong activeGeneration,
+        IGameGenerationStateProvider game)
+    {
+        if (activeGeneration != _actorPresentationPreparationGeneration) return false;
+        for (int slot = 0; slot < _participants.Length; slot++)
+        {
+            ref GamePublicActorPresentation retained = ref _actorPresentations[slot];
+            if (!_occupied[slot])
+            {
+                if (retained.IsValid)
+                {
+                    retained = default;
+                    _actorPresentationPreparationContentChanged = true;
+                    _actorPresentationPreparationChangedRecords++;
+                }
+                continue;
+            }
+            SaturatingIncrement(ref _actorPresentationRecordsExamined);
+            SharedPlayableParticipant participant = _participants[slot];
+            Entity actor = Resolve(world, participant.Entities.PlayerId);
+            uint mainHandPrefab = 0;
+            if (game.Inventory.Index.TryGetEquipped(
+                    actor, InventoryEquipSlot.MainHand, out Entity item) &&
+                game.WorldState.TryReadPublic(
+                    world, item, out WorldPublicDescriptor itemPresentation))
+                mainHandPrefab = itemPresentation.PrefabId;
+            if (!game.WorldActions.TryReadVerticalMotion(
+                    world, actor, out GameVerticalMotionSnapshot vertical) ||
+                vertical.Kind == GameVerticalMotionKind.None)
+                return false;
+            GamePublicActorVerticalPhase verticalPhase = vertical.Kind switch
+            {
+                GameVerticalMotionKind.Grounded => GamePublicActorVerticalPhase.Grounded,
+                GameVerticalMotionKind.Airborne when
+                    vertical.VelocityMillimetersPerSecond > 0 =>
+                        GamePublicActorVerticalPhase.Rising,
+                GameVerticalMotionKind.Airborne => GamePublicActorVerticalPhase.Falling,
+                _ => throw new InvalidOperationException(
+                    "The authoritative vertical state was not presentable."),
+            };
+            GamePublicActorActionKind action = _desiredPresentationActions[slot];
+            ulong actionSequence = _desiredPresentationActionSequences[slot];
+            if (retained.IsValid && retained.Participant == participant &&
+                retained.MainHandPrefabId == mainHandPrefab &&
+                retained.VerticalPhase == verticalPhase &&
+                retained.Action == action && retained.ActionSequence == actionSequence)
+                continue;
+            ulong revision = retained.IsValid &&
+                retained.Participant.PublicEntity == participant.PublicEntity
+                    ? checked(retained.Revision + 1)
+                    : 1;
+            retained = new GamePublicActorPresentation(
+                participant, revision, mainHandPrefab, verticalPhase,
+                action, actionSequence);
+            _actorPresentationPreparationContentChanged = true;
+            _actorPresentationPreparationChangedRecords++;
+        }
+        return true;
+    }
+
+    private void InvalidateActorPresentations(bool topologyChanged)
+    {
+        _actorPresentationDirty = true;
+        _actorPresentationTopologyChanged |= topologyChanged;
+        SaturatingIncrement(ref _actorPresentationExplicitInvalidations);
     }
 
     /// <summary>Copies bounded cold diagnostics for the currently attached remote adapters.</summary>
@@ -777,6 +931,20 @@ public sealed class SharedPlayableAuthority : IDisposable
         for (int index = 0; index < _remoteApplications.Length; index++)
             if (_remoteApplications[index] is RemoteGuestPlayableApplication application)
                 destination[count++] = application.GetSnapshot();
+        return count;
+    }
+
+    internal int CopyRemotePresentationCensus(Span<RemoteSharedPresentationCensus> destination)
+    {
+        EnsureOperational();
+        int required = 0;
+        for (int index = 0; index < _remoteApplications.Length; index++)
+            if (_remoteApplications[index] is not null) required++;
+        if (destination.Length < required) return -1;
+        int count = 0;
+        for (int index = 0; index < _remoteApplications.Length; index++)
+            if (_remoteApplications[index] is RemoteGuestPlayableApplication application)
+                destination[count++] = application.GetSharedPresentationCensus();
         return count;
     }
 

@@ -59,6 +59,15 @@ public readonly record struct RemoteGuestPlayableServerSnapshot(
     RemoteChatDeliveryServiceSnapshot Chat,
     RemoteGuestApplicationTimingSnapshot Timing);
 
+/// <summary>Owner-local evidence for shared actor-presentation reconciliation.</summary>
+internal readonly record struct RemoteSharedPresentationCensus(
+    ulong ProgressPasses,
+    ulong ReconciliationPasses,
+    ulong UnchangedSourceSkips,
+    ulong SlotReads,
+    ulong ProofWakeups,
+    ulong LastSourceVersion);
+
 /// <summary>
 /// Cold, bounded attribution for one remote Game/application lifetime. These
 /// observations never participate in admission, ordering, scheduling, or
@@ -268,9 +277,15 @@ public sealed class RemoteGuestPlayableApplication :
     private ulong _duplicatePublicPresentationProofs;
     private ulong _rejectedPublicPresentationProofs;
     private readonly SharedPublicPresentationRow[]? _sharedPresentation;
-    private readonly GamePublicActorPresentation[]? _sharedParticipantScratch;
     private ulong _nextSharedPresentationDeliveryId = 1;
     private int _sharedPresentationDeliverySlot = -1;
+    private ulong _lastSharedPresentationSourceVersion;
+    private ulong _sharedPresentationProgressPasses;
+    private ulong _sharedPresentationReconciliationPasses;
+    private ulong _sharedPresentationUnchangedSourceSkips;
+    private ulong _sharedPresentationSlotReads;
+    private ulong _sharedPresentationProofWakeups;
+    private bool _sharedPresentationReconcileRequired = true;
     private readonly SharedPublicPresentationRow[] _publicItemPresentations =
         new SharedPublicPresentationRow[64];
     private readonly GamePublicWeaponPresentation[] _publicItemScratch =
@@ -387,7 +402,6 @@ public sealed class RemoteGuestPlayableApplication :
         {
             int participantCapacity = sharedAuthority.GetSnapshot().MaximumParticipants;
             _sharedPresentation = new SharedPublicPresentationRow[participantCapacity];
-            _sharedParticipantScratch = new GamePublicActorPresentation[participantCapacity];
         }
         _clientProfile = clientProfile;
         _serverPerformanceProfile = serverPerformanceProfile;
@@ -774,6 +788,8 @@ public sealed class RemoteGuestPlayableApplication :
         catch (Exception exception) when (exception is not OutOfMemoryException) { }
         try { _serverMonitorUi?.Dispose(); }
         catch (Exception exception) when (exception is not OutOfMemoryException) { }
+        if (_inventoryUi is not null)
+            _inventoryUi.MutationCompleted -= HandleInventoryMutationCompleted;
         try { _inventoryUi?.Dispose(); }
         catch (Exception exception) when (exception is not OutOfMemoryException) { }
         _ui?.Dispose();
@@ -1201,6 +1217,7 @@ public sealed class RemoteGuestPlayableApplication :
             contentBackedDefinitions: _contentBackedUiDefinitions,
             standardDefinitions: _standardUiDefinitions);
         _inventoryUi = new InventoryUiController(_runtime.Game, _ui);
+        _inventoryUi.MutationCompleted += HandleInventoryMutationCompleted;
         _signUi = new InformationalSignUiController(_ui);
         _serverMonitorUi = new ServerMonitorUiController(_ui);
         _chatSession = _chatDelivery.Register(
@@ -1550,9 +1567,10 @@ public sealed class RemoteGuestPlayableApplication :
     private bool QueueSharedPublicPresentationMetadata(bool force)
     {
         if (!_guestAdmitted || !_admissionResultApplied || _runtime is null ||
-            _sharedPresentation is null || _sharedParticipantScratch is null)
+            _sharedPresentation is null)
             return true;
 
+        SaturatingIncrement(ref _sharedPresentationProgressPasses);
         ReconcileSharedPresentation();
         int slot = _sharedPresentationDeliverySlot;
         if (slot < 0)
@@ -1660,14 +1678,21 @@ public sealed class RemoteGuestPlayableApplication :
         row.LastQueuedMilliseconds = 0;
         _sharedPresentationDeliverySlot = -1;
         _publicPresentationApplied = IsOwnPresentationApplied();
+        _sharedPresentationReconcileRequired = true;
+        SaturatingIncrement(ref _sharedPresentationProofWakeups);
     }
 
     private void ReconcileSharedPresentation()
     {
         SharedPublicPresentationRow[] rows = _sharedPresentation!;
-        int count = _sharedAuthority!.CopyActorPresentations(_sharedParticipantScratch!);
-        if (count < 0)
-            throw new InvalidOperationException("The shared participant census exceeded its bound.");
+        SharedActorPresentationView source = _sharedAuthority!.GetActorPresentationView();
+        if (!_sharedPresentationReconcileRequired &&
+            source.Version == _lastSharedPresentationSourceVersion)
+        {
+            SaturatingIncrement(ref _sharedPresentationUnchangedSourceSkips);
+            return;
+        }
+        SaturatingIncrement(ref _sharedPresentationReconciliationPasses);
         for (int slot = 0; slot < rows.Length; slot++)
         {
             ref SharedPublicPresentationRow row = ref rows[slot];
@@ -1676,13 +1701,8 @@ public sealed class RemoteGuestPlayableApplication :
             // would let an old delivery identity describe a newer participant (key ABA).
             if (row.DeliveryId != 0) continue;
 
-            GamePublicActorPresentation desired = default;
-            for (int index = 0; index < count; index++)
-            {
-                if (_sharedParticipantScratch![index].Participant.Slot != slot) continue;
-                desired = _sharedParticipantScratch[index];
-                break;
-            }
+            SaturatingIncrement(ref _sharedPresentationSlotReads);
+            _ = source.TryGet(slot, out GamePublicActorPresentation desired);
             if (!desired.IsValid)
             {
                 if (!row.PublicEntity.IsValid) continue;
@@ -1743,6 +1763,29 @@ public sealed class RemoteGuestPlayableApplication :
                 DesiredPresent = true,
             };
         }
+        _lastSharedPresentationSourceVersion = source.Version;
+        _sharedPresentationReconcileRequired = false;
+    }
+
+    internal RemoteSharedPresentationCensus GetSharedPresentationCensus()
+    {
+        EnsureOperational();
+        return new RemoteSharedPresentationCensus(
+            _sharedPresentationProgressPasses,
+            _sharedPresentationReconciliationPasses,
+            _sharedPresentationUnchangedSourceSkips,
+            _sharedPresentationSlotReads,
+            _sharedPresentationProofWakeups,
+            _lastSharedPresentationSourceVersion);
+    }
+
+    private void HandleInventoryMutationCompleted(InventoryMutationResult result)
+    {
+        if (!result.Accepted || _sharedAuthority is null || !_sharedParticipant.IsValid)
+            return;
+        if (!_sharedAuthority.ObserveActorPresentationMutation(in _sharedParticipant))
+            throw new InvalidOperationException(
+                "An accepted Inventory mutation could not invalidate actor presentation.");
     }
 
     private bool IsOwnPresentationApplied()
@@ -1854,6 +1897,10 @@ public sealed class RemoteGuestPlayableApplication :
                     in _sharedParticipant, command.Sequence, presentationAction))
                 throw new InvalidOperationException(
                     "An accepted public actor presentation action could not be recorded.");
+            if (_lastCommandResult.WasAdmitted &&
+                !_sharedAuthority.ObserveActorPresentationMutation(in _sharedParticipant))
+                throw new InvalidOperationException(
+                    "An admitted command could not invalidate its actor presentation source.");
         }
         SaturatingIncrement(ref _commandsApplied);
         _ = QueueOwnerState();
@@ -2484,6 +2531,8 @@ public sealed class RemoteGuestPlayableApplication :
         if (_sharedAuthority is null)
             try { _chatDelivery?.Dispose(); } catch { }
         try { _signUi?.Dispose(); } catch { }
+        if (_inventoryUi is not null)
+            _inventoryUi.MutationCompleted -= HandleInventoryMutationCompleted;
         try { _inventoryUi?.Dispose(); } catch { }
         try { _ui?.Dispose(); } catch { }
         if (_sharedAuthority is not null)

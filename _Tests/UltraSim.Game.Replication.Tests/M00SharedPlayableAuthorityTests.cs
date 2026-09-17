@@ -10,6 +10,100 @@ namespace UltraSim.Game.Replication.Tests;
 
 internal static class M00SharedPlayableAuthorityTests
 {
+    internal static void SharedActorPresentationPreparationIsVersionedAndSlotIndexed()
+    {
+        using SharedPlayableAuthority authority = SharedPlayableAuthority.CreateConceptDemo(
+            new SharedPlayableAuthorityLimits(3));
+        Check.True(authority.Join(
+            new ParticipantId(301),
+            new GameGuestAdmissionRequest(GameGuestBody.HumanFemale, "Alice"),
+            out SharedPlayableParticipant alice).IsEntered);
+        Check.True(authority.Join(
+            new ParticipantId(302),
+            new GameGuestAdmissionRequest(GameGuestBody.HumanMale, "Bob"),
+            out SharedPlayableParticipant bob).IsEntered);
+        Check.True(authority.Join(
+            new ParticipantId(303),
+            new GameGuestAdmissionRequest(GameGuestBody.HumanFemale, "Carol"),
+            out SharedPlayableParticipant carol).IsEntered);
+
+        SharedActorPresentationCensus before = authority.GetActorPresentationCensus();
+        SharedActorPresentationView first = authority.GetActorPresentationView();
+        Check.Equal(3, first.Count);
+        Check.Equal(3, first.Capacity);
+        Check.True(first.Version > 0);
+        Check.True(first.TryGet(alice.Slot, out GamePublicActorPresentation aliceView));
+        Check.Equal(alice, aliceView.Participant);
+        Check.True(first.TryGet(bob.Slot, out GamePublicActorPresentation bobView));
+        Check.Equal(bob, bobView.Participant);
+        Check.True(first.TryGet(carol.Slot, out GamePublicActorPresentation carolView));
+        Check.Equal(carol, carolView.Participant);
+
+        for (int read = 0; read < 128; read++)
+        {
+            SharedActorPresentationView repeated = authority.GetActorPresentationView();
+            Check.Equal(first.Version, repeated.Version);
+        }
+        SharedActorPresentationCensus repeatedCensus = authority.GetActorPresentationCensus();
+        Check.Equal(before.Preparations + 1, repeatedCensus.Preparations);
+        Check.Equal(before.ParticipantRecordsExamined + 3,
+            repeatedCensus.ParticipantRecordsExamined);
+        Check.Equal(before.ViewReads + 129, repeatedCensus.ViewReads);
+
+        authority.Runtime.Tick();
+        SharedActorPresentationView afterTick = authority.GetActorPresentationView();
+        SharedActorPresentationCensus tickCensus = authority.GetActorPresentationCensus();
+        Check.Equal(repeatedCensus.Preparations + 1, tickCensus.Preparations);
+        Check.Equal(repeatedCensus.ParticipantRecordsExamined + 3,
+            tickCensus.ParticipantRecordsExamined);
+        Check.Equal(first.Version, afterTick.Version);
+
+        Check.True(authority.RecordPresentationAction(
+            in alice, 1, GamePublicActorActionKind.Interact));
+        SharedActorPresentationView afterAction = authority.GetActorPresentationView();
+        Check.Equal(checked(first.Version + 1), afterAction.Version);
+        Check.True(afterAction.TryGet(alice.Slot, out aliceView));
+        Check.Equal(GamePublicActorActionKind.Interact, aliceView.Action);
+        Check.Equal(1UL, aliceView.ActionSequence);
+
+        Check.True(authority.Leave(bob));
+        SharedActorPresentationView afterLeave = authority.GetActorPresentationView();
+        Check.Equal(2, afterLeave.Count);
+        Check.False(afterLeave.TryGet(bob.Slot, out _));
+        ulong leaveVersion = afterLeave.Version;
+        Check.True(authority.Join(
+            new ParticipantId(304),
+            new GameGuestAdmissionRequest(GameGuestBody.HumanMale, "Bob Again"),
+            out SharedPlayableParticipant replacement).IsEntered);
+        Check.Equal(bob.Slot, replacement.Slot);
+        SharedActorPresentationView afterReuse = authority.GetActorPresentationView();
+        Check.True(afterReuse.Version > leaveVersion);
+        Check.True(afterReuse.TryGet(replacement.Slot, out GamePublicActorPresentation replacementView));
+        Check.Equal(replacement, replacementView.Participant);
+        Check.False(replacementView.Participant.PublicEntity == bob.PublicEntity);
+
+        Check.True(authority.RecordPresentationAction(
+            in alice, 2, GamePublicActorActionKind.Primary));
+        _ = authority.GetActorPresentationView();
+        long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        for (ulong sequence = 3; sequence < 131; sequence++)
+        {
+            Check.True(authority.RecordPresentationAction(
+                in alice,
+                sequence,
+                (sequence & 1) == 0
+                    ? GamePublicActorActionKind.Primary
+                    : GamePublicActorActionKind.Interact));
+            SharedActorPresentationView warmed = authority.GetActorPresentationView();
+            Check.True(warmed.TryGet(alice.Slot, out _));
+        }
+        Check.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - allocatedBefore);
+
+        Check.True(authority.Leave(replacement));
+        Check.True(authority.Leave(carol));
+        Check.True(authority.Leave(alice));
+    }
+
     internal static void ConfiguredParticipantCapacityReservesParticipantEntities()
     {
         const int participantCapacity = 50;

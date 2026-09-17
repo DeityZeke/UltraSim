@@ -15,14 +15,140 @@ using UltraSim.UI;
 
 internal static class M00SharedAuthorityTests
 {
-    internal const int TestCount = 2;
+    internal const int TestCount = 3;
 
     internal static void RunAll()
     {
         OneDedicatedAuthorityServesThreeIndependentRemoteSessions();
         Console.WriteLine("PASS M00OneDedicatedAuthorityServesThreeIndependentRemoteSessions");
+        SharedPresentationPreparationIsSharedAndProofWakeDeliversNewerState();
+        Console.WriteLine("PASS PF5R10SharedPresentationPreparationIsSharedAndProofWakeDeliversNewerState");
         ExistingLocalAuthorityAddsAndRetiresRemoteRecipients();
         Console.WriteLine("PASS M00ExistingLocalAuthorityAddsAndRetiresRemoteRecipients");
+    }
+
+    private static void SharedPresentationPreparationIsSharedAndProofWakeDeliversNewerState()
+    {
+        const int maximumParticipants = 2;
+        var realm = new ApplicationRealmId(0x4D10, 1);
+        using NetworkServerIdentity identity = NetworkServerIdentity.CreateEphemeral();
+        using SharedPlayableAuthority authority = SharedPlayableAuthority.CreateConceptDemo(
+            new SharedPlayableAuthorityLimits(maximumParticipants));
+        using var host = new HostedUdpAdmissionHost(
+            new IPEndPoint(IPAddress.Loopback, 0),
+            identity,
+            NetworkProtocolLimits.Default,
+            UdpProtocolLimits.Default,
+            SharedUdpProtocolLimits.Default with { MaximumSessions = maximumParticipants },
+            HostedUdpAdmissionLimits.Default with
+            {
+                MaximumChallengesPerAddressPerBucket = 64,
+                MaximumValidationsPerAddressPerBucket = 64,
+            },
+            new SharedRemoteGuestPlayableApplicationFactory(authority, realm),
+            UltraSimGameProtocol.Manifest);
+        string root = Path.Combine(Path.GetTempPath(),
+            $"ultrasim-pf5-r10-presentation-{Environment.ProcessId}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var clients = new List<ClientNode>();
+        try
+        {
+            ClientNode alice = ClientNode.Connect(root, "alice", host, identity);
+            ClientNode bob = ClientNode.Connect(root, "bob", host, identity);
+            clients.Add(alice);
+            clients.Add(bob);
+            True(alice.Session.TrySubmitGuest(new GameGuestAdmissionRequest(
+                GameGuestBody.HumanFemale, "Alice")));
+            True(bob.Session.TrySubmitGuest(new GameGuestAdmissionRequest(
+                GameGuestBody.HumanMale, "Bob")));
+            DriveUntil(host, authority, clients, () => clients.All(static client =>
+                client.Session.Playable.GetSnapshot().State == RemotePlayableClientState.Active &&
+                client.Session.PublicPresentationState.GetSnapshot().CurrentRecords >= 2));
+
+            SharedActorPresentationCensus sourceBefore = authority.GetActorPresentationCensus();
+            Span<RemoteSharedPresentationCensus> remoteBefore =
+                stackalloc RemoteSharedPresentationCensus[maximumParticipants];
+            Equal(maximumParticipants, authority.CopyRemotePresentationCensus(remoteBefore));
+            for (int step = 0; step < 256; step++)
+            {
+                for (int index = 0; index < clients.Count; index++) clients[index].Direct.Pump();
+                host.Pump();
+                _ = authority.TickDue();
+                for (int index = 0; index < clients.Count; index++)
+                {
+                    clients[index].Direct.Pump();
+                    _ = clients[index].Session.ProcessReceived();
+                }
+            }
+            SharedActorPresentationCensus sourceStable = authority.GetActorPresentationCensus();
+            Span<RemoteSharedPresentationCensus> remoteStable =
+                stackalloc RemoteSharedPresentationCensus[maximumParticipants];
+            Equal(maximumParticipants, authority.CopyRemotePresentationCensus(remoteStable));
+            ulong progressDelta = 0;
+            ulong reconciliationDelta = 0;
+            ulong skipDelta = 0;
+            for (int index = 0; index < maximumParticipants; index++)
+            {
+                progressDelta += remoteStable[index].ProgressPasses - remoteBefore[index].ProgressPasses;
+                reconciliationDelta += remoteStable[index].ReconciliationPasses -
+                    remoteBefore[index].ReconciliationPasses;
+                skipDelta += remoteStable[index].UnchangedSourceSkips -
+                    remoteBefore[index].UnchangedSourceSkips;
+            }
+            True(progressDelta > 0);
+            True(skipDelta > 0);
+            True(reconciliationDelta < progressDelta);
+            True(sourceStable.ViewReads - sourceBefore.ViewReads >= progressDelta);
+            True(sourceStable.Preparations - sourceBefore.Preparations < progressDelta);
+
+            var participants = new SharedPlayableParticipant[maximumParticipants];
+            Equal(maximumParticipants, authority.CopyParticipants(participants));
+            SharedPlayableParticipant aliceParticipant = participants.Single(
+                static participant => participant.GuestIdentity.DisplayName == "Alice");
+            True(authority.RecordPresentationAction(
+                in aliceParticipant, 1, GamePublicActorActionKind.Interact));
+            for (int step = 0; step < 64; step++)
+            {
+                host.Pump();
+                _ = authority.TickDue();
+                Thread.Yield();
+            }
+            True(authority.RecordPresentationAction(
+                in aliceParticipant, 2, GamePublicActorActionKind.Primary));
+            for (int step = 0; step < 64; step++)
+            {
+                host.Pump();
+                _ = authority.TickDue();
+                Thread.Yield();
+            }
+            DriveUntil(host, authority, clients, () => clients.All(client =>
+                client.Session.PublicPresentationState.TryGet(
+                    aliceParticipant.PublicEntity,
+                    out ClientPublicPresentationMetadata metadata) &&
+                metadata.ActorAction == ClientPublicActorActionKind.Primary &&
+                metadata.ActorActionSequence == 2));
+
+            Span<RemoteSharedPresentationCensus> remoteAfter =
+                stackalloc RemoteSharedPresentationCensus[maximumParticipants];
+            Equal(maximumParticipants, authority.CopyRemotePresentationCensus(remoteAfter));
+            ulong proofWakeups = 0;
+            for (int index = 0; index < maximumParticipants; index++)
+                proofWakeups += remoteAfter[index].ProofWakeups - remoteStable[index].ProofWakeups;
+            True(proofWakeups >= (ulong)maximumParticipants);
+        }
+        finally
+        {
+            for (int index = clients.Count - 1; index >= 0; index--) clients[index].Dispose();
+            for (int step = 0; step < 20_000 && authority.GetSnapshot().ParticipantCount != 0;
+                 step++)
+            {
+                host.Pump();
+                _ = authority.TickDue();
+                Thread.Yield();
+            }
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+        Equal(0, authority.GetSnapshot().ParticipantCount);
     }
 
     private static void ExistingLocalAuthorityAddsAndRetiresRemoteRecipients()
