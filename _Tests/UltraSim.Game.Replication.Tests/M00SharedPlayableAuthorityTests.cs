@@ -104,6 +104,50 @@ internal static class M00SharedPlayableAuthorityTests
         Check.True(authority.Leave(alice));
     }
 
+    internal static void FailedActorPresentationPreparationCannotHideChangedTruth()
+    {
+        using SharedPlayableAuthority authority = SharedPlayableAuthority.CreateConceptDemo(
+            new SharedPlayableAuthorityLimits(2));
+        Check.True(authority.Join(
+            new ParticipantId(311),
+            new GameGuestAdmissionRequest(GameGuestBody.HumanFemale, "Alice"),
+            out SharedPlayableParticipant alice).IsEntered);
+        Check.True(authority.Join(
+            new ParticipantId(312),
+            new GameGuestAdmissionRequest(GameGuestBody.HumanMale, "Bob"),
+            out SharedPlayableParticipant bob).IsEntered);
+        Check.True(alice.Slot < bob.Slot);
+
+        SharedActorPresentationView baseline = authority.GetActorPresentationView();
+        ulong baselineVersion = baseline.Version;
+        Check.True(authority.RecordPresentationAction(
+            in alice, 1, GamePublicActorActionKind.Interact));
+        authority.SetActorPresentationPreparationFaultForTesting(
+            bob.Slot, SharedActorPresentationPreparationFault.ReturnFalse);
+        Check.Throws<InvalidOperationException>(() => authority.GetActorPresentationView());
+
+        SharedActorPresentationView afterFalse = authority.GetActorPresentationView();
+        Check.Equal(checked(baselineVersion + 1), afterFalse.Version);
+        Check.True(afterFalse.TryGet(alice.Slot, out GamePublicActorPresentation changed));
+        Check.Equal(GamePublicActorActionKind.Interact, changed.Action);
+        Check.Equal(1UL, changed.ActionSequence);
+
+        Check.True(authority.RecordPresentationAction(
+            in alice, 2, GamePublicActorActionKind.Primary));
+        authority.SetActorPresentationPreparationFaultForTesting(
+            bob.Slot, SharedActorPresentationPreparationFault.Throw);
+        Check.Throws<InvalidOperationException>(() => authority.GetActorPresentationView());
+
+        SharedActorPresentationView afterThrow = authority.GetActorPresentationView();
+        Check.Equal(checked(afterFalse.Version + 1), afterThrow.Version);
+        Check.True(afterThrow.TryGet(alice.Slot, out changed));
+        Check.Equal(GamePublicActorActionKind.Primary, changed.Action);
+        Check.Equal(2UL, changed.ActionSequence);
+
+        Check.True(authority.Leave(bob));
+        Check.True(authority.Leave(alice));
+    }
+
     internal static void ConfiguredParticipantCapacityReservesParticipantEntities()
     {
         const int participantCapacity = 50;

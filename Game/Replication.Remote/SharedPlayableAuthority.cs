@@ -143,6 +143,13 @@ internal readonly record struct SharedActorPresentationCensus(
     ulong ChangedRecords,
     ulong ExplicitInvalidations);
 
+internal enum SharedActorPresentationPreparationFault : byte
+{
+    None = 0,
+    ReturnFalse = 1,
+    Throw = 2,
+}
+
 /// <summary>Read-only evidence for one shared Game/World authority.</summary>
 public readonly record struct SharedPlayableAuthoritySnapshot(
     ulong GenerationId,
@@ -252,6 +259,9 @@ public sealed class SharedPlayableAuthority : IDisposable
     private bool _actorPresentationPrepared;
     private bool _actorPresentationDirty = true;
     private bool _actorPresentationTopologyChanged = true;
+    private SharedActorPresentationPreparationFault _actorPresentationFaultForTesting;
+    private SharedActorPresentationPreparationFault _actorPresentationObservedFaultForTesting;
+    private int _actorPresentationFaultSlotForTesting = -1;
     private bool _disposed;
 
     private SharedPlayableAuthority(
@@ -826,6 +836,20 @@ public sealed class SharedPlayableAuthority : IDisposable
             _actorPresentationExplicitInvalidations);
     }
 
+    internal void SetActorPresentationPreparationFaultForTesting(
+        int slot,
+        SharedActorPresentationPreparationFault fault)
+    {
+        EnsureOperational();
+        if ((uint)slot >= (uint)_actorPresentations.Length)
+            throw new ArgumentOutOfRangeException(nameof(slot));
+        if (fault is not (SharedActorPresentationPreparationFault.ReturnFalse or
+            SharedActorPresentationPreparationFault.Throw))
+            throw new ArgumentOutOfRangeException(nameof(fault));
+        _actorPresentationFaultSlotForTesting = slot;
+        _actorPresentationFaultForTesting = fault;
+    }
+
     private void PrepareActorPresentations(ulong generation, ulong simulationTick)
     {
         _actorPresentationPreparationGeneration = generation;
@@ -833,11 +857,29 @@ public sealed class SharedPlayableAuthority : IDisposable
             _actorPresentationPreparedGeneration != generation ||
             _actorPresentationTopologyChanged;
         _actorPresentationPreparationChangedRecords = 0;
-        bool captured = Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
-            _prepareActorPresentationsOperation, out bool complete) && complete;
+        _actorPresentationObservedFaultForTesting =
+            SharedActorPresentationPreparationFault.None;
+        bool captured;
+        try
+        {
+            captured = Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+                _prepareActorPresentationsOperation, out bool complete) && complete;
+        }
+        catch
+        {
+            InvalidateFailedActorPresentationPreparation();
+            throw;
+        }
         if (!captured)
+        {
+            InvalidateFailedActorPresentationPreparation();
+            if (_actorPresentationObservedFaultForTesting ==
+                SharedActorPresentationPreparationFault.Throw)
+                throw new InvalidOperationException(
+                    "Injected actor-presentation preparation failure.");
             throw new InvalidOperationException(
                 "The authoritative actor-presentation source could not be prepared.");
+        }
         SaturatingIncrement(ref _actorPresentationPreparations);
         SaturatingAdd(ref _actorPresentationChangedRecords,
             _actorPresentationPreparationChangedRecords);
@@ -894,6 +936,17 @@ public sealed class SharedPlayableAuthority : IDisposable
             };
             GamePublicActorActionKind action = _desiredPresentationActions[slot];
             ulong actionSequence = _desiredPresentationActionSequences[slot];
+
+            if (_actorPresentationFaultForTesting != SharedActorPresentationPreparationFault.None &&
+                _actorPresentationFaultSlotForTesting == slot)
+            {
+                SharedActorPresentationPreparationFault fault =
+                    _actorPresentationFaultForTesting;
+                _actorPresentationFaultForTesting = SharedActorPresentationPreparationFault.None;
+                _actorPresentationFaultSlotForTesting = -1;
+                _actorPresentationObservedFaultForTesting = fault;
+                return false;
+            }
             if (retained.IsValid && retained.Participant == participant &&
                 retained.MainHandPrefabId == mainHandPrefab &&
                 retained.VerticalPhase == verticalPhase &&
@@ -910,6 +963,15 @@ public sealed class SharedPlayableAuthority : IDisposable
             _actorPresentationPreparationChangedRecords++;
         }
         return true;
+    }
+
+    private void InvalidateFailedActorPresentationPreparation()
+    {
+        // Preparation writes retained rows incrementally. None of those rows may be exposed as a
+        // valid old source revision after a later row fails. Forcing the next complete capture to
+        // start from an invalid prepared state guarantees one new source version on recovery.
+        _actorPresentationPrepared = false;
+        _actorPresentationDirty = true;
     }
 
     private void InvalidateActorPresentations(bool topologyChanged)

@@ -135,6 +135,53 @@ internal static class M00SharedAuthorityTests
             for (int index = 0; index < maximumParticipants; index++)
                 proofWakeups += remoteAfter[index].ProofWakeups - remoteStable[index].ProofWakeups;
             True(proofWakeups >= (ulong)maximumParticipants);
+
+            // A partial source preparation must not leave changed retained rows hidden behind the
+            // source version the recipients have already proved. Exercise both a failed capture
+            // result and the outer exception path without allowing the failed view into progress.
+            for (int step = 0; step < 128; step++)
+            {
+                for (int index = 0; index < clients.Count; index++) clients[index].Direct.Pump();
+                host.Pump();
+                for (int index = 0; index < clients.Count; index++)
+                {
+                    clients[index].Direct.Pump();
+                    _ = clients[index].Session.ProcessReceived();
+                }
+            }
+            ulong recoveredVersion = authority.GetActorPresentationView().Version;
+            True(authority.RecordPresentationAction(
+                in aliceParticipant, 3, GamePublicActorActionKind.Interact));
+            authority.SetActorPresentationPreparationFaultForTesting(
+                participants.Single(static participant =>
+                    participant.GuestIdentity.DisplayName == "Bob").Slot,
+                SharedActorPresentationPreparationFault.ReturnFalse);
+            Throws<InvalidOperationException>(() => authority.GetActorPresentationView());
+            SharedActorPresentationView recoveredFalse = authority.GetActorPresentationView();
+            True(recoveredFalse.Version > recoveredVersion);
+            DriveUntil(host, authority, clients, () => clients.All(client =>
+                client.Session.PublicPresentationState.TryGet(
+                    aliceParticipant.PublicEntity,
+                    out ClientPublicPresentationMetadata metadata) &&
+                metadata.ActorAction == ClientPublicActorActionKind.Interact &&
+                metadata.ActorActionSequence == 3));
+
+            recoveredVersion = recoveredFalse.Version;
+            True(authority.RecordPresentationAction(
+                in aliceParticipant, 4, GamePublicActorActionKind.Primary));
+            authority.SetActorPresentationPreparationFaultForTesting(
+                participants.Single(static participant =>
+                    participant.GuestIdentity.DisplayName == "Bob").Slot,
+                SharedActorPresentationPreparationFault.Throw);
+            Throws<InvalidOperationException>(() => authority.GetActorPresentationView());
+            SharedActorPresentationView recoveredThrow = authority.GetActorPresentationView();
+            True(recoveredThrow.Version > recoveredVersion);
+            DriveUntil(host, authority, clients, () => clients.All(client =>
+                client.Session.PublicPresentationState.TryGet(
+                    aliceParticipant.PublicEntity,
+                    out ClientPublicPresentationMetadata metadata) &&
+                metadata.ActorAction == ClientPublicActorActionKind.Primary &&
+                metadata.ActorActionSequence == 4));
         }
         finally
         {
@@ -149,6 +196,13 @@ internal static class M00SharedAuthorityTests
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
         Equal(0, authority.GetSnapshot().ParticipantCount);
+    }
+
+    private static void Throws<TException>(Action body) where TException : Exception
+    {
+        try { body(); }
+        catch (TException) { return; }
+        throw new InvalidOperationException($"Expected {typeof(TException).Name}.");
     }
 
     private static void ExistingLocalAuthorityAddsAndRetiresRemoteRecipients()
