@@ -106,6 +106,7 @@ internal static class M00SharedAuthorityTests
             ulong actorSearchDelta = 0;
             ulong actorRowsExaminedDelta = 0;
             ulong actorEmptySearchDelta = 0;
+            ulong actorCleanSkipDelta = 0;
             for (int index = 0; index < maximumParticipants; index++)
             {
                 progressDelta += remoteStable[index].ProgressPasses - remoteBefore[index].ProgressPasses;
@@ -119,13 +120,16 @@ internal static class M00SharedAuthorityTests
                     remoteBefore[index].DeliveryRowsExamined;
                 actorEmptySearchDelta += remoteStable[index].EmptyDeliverySearches -
                     remoteBefore[index].EmptyDeliverySearches;
+                actorCleanSkipDelta += remoteStable[index].CleanDeliverySkips -
+                    remoteBefore[index].CleanDeliverySkips;
             }
             True(progressDelta > 0);
             True(skipDelta > 0);
             True(reconciliationDelta < progressDelta);
-            True(actorSearchDelta > 0);
-            Equal(actorSearchDelta, actorEmptySearchDelta);
-            Equal(actorSearchDelta * maximumParticipants, actorRowsExaminedDelta);
+            Equal(0UL, actorSearchDelta);
+            Equal(0UL, actorEmptySearchDelta);
+            Equal(0UL, actorRowsExaminedDelta);
+            True(actorCleanSkipDelta > 0);
             True(sourceStable.ViewReads - sourceBefore.ViewReads >= progressDelta);
             True(sourceStable.Preparations - sourceBefore.Preparations < progressDelta);
 
@@ -135,6 +139,7 @@ internal static class M00SharedAuthorityTests
             ulong itemSearchDelta = 0;
             ulong itemRowsExaminedDelta = 0;
             ulong itemEmptySearchDelta = 0;
+            ulong itemCleanSkipDelta = 0;
             for (int index = 0; index < maximumParticipants; index++)
             {
                 itemProgressDelta += remoteItemStable[index].ProgressPasses -
@@ -149,15 +154,16 @@ internal static class M00SharedAuthorityTests
                     remoteItemBefore[index].DeliveryRowsExamined;
                 itemEmptySearchDelta += remoteItemStable[index].EmptyDeliverySearches -
                     remoteItemBefore[index].EmptyDeliverySearches;
+                itemCleanSkipDelta += remoteItemStable[index].CleanDeliverySkips -
+                    remoteItemBefore[index].CleanDeliverySkips;
             }
             True(itemProgressDelta > 0);
             True(itemSkipDelta > 0);
             True(itemReconciliationDelta < itemProgressDelta);
-            True(itemSearchDelta > 0);
-            Equal(itemSearchDelta, itemEmptySearchDelta);
-            Equal(
-                itemSearchDelta * SharedPlayableAuthority.MaximumPublicItemPresentations,
-                itemRowsExaminedDelta);
+            Equal(0UL, itemSearchDelta);
+            Equal(0UL, itemEmptySearchDelta);
+            Equal(0UL, itemRowsExaminedDelta);
+            True(itemCleanSkipDelta > 0);
             True(itemSourceStable.ViewReads - itemSourceBefore.ViewReads >= itemProgressDelta);
             True(itemSourceStable.Preparations - itemSourceBefore.Preparations < itemProgressDelta);
 

@@ -69,6 +69,9 @@ internal readonly record struct RemoteSharedPresentationCensus(
     ulong DeliverySearches,
     ulong DeliveryRowsExamined,
     ulong EmptyDeliverySearches,
+    ulong CleanDeliverySkips,
+    ulong ReadinessRefreshes,
+    ulong ReadinessRowsExamined,
     ulong QueueAttempts,
     ulong QueueAcceptances,
     ulong QueueRefusals,
@@ -88,6 +91,9 @@ internal readonly record struct RemotePublicItemPresentationCensus(
     ulong DeliverySearches,
     ulong DeliveryRowsExamined,
     ulong EmptyDeliverySearches,
+    ulong CleanDeliverySkips,
+    ulong ReadinessRefreshes,
+    ulong ReadinessRowsExamined,
     ulong QueueAttempts,
     ulong QueueAcceptances,
     ulong QueueRefusals,
@@ -105,6 +111,9 @@ public readonly record struct RemotePresentationDeliveryPollingSnapshot(
     ulong DeliverySearches,
     ulong DeliveryRowsExamined,
     ulong EmptyDeliverySearches,
+    ulong CleanDeliverySkips,
+    ulong ReadinessRefreshes,
+    ulong ReadinessRowsExamined,
     ulong QueueAttempts,
     ulong QueueAcceptances,
     ulong QueueRefusals,
@@ -336,12 +345,16 @@ public sealed class RemoteGuestPlayableApplication :
     private ulong _sharedPresentationDeliverySearches;
     private ulong _sharedPresentationDeliveryRowsExamined;
     private ulong _sharedPresentationEmptyDeliverySearches;
+    private ulong _sharedPresentationCleanDeliverySkips;
+    private ulong _sharedPresentationReadinessRefreshes;
+    private ulong _sharedPresentationReadinessRowsExamined;
     private ulong _sharedPresentationQueueAttempts;
     private ulong _sharedPresentationQueueAcceptances;
     private ulong _sharedPresentationQueueRefusals;
     private ulong _sharedPresentationRetryDeferrals;
     private ulong _sharedPresentationRetryAttempts;
     private ulong _sharedPresentationProofWakeups;
+    private bool _sharedPresentationHasReadyDelivery;
     private bool _sharedPresentationReconcileRequired = true;
     private readonly SharedPublicPresentationRow[] _publicItemPresentations =
         new SharedPublicPresentationRow[SharedPlayableAuthority.MaximumPublicItemPresentations];
@@ -359,12 +372,16 @@ public sealed class RemoteGuestPlayableApplication :
     private ulong _publicItemPresentationDeliverySearches;
     private ulong _publicItemPresentationDeliveryRowsExamined;
     private ulong _publicItemPresentationEmptyDeliverySearches;
+    private ulong _publicItemPresentationCleanDeliverySkips;
+    private ulong _publicItemPresentationReadinessRefreshes;
+    private ulong _publicItemPresentationReadinessRowsExamined;
     private ulong _publicItemPresentationQueueAttempts;
     private ulong _publicItemPresentationQueueAcceptances;
     private ulong _publicItemPresentationQueueRefusals;
     private ulong _publicItemPresentationRetryDeferrals;
     private ulong _publicItemPresentationRetryAttempts;
     private ulong _publicItemPresentationProofWakeups;
+    private bool _publicItemPresentationHasReadyDelivery;
     private ulong _lastPublicItemPresentationSourceVersion;
     private ulong _publicItemPresentationSubscriptionTopologyVersion;
     private ulong _lastPublicItemPresentationSubscriptionTopologyVersion;
@@ -1431,6 +1448,11 @@ public sealed class RemoteGuestPlayableApplication :
         SaturatingIncrement(ref _publicItemPresentationProgressPasses);
         ReconcilePublicItemPresentation();
         int slot = _publicItemPresentationDeliverySlot;
+        if (slot < 0 && !_publicItemPresentationHasReadyDelivery)
+        {
+            SaturatingIncrement(ref _publicItemPresentationCleanDeliverySkips);
+            return true;
+        }
         if (slot < 0)
         {
             SaturatingIncrement(ref _publicItemPresentationDeliverySearches);
@@ -1448,6 +1470,7 @@ public sealed class RemoteGuestPlayableApplication :
                 _publicItemPresentationDeliverySlot = index;
                 break;
             }
+            _publicItemPresentationHasReadyDelivery = false;
         }
         if (slot < 0)
         {
@@ -1668,12 +1691,27 @@ public sealed class RemoteGuestPlayableApplication :
             };
         }
 
+        RefreshPublicItemPresentationReadiness();
+
         if (sharedSource)
         {
             _lastPublicItemPresentationSourceVersion = sourceVersion;
             _lastPublicItemPresentationSubscriptionTopologyVersion =
                 _publicItemPresentationSubscriptionTopologyVersion;
             _publicItemPresentationReconcileRequired = false;
+        }
+    }
+
+    private void RefreshPublicItemPresentationReadiness()
+    {
+        SaturatingIncrement(ref _publicItemPresentationReadinessRefreshes);
+        _publicItemPresentationHasReadyDelivery = false;
+        for (int index = 0; index < _publicItemPresentations.Length; index++)
+        {
+            SaturatingIncrement(ref _publicItemPresentationReadinessRowsExamined);
+            if (!_publicItemPresentations[index].NeedsDelivery) continue;
+            _publicItemPresentationHasReadyDelivery = true;
+            return;
         }
     }
 
@@ -1724,6 +1762,12 @@ public sealed class RemoteGuestPlayableApplication :
         SaturatingIncrement(ref _sharedPresentationProgressPasses);
         ReconcileSharedPresentation();
         int slot = _sharedPresentationDeliverySlot;
+        if (slot < 0 && !_sharedPresentationHasReadyDelivery)
+        {
+            SaturatingIncrement(ref _sharedPresentationCleanDeliverySkips);
+            _publicPresentationApplied = IsOwnPresentationApplied();
+            return true;
+        }
         if (slot < 0)
         {
             SaturatingIncrement(ref _sharedPresentationDeliverySearches);
@@ -1740,6 +1784,7 @@ public sealed class RemoteGuestPlayableApplication :
                 _sharedPresentationDeliverySlot = index;
                 break;
             }
+            _sharedPresentationHasReadyDelivery = false;
         }
         if (slot < 0)
         {
@@ -1927,8 +1972,23 @@ public sealed class RemoteGuestPlayableApplication :
                 DesiredPresent = true,
             };
         }
+        RefreshSharedPresentationReadiness();
         _lastSharedPresentationSourceVersion = source.Version;
         _sharedPresentationReconcileRequired = false;
+    }
+
+    private void RefreshSharedPresentationReadiness()
+    {
+        SaturatingIncrement(ref _sharedPresentationReadinessRefreshes);
+        _sharedPresentationHasReadyDelivery = false;
+        SharedPublicPresentationRow[] rows = _sharedPresentation!;
+        for (int index = 0; index < rows.Length; index++)
+        {
+            SaturatingIncrement(ref _sharedPresentationReadinessRowsExamined);
+            if (!rows[index].NeedsDelivery) continue;
+            _sharedPresentationHasReadyDelivery = true;
+            return;
+        }
     }
 
     internal RemoteSharedPresentationCensus GetSharedPresentationCensus()
@@ -1942,6 +2002,9 @@ public sealed class RemoteGuestPlayableApplication :
             _sharedPresentationDeliverySearches,
             _sharedPresentationDeliveryRowsExamined,
             _sharedPresentationEmptyDeliverySearches,
+            _sharedPresentationCleanDeliverySkips,
+            _sharedPresentationReadinessRefreshes,
+            _sharedPresentationReadinessRowsExamined,
             _sharedPresentationQueueAttempts,
             _sharedPresentationQueueAcceptances,
             _sharedPresentationQueueRefusals,
@@ -1964,6 +2027,9 @@ public sealed class RemoteGuestPlayableApplication :
             _publicItemPresentationDeliverySearches,
             _publicItemPresentationDeliveryRowsExamined,
             _publicItemPresentationEmptyDeliverySearches,
+            _publicItemPresentationCleanDeliverySkips,
+            _publicItemPresentationReadinessRefreshes,
+            _publicItemPresentationReadinessRowsExamined,
             _publicItemPresentationQueueAttempts,
             _publicItemPresentationQueueAcceptances,
             _publicItemPresentationQueueRefusals,
@@ -1982,6 +2048,9 @@ public sealed class RemoteGuestPlayableApplication :
             _sharedPresentationDeliverySearches,
             _sharedPresentationDeliveryRowsExamined,
             _sharedPresentationEmptyDeliverySearches,
+            _sharedPresentationCleanDeliverySkips,
+            _sharedPresentationReadinessRefreshes,
+            _sharedPresentationReadinessRowsExamined,
             _sharedPresentationQueueAttempts,
             _sharedPresentationQueueAcceptances,
             _sharedPresentationQueueRefusals,
@@ -1995,6 +2064,9 @@ public sealed class RemoteGuestPlayableApplication :
             _publicItemPresentationDeliverySearches,
             _publicItemPresentationDeliveryRowsExamined,
             _publicItemPresentationEmptyDeliverySearches,
+            _publicItemPresentationCleanDeliverySkips,
+            _publicItemPresentationReadinessRefreshes,
+            _publicItemPresentationReadinessRowsExamined,
             _publicItemPresentationQueueAttempts,
             _publicItemPresentationQueueAcceptances,
             _publicItemPresentationQueueRefusals,
