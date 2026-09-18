@@ -100,6 +100,15 @@ limits before allocating collections. The Godot adapter likewise preadmits every
 padding value against its native integer range before constructing controls. Boolean `Unset`
 always projects as an unpressed toggle, including a retained `true -> Unset` update.
 
+Compiled definitions also own one finite outside-pointer policy. The default is modeless:
+pointer input over a visible UI surface belongs to the UI, while input outside passes to gameplay
+and leaves the view open. Definitions may instead declare a modal `Block` policy, or a `Close`
+policy tied to exactly one ordinary no-input Game action. Click-outside closing therefore follows
+the same validated semantic action path as the visible Close button; it is not a Godot-local view
+deletion. Character Select is explicitly modal, Inventory and Server Monitor use the modeless
+default, and informational signs use semantic click-outside Close. Local and Online interpret the
+same compiled policy.
+
 ## Local and remote paths
 
 `LocalSemanticLink` is the engine-neutral offline bridge. It transfers the same
@@ -148,7 +157,7 @@ sign text, interaction distance, or view lifecycle.
 
 ## Current client closure
 
-The renderer, exact cache identity, cold/hot semantics, Inventory v7 workflow, local/remote action
+The renderer, exact cache identity, cold/hot semantics, Inventory v8 workflow, local/remote action
 path, A0.6 content-backed `.usui` path, and F0.5 source convergence are accepted. One selected
 standard Inventory artifact, reopened cached bytes, and content-backed exact bytes enter the same
 `UiClientRuntime` and produce the same model, actions, Game handler, and Godot result. The standard
@@ -156,7 +165,8 @@ library remains small composition data; it does not make Client Core
 depend on every Game definition, pull Game UI/Inventory authority assemblies into Online, or
 substitute for required realm-content application proof.
 
-I0.12 advances the passive definition to v7 with one item-details slot and Drop action. I0.13
+I0.12 advanced the passive definition to v7 with one item-details slot and Drop action. Human-play
+input hardening advances the passive artifact to v8 without moving authority into the client. I0.13
 replaces the temporary preformatted weapon string with a typed bounded Inspection Property set.
 Game determines disclosed facts from persistent authoritative instance state and authorizes Drop
 only in an owner-bound view; an engine-neutral presentation profile determines labels, formatting,

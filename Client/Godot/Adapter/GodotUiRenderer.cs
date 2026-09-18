@@ -18,6 +18,7 @@ public sealed class GodotUiRenderer : IUiRenderer
 {
     private readonly IGodotUiAssetResolver? _assets;
     private readonly Control? _host;
+    private readonly List<GodotUiRenderHandle> _openHandles = [];
 
     public GodotUiRenderer(Control? host = null, IGodotUiAssetResolver? assets = null)
     {
@@ -38,6 +39,7 @@ public sealed class GodotUiRenderer : IUiRenderer
             _host.AddChild(handle.Root);
             handle.CenterInHost();
         }
+        _openHandles.Add(handle);
         return handle;
     }
 
@@ -58,8 +60,88 @@ public sealed class GodotUiRenderer : IUiRenderer
     {
         if (handle is not GodotUiRenderHandle godotHandle)
             throw new ArgumentException("The render handle was not created by GodotUiRenderer.", nameof(handle));
+        _openHandles.Remove(godotHandle);
         godotHandle.Close();
     }
+
+    /// <summary>
+    /// Resolves gameplay input against the topmost open compiled UI without consuming native
+    /// GUI delivery. A UI-surface result tells the caller to skip world input while still
+    /// allowing Godot's later <c>_GuiInput</c> phase to operate normally.
+    /// </summary>
+    public GodotUiGameplayInputDisposition ResolveGameplayInput(InputEvent inputEvent)
+    {
+        ArgumentNullException.ThrowIfNull(inputEvent);
+        if (TryGetPointerPosition(inputEvent, out Vector2 position))
+        {
+            for (int index = _openHandles.Count - 1; index >= 0; index--)
+            {
+                GodotUiRenderHandle handle = _openHandles[index];
+                if (handle.ContainsUiSurface(position))
+                    return GodotUiGameplayInputDisposition.UiSurface;
+            }
+
+            if (inputEvent is InputEventMouseButton
+                {
+                    ButtonIndex: MouseButton.Left,
+                    Pressed: true,
+                })
+            {
+                for (int index = _openHandles.Count - 1; index >= 0; index--)
+                {
+                    GodotUiRenderHandle handle = _openHandles[index];
+                    if (handle.TrySubmitOutsideClose())
+                        return GodotUiGameplayInputDisposition.OutsideCloseSubmitted;
+                }
+            }
+        }
+
+        foreach (GodotUiRenderHandle handle in _openHandles)
+        {
+            if (handle.OutsidePointerBehavior == UiOutsidePointerBehavior.Block)
+                return GodotUiGameplayInputDisposition.Blocked;
+        }
+        return GodotUiGameplayInputDisposition.Gameplay;
+    }
+
+    /// <summary>Whether an explicitly modal view currently revokes held gameplay input.</summary>
+    public bool BlocksGameplayInput
+    {
+        get
+        {
+            foreach (GodotUiRenderHandle handle in _openHandles)
+                if (handle.OutsidePointerBehavior == UiOutsidePointerBehavior.Block)
+                    return true;
+            return false;
+        }
+    }
+
+    private static bool TryGetPointerPosition(InputEvent inputEvent, out Vector2 position)
+    {
+        switch (inputEvent)
+        {
+            case InputEventMouse mouse:
+                position = mouse.Position;
+                return true;
+            case InputEventScreenTouch touch:
+                position = touch.Position;
+                return true;
+            case InputEventScreenDrag drag:
+                position = drag.Position;
+                return true;
+            default:
+                position = default;
+                return false;
+        }
+    }
+}
+
+public enum GodotUiGameplayInputDisposition : byte
+{
+    Gameplay = 0,
+    UiSurface = 1,
+    Blocked = 2,
+    OutsideCloseSubmitted = 3,
 }
 
 internal static class GodotUiDefinitionAdmission
@@ -104,7 +186,9 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
     private readonly Dictionary<UiElementId, VBoxContainer> _lists = [];
     private readonly Dictionary<UiElementId, Dictionary<UiRowId, Control>> _listRows = [];
     private readonly Dictionary<UiActionId, UiActionState> _actionStates = [];
+    private readonly Action<UiActionRequest> _submitAction;
     private bool _updating;
+    private bool _outsideCloseSubmitted;
 
     public GodotUiRenderHandle(
         UiViewInstanceId instance,
@@ -116,6 +200,7 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
         _instance = instance;
         _definition = definition;
         _assets = assets;
+        _submitAction = submitAction;
         Root = new Control
         {
             Name = $"UiView_{instance.Value}",
@@ -129,6 +214,44 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
     }
 
     public Control Root { get; }
+
+    internal UiOutsidePointerBehavior OutsidePointerBehavior =>
+        _definition.OutsidePointerBehavior;
+
+    internal bool ContainsUiSurface(Vector2 viewportPosition)
+    {
+        if (!GodotObject.IsInstanceValid(Root) || !Root.IsVisibleInTree())
+            return false;
+        foreach (Control control in _elements.Values)
+        {
+            if (GodotObject.IsInstanceValid(control) && control.IsVisibleInTree() &&
+                control.GetGlobalRect().HasPoint(viewportPosition))
+                return true;
+        }
+        return false;
+    }
+
+    internal bool TrySubmitOutsideClose()
+    {
+        if (_definition.OutsidePointerBehavior != UiOutsidePointerBehavior.Close ||
+            !_definition.OutsideClickAction.IsValid || _outsideCloseSubmitted ||
+            !IsActionEnabled(_definition.OutsideClickAction))
+            return false;
+        try
+        {
+            _submitAction(new UiActionRequest(
+                _instance,
+                _definition.Handle,
+                _definition.OutsideClickAction));
+            _outsideCloseSubmitted = true;
+            return true;
+        }
+        catch
+        {
+            _outsideCloseSubmitted = false;
+            throw;
+        }
+    }
 
     internal void Apply(UiModelView model, UiModelDelta delta, Action<UiActionRequest> submitAction)
     {

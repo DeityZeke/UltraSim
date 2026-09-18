@@ -21,10 +21,11 @@ public static class CharacterSelectUi
 
     private static Contract CreateContract()
     {
-        var source = new UiDefinitionBuilder("game.admission.character-select", version: 1);
+        var source = new UiDefinitionBuilder("game.admission.character-select", version: 2);
         UiSlotReference title = source.DeclareSlot("title", UiSlotValueKind.Text);
         UiSlotReference characters = source.DeclareSlot("characters", UiSlotValueKind.List);
         UiActionReference play = source.DeclareAction("play", acceptsRowContext: true);
+        source.SetOutsidePointerBehavior(UiOutsidePointerBehavior.Block);
 
         source.AddCanvas(canvas =>
         {

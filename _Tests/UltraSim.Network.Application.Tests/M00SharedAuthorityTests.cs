@@ -69,13 +69,13 @@ internal static class M00SharedAuthorityTests
             SharedActorPresentationCensus sourceBefore = authority.GetActorPresentationCensus();
             SharedPublicItemPresentationCensus itemSourceBefore =
                 authority.GetPublicItemPresentationCensus();
-            Span<RemoteSharedPresentationCensus> remoteBefore =
-                stackalloc RemoteSharedPresentationCensus[maximumParticipants];
+            var remoteBefore = new RemoteSharedPresentationCensus[maximumParticipants];
             Equal(maximumParticipants, authority.CopyRemotePresentationCensus(remoteBefore));
-            Span<RemotePublicItemPresentationCensus> remoteItemBefore =
-                stackalloc RemotePublicItemPresentationCensus[maximumParticipants];
+            var remoteItemBefore = new RemotePublicItemPresentationCensus[maximumParticipants];
             Equal(maximumParticipants,
                 authority.CopyRemotePublicItemPresentationCensus(remoteItemBefore));
+            DriveUntil(host, authority, clients, () => PresentationCleanSkipsAdvanced(
+                authority, remoteBefore, remoteItemBefore));
             for (int step = 0; step < 256; step++)
             {
                 for (int index = 0; index < clients.Count; index++) clients[index].Direct.Pump();
@@ -256,12 +256,14 @@ internal static class M00SharedAuthorityTests
                 authority.GetPublicItemPresentationView();
             Equal(1, publicItems.Count);
             WorldPublicEntityId swordId = publicItems[0].Id;
+            Entity swordEntity = Entity.Null;
             True(authority.Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
                 (world, _, game) =>
                 {
                     Entity actor = Resolve(world, aliceParticipant.Entities.PlayerId);
                     Entity backpack = Resolve(world, aliceParticipant.Entities.BackpackId);
                     True(game.WorldState.Publications.TryResolvePublicEntity(swordId, out Entity item));
+                    swordEntity = item;
                     Equal(GameWorldActionStatus.Accepted, game.Items.TryPickup(
                         world, game.WorldState, game.Inventory, actor, item, backpack));
                     return true;
@@ -277,9 +279,9 @@ internal static class M00SharedAuthorityTests
                 (world, _, game) =>
                 {
                     Entity actor = Resolve(world, aliceParticipant.Entities.PlayerId);
-                    True(game.WorldState.Publications.TryResolvePublicEntity(swordId, out Entity item));
+                    True(world.IsAlive(swordEntity));
                     Equal(GameWorldActionStatus.Accepted,
-                        game.Items.TryDrop(world, game.WorldState, game.Inventory, actor, item));
+                        game.Items.TryDrop(world, game.WorldState, game.Inventory, actor, swordEntity));
                     return true;
                 }, out bool dropped) && dropped);
             authority.ObservePublicItemPresentationMutation();
@@ -289,17 +291,31 @@ internal static class M00SharedAuthorityTests
                 _ = authority.TickDue();
                 Thread.Yield();
             }
-            DriveUntil(host, authority, clients, () => clients.All(client =>
-                client.Session.PublicPresentationState.TryGet(
-                    swordId, out ClientPublicPresentationMetadata metadata) &&
-                (metadata.Flags & ClientPublicPresentationFlags.ItemProperties) != 0));
+            WorldPublicEntityId firstReintroducedSwordId = default;
+            DriveUntil(host, authority, clients, () =>
+            {
+                if (!authority.Runtime.Game.TryUseActiveGeneration<
+                        IGameGenerationStateProvider, WorldPublicEntityId>(
+                        (world, _, game) => game.WorldState.Publications.TryGetPublicEntityId(
+                            swordEntity, out WorldPublicEntityId currentId)
+                                ? currentId
+                                : default,
+                        out firstReintroducedSwordId) || !firstReintroducedSwordId.IsValid)
+                    return false;
+                return clients.All(client =>
+                    client.Session.PublicPresentationState.TryGet(
+                        firstReintroducedSwordId, out ClientPublicPresentationMetadata metadata) &&
+                    (metadata.Flags & ClientPublicPresentationFlags.ItemProperties) != 0);
+            });
+            swordId = firstReintroducedSwordId;
             DriveUntil(host, authority, clients, () =>
                 CopyPublicItemProofWakeups(authority, maximumParticipants) -
                     itemProofWakeupsBefore >= (ulong)maximumParticipants);
 
-            // A fully proven removal retires the server row, but the client deliberately retains
-            // the exact identity/revision floor. Reintroducing that same live item must allocate a
-            // newer metadata revision rather than starting the recycled row at revision one.
+            // A fully proven removal retires the server row. Reintroducing that same live item
+            // may also allocate a new generational public identity, but its per-recipient
+            // presentation revision must remain newer than the retired row rather than restarting
+            // at revision one.
             True(clients[0].Session.PublicPresentationState.TryGet(
                 swordId, out ClientPublicPresentationMetadata beforeRetirement));
             ulong retainedRevisionFloor = beforeRetirement.Revision;
@@ -330,16 +346,28 @@ internal static class M00SharedAuthorityTests
                 (world, _, game) =>
                 {
                     Entity actor = Resolve(world, aliceParticipant.Entities.PlayerId);
-                    True(game.WorldState.Publications.TryResolvePublicEntity(swordId, out Entity item));
+                    True(world.IsAlive(swordEntity));
                     Equal(GameWorldActionStatus.Accepted,
-                        game.Items.TryDrop(world, game.WorldState, game.Inventory, actor, item));
+                        game.Items.TryDrop(world, game.WorldState, game.Inventory, actor, swordEntity));
                     return true;
                 }, out dropped) && dropped);
             authority.ObservePublicItemPresentationMutation();
-            DriveUntil(host, authority, clients, () => clients.All(client =>
-                client.Session.PublicPresentationState.TryGet(
-                    swordId, out ClientPublicPresentationMetadata metadata) &&
-                metadata.Revision > retainedRevisionFloor));
+            WorldPublicEntityId reintroducedSwordId = default;
+            DriveUntil(host, authority, clients, () =>
+            {
+                if (!authority.Runtime.Game.TryUseActiveGeneration<
+                        IGameGenerationStateProvider, WorldPublicEntityId>(
+                        (world, _, game) => game.WorldState.Publications.TryGetPublicEntityId(
+                            swordEntity, out WorldPublicEntityId currentId)
+                                ? currentId
+                                : default,
+                        out reintroducedSwordId) || !reintroducedSwordId.IsValid)
+                    return false;
+                return clients.All(client =>
+                    client.Session.PublicPresentationState.TryGet(
+                        reintroducedSwordId, out ClientPublicPresentationMetadata metadata) &&
+                    metadata.Revision > retainedRevisionFloor);
+            });
         }
         finally
         {
@@ -379,6 +407,25 @@ internal static class M00SharedAuthorityTests
         for (int index = 0; index < maximumParticipants; index++)
             result += census[index].ProofWakeups;
         return result;
+    }
+
+    private static bool PresentationCleanSkipsAdvanced(
+        SharedPlayableAuthority authority,
+        RemoteSharedPresentationCensus[] actorBefore,
+        RemotePublicItemPresentationCensus[] itemBefore)
+    {
+        Span<RemoteSharedPresentationCensus> actors =
+            stackalloc RemoteSharedPresentationCensus[actorBefore.Length];
+        Span<RemotePublicItemPresentationCensus> items =
+            stackalloc RemotePublicItemPresentationCensus[itemBefore.Length];
+        if (authority.CopyRemotePresentationCensus(actors) != actorBefore.Length ||
+            authority.CopyRemotePublicItemPresentationCensus(items) != itemBefore.Length)
+            return false;
+        for (int index = 0; index < actorBefore.Length; index++)
+            if (actors[index].CleanDeliverySkips <= actorBefore[index].CleanDeliverySkips ||
+                items[index].CleanDeliverySkips <= itemBefore[index].CleanDeliverySkips)
+                return false;
+        return true;
     }
 
     private static void ExistingLocalAuthorityAddsAndRetiresRemoteRecipients()

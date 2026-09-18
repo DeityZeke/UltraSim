@@ -2027,7 +2027,7 @@ other already-known eligible actor. Expiry and reveal do not request disclosure 
 **Status: CLOSED.** Most of the original vertical was earned before its numbered
 checkpoint. `UiClientRuntime` already owns exact bounded definition caching plus cold/hot opens;
 local and remote Game UI use the same model/action semantics; `GodotUiRenderer` realizes the
-engine-neutral compiled tree; Inventory v7 is a real interactive compiled definition; and A0.6
+engine-neutral compiled tree; Inventory is a real interactive compiled definition; and A0.6
 proves exact content-backed `.usui` resolution through an applied realm catalog. Human-play
 hardening additionally supplies centered opaque views and validated close behavior.
 
@@ -2043,9 +2043,9 @@ F0.5 closed the remaining source-convergence gap:
   through teardown;
 - retain the already-accepted local/remote semantic result and cold/hot failure behavior.
 
-`Client.StandardUi` is explicit composition data and references only the UI kernel. Its embedded
-1,158-byte canonical Inventory v7 artifact decodes to the exact
-`game.inventory.gump/v7/b0b3e87ced073c8a40778127ba583993` identity. It is not a reason for generic
+`Client.StandardUi` is explicit composition data and references only the UI kernel. Its current
+1,161-byte canonical Inventory v8 artifact decodes to the exact
+`game.inventory.gump/v8/9a5ee0d4ae21da83d232b49b3fa30eb9` identity. It is not a reason for generic
 Client Core to depend on every Game UI definition. In particular, the Online product preseeds passive
 definition bytes/data without acquiring the Game UI/Inventory authority assemblies. Main
 Menu/Settings/Exit stay client-owned. Required content authorization/application proof also remains
@@ -2066,11 +2066,13 @@ accepted authenticated content-plan or `ContentSetApplied` gates.
 
 Human-play hardening centers the fixed logical Canvas within the current viewport. Informational
 and Inventory definitions provide an opaque surface and a compiled, validated Close action;
-Inventory `I` toggles its existing view instead of stacking another transparent view. While any
-compiled UI view is open, Local and Online revoke gameplay movement/action focus and issue the
-ordinary Stop transition; the relevant toggle/Close input remains available. Non-modal gameplay
-input must be an explicit later surface policy, not an accidental default. Window dragging/placement
-persistence remains later UI-shell polish, not a new semantic requirement.
+Inventory `I` toggles its existing view instead of stacking another transparent view. The compiled
+definition now owns a finite outside-pointer policy shared by Local and Online. The default blocks
+world click-through over visible UI while outside gameplay input remains active and the view stays
+open. Character Select explicitly selects modal blocking. Informational signs select click-outside
+Close through the same validated server action as their button. This schema change advances the
+Game manifest to v30 while retaining transport revision 2 and all physical composition boundaries.
+Window dragging/placement persistence remains later UI-shell polish, not a new semantic requirement.
 
 Pointer nomination now tests bounded full-height stock presentation volumes before falling back to
 terrain projection. Clicking the upper portion of a door or sign therefore nominates that already
@@ -2118,7 +2120,7 @@ credential/key, account/machine identity, exact position, owner-private state, o
 action.
 
 `F4` is the stock client binding for opening/toggling the monitor. Local play emits the normal cold
-compiled `game.server-monitor.gump/v1` definition through its packet-free semantic bridge. Remote
+compiled `game.server-monitor.gump/v2` definition through its packet-free semantic bridge. Remote
 play authorizes the exact passive `.usui` in the applied realm catalog and converges through the
 existing content-backed `HotOpen`, `UiClientRuntime`, and generic Godot renderer. The server UI
 controller does not choose transport hot/cold behavior, and its sole action is Close.

@@ -2548,8 +2548,13 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 36c. Close remaining product presentation polling and recurring allocation costs.
     **CLOSED — PF5-R12 outcome A; fully retired item-row revision repair, proof-woken readiness,
     and retained generation-capture delegates selected**
+36d. Close first external human-play input/equipment findings.
+    **CLOSED — equipped MainHand cancels imported body scale; compiled UI outside-pointer policy
+    defaults modeless, Character Select remains modal, and signs use semantic click-outside Close;
+    Game manifest v30 / transport revision 2**
 37. Choose/document the default deployment-performance policy.
-    **CLOSED — v29 plus PF5-R3 egress and PF5-R9 opt-in detailed egress timing**
+    **CLOSED — PF4F v29 replication policy plus PF5-R3 egress and PF5-R9 opt-in detailed egress
+    timing; later UI-only manifest v30 does not change that wire-performance policy**
 38. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5/PF5-R8/PF5-R9**
 39. Full exact-tree verifier and export closure.
 40. Freeze/tag the Concept Demo baseline.

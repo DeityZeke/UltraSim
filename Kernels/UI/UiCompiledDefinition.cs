@@ -173,6 +173,8 @@ public sealed class CompiledUiDefinition
         UiDefinitionHandle handle,
         UiDefinitionHash hash,
         UiCompileLimits limits,
+        UiOutsidePointerBehavior outsidePointerBehavior,
+        UiActionId outsideClickAction,
         UiCompiledLayoutNode[] layoutNodes,
         UiCompiledElement[] elements,
         UiSlotDefinition[] slots,
@@ -185,6 +187,8 @@ public sealed class CompiledUiDefinition
         Handle = handle;
         Hash = hash;
         Limits = limits;
+        OutsidePointerBehavior = outsidePointerBehavior;
+        OutsideClickAction = outsideClickAction;
         _layoutNodes = layoutNodes;
         _elements = elements;
         _slots = slots;
@@ -198,6 +202,8 @@ public sealed class CompiledUiDefinition
     public UiDefinitionHandle Handle { get; }
     public UiDefinitionHash Hash { get; }
     public UiCompileLimits Limits { get; }
+    public UiOutsidePointerBehavior OutsidePointerBehavior { get; }
+    public UiActionId OutsideClickAction { get; }
     public UiPreparedBindings Bindings { get; }
 
     public int LayoutNodeCount => _layoutNodes.Length;
@@ -412,11 +418,15 @@ public static class UiDefinitionCompiler
             layoutNodes, elements, elementKeys, slotIds, slotKinds, actionIds, source, limits,
             ref textCharacters);
 
+        UiActionId outsideClickAction = ResolveOutsideClickAction(source, actionIds);
+        ValidateOutsideClickSource(source.OutsidePointerBehavior, outsideClickAction, elements);
         UiPreparedBindings bindings = new(slotIds, actionIds);
         UiDefinitionHash hash = ComputeHash(
             source.Key,
             source.Version,
             limits,
+            source.OutsidePointerBehavior,
+            outsideClickAction,
             layoutNodes,
             elements,
             slots,
@@ -429,6 +439,8 @@ public static class UiDefinitionCompiler
             handle,
             hash,
             limits,
+            source.OutsidePointerBehavior,
+            outsideClickAction,
             layoutNodes.ToArray(),
             elements.ToArray(),
             slots,
@@ -441,6 +453,8 @@ public static class UiDefinitionCompiler
         UiDefinitionKey key,
         ushort version,
         UiCompileLimits limits,
+        UiOutsidePointerBehavior outsidePointerBehavior,
+        UiActionId outsideClickAction,
         UiCompiledLayoutNode[] nodes,
         UiCompiledElement[] elements,
         UiSlotDefinition[] slots,
@@ -449,6 +463,9 @@ public static class UiDefinitionCompiler
     {
         if (!key.IsValid || version == 0 || !expectedHash.IsValid)
             throw new InvalidDataException("The wire UI definition identity is invalid.");
+        if ((uint)outsidePointerBehavior > (uint)UiOutsidePointerBehavior.Close ||
+            (outsidePointerBehavior == UiOutsidePointerBehavior.Close) != outsideClickAction.IsValid)
+            throw new InvalidDataException("The wire UI outside-pointer policy is invalid.");
         if (nodes.Length == 0 || nodes.Length > limits.MaximumLayoutNodes ||
             elements.Length > limits.MaximumElements || slots.Length > limits.MaximumSlots ||
             actions.Length > limits.MaximumActions)
@@ -472,6 +489,14 @@ public static class UiDefinitionCompiler
             if (action.Id.Value != index || (uint)action.InputKind > (uint)UiValueKind.Boolean ||
                 !actionIds.TryAdd(action.Key, action.Id))
                 throw new InvalidDataException("The wire UI action table is non-canonical.");
+        }
+        if (outsideClickAction.IsValid)
+        {
+            if (outsideClickAction.Value >= actions.Length)
+                throw new InvalidDataException("The outside-click action is outside the action table.");
+            UiActionDefinition action = actions[outsideClickAction.Value];
+            if (action.AcceptsRowContext || action.InputKind != UiValueKind.Unset)
+                throw new InvalidDataException("The outside-click action has an incompatible contract.");
         }
 
         var siblingOrders = new HashSet<(int Parent, int Order)>();
@@ -528,6 +553,7 @@ public static class UiDefinitionCompiler
         foreach ((int parent, int order) in siblingOrders)
             if (order >= childCounts[parent])
                 throw new InvalidDataException("The wire UI sibling order is not dense.");
+        ValidateOutsideClickSource(outsidePointerBehavior, outsideClickAction, elements);
 
         int textCharacters = 0;
         AddText(ref textCharacters, key.Value, limits);
@@ -542,7 +568,8 @@ public static class UiDefinitionCompiler
         foreach (UiActionDefinition action in actions) AddText(ref textCharacters, action.Key, limits);
 
         UiDefinitionHash actualHash = ComputeHash(
-            key, version, limits, nodes.ToList(), elements.ToList(), slots, actions);
+            key, version, limits, outsidePointerBehavior, outsideClickAction,
+            nodes.ToList(), elements.ToList(), slots, actions);
         if (actualHash != expectedHash)
             throw new InvalidDataException("The wire UI definition hash does not match its canonical structure.");
 
@@ -552,6 +579,8 @@ public static class UiDefinitionCompiler
             new UiDefinitionHandle(actualHash.Low, actualHash.High),
             actualHash,
             limits,
+            outsidePointerBehavior,
+            outsideClickAction,
             nodes,
             elements,
             slots,
@@ -951,6 +980,8 @@ public static class UiDefinitionCompiler
         UiDefinitionKey key,
         ushort version,
         UiCompileLimits limits,
+        UiOutsidePointerBehavior outsidePointerBehavior,
+        UiActionId outsideClickAction,
         List<UiCompiledLayoutNode> nodes,
         List<UiCompiledElement> elements,
         UiSlotDefinition[] slots,
@@ -962,6 +993,8 @@ public static class UiDefinitionCompiler
             stream.WriteString(key.Value);
             stream.WriteUInt16(version);
             stream.WriteLimits(limits);
+            stream.WriteByte((byte)outsidePointerBehavior);
+            stream.WriteUInt16(outsideClickAction.Value);
             stream.WriteInt32(nodes.Count);
             foreach (UiCompiledLayoutNode node in nodes)
             {
@@ -1007,6 +1040,37 @@ public static class UiDefinitionCompiler
         Span<byte> digest = stackalloc byte[32];
         SHA256.HashData(buffer.WrittenSpan, digest);
         return UiDefinitionHash.FromDigest(digest);
+    }
+
+    private static UiActionId ResolveOutsideClickAction(
+        UiDefinitionBuilder source,
+        Dictionary<string, UiActionId> actionIds)
+    {
+        UiActionReference reference = source.OutsideClickAction;
+        if (source.OutsidePointerBehavior != UiOutsidePointerBehavior.Close)
+            return UiActionId.Invalid;
+        if (!reference.IsValid || !ReferenceEquals(reference.Owner, source.Identity) ||
+            !actionIds.TryGetValue(reference.Key!, out UiActionId action))
+            throw new InvalidDataException("The outside-click action is not declared by this definition.");
+        return action;
+    }
+
+    private static void ValidateOutsideClickSource(
+        UiOutsidePointerBehavior behavior,
+        UiActionId action,
+        IReadOnlyList<UiCompiledElement> elements)
+    {
+        if (behavior != UiOutsidePointerBehavior.Close)
+            return;
+        int sources = 0;
+        foreach (UiCompiledElement element in elements)
+            if (element.Action == action)
+                sources++;
+        if (sources != 1)
+        {
+            throw new InvalidDataException(
+                "The outside-click action must be bound to exactly one UI element.");
+        }
     }
 }
 

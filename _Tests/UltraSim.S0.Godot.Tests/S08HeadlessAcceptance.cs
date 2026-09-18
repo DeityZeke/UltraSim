@@ -22,6 +22,7 @@ public partial class S08HeadlessAcceptance : Control
         {
             RunAcceptance();
             RunNativeAdapterBoundaryAcceptance();
+            RunOutsidePointerPolicyAcceptance();
             RunRemoteInventoryAcceptance();
             GD.Print("S0.8 / I0.11 GODOT ACCEPTANCE PASS");
             GetTree().Quit(0);
@@ -82,6 +83,59 @@ public partial class S08HeadlessAcceptance : Control
             "Oversized native flow constants were not rejected by adapter admission.");
         Expect(GetNodeOrNull<Control>("UiView_9001") is null,
             "Rejected native UI admission retained a partial control root.");
+    }
+
+    private void RunOutsidePointerPolicyAcceptance()
+    {
+        Expect(InventoryUi.Definition.OutsidePointerBehavior ==
+                UiOutsidePointerBehavior.PassThrough,
+            "Inventory did not retain the default modeless outside-input policy.");
+        Expect(CharacterSelectUi.Definition.OutsidePointerBehavior ==
+                UiOutsidePointerBehavior.Block,
+            "CharacterSelect did not declare its modal input policy.");
+        Expect(InformationalSignUi.Definition.OutsidePointerBehavior ==
+                UiOutsidePointerBehavior.Close &&
+            InformationalSignUi.Definition.OutsideClickAction == InformationalSignUi.Close,
+            "InformationalSign did not declare its semantic outside-close action.");
+
+        var model = new UiModel(InformationalSignUi.Definition);
+        model.SetText(InformationalSignUi.Title, "Sign");
+        model.SetText(InformationalSignUi.Body, "Body");
+        model.SetText(InformationalSignUi.CloseLabel, "Close");
+        var renderer = new GodotUiRenderer(this);
+        using var client = new UiClientRuntime(renderer);
+        var link = new LocalSemanticLink(client);
+        UiActionRequest submitted = default;
+        int submissions = 0;
+        link.ActionSubmitted += request =>
+        {
+            submitted = request;
+            submissions++;
+        };
+        UiViewInstanceId view = link.OpenView(new UiOpenView(
+            CacheKey(InformationalSignUi.Definition),
+            InformationalSignUi.Definition,
+            model));
+        Control root = GetNode<Control>($"UiView_{view.Value}");
+        Panel surface = Find<Panel>(root, "Element_background");
+        Vector2 inside = surface.GetGlobalRect().GetCenter();
+        Vector2 outside = surface.GetGlobalRect().End + new Vector2(8, 8);
+        Expect(renderer.ResolveGameplayInput(new InputEventMouseButton
+            {
+                Position = inside,
+                ButtonIndex = MouseButton.Left,
+                Pressed = true,
+            }) == GodotUiGameplayInputDisposition.UiSurface && submissions == 0,
+            "Pointer input over a compiled UI surface leaked through to gameplay.");
+        Expect(renderer.ResolveGameplayInput(new InputEventMouseButton
+            {
+                Position = outside,
+                ButtonIndex = MouseButton.Left,
+                Pressed = true,
+            }) == GodotUiGameplayInputDisposition.OutsideCloseSubmitted &&
+            submissions == 1 && submitted.Instance == view &&
+            submitted.Action == InformationalSignUi.Close,
+            "An outside sign click did not submit the ordinary semantic Close action.");
     }
 
     private static UiDefinitionCacheKey CacheKey(CompiledUiDefinition definition) => new(
@@ -146,7 +200,8 @@ public partial class S08HeadlessAcceptance : Control
             out Fixture fixture),
             "The native acceptance fixture did not run.");
 
-        var client = new UiClientRuntime(new GodotUiRenderer(this));
+        var renderer = new GodotUiRenderer(this);
+        var client = new UiClientRuntime(renderer);
         var link = new LocalSemanticLink(client);
         using var port = new NativeUiPort(link);
         using var admission = new AdmissionService(runtime.Game, composition, port);
@@ -156,6 +211,13 @@ public partial class S08HeadlessAcceptance : Control
         Expect(waiting.IsWaitingForCharacter, "Native account-backed admission did not open CharacterSelect.");
         UiViewInstanceId characterView = waiting.CharacterSelectView;
         Control characterRoot = GetNode<Control>($"UiView_{characterView.Value}");
+        Expect(renderer.BlocksGameplayInput &&
+            renderer.ResolveGameplayInput(new InputEventKey
+            {
+                Keycode = Key.W,
+                Pressed = true,
+            }) == GodotUiGameplayInputDisposition.Blocked,
+            "CharacterSelect did not block gameplay input while admission was incomplete.");
         VBoxContainer characterRows = Find<VBoxContainer>(characterRoot, "Element_characters");
         Expect(characterRows.GetChildCount() == 1,
             "The native CharacterSelect list did not render Alice.");
@@ -177,6 +239,21 @@ public partial class S08HeadlessAcceptance : Control
         Expect(opened.Succeeded, "Native Inventory did not open.");
         UiViewInstanceId inventoryView = opened.View;
         Control inventoryRoot = GetNode<Control>($"UiView_{inventoryView.Value}");
+        Panel inventorySurface = Find<Panel>(inventoryRoot, "Element_background");
+        Expect(renderer.ResolveGameplayInput(new InputEventMouseButton
+            {
+                Position = inventorySurface.GetGlobalRect().GetCenter(),
+                ButtonIndex = MouseButton.Left,
+                Pressed = true,
+            }) == GodotUiGameplayInputDisposition.UiSurface,
+            "Inventory allowed a world click through its visible UI surface.");
+        Expect(renderer.ResolveGameplayInput(new InputEventMouseButton
+            {
+                Position = Vector2.Zero,
+                ButtonIndex = MouseButton.Left,
+                Pressed = true,
+            }) == GodotUiGameplayInputDisposition.Gameplay && !renderer.BlocksGameplayInput,
+            "Inventory did not allow outside gameplay input while remaining open.");
         VBoxContainer inventoryRows = Find<VBoxContainer>(inventoryRoot, "Element_items");
         Expect(inventoryRows.GetChildCount() == 2 &&
             ContainsLabel(inventoryRows, "Bread") &&

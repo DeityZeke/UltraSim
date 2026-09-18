@@ -84,6 +84,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private Camera3D? _camera;
     private Control? _ownedHud;
     private Control? _uiHost;
+    private GodotUiRenderer? _uiRenderer;
     private Label? _status;
     private Label? _ping;
     private RichTextLabel? _chatFeed;
@@ -160,13 +161,14 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             hudLayer.AddChild(_ownedHud);
             _uiHost = FullRectControl("RemoteServerUi");
             _ownedHud.AddChild(_uiHost);
+            _uiRenderer = new GodotUiRenderer(_uiHost);
             _session = new RemotePlayableSession(
                 peer,
                 applicationSessionEpoch,
                 new RemoteRequiredContentBinding(
                     realm, _cache!, ContentBaseCatalog.Empty, _source),
                 RemoteConceptDemoWorldProfile.CreateRequiredBinding(),
-                new GodotUiRenderer(_uiHost),
+                _uiRenderer,
                 new ClientChatLimits(64, 256, 128),
                 standardUiDefinitionResolver: ClientStandardUiLibrary.Resolve);
             _session.ConfigureTelemetry(telemetryLevel);
@@ -423,7 +425,16 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             GetViewport().SetInputAsHandled();
             return;
         }
-        if (_session!.UiClient.OpenViewCount != 0) return;
+        GodotUiGameplayInputDisposition uiDisposition =
+            _uiRenderer?.ResolveGameplayInput(inputEvent) ??
+            GodotUiGameplayInputDisposition.Gameplay;
+        if (uiDisposition != GodotUiGameplayInputDisposition.Gameplay)
+        {
+            if (uiDisposition is GodotUiGameplayInputDisposition.Blocked or
+                GodotUiGameplayInputDisposition.OutsideCloseSubmitted)
+                GetViewport().SetInputAsHandled();
+            return;
+        }
         if (inputEvent is InputEventKey chat && chat.Pressed && !chat.Echo &&
             GodotWorldInput.Matches(chat, _settings, ClientSemanticAction.Chat))
         {
@@ -642,7 +653,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
 
     private bool ObserveGameplayInputAdmission(bool shellAllowsGameplay)
     {
-        bool admitted = shellAllowsGameplay && _session!.UiClient.OpenViewCount == 0;
+        bool admitted = shellAllowsGameplay && !(_uiRenderer?.BlocksGameplayInput ?? false);
         bool stopRetained = true;
         if (!admitted)
         {

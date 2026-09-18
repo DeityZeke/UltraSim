@@ -155,6 +155,7 @@ public partial class LocalCabinClient : Node3D
     private Control? _ownedHudRoot;
     private Control? _ownedWorldUiRoot;
     private Control? _inventoryHost;
+    private GodotUiRenderer? _uiRenderer;
     private UiClientRuntime? _uiClient;
     private LocalQueuedUiClient? _uiBridge;
     private Node3D? _humanPresentation;
@@ -678,7 +679,16 @@ public partial class LocalCabinClient : Node3D
             GetViewport().SetInputAsHandled();
             return;
         }
-        if ((_uiClient?.OpenViewCount ?? 0) != 0) return;
+        GodotUiGameplayInputDisposition uiDisposition =
+            _uiRenderer?.ResolveGameplayInput(inputEvent) ??
+            GodotUiGameplayInputDisposition.Gameplay;
+        if (uiDisposition != GodotUiGameplayInputDisposition.Gameplay)
+        {
+            if (uiDisposition is GodotUiGameplayInputDisposition.Blocked or
+                GodotUiGameplayInputDisposition.OutsideCloseSubmitted)
+                GetViewport().SetInputAsHandled();
+            return;
+        }
         if (inputEvent is InputEventKey reveal && !reveal.Echo && IsControlKey(reveal))
         {
             _actorPresenter?.SetRevealHeld(reveal.Pressed);
@@ -1218,9 +1228,8 @@ public partial class LocalCabinClient : Node3D
     {
         if (_localSession is null || _inventoryHost is null)
             throw new InvalidOperationException("Inventory presentation was composed out of order.");
-        _uiClient = new UiClientRuntime(
-            new GodotUiRenderer(_inventoryHost),
-            new UiClientLimits(8, 8));
+        _uiRenderer = new GodotUiRenderer(_inventoryHost);
+        _uiClient = new UiClientRuntime(_uiRenderer, new UiClientLimits(8, 8));
         _uiBridge = _localSession.AttachUiClient(
             _uiClient,
             ClientStandardUiLibrary.Resolve);
@@ -2217,7 +2226,7 @@ public partial class LocalCabinClient : Node3D
 
     private bool ObserveGameplayInputAdmission()
     {
-        bool admitted = _gameplayInputAllowed && (_uiClient?.OpenViewCount ?? 0) == 0;
+        bool admitted = _gameplayInputAllowed && !(_uiRenderer?.BlocksGameplayInput ?? false);
         if (!admitted)
         {
             _primaryDown = false;
@@ -2521,7 +2530,7 @@ public partial class LocalCabinClient : Node3D
         if (_settings is null)
             throw new InvalidOperationException("The Concept Demo settings are unavailable.");
         ProbeSelectedPublicTargetRetention();
-        ProbeInventoryInputSuppressionAndEquipment();
+        ProbeInventoryOutsideInputAndEquipment();
         ApplySettings(WithRenderDistance(_settings, 1));
 
         if (!WorldPosition.TryFromGlobalMillimeters(63_000, 0, 60_000, out WorldPosition outerVoid) ||
@@ -2765,7 +2774,7 @@ public partial class LocalCabinClient : Node3D
         });
     }
 
-    private void ProbeInventoryInputSuppressionAndEquipment()
+    private void ProbeInventoryOutsideInputAndEquipment()
     {
         if (_localSession is null || _sequencer is null || _inputScheduler is null ||
             _uiClient is null || _uiBridge is null || _actorPresenter is null)
@@ -2810,14 +2819,15 @@ public partial class LocalCabinClient : Node3D
             new ClientWorldInputSample(1, 0, GamePlayerActions.Primary, true),
             ClientHorizontalCameraBasis.WorldAxes);
         bool admitted = ObserveGameplayInputAdmission();
-        ClientControlProfileDecision blocked = EvaluateProfile(
+        ClientControlProfileDecision whileOpen = EvaluateProfile(
             new ClientWorldInputSample(1, 0, GamePlayerActions.Primary, admitted),
             ClientHorizontalCameraBasis.WorldAxes);
-        if (moving.Command.Locomotion.Kind != GameLocomotionUpdateKind.Direct || admitted ||
-            blocked.Command.Locomotion.Kind != GameLocomotionUpdateKind.Stop ||
-            blocked.Command.HeldActions != GamePlayerActions.None || blocked.Command.HasFocus)
+        if (moving.Command.Locomotion.Kind != GameLocomotionUpdateKind.Direct || !admitted ||
+            whileOpen.Command.Locomotion.Kind != GameLocomotionUpdateKind.Direct ||
+            whileOpen.Command.HeldActions != GamePlayerActions.Primary ||
+            !whileOpen.Command.HasFocus)
             throw new InvalidOperationException(
-                "An open Inventory did not revoke gameplay movement/action focus and produce Stop.");
+                "The modeless Inventory unexpectedly revoked outside gameplay movement/action focus.");
 
         Control inventoryRoot = FindOpenInventoryView() ??
             throw new InvalidOperationException("The native Inventory root was absent.");
@@ -2854,10 +2864,27 @@ public partial class LocalCabinClient : Node3D
                 "MainHandSocket", recursive: true, owned: false) as Node3D;
             Node3D? presentation = socket?.FindChild(
                 "MainHandPresentation", recursive: true, owned: false) as Node3D;
+            MeshInstance3D? blade = presentation?.FindChild(
+                "PrimitiveBlade", recursive: true, owned: false) as MeshInstance3D;
             return presentation?.Visible == true && presentation.IsVisibleInTree() &&
-                presentation.GetParent() == socket &&
+                presentation.GetParent() == socket && blade?.Mesh is not null &&
+                blade.IsVisibleInTree() &&
                 presentation.GlobalPosition.DistanceTo(actor.GlobalPosition) < 3f;
         });
+        if (!_localSession.TryGetLatestView(out LocalPlayableAuthorityView presentedView) ||
+            !_actorPresenter.TryGetActorRoot(presentedView.PublicActor, out Node3D? presentedActor) ||
+            presentedActor is null ||
+            presentedActor.FindChild(
+                "PrimitiveBlade", recursive: true, owned: false) is not MeshInstance3D presentedBlade ||
+            presentedBlade.Mesh is null)
+            throw new InvalidOperationException("The equipped sword blade was not realized.");
+        Vector3 bladeBase = presentedBlade.ToGlobal(Vector3.Zero);
+        Vector3 bladeTip = presentedBlade.ToGlobal(new Vector3(0, 1.15f, 0));
+        if (presentedBlade.Mesh.GetAabb().Size.Y < 1.1f ||
+            bladeTip.DistanceTo(bladeBase) < 0.75f)
+            throw new InvalidOperationException(
+                $"The equipped sword blade had no visible world-space extent: " +
+                $"aabb={presentedBlade.Mesh.GetAabb()}, base={bladeBase}, tip={bladeTip}.");
         WorldPublicRecord equipped = default;
         if (!_localSession.TryGetLatestView(out LocalPlayableAuthorityView equippedView) ||
             !TryFindEquippedPublicRecord(equippedView.PlayerPosition, out equipped))

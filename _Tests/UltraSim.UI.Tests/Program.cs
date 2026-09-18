@@ -27,10 +27,69 @@ var tests = new (string Name, Action Body)[]
     ("DynamicTextAndIdentityRejectMalformedOrUnboundedUnicode", DynamicTextAndIdentityRejectMalformedOrUnboundedUnicode),
     ("SemanticWireCodecIsCanonicalBoundedAndTransactional", SemanticWireCodecIsCanonicalBoundedAndTransactional),
     ("DefinitionArtifactIsCanonicalBoundedAndExact", DefinitionArtifactIsCanonicalBoundedAndExact),
+    ("OutsidePointerPolicyIsCanonicalAndValidated", OutsidePointerPolicyIsCanonicalAndValidated),
     ("HotOpenModelRebindRequiresExactCompiledIdentity", HotOpenModelRebindRequiresExactCompiledIdentity),
     ("ActionReasonMustRespectCompiledTextLimit", ActionReasonMustRespectCompiledTextLimit),
     ("TruncatedDeltaCountsMustNotCauseLargeAllocations", TruncatedDeltaCountsMustNotCauseLargeAllocations),
 };
+
+static void OutsidePointerPolicyIsCanonicalAndValidated()
+{
+    var modelessSource = CreateOutsidePolicyFixture(UiOutsidePointerBehavior.PassThrough);
+    CompiledUiDefinition modeless = UiDefinitionCompiler.Compile(modelessSource);
+    Assert.Equal(UiOutsidePointerBehavior.PassThrough, modeless.OutsidePointerBehavior);
+    Assert.False(modeless.OutsideClickAction.IsValid);
+
+    var closeSource = CreateOutsidePolicyFixture(UiOutsidePointerBehavior.Close);
+    CompiledUiDefinition closeDefinition = UiDefinitionCompiler.Compile(closeSource);
+    Assert.Equal(UiOutsidePointerBehavior.Close, closeDefinition.OutsidePointerBehavior);
+    Assert.Equal(closeDefinition.Bindings.RequireAction("close"), closeDefinition.OutsideClickAction);
+    Assert.False(modeless.Hash == closeDefinition.Hash);
+    Assert.True(UiDefinitionArtifactCodec.TryEncodeCanonical(closeDefinition, out byte[] artifact));
+    Assert.True(UiDefinitionArtifactCodec.TryReadCanonical(
+        artifact, out CompiledUiDefinition? restored));
+    Assert.Equal(UiOutsidePointerBehavior.Close, restored!.OutsidePointerBehavior);
+    Assert.Equal(restored.Bindings.RequireAction("close"), restored.OutsideClickAction);
+
+    var modalSource = CreateOutsidePolicyFixture(UiOutsidePointerBehavior.Block);
+    CompiledUiDefinition modal = UiDefinitionCompiler.Compile(modalSource);
+    Assert.Equal(UiOutsidePointerBehavior.Block, modal.OutsidePointerBehavior);
+    Assert.False(modal.Hash == modeless.Hash);
+
+    var wrongOwner = new UiDefinitionBuilder("wrong-owner");
+    UiActionReference wrongAction = wrongOwner.DeclareAction("close");
+    var foreignTarget = new UiDefinitionBuilder("foreign-target");
+    foreignTarget.DeclareAction("close");
+    Assert.Throws<ArgumentException>(() => closeSource.SetOutsidePointerBehavior(
+        UiOutsidePointerBehavior.Close, wrongAction));
+    Assert.Throws<ArgumentException>(() => foreignTarget.SetOutsidePointerBehavior(
+        UiOutsidePointerBehavior.PassThrough, wrongAction));
+
+    var unbound = new UiDefinitionBuilder("unbound-close");
+    UiActionReference unboundClose = unbound.DeclareAction("close");
+    unbound.SetOutsidePointerBehavior(UiOutsidePointerBehavior.Close, unboundClose);
+    unbound.AddCanvas(_ => { });
+    Assert.Throws<InvalidDataException>(() => UiDefinitionCompiler.Compile(unbound));
+}
+
+static UiDefinitionBuilder CreateOutsidePolicyFixture(UiOutsidePointerBehavior behavior)
+{
+    var builder = new UiDefinitionBuilder("outside-policy");
+    UiSlotReference label = builder.DeclareSlot("label", UiSlotValueKind.Text);
+    UiActionReference close = builder.DeclareAction("close");
+    if (behavior == UiOutsidePointerBehavior.Close)
+        builder.SetOutsidePointerBehavior(behavior, close);
+    else if (behavior != UiOutsidePointerBehavior.PassThrough)
+        builder.SetOutsidePointerBehavior(behavior);
+    builder.AddCanvas(canvas =>
+    {
+        canvas.AddPanel("surface", "surface",
+            UiChildLayout.Canvas(new UiCanvasPlacement(10, 10, 100, 100)));
+        canvas.AddButton("close", close, label,
+            UiChildLayout.Canvas(new UiCanvasPlacement(20, 20, 80, 30)));
+    });
+    return builder;
+}
 
 foreach ((string name, Action body) in tests)
 {

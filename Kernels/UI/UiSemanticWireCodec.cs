@@ -29,8 +29,8 @@ public readonly record struct UiSemanticWireLimits(
 /// </summary>
 public static class UiSemanticWireCodec
 {
-    private const ulong DefinitionArtifactMagic = 0x5553554944454631UL; // USUIDEF1
-    private const uint DefinitionArtifactVersion = 1;
+    private const ulong DefinitionArtifactMagic = 0x5553554944454632UL; // USUIDEF2
+    private const uint DefinitionArtifactVersion = 2;
 
     internal static bool TryWriteDefinitionArtifactCore(
         Span<byte> destination,
@@ -360,6 +360,8 @@ public static class UiSemanticWireCodec
         if (!writer.TryWriteString(definition.Key.Value, UiDefinitionKey.MaximumLength) ||
             !writer.TryWriteUInt16(definition.Version) ||
             !WriteLimits(ref writer, limits) ||
+            !writer.TryWriteByte((byte)definition.OutsidePointerBehavior) ||
+            !writer.TryWriteUInt16(definition.OutsideClickAction.Value) ||
             !writer.TryWriteInt32(definition.LayoutNodeCount) ||
             !writer.TryWriteInt32(definition.ElementCount) ||
             !writer.TryWriteInt32(definition.SlotCount) ||
@@ -407,6 +409,9 @@ public static class UiSemanticWireCodec
         if (!reader.TryReadString(UiDefinitionKey.MaximumLength, out string? keyText) ||
             !reader.TryReadUInt16(out ushort version) || version == 0 ||
             !ReadLimits(ref reader, admitted, out UiCompileLimits limits) ||
+            !reader.TryReadByte(out byte outsideBehavior) ||
+            outsideBehavior > (byte)UiOutsidePointerBehavior.Close ||
+            !reader.TryReadUInt16(out ushort outsideAction) ||
             !reader.TryReadInt32(out int nodeCount) || nodeCount <= 0 || nodeCount > limits.MaximumLayoutNodes ||
             !reader.TryReadInt32(out int elementCount) || elementCount < 0 || elementCount > limits.MaximumElements ||
             !reader.TryReadInt32(out int slotCount) || slotCount < 0 || slotCount > limits.MaximumSlots ||
@@ -460,7 +465,8 @@ public static class UiSemanticWireCodec
         }
         var definitionKey = new UiDefinitionKey(keyText);
         definition = UiDefinitionCompiler.RestoreCompiled(
-            definitionKey, version, limits, nodes, elements, slots, actions, expectedHash);
+            definitionKey, version, limits, (UiOutsidePointerBehavior)outsideBehavior,
+            new UiActionId(outsideAction), nodes, elements, slots, actions, expectedHash);
         return true;
     }
 

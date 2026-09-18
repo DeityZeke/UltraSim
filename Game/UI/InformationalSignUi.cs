@@ -44,11 +44,12 @@ public static class InformationalSignUi
 
     private static Contract CreateContract()
     {
-        var source = new UiDefinitionBuilder("game.informational-sign.gump");
+        var source = new UiDefinitionBuilder("game.informational-sign.gump", version: 2);
         UiSlotReference title = source.DeclareSlot("title", UiSlotValueKind.Text);
         UiSlotReference body = source.DeclareSlot("body", UiSlotValueKind.Text);
         UiSlotReference closeLabel = source.DeclareSlot("close-label", UiSlotValueKind.Text);
         UiActionReference close = source.DeclareAction("close");
+        source.SetOutsidePointerBehavior(UiOutsidePointerBehavior.Close, close);
         source.AddCanvas(new UiCanvasOptions(800, 600), canvas =>
         {
             var surface = new UiCanvasPlacement(150, 130, 500, 300);

@@ -125,18 +125,22 @@ camera profiles. The Central Island welcome sign exposes a local `Sign`
 hover from resident presentation state; select it and press E to open its authoritative
 informational view, then use the view's Close action to dismiss it.
 
-Compiled UI Canvases are centered in the viewport. The Inventory v7 definition supplies its own
+Compiled UI Canvases are centered in the viewport. The Inventory v8 definition supplies its own
 surface and authoritative Close action; `I` opens it when no UI is active and closes the existing
-Inventory instead of stacking duplicate transparent views. Any currently open compiled UI view
-revokes gameplay movement/action focus and emits one Stop transition; its own toggle/Close path
-remains active. A future explicitly non-modal surface must opt back into gameplay input rather than
-inheriting it accidentally. Window dragging remains deferred. Tall
+Inventory instead of stacking duplicate transparent views. Compiled definitions select a bounded
+outside-pointer policy. The modeless default blocks world click-through over the visible UI but
+allows outside gameplay input while the view remains open. Character Select explicitly blocks
+gameplay; informational signs submit their ordinary authoritative Close action on an outside click.
+Window dragging remains deferred. Tall
 stock public objects use bounded full-height pointer volumes before terrain projection, so the
 visible upper portions of doors and signs nominate those disclosed objects normally.
 
 I0.12 adds the first persistent world item to both local and remote consumers. An Iron Sword can be
 selected and picked up with the ordinary Interact path, inspected in Inventory, equipped, used with
-Primary, and dropped through the compiled Inventory view. The semantic world item has a bounded
+Primary, and dropped through the compiled Inventory view. Equipped sword presentation is attached
+beneath the semantic `MainHandSocket`; imported body scale is cancelled at that socket so the
+meter-scale blade does not collapse to a one-centimeter mesh, and the blade extends away from the
+hand rather than backward through the torso. The semantic world item has a bounded
 primitive presentation/pick volume; recipient-visible rolled facts arrive through the bounded cold
 public metadata cache rather than hot movement rows. I0.13 formats that typed set through the same
 engine-neutral catalog/profile used by Inventory. The shared sign/item tooltip has no sword-sized
@@ -169,7 +173,7 @@ timeout is Godot presentation state and does not remove the retained feed occurr
 second protocol message.
 
 D0.6 displays `Ping: Local` for the packet-free internal authority and sanitized smoothed peer RTT
-for Online. F4 requests the normal Game-composed `game.server-monitor.gump/v1` read-only view. Local
+for Online. F4 requests the normal Game-composed `game.server-monitor.gump/v2` read-only view. Local
 receives its compiled definition over the direct semantic UI bridge; remote play acquires and
 authorizes the exact passive `.usui` with the World/Inventory deployment content and receives the
 existing compact HotOpen. Both render through the same `UiClientRuntime`/`GodotUiRenderer`. The

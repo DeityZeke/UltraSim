@@ -369,6 +369,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         Node3D interactCue = CreateInteractCue();
         effectsAnchor.AddChild(interactCue);
         Root.AddChild(root);
+        NormalizeMainHandPresentationScale(mainHandSocket, primaryCue);
         _slots[index] = new ActorSlot
         {
             Used = true,
@@ -428,6 +429,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         Node3D socket = CreateMainHandSocket(root, visual);
         Node3D primaryCue = CreateMainHandPresentation();
         socket.AddChild(primaryCue);
+        NormalizeMainHandPresentationScale(socket, primaryCue);
 
         slot.Visual = visual;
         slot.BaseVisualScale = visual.Scale;
@@ -898,12 +900,13 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
     {
         var bladeMaterial = new StandardMaterial3D
         {
-            AlbedoColor = new Color(0.78f, 0.84f, 0.94f),
+            AlbedoColor = new Color(0.83f, 0.90f, 1.0f),
             Metallic = 0.75f,
             Roughness = 0.18f,
             EmissionEnabled = true,
-            Emission = new Color(0.08f, 0.10f, 0.16f),
-            EmissionEnergyMultiplier = 0.45f,
+            Emission = new Color(0.14f, 0.19f, 0.30f),
+            EmissionEnergyMultiplier = 0.65f,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
         };
         var guardMaterial = new StandardMaterial3D
         {
@@ -925,8 +928,11 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         {
             Name = "PrimitiveBlade",
             Mesh = GodotMeshGeometry.CreateGroundedBox(
-                new Vector3(0.11f, 1.05f, 0.055f), bladeMaterial),
-            Position = new Vector3(0, 0, -0.98f),
+                new Vector3(0.14f, 1.15f, 0.065f), bladeMaterial),
+            // The imported right-hand bone points its usable grip axis along local +Z.
+            // Start the blade at the hand and extend away from the body. The previous
+            // -0.98 m offset extended the blade back through the arm/torso.
+            Position = new Vector3(0, 0, 0.08f),
             Rotation = new Vector3(MathF.PI * 0.5f, 0, 0),
         });
         pivot.AddChild(new MeshInstance3D
@@ -934,17 +940,29 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             Name = "PrimitiveGuard",
             Mesh = GodotMeshGeometry.CreateGroundedBox(
                 new Vector3(0.34f, 0.07f, 0.10f), guardMaterial),
-            Position = new Vector3(0, -0.035f, 0.02f),
+            Position = new Vector3(0, -0.035f, 0.04f),
         });
         pivot.AddChild(new MeshInstance3D
         {
             Name = "PrimitiveGrip",
             Mesh = GodotMeshGeometry.CreateGroundedBox(
                 new Vector3(0.075f, 0.26f, 0.075f), gripMaterial),
-            Position = new Vector3(0, 0, 0.02f),
+            Position = new Vector3(0, 0, -0.22f),
             Rotation = new Vector3(MathF.PI * 0.5f, 0, 0),
         });
         return pivot;
+    }
+
+    private static void NormalizeMainHandPresentationScale(Node3D socket, Node3D presentation)
+    {
+        Vector3 inherited = socket.GlobalTransform.Basis.Scale.Abs();
+        const float minimum = 0.0001f;
+        if (inherited.X < minimum || inherited.Y < minimum || inherited.Z < minimum)
+            throw new InvalidDataException("The MainHand socket has a degenerate inherited scale.");
+        presentation.Scale = new Vector3(
+            1f / inherited.X,
+            1f / inherited.Y,
+            1f / inherited.Z);
     }
 
     private static Node3D CreateInteractCue()

@@ -7,6 +7,8 @@ public sealed class UiDefinitionBuilder
     private readonly List<UiSourceSlot> _slots = [];
     private readonly List<UiSourceAction> _actions = [];
     private UiSourceLayoutNode? _root;
+    private UiOutsidePointerBehavior _outsidePointerBehavior;
+    private UiActionReference _outsideClickAction;
 
     public UiDefinitionBuilder(UiDefinitionKey key, ushort version = 1)
     {
@@ -24,6 +26,43 @@ public sealed class UiDefinitionBuilder
     public UiDefinitionKey Key { get; }
 
     public ushort Version { get; }
+
+    /// <summary>
+    /// Selects the view's renderer-neutral outside-pointer policy. The default is modeless:
+    /// input over the UI is retained by the UI while input outside continues to gameplay.
+    /// Closing from an outside click requires an ordinary declared server action.
+    /// </summary>
+    public void SetOutsidePointerBehavior(
+        UiOutsidePointerBehavior behavior,
+        UiActionReference closeAction = default)
+    {
+        if ((uint)behavior > (uint)UiOutsidePointerBehavior.Close)
+            throw new ArgumentOutOfRangeException(nameof(behavior));
+        if (behavior == UiOutsidePointerBehavior.Close)
+        {
+            if (!closeAction.IsValid || !ReferenceEquals(closeAction.Owner, _identity) ||
+                closeAction.Ordinal >= _actions.Count)
+            {
+                throw new ArgumentException(
+                    "Close-on-outside requires an action declared by this UI definition.",
+                    nameof(closeAction));
+            }
+            UiSourceAction declaration = _actions[closeAction.Ordinal];
+            if (declaration.AcceptsRowContext || declaration.InputKind != UiValueKind.Unset)
+            {
+                throw new ArgumentException(
+                    "The close-on-outside action cannot require row context or input.",
+                    nameof(closeAction));
+            }
+        }
+        else if (closeAction.IsValid)
+        {
+            throw new ArgumentException(
+                "Only Close outside-pointer behavior accepts an action.", nameof(closeAction));
+        }
+        _outsidePointerBehavior = behavior;
+        _outsideClickAction = closeAction;
+    }
 
     /// <summary>Declares one dynamic scalar/list binding before layout authoring.</summary>
     public UiSlotReference DeclareSlot(string key, UiSlotValueKind valueKind)
@@ -95,6 +134,10 @@ public sealed class UiDefinitionBuilder
     internal IReadOnlyList<UiSourceSlot> Slots => _slots;
 
     internal IReadOnlyList<UiSourceAction> Actions => _actions;
+
+    internal UiOutsidePointerBehavior OutsidePointerBehavior => _outsidePointerBehavior;
+
+    internal UiActionReference OutsideClickAction => _outsideClickAction;
 
     internal object Identity => _identity;
 

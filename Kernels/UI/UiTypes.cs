@@ -45,6 +45,22 @@ public enum UiElementKind : byte
     List = 6,
 }
 
+/// <summary>
+/// Declares how a rendered view treats pointer input outside its bounded Canvas surface.
+/// Pointer input over the Canvas is always owned by the UI and never clicks through to gameplay.
+/// </summary>
+public enum UiOutsidePointerBehavior : byte
+{
+    /// <summary>Leave the view open and allow outside pointer/gameplay input.</summary>
+    PassThrough = 0,
+
+    /// <summary>Keep the view open and block outside pointer plus gameplay input.</summary>
+    Block = 1,
+
+    /// <summary>Consume the first outside primary click and submit the definition's close action.</summary>
+    Close = 2,
+}
+
 /// <summary>Value domain declared by one dynamic model slot.</summary>
 public enum UiSlotValueKind : byte
 {

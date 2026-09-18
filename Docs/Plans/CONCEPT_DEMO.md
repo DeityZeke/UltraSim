@@ -1022,6 +1022,12 @@ does not replay when an actor first enters presentation, and rejected actions ne
 model. Equipped items stay attached and non-pickable; authoritative Drop returns the same entity to
 ordinary GroundItem presentation.
 
+Human-play validation additionally proved that the imported body hierarchy contributes a `0.01`
+scale below the hand bone. Main-Hand presentation now cancels that inherited presentation scale,
+keeps the sword parented to the semantic socket, and extends the primitive blade away from the hand.
+The permanent local product journey requires a visible meter-scale blade mesh after authoritative
+equip, not merely a visible empty socket node.
+
 The V1.5 X/Y model and action FBXs are now authoring inputs outside Godot's runtime resource tree.
 A reproducible Blender conversion verifies an exact ordered 65-bone-name match and emits one GLB per body
 with one skeleton plus sampled `Idle`, `Walk`, and `Jump` actions. Godot never attaches a clip scene's
@@ -1303,7 +1309,7 @@ It deliberately excludes exact position, owner-private state, endpoints/IP addre
 deployment keys, account/machine identities, and all mutable administrative actions. `F4` is a
 client-owned stock binding that requests/toggles the view; it is not a server-supplied action grammar.
 
-The server composes the normal `game.server-monitor.gump/v1` UI definition and bounded model. Local
+The server composes the normal `game.server-monitor.gump/v2` UI definition and bounded model. Local
 play sends the cold compiled definition through the packet-free semantic UI bridge. Remote
 composition declares the exact same passive `.usui` definition in the authenticated applied content
 catalog, so the existing UI port emits the compact `HotOpen`; a matching blob in CAS without realm

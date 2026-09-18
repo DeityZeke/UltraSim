@@ -139,7 +139,7 @@ public static class ServerMonitorUi
 
     private static Contract CreateContract()
     {
-        var source = new UiDefinitionBuilder("game.server-monitor.gump");
+        var source = new UiDefinitionBuilder("game.server-monitor.gump", version: 2);
         UiSlotReference title = source.DeclareSlot("title", UiSlotValueKind.Text);
         UiSlotReference summary = source.DeclareSlot("summary", UiSlotValueKind.Text);
         UiSlotReference timing = source.DeclareSlot("timing", UiSlotValueKind.Text);
