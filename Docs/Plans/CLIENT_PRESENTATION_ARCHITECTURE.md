@@ -1129,6 +1129,154 @@ The exact vegetation source format is future implementation detail. Do not put i
 
 ---
 
+## 28.1 Shader-generated blade/leaf geometry candidate
+
+One promising renderer realization is to generate plant geometry almost entirely in the vertex shader rather than importing one mesh per plant.
+
+The renderer still submits a finite vertex/index budget. A normal vertex shader cannot emit an unlimited number of new vertices; instead the shared source mesh may contain zeroed/dummy vertices and a fixed strip/list topology. `VERTEX_ID` then determines which conceptual blade, segment, and side each vertex represents and computes its final position procedurally.
+
+Conceptually:
+
+~~~text
+one reusable grass-patch source mesh
+    fixed maximum vertex/index capacity
+    no authored Blender grass model required
+          |
+          v
+vertex shader
+    VERTEX_ID
+        -> blade index
+        -> blade segment
+        -> left/right side
+        -> connector/degenerate vertex
+          |
+          + deterministic patch/blade seed
+          + terrain/local placement
+          + species/density
+          + wind/time
+          + cut state
+          |
+          v
+final blade geometry
+~~~
+
+A blade may therefore be a short vertical triangle strip whose width, height, tip shape, lean, yaw, and bend are derived from stable shader inputs.
+
+Multiple blades can occupy one continuous source strip/list by inserting degenerate connector triangles between blades. Those connector vertices collapse onto neighboring roots/endpoints so the unwanted triangles have zero area and do not rasterize.
+
+This permits one patch mesh to describe many visually independent blades while retaining one material and one submitted mesh topology.
+
+## 28.2 MultiMesh/patch realization
+
+The shader-generated patch can then be instanced spatially.
+
+A practical first candidate is:
+
+~~~text
+terrain/render chunk
+    -> one grass MultiMesh
+         -> one instance per vegetation cell or small patch
+              -> shared procedural grass-patch mesh
+              -> shared atlas/material
+              -> per-instance transform
+              -> per-instance seed/density/type/cut state
+~~~
+
+For the current 32x32-cell terrain chunk, one-instance-per-cell yields at most 1,024 grass patch instances in one MultiMesh. Each instance may procedurally expand into several blades in the vertex shader.
+
+This is not the only possible granularity. A future benchmark may select one instance per smaller/larger patch, one procedural mesh per render chunk without MultiMesh, or a hybrid.
+
+The important rule is spatial locality: MultiMesh is spatially treated as one object, so enormous world-wide grass MultiMeshes would defeat useful frustum/occlusion work. Grass should be grouped into terrain/render chunks or smaller spatial cells so whole groups can enter/retire with ordinary client residency and culling.
+
+Because vertex-shader displacement may extend far beyond a zeroed/dummy source mesh, every procedural grass group needs a conservative explicit native AABB covering maximum height, bend, and wind displacement. Do not rely on the dummy source geometry's bounds.
+
+## 28.3 Feeding cut state to the shader
+
+Cutting should change small retained state, not rebuild mesh topology.
+
+For coarse cell-level cutting, one MultiMesh instance can represent one vegetation cell and expose a simple cut value through per-instance custom data:
+
+~~~text
+INSTANCE_CUSTOM
+    x = cut / active amount
+    y = deterministic seed or density
+    z = vegetation type/profile
+    w = future presentation parameter
+~~~
+
+When the authoritative cell changes from uncut to cut, the client updates that instance's cut state. The vertex shader then collapses every blade vertex in that patch toward its root, producing degenerate/invisible geometry without adding/removing vertices or rebuilding indices.
+
+If gameplay/visuals later require finer-than-instance cutting, the renderer may instead use a small cut-state texture/buffer indexed by patch/blade/subcell. Godot 4.7 provides runtime-updatable textures, including GPU-modifiable DrawableTexture2D, so a tiny mask atlas is a plausible native mechanism; the architecture must not depend on that experimental API specifically.
+
+The semantic authority remains independent of the representation. The server may retain a 32x32 cell cut mask while a renderer maps one authoritative cell to many visual blades.
+
+## 28.4 Important performance caveat: collapsed is not free
+
+Collapsing a blade removes its visible/rasterized area, but the vertex shader still executes for the submitted vertices.
+
+Therefore:
+
+~~~text
+cut update cost
+    very small
+
+fragment/overdraw cost after collapse
+    approximately disappears
+
+vertex-processing cost after collapse
+    remains until the containing patch/instance is no longer submitted
+~~~
+
+That is usually acceptable for sparse cutting and regrowing vegetation, but a player mowing an entire field could leave large amounts of invisible vertex work.
+
+An optional second-stage optimization may retire or compact fully cut patches:
+
+~~~text
+patch becomes completely cut
+    -> swap/remove it from the active instance prefix
+    -> lower visible instance count or rebuild a bounded MultiMesh buffer later
+
+regrowth
+    -> reinsert patch
+~~~
+
+This maintenance path can occur much less frequently than individual cut events and remains presentation-only.
+
+Do not implement compaction until measurement shows collapsed-vertex cost matters.
+
+## 28.5 Expected GPU bottlenecks to measure
+
+The procedural approach deliberately trades CPU objects/draw calls for GPU work.
+
+Likely costs to measure are:
+
+- total submitted vertices per visible chunk and per shadow pass;
+- vertex-shader hash/trigonometric/wind work;
+- alpha/cutout overdraw and fragment cost;
+- shadow casting, which can repeat grass vertex work;
+- number and spatial size of MultiMeshes;
+- conservative AABB/culling effectiveness;
+- cut-state update cost;
+- atlas/material binding count;
+- near/far vegetation density/LOD.
+
+A rough example illustrates why density must remain tunable:
+
+~~~text
+32x32 cells = 1,024 patch instances/chunk
+
+8 blades/cell * 6 submitted vertices/blade
+    = 49,152 vertices/chunk/pass
+
+16 blades/cell * 6 submitted vertices/blade
+    = 98,304 vertices/chunk/pass
+~~~
+
+That can still be entirely reasonable on modern hardware, especially with chunk culling and client vegetation distance, but shadows, several visible chunks, mobile GPUs, and heavy fragment overdraw can dominate before draw-call count does.
+
+The correct acceptance criterion is measured whole-frame cost across representative hardware, not merely "one draw call."
+
+
 # 29. Vegetation rendering
 
 Vegetation may use:
