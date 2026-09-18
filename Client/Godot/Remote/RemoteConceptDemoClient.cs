@@ -112,6 +112,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private float _cameraPivotMeters = CameraPivotMeters;
     private bool _smoke;
     private bool _gameplayInputAllowed;
+    private bool _gameplayInputAdmittedLastFrame;
     private int _smokePhase;
     private ulong _lastSmokeDiagnosticMilliseconds;
     private int _terrainTriangles;
@@ -281,14 +282,14 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             if (_pf3SustainedInput && _telemetryWindowActive)
                 SubmitPf3SustainedInput();
 
-            if (!gameplayInputAllowed) _actorPresenter?.SetRevealHeld(false);
+            bool gameplayInputAdmitted = ObserveGameplayInputAdmission(gameplayInputAllowed);
 
             SynchronizePresentation(snapshot.Playable);
             if (!_smoke)
             {
                 UpdatePointerWorldPoint();
                 UpdateWorldHover();
-                SubmitPhysicalInput(gameplayInputAllowed);
+                SubmitPhysicalInput(gameplayInputAdmitted);
             }
             else
                 ProgressSmoke(snapshot);
@@ -402,19 +403,6 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         if (_state != RemoteConceptDemoClientState.Active || _settings is null) return;
         if (TryHandleFocusedChatInput(inputEvent)) return;
         if (!_gameplayInputAllowed) return;
-        if (inputEvent is InputEventKey chat && chat.Pressed && !chat.Echo &&
-            GodotWorldInput.Matches(chat, _settings, ClientSemanticAction.Chat))
-        {
-            _chatInput?.GrabFocus();
-            GetViewport().SetInputAsHandled();
-            return;
-        }
-        if (inputEvent is InputEventKey reveal && !reveal.Echo && IsControlKey(reveal))
-        {
-            _actorPresenter?.SetRevealHeld(reveal.Pressed);
-            GetViewport().SetInputAsHandled();
-            return;
-        }
         if (inputEvent is InputEventKey key && key.Pressed && !key.Echo &&
             GodotWorldInput.Matches(key, _settings, ClientSemanticAction.OpenInventory))
         {
@@ -432,6 +420,20 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             {
                 _oneShotRequests.RequestServerMonitor();
             }
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+        if (_session!.UiClient.OpenViewCount != 0) return;
+        if (inputEvent is InputEventKey chat && chat.Pressed && !chat.Echo &&
+            GodotWorldInput.Matches(chat, _settings, ClientSemanticAction.Chat))
+        {
+            _chatInput?.GrabFocus();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+        if (inputEvent is InputEventKey reveal && !reveal.Echo && IsControlKey(reveal))
+        {
+            _actorPresenter?.SetRevealHeld(reveal.Pressed);
             GetViewport().SetInputAsHandled();
             return;
         }
@@ -638,6 +640,31 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         }
     }
 
+    private bool ObserveGameplayInputAdmission(bool shellAllowsGameplay)
+    {
+        bool admitted = shellAllowsGameplay && _session!.UiClient.OpenViewCount == 0;
+        bool stopRetained = true;
+        if (!admitted)
+        {
+            _primaryDown = false;
+            _primaryPressed = false;
+            _primaryReleased = false;
+            _secondaryPressed = false;
+            _actorPresenter?.SetRevealHeld(false);
+            if (_gameplayInputAdmittedLastFrame && _inputScheduler is not null)
+            {
+                var stop = new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.Stop,
+                    GamePlayerActions.None,
+                    HasFocus: false);
+                stopRetained = TrySubmitObservedCommand(in stop);
+            }
+        }
+        if (admitted || stopRetained)
+            _gameplayInputAdmittedLastFrame = admitted;
+        return admitted;
+    }
+
     private bool TrySubmitObservedCommand(
         in ClientWorldCommandIntent command,
         WorldPublicEntityId target = default,
@@ -771,6 +798,12 @@ public sealed partial class RemoteConceptDemoClient : Node3D
 
     private void ProgressSmoke(in RemotePlayableSessionSnapshot snapshot)
     {
+        // The exported-product acceptance intentionally keeps Server Monitor open while it
+        // verifies overhead speech and nameplates. That diagnostic reveal is not physical
+        // gameplay input; keep it asserted after the modal-input gate clears held controls.
+        if (_smokePhase >= 5)
+            _actorPresenter!.SetRevealHeld(true);
+
         switch (_smokePhase)
         {
             case 0 when _renderer!.GetSnapshot().ActiveRenderChunks == 9 &&

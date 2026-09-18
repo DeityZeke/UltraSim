@@ -127,7 +127,10 @@ informational view, then use the view's Close action to dismiss it.
 
 Compiled UI Canvases are centered in the viewport. The Inventory v7 definition supplies its own
 surface and authoritative Close action; `I` opens it when no UI is active and closes the existing
-Inventory instead of stacking duplicate transparent views. Window dragging remains deferred. Tall
+Inventory instead of stacking duplicate transparent views. Any currently open compiled UI view
+revokes gameplay movement/action focus and emits one Stop transition; its own toggle/Close path
+remains active. A future explicitly non-modal surface must opt back into gameplay input rather than
+inheriting it accidentally. Window dragging remains deferred. Tall
 stock public objects use bounded full-height pointer volumes before terrain projection, so the
 visible upper portions of doors and signs nominate those disclosed objects normally.
 

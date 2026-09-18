@@ -2066,8 +2066,11 @@ accepted authenticated content-plan or `ContentSetApplied` gates.
 
 Human-play hardening centers the fixed logical Canvas within the current viewport. Informational
 and Inventory definitions provide an opaque surface and a compiled, validated Close action;
-Inventory `I` toggles its existing view instead of stacking another transparent view. Window
-dragging/placement persistence remains later UI-shell polish, not a new semantic requirement.
+Inventory `I` toggles its existing view instead of stacking another transparent view. While any
+compiled UI view is open, Local and Online revoke gameplay movement/action focus and issue the
+ordinary Stop transition; the relevant toggle/Close input remains available. Non-modal gameplay
+input must be an explicit later surface policy, not an accidental default. Window dragging/placement
+persistence remains later UI-shell polish, not a new semantic requirement.
 
 Pointer nomination now tests bounded full-height stock presentation volumes before falling back to
 terrain projection. Clicking the upper portion of a door or sign therefore nominates that already

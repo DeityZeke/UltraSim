@@ -896,11 +896,25 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
 
     private static Node3D CreateMainHandPresentation()
     {
-        var material = new StandardMaterial3D
+        var bladeMaterial = new StandardMaterial3D
         {
-            AlbedoColor = new Color(0.88f, 0.9f, 0.94f),
+            AlbedoColor = new Color(0.78f, 0.84f, 0.94f),
             Metallic = 0.75f,
-            Roughness = 0.25f,
+            Roughness = 0.18f,
+            EmissionEnabled = true,
+            Emission = new Color(0.08f, 0.10f, 0.16f),
+            EmissionEnergyMultiplier = 0.45f,
+        };
+        var guardMaterial = new StandardMaterial3D
+        {
+            AlbedoColor = new Color(0.72f, 0.48f, 0.12f),
+            Metallic = 0.65f,
+            Roughness = 0.28f,
+        };
+        var gripMaterial = new StandardMaterial3D
+        {
+            AlbedoColor = new Color(0.16f, 0.07f, 0.035f),
+            Roughness = 0.82f,
         };
         var pivot = new Node3D
         {
@@ -910,8 +924,24 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         pivot.AddChild(new MeshInstance3D
         {
             Name = "PrimitiveBlade",
-            Mesh = GodotMeshGeometry.CreateGroundedBox(new Vector3(0.08f, 1.0f, 0.08f), material),
-            Position = new Vector3(0, 0.04f, -0.48f),
+            Mesh = GodotMeshGeometry.CreateGroundedBox(
+                new Vector3(0.11f, 1.05f, 0.055f), bladeMaterial),
+            Position = new Vector3(0, 0, -0.98f),
+            Rotation = new Vector3(MathF.PI * 0.5f, 0, 0),
+        });
+        pivot.AddChild(new MeshInstance3D
+        {
+            Name = "PrimitiveGuard",
+            Mesh = GodotMeshGeometry.CreateGroundedBox(
+                new Vector3(0.34f, 0.07f, 0.10f), guardMaterial),
+            Position = new Vector3(0, -0.035f, 0.02f),
+        });
+        pivot.AddChild(new MeshInstance3D
+        {
+            Name = "PrimitiveGrip",
+            Mesh = GodotMeshGeometry.CreateGroundedBox(
+                new Vector3(0.075f, 0.26f, 0.075f), gripMaterial),
+            Position = new Vector3(0, 0, 0.02f),
             Rotation = new Vector3(MathF.PI * 0.5f, 0, 0),
         });
         return pivot;

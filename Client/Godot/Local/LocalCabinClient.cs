@@ -193,6 +193,8 @@ public partial class LocalCabinClient : Node3D
     private int _peakRenderedChunks;
     private int _effectiveRenderDistanceChunks;
     private bool _gameplayInputAllowed = true;
+    private bool _gameplayInputAdmittedLastFrame;
+    private bool _gameplayStopPending;
     private bool _shutdown;
     private string? _initializationError;
 
@@ -600,12 +602,25 @@ public partial class LocalCabinClient : Node3D
             UpdateWorldHover();
             PumpChat();
             _ = _uiBridge?.Pump();
+            bool gameplayInputAdmitted = ObserveGameplayInputAdmission();
             ClientWorldInputSample physical = GodotWorldInput.Capture(
                 _settings ?? throw new InvalidOperationException("Client settings are unavailable."),
-                _gameplayInputAllowed && GetWindow().HasFocus() &&
+                gameplayInputAdmitted && GetWindow().HasFocus() &&
                     (_chatInput is null || !_chatInput.HasFocus()));
             ClientHorizontalCameraBasis basis = CameraBasis();
             ClientControlProfileDecision decision = EvaluateProfile(physical, basis);
+            if (_gameplayStopPending)
+            {
+                decision = new ClientControlProfileDecision(
+                    new ClientWorldCommandIntent(
+                        GameLocomotionUpdate.Stop,
+                        GamePlayerActions.None,
+                        HasFocus: false),
+                    false,
+                    default,
+                    false,
+                    default);
+            }
             if (decision.SelectionRequested)
                 Select(decision.SelectionPoint);
             bool faceRequested = TryResolveProfileFacing(
@@ -629,7 +644,10 @@ public partial class LocalCabinClient : Node3D
             if (!_inputScheduler.TryObserve(decision.Command, context, now))
                 _lastOutcome = "Local input scheduler busy";
             else
+            {
+                _gameplayStopPending = false;
                 _ = _inputScheduler.TryPump(now, TrySubmitScheduledLocalCommand);
+            }
             SynchronizeProjection();
             UpdateChatPresentation();
             UpdateCamera();
@@ -654,6 +672,13 @@ public partial class LocalCabinClient : Node3D
     {
         if (TryHandleFocusedChatInput(inputEvent)) return;
         if (!_gameplayInputAllowed) return;
+        if (inputEvent is InputEventKey uiKey && uiKey.Pressed && !uiKey.Echo &&
+            TryHandleUiToggleKey(uiKey))
+        {
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+        if ((_uiClient?.OpenViewCount ?? 0) != 0) return;
         if (inputEvent is InputEventKey reveal && !reveal.Echo && IsControlKey(reveal))
         {
             _actorPresenter?.SetRevealHeld(reveal.Pressed);
@@ -2146,18 +2171,7 @@ public partial class LocalCabinClient : Node3D
 
     private void HandleKey(InputEventKey input)
     {
-        if (_settings is not null &&
-            GodotWorldInput.Matches(input, _settings, ClientSemanticAction.OpenInventory))
-        {
-            OpenInventory();
-            return;
-        }
-        if (_settings is not null &&
-            GodotWorldInput.Matches(input, _settings, ClientSemanticAction.OpenServerMonitor))
-        {
-            OpenServerMonitor();
-            return;
-        }
+        if (TryHandleUiToggleKey(input)) return;
         switch (input.Keycode)
         {
             case global::Godot.Key.Escape:
@@ -2182,6 +2196,44 @@ public partial class LocalCabinClient : Node3D
                 LoadWorld();
                 break;
         }
+    }
+
+    private bool TryHandleUiToggleKey(InputEventKey input)
+    {
+        if (_settings is not null &&
+            GodotWorldInput.Matches(input, _settings, ClientSemanticAction.OpenInventory))
+        {
+            OpenInventory();
+            return true;
+        }
+        if (_settings is not null &&
+            GodotWorldInput.Matches(input, _settings, ClientSemanticAction.OpenServerMonitor))
+        {
+            OpenServerMonitor();
+            return true;
+        }
+        return false;
+    }
+
+    private bool ObserveGameplayInputAdmission()
+    {
+        bool admitted = _gameplayInputAllowed && (_uiClient?.OpenViewCount ?? 0) == 0;
+        if (!admitted)
+        {
+            _primaryDown = false;
+            _primaryPressed = false;
+            _primaryReleased = false;
+            _secondaryPressed = false;
+            _cancelPressed = false;
+            _actorPresenter?.SetRevealHeld(false);
+            if (_gameplayInputAdmittedLastFrame)
+            {
+                _profileStopPending = true;
+                _gameplayStopPending = true;
+            }
+        }
+        _gameplayInputAdmittedLastFrame = admitted;
+        return admitted;
     }
 
     private static bool IsControlKey(InputEventKey input) =>
@@ -2469,6 +2521,7 @@ public partial class LocalCabinClient : Node3D
         if (_settings is null)
             throw new InvalidOperationException("The Concept Demo settings are unavailable.");
         ProbeSelectedPublicTargetRetention();
+        ProbeInventoryInputSuppressionAndEquipment();
         ApplySettings(WithRenderDistance(_settings, 1));
 
         if (!WorldPosition.TryFromGlobalMillimeters(63_000, 0, 60_000, out WorldPosition outerVoid) ||
@@ -2710,6 +2763,114 @@ public partial class LocalCabinClient : Node3D
             _ = _uiBridge.Pump();
             return _uiClient.OpenViewCount == 0;
         });
+    }
+
+    private void ProbeInventoryInputSuppressionAndEquipment()
+    {
+        if (_localSession is null || _sequencer is null || _inputScheduler is null ||
+            _uiClient is null || _uiBridge is null || _actorPresenter is null)
+            throw new InvalidOperationException(
+                "The equipment/input acceptance requires the complete local product path.");
+        if (!TryFindPublicRecord(GameWorldPublicPrefabIds.IronSword, out WorldPublicRecord sword))
+            throw new InvalidOperationException(
+                "The equipment/input acceptance could not find the public Iron Sword.");
+
+        _pointerTarget = sword.Id;
+        _pointerTargetPrefab = sword.PrefabId;
+        Select(new ClientControlWorldPoint(
+            sword.Position.GlobalXMillimeters,
+            sword.Position.GlobalZMillimeters));
+        if (!_sequencer.TryCreateSemanticCommand(
+                new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.Stop,
+                    GamePlayerActions.Interact,
+                    true),
+                out GamePlayerCommand pickup))
+            throw new InvalidOperationException("The Iron Sword pickup command could not be formed.");
+        ApplyCommand(pickup, false, default, false);
+        DriveLocalUntil(() =>
+            _localSession.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastCommandSequence == pickup.Sequence &&
+            view.LastCommandResult.Interaction == GameWorldActionStatus.Accepted &&
+            !TryFindPublicRecord(GameWorldPublicPrefabIds.IronSword, out _));
+
+        OpenInventory();
+        DriveLocalUntil(() =>
+        {
+            _ = _uiBridge.Pump();
+            return _uiClient.OpenViewCount == 1;
+        });
+
+        SetProfile(ControlProfile.ThirdPersonDirect);
+        _ = EvaluateProfile(
+            new ClientWorldInputSample(0, 0, GamePlayerActions.None, true),
+            ClientHorizontalCameraBasis.WorldAxes);
+        _gameplayInputAdmittedLastFrame = true;
+        ClientControlProfileDecision moving = EvaluateProfile(
+            new ClientWorldInputSample(1, 0, GamePlayerActions.Primary, true),
+            ClientHorizontalCameraBasis.WorldAxes);
+        bool admitted = ObserveGameplayInputAdmission();
+        ClientControlProfileDecision blocked = EvaluateProfile(
+            new ClientWorldInputSample(1, 0, GamePlayerActions.Primary, admitted),
+            ClientHorizontalCameraBasis.WorldAxes);
+        if (moving.Command.Locomotion.Kind != GameLocomotionUpdateKind.Direct || admitted ||
+            blocked.Command.Locomotion.Kind != GameLocomotionUpdateKind.Stop ||
+            blocked.Command.HeldActions != GamePlayerActions.None || blocked.Command.HasFocus)
+            throw new InvalidOperationException(
+                "An open Inventory did not revoke gameplay movement/action focus and produce Stop.");
+
+        Control inventoryRoot = FindOpenInventoryView() ??
+            throw new InvalidOperationException("The native Inventory root was absent.");
+        const string viewPrefix = "UiView_";
+        string viewName = inventoryRoot.Name.ToString();
+        if (!viewName.StartsWith(viewPrefix, StringComparison.Ordinal) ||
+            !ulong.TryParse(viewName.AsSpan(viewPrefix.Length), out ulong viewValue) ||
+            viewValue == 0)
+            throw new InvalidOperationException("The native Inventory view identity was invalid.");
+        var viewId = new UiViewInstanceId(viewValue);
+        UiRowId swordRow = default;
+        foreach (UiListRow row in _uiClient.GetRows(viewId, InventoryUi.Items))
+        {
+            if (row.Values.Length != 0 &&
+                string.Equals(row.Values[0].Text, "Iron Sword", StringComparison.Ordinal))
+            {
+                swordRow = row.Id;
+                break;
+            }
+        }
+        if (!swordRow.IsValid)
+            throw new InvalidOperationException("The picked-up Iron Sword was absent from Inventory.");
+        _uiClient.SubmitAction(viewId, InventoryUi.Select, swordRow);
+        DriveLocalUntil(() => _uiClient.GetActionState(viewId, InventoryUi.Equip).Enabled);
+        _uiClient.SubmitAction(viewId, InventoryUi.Equip);
+        DriveLocalUntil(() =>
+        {
+            if (!_localSession.TryGetLatestView(out LocalPlayableAuthorityView view) ||
+                view.MainHandPrefabId != GameWorldPublicPrefabIds.IronSword ||
+                _actorPresenter.GetSnapshot().EquippedMainHands != 1 ||
+                !_actorPresenter.TryGetActorRoot(view.PublicActor, out Node3D? actor) || actor is null)
+                return false;
+            Node3D? socket = actor.FindChild(
+                "MainHandSocket", recursive: true, owned: false) as Node3D;
+            Node3D? presentation = socket?.FindChild(
+                "MainHandPresentation", recursive: true, owned: false) as Node3D;
+            return presentation?.Visible == true && presentation.IsVisibleInTree() &&
+                presentation.GetParent() == socket &&
+                presentation.GlobalPosition.DistanceTo(actor.GlobalPosition) < 3f;
+        });
+        WorldPublicRecord equipped = default;
+        if (!_localSession.TryGetLatestView(out LocalPlayableAuthorityView equippedView) ||
+            !TryFindEquippedPublicRecord(equippedView.PlayerPosition, out equipped))
+            throw new InvalidOperationException(
+                "The equipped Iron Sword did not return as visible, non-pickable owner-following " +
+                $"public truth: found={equipped.Id.IsValid}, flags={equipped.StateFlags}, " +
+                $"item={equipped.Position}, owner={equippedView.PlayerPosition}.");
+
+        OpenInventory();
+        DriveLocalUntil(() => _uiClient.OpenViewCount == 0);
+        _gameplayInputAdmittedLastFrame = false;
+        _gameplayStopPending = false;
+        SetProfile(ControlProfile.OrbitCommand);
     }
 
     private void ProbeAuthoritativeJump()
@@ -3356,6 +3517,34 @@ public partial class LocalCabinClient : Node3D
                 foreach (ref readonly WorldPublicRecord record in view.PublicRecords)
                 {
                     if (record.PrefabId != prefabId) continue;
+                    found = record;
+                    return true;
+                }
+            }
+        }
+        found = default;
+        return false;
+    }
+
+    private bool TryFindEquippedPublicRecord(
+        in WorldPosition ownerPosition,
+        out WorldPublicRecord found)
+    {
+        if (_cache is not null && _cache.TryCopyResidentInfo(
+                _chatChunkInfo, out int count, out _))
+        {
+            for (int chunk = 0; chunk < count; chunk++)
+            {
+                if (!_cache.TryGetResidentView(
+                        _chatChunkInfo[chunk].Handle, out ClientSemanticChunkView view))
+                    continue;
+                foreach (ref readonly WorldPublicRecord record in view.PublicRecords)
+                {
+                    if (record.PrefabId != GameWorldPublicPrefabIds.IronSword ||
+                        record.Position != ownerPosition ||
+                        (record.StateFlags & WorldPublicStateFlags.Visible) == 0 ||
+                        (record.StateFlags & WorldPublicStateFlags.GroundItem) != 0)
+                        continue;
                     found = record;
                     return true;
                 }
