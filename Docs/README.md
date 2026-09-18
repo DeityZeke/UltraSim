@@ -99,6 +99,7 @@ acceptance narratives remain available through git history.
   accounting and PF2.5 ownership/observability are closed, and PF3 now closes authenticated
   performance policy plus independent render/input/submission/authority/Network clocks. PF4
   measured optimization is next.
+- [Client completion campaign](Plans/CLIENT_COMPLETION_PLAN.md) — ordered F1.0-F1.12 pre-PF6 implementation plan covering unified content scopes, semantic-vs-presentation resolution, primitive fallback, removable Official content, resource generations, derived resources/atlases, UI/gumps, declarative profiles, scalable Godot RenderingServer/batch tiers, actor representation tiers, renderer stress consumers, and dogfooding/PF6 readiness.
 - [Client presentation/content architecture](Plans/CLIENT_PRESENTATION_ARCHITECTURE.md) — durable\n  dumb-terminal client model, four content layers and graceful fallback, removable Local/Official\n  content, realm-scoped global CAS use, renderer-independent source/derived-resource boundaries,\n  atlas policy, UI/gump layering and lifetime, declarative camera/control profiles, and the\n  vegetation/cut-state seam for the pre-PF6 client-completion pass.\n- [Asset streaming/content layering plan](Plans/ASSET_STREAMING.md) — stable logical
   content identity, activation/application proof, deterministic Default/Replace/Add,
   passive-content validation, content-addressed blobs with realm-scoped ownership,
