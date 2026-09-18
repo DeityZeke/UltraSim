@@ -99,7 +99,7 @@ acceptance narratives remain available through git history.
   accounting and PF2.5 ownership/observability are closed, and PF3 now closes authenticated
   performance policy plus independent render/input/submission/authority/Network clocks. PF4
   measured optimization is next.
-- [Asset streaming/content layering plan](Plans/ASSET_STREAMING.md) — stable logical
+- [Client presentation/content architecture](Plans/CLIENT_PRESENTATION_ARCHITECTURE.md) — durable\n  dumb-terminal client model, four content layers and graceful fallback, removable Local/Official\n  content, realm-scoped global CAS use, renderer-independent source/derived-resource boundaries,\n  atlas policy, UI/gump layering and lifetime, declarative camera/control profiles, and the\n  vegetation/cut-state seam for the pre-PF6 client-completion pass.\n- [Asset streaming/content layering plan](Plans/ASSET_STREAMING.md) — stable logical
   content identity, activation/application proof, deterministic Default/Replace/Add,
   passive-content validation, content-addressed blobs with realm-scoped ownership,
   source-independent byte delivery, immutable catalog generations, Cabin parity,
@@ -216,7 +216,7 @@ consumer/deployment need earns them.
   authority-thread/local-session extraction, Direct Connect trust, settings/control-
   profile, world-presentation, and standard-UI convergence work through F0.5, the A0-derived
   F0.6 closure, M0.0 shared authority, and the remaining lifecycle/parity roadmap.
-- [Asset Streaming A0](Plans/ASSET_STREAMING.md) records the passive content package,
+- [Client presentation/content architecture](Plans/CLIENT_PRESENTATION_ARCHITECTURE.md) records the\n  pre-PF6 client-completion direction: primitives/Local/Server/user layers, removable Official\n  content, atlas/native realization, UI/gump categories, declarative profiles, renderer\n  independence, and the future vegetation ownership seam.\n- [Asset Streaming A0](Plans/ASSET_STREAMING.md) records the passive content package,
   activation proof, CAS/cache, hosting/source, Default/Replace/Add, catalog/resource
   lifetime, Cabin parity, complete-WorldPack canary, Contentless Online, and deferred
   executable-extension boundary.
