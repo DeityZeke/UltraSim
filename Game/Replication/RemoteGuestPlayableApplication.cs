@@ -285,6 +285,10 @@ public sealed class RemoteGuestPlayableApplication :
     private const long AdmissionRetryMilliseconds = 1_000;
 
     private readonly NetworkProtocolPeer _peer;
+    private readonly ServerGenerationStateOperation<IGameGenerationStateProvider,
+        PublicWorldDriveCapture> _capturePublicWorldDriveOperation;
+    private readonly ServerGenerationStateOperation<IGameGenerationStateProvider,
+        OwnerCapture> _captureOwnerStateOperation;
     private readonly ApplicationRealmId _realm;
     private readonly RemoteContentAuthorization? _contentAuthorization;
     private readonly UiDefinitionIdentity[] _contentBackedUiDefinitions;
@@ -479,6 +483,8 @@ public sealed class RemoteGuestPlayableApplication :
         RemoteChunkPublicationPolicy publicationPolicy = default)
     {
         _peer = peer ?? throw new ArgumentNullException(nameof(peer));
+        _capturePublicWorldDriveOperation = CapturePublicWorldDrive;
+        _captureOwnerStateOperation = CaptureOwnerState;
         if (!realm.IsValid) throw new ArgumentOutOfRangeException(nameof(realm));
         if (!participant.IsValid) throw new ArgumentOutOfRangeException(nameof(participant));
         ArgumentOutOfRangeException.ThrowIfZero(applicationSessionEpoch);
@@ -2450,17 +2456,22 @@ public sealed class RemoteGuestPlayableApplication :
         finally { _publicWorldTiming.RecordDetailed(started); }
     }
 
+    private PublicWorldDriveCapture CapturePublicWorldDrive(
+        EcsWorld world,
+        ulong _,
+        IGameGenerationStateProvider game)
+    {
+        Entity player = Resolve(world, _entities.PlayerId);
+        if (!game.WorldState.TryReadPosition(world, player, out WorldPosition position))
+            throw new InvalidOperationException("The remote public anchor was unavailable.");
+        return new PublicWorldDriveCapture(position, game.WorldState.Publications);
+    }
+
     private void DrivePublicWorldCore()
     {
         SaturatingIncrement(ref _publicationDrivePasses);
         if (!_runtime!.Game.TryUseActiveGeneration<IGameGenerationStateProvider, PublicWorldDriveCapture>(
-                (world, _, game) =>
-                {
-                    Entity player = Resolve(world, _entities.PlayerId);
-                    if (!game.WorldState.TryReadPosition(world, player, out WorldPosition position))
-                        throw new InvalidOperationException("The remote public anchor was unavailable.");
-                    return new PublicWorldDriveCapture(position, game.WorldState.Publications);
-                }, out PublicWorldDriveCapture capture))
+                _capturePublicWorldDriveOperation, out PublicWorldDriveCapture capture))
             throw new InvalidOperationException("The remote public authority was unavailable.");
 
         if (!ReferenceEquals(capture.Publications, _publicationSource))
@@ -2694,23 +2705,28 @@ public sealed class RemoteGuestPlayableApplication :
         finally { _ownerStateTiming.RecordDetailed(started); }
     }
 
+    private OwnerCapture CaptureOwnerState(
+        EcsWorld world,
+        ulong generation,
+        IGameGenerationStateProvider game)
+    {
+        Entity player = Resolve(world, _entities.PlayerId);
+        if (!game.WorldState.TryReadPosition(world, player, out WorldPosition position) ||
+            !game.WorldState.TryReadPublic(
+                world, player, out WorldPublicDescriptor descriptor) ||
+            !game.WorldState.Publications.TryGetPublicEntityId(
+                player, out WorldPublicEntityId publicId))
+            throw new InvalidOperationException("The owner-private actor state was incomplete.");
+        return new OwnerCapture(generation, world.TickCount, position, descriptor, publicId);
+    }
+
     private bool QueueOwnerStateCore()
     {
         if (!_guestAdmitted || !_admissionResultApplied || _runtime is null ||
             _ownerStateSequence == ulong.MaxValue)
             return false;
         if (!_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, OwnerCapture>(
-                (world, generation, game) =>
-                {
-                    Entity player = Resolve(world, _entities.PlayerId);
-                    if (!game.WorldState.TryReadPosition(world, player, out WorldPosition position) ||
-                        !game.WorldState.TryReadPublic(
-                            world, player, out WorldPublicDescriptor descriptor) ||
-                        !game.WorldState.Publications.TryGetPublicEntityId(
-                            player, out WorldPublicEntityId publicId))
-                        throw new InvalidOperationException("The owner-private actor state was incomplete.");
-                    return new OwnerCapture(generation, world.TickCount, position, descriptor, publicId);
-                }, out OwnerCapture capture))
+                _captureOwnerStateOperation, out OwnerCapture capture))
             return false;
         if (_ownerStateSequence != 0 &&
             capture.Generation == _lastOwnerStateGeneration &&
