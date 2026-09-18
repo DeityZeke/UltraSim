@@ -303,6 +303,7 @@ public sealed class RemoteGuestPlayableApplication :
     private readonly GamePublicWeaponPresentation[] _publicItemScratch =
         new GamePublicWeaponPresentation[SharedPlayableAuthority.MaximumPublicItemPresentations];
     private ulong _nextPublicItemPresentationDeliveryId = 1UL << 63;
+    private ulong _nextPublicItemPresentationRevision = 1;
     private int _publicItemPresentationDeliverySlot = -1;
     private ulong _publicItemPresentationProgressPasses;
     private ulong _publicItemPresentationReconciliationPasses;
@@ -1537,14 +1538,14 @@ public sealed class RemoteGuestPlayableApplication :
                 if (row.DesiredPresent)
                 {
                     row.DesiredPresent = false;
-                    row.Revision = checked(row.Revision + 1);
+                    row.Revision = AllocatePublicItemPresentationRevision();
                 }
                 continue;
             }
             if (WeaponsEqual(row.Weapon, desired.Weapon))
             {
                 if (!row.DesiredPresent)
-                    row.Revision = checked(row.Revision + 1);
+                    row.Revision = AllocatePublicItemPresentationRevision();
                 row.DesiredPresent = true;
                 continue;
             }
@@ -1553,13 +1554,13 @@ public sealed class RemoteGuestPlayableApplication :
                 if (row.DesiredPresent)
                 {
                     row.DesiredPresent = false;
-                    row.Revision = checked(row.Revision + 1);
+                    row.Revision = AllocatePublicItemPresentationRevision();
                 }
                 continue;
             }
             row.Weapon = desired.Weapon;
             row.InspectionProperties = desired.InspectionProperties;
-            row.Revision = checked(row.Revision + 1);
+            row.Revision = AllocatePublicItemPresentationRevision();
             row.DesiredPresent = true;
         }
 
@@ -1592,7 +1593,7 @@ public sealed class RemoteGuestPlayableApplication :
                 InspectionProperties = desired.InspectionProperties,
                 DesiredFlags = RemotePublicPresentationFlags.ItemProperties,
                 Weapon = desired.Weapon,
-                Revision = 1,
+                Revision = AllocatePublicItemPresentationRevision(),
                 DesiredPresent = true,
             };
         }
@@ -1635,6 +1636,14 @@ public sealed class RemoteGuestPlayableApplication :
         left.Quality == right.Quality &&
         left.Element == right.Element &&
         left.SpawnOrdinal == right.SpawnOrdinal;
+
+    private ulong AllocatePublicItemPresentationRevision()
+    {
+        if (_nextPublicItemPresentationRevision == 0)
+            throw new InvalidOperationException(
+                "The public-item presentation revision identity space is exhausted.");
+        return _nextPublicItemPresentationRevision++;
+    }
 
     private bool QueueSharedPublicPresentationMetadata(bool force)
     {

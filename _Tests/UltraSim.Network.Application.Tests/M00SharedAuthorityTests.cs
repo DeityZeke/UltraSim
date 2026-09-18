@@ -264,6 +264,50 @@ internal static class M00SharedAuthorityTests
             DriveUntil(host, authority, clients, () =>
                 CopyPublicItemProofWakeups(authority, maximumParticipants) -
                     itemProofWakeupsBefore >= (ulong)maximumParticipants);
+
+            // A fully proven removal retires the server row, but the client deliberately retains
+            // the exact identity/revision floor. Reintroducing that same live item must allocate a
+            // newer metadata revision rather than starting the recycled row at revision one.
+            True(clients[0].Session.PublicPresentationState.TryGet(
+                swordId, out ClientPublicPresentationMetadata beforeRetirement));
+            ulong retainedRevisionFloor = beforeRetirement.Revision;
+            True(authority.Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+                (world, _, game) =>
+                {
+                    Entity actor = Resolve(world, aliceParticipant.Entities.PlayerId);
+                    Entity backpack = Resolve(world, aliceParticipant.Entities.BackpackId);
+                    True(game.WorldState.Publications.TryResolvePublicEntity(swordId, out Entity item));
+                    Equal(GameWorldActionStatus.Accepted, game.Items.TryPickup(
+                        world, game.WorldState, game.Inventory, actor, item, backpack));
+                    return true;
+                }, out pickedUp) && pickedUp);
+            authority.ObservePublicItemPresentationMutation();
+            DriveUntil(host, authority, clients, () => clients.All(client =>
+                !client.Session.PublicPresentationState.TryGet(swordId, out _)));
+            for (int step = 0; step < 64; step++)
+            {
+                host.Pump();
+                _ = authority.TickDue();
+                for (int index = 0; index < clients.Count; index++)
+                {
+                    clients[index].Direct.Pump();
+                    _ = clients[index].Session.ProcessReceived();
+                }
+            }
+            True(authority.Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+                (world, _, game) =>
+                {
+                    Entity actor = Resolve(world, aliceParticipant.Entities.PlayerId);
+                    True(game.WorldState.Publications.TryResolvePublicEntity(swordId, out Entity item));
+                    Equal(GameWorldActionStatus.Accepted,
+                        game.Items.TryDrop(world, game.WorldState, game.Inventory, actor, item));
+                    return true;
+                }, out dropped) && dropped);
+            authority.ObservePublicItemPresentationMutation();
+            DriveUntil(host, authority, clients, () => clients.All(client =>
+                client.Session.PublicPresentationState.TryGet(
+                    swordId, out ClientPublicPresentationMetadata metadata) &&
+                metadata.Revision > retainedRevisionFloor));
         }
         finally
         {
