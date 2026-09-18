@@ -41,6 +41,7 @@ var tests = new (string Name, Action Body)[]
     ("InventoryUiDoesNotConvertTerminalRuntimeFaultToDomainRejection", InventoryUiDoesNotConvertTerminalRuntimeFaultToDomainRejection),
     ("InventoryPersistsAndRebuildsAfterGenerationSwap", InventoryPersistsAndRebuildsAfterGenerationSwap),
     ("I012RolledWeaponAndSpawnerContinuationPersistAsResults", I012RolledWeaponAndSpawnerContinuationPersistAsResults),
+    ("GroundItemPickupUsesForgivingBoundedRange", GroundItemPickupUsesForgivingBoundedRange),
     ("I012SpawnerDefersAtCapacityAndRecovers", I012SpawnerDefersAtCapacityAndRecovers),
     ("GridPlacementPersistsAndRebuildsAfterGenerationSwap", GridPlacementPersistsAndRebuildsAfterGenerationSwap),
     ("EquippedRelationshipPersistsAndReindexes", EquippedRelationshipPersistsAndReindexes),
@@ -1342,6 +1343,67 @@ static void I012RolledWeaponAndSpawnerContinuationPersistAsResults()
     {
         runtime.Stop();
         if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+}
+
+static void GroundItemPickupUsesForgivingBoundedRange()
+{
+    WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var runtime = new ServerRuntime(
+        composition,
+        new ServerRuntimeOptions(
+            UltraSimGameComposition.CreateWorldOptions(
+                256,
+                new PersistenceIdentityOptions(new PersistentWorldId(0x70_1214))),
+            WorldClockOptions.Default));
+    runtime.Initialize();
+    runtime.Start();
+    try
+    {
+        Assert.True(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider,
+            GamePlayableWorldEntities>(
+                static (world, _, game) =>
+                {
+                    Assert.True(world.TryInstantiate(game.Content.Character, out Entity player));
+                    return GamePlayableWorld.PopulateConceptDemo(world, game, player);
+                },
+                out GamePlayableWorldEntities entities));
+        runtime.Tick();
+        WeaponSpawn sword = ReadActiveWeapon(runtime, entities.IronSwordSpawnerId);
+        Assert.True(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (world, _, game) =>
+            {
+                Entity actor = ResolvePersistent(world, entities.PlayerId);
+                Entity backpack = ResolvePersistent(world, entities.BackpackId);
+                Assert.True(game.WorldState.TryReadPosition(
+                    world, sword.Entity, out WorldPosition itemPosition));
+                Assert.True(WorldPosition.TryFromGlobalMillimeters(
+                    itemPosition.GlobalXMillimeters +
+                        GameItemGenerationState.PickupRangeMillimeters + 1,
+                    itemPosition.YMillimeters,
+                    itemPosition.GlobalZMillimeters,
+                    out WorldPosition outside));
+                Assert.True(game.WorldState.TrySetPosition(world, actor, outside));
+                Assert.Equal(GameWorldActionStatus.OutOfRange, game.Items.TryPickup(
+                    world, game.WorldState, game.Inventory, actor, sword.Entity, backpack));
+
+                Assert.True(WorldPosition.TryFromGlobalMillimeters(
+                    itemPosition.GlobalXMillimeters + 2_750,
+                    itemPosition.YMillimeters,
+                    itemPosition.GlobalZMillimeters,
+                    out WorldPosition forgiving));
+                Assert.True(game.WorldState.TrySetPosition(world, actor, forgiving));
+                Assert.Equal(GameWorldActionStatus.Accepted, game.Items.TryPickup(
+                    world, game.WorldState, game.Inventory, actor, sword.Entity, backpack));
+                return true;
+            }, out bool exercised) && exercised);
+    }
+    finally
+    {
+        runtime.Stop();
     }
 }
 

@@ -328,7 +328,11 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         visual.Scale *= new Vector3(scale, scale, scale);
         root.AddChild(visual);
         AnimationPlayer? animations = FindFirst<AnimationPlayer>(visual);
-        if (animations is not null) ConfigureAnimationLoops(animations);
+        if (animations is not null)
+        {
+            ConfigureAuthoritativeRootMotion(visual, animations);
+            ConfigureAnimationLoops(animations);
+        }
         var nameplate = new Label3D
         {
             Name = "Nameplate",
@@ -416,7 +420,11 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         visual.Scale *= new Vector3(scale, scale, scale);
         root.AddChild(visual);
         AnimationPlayer? animations = FindFirst<AnimationPlayer>(visual);
-        if (animations is not null) ConfigureAnimationLoops(animations);
+        if (animations is not null)
+        {
+            ConfigureAuthoritativeRootMotion(visual, animations);
+            ConfigureAnimationLoops(animations);
+        }
         Node3D socket = CreateMainHandSocket(root, visual);
         Node3D primaryCue = CreateMainHandPresentation();
         socket.AddChild(primaryCue);
@@ -749,6 +757,44 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             if (!TryFindAnimation(player, requested, out StringName name)) continue;
             Animation? animation = player.GetAnimation(name);
             if (animation is not null) animation.LoopMode = Animation.LoopModeEnum.Linear;
+        }
+    }
+
+    private static void ConfigureAuthoritativeRootMotion(
+        Node3D visual,
+        AnimationPlayer player)
+    {
+        Skeleton3D? skeleton = FindFirst<Skeleton3D>(visual);
+        if (skeleton is null) return;
+        int rootBone = -1;
+        for (int bone = 0; bone < skeleton.GetBoneCount(); bone++)
+        {
+            if (skeleton.GetBoneParent(bone) != -1) continue;
+            rootBone = bone;
+            break;
+        }
+        if (rootBone < 0) return;
+        string rootName = skeleton.GetBoneName(rootBone).ToString();
+        foreach (StringName animationName in player.GetAnimationList())
+        {
+            Animation? animation = player.GetAnimation(animationName);
+            if (animation is null) continue;
+            for (int track = 0; track < animation.GetTrackCount(); track++)
+            {
+                if (animation.TrackGetType(track) != Animation.TrackType.Position3D)
+                    continue;
+                NodePath path = animation.TrackGetPath(track);
+                if (!string.Equals(
+                        path.GetConcatenatedSubNames(), rootName,
+                        StringComparison.Ordinal))
+                    continue;
+
+                // Game owns the actor's complete authoritative position, including vertical
+                // motion. Extracting this imported track makes Godot cancel its visual motion
+                // instead of applying it on top of the authoritative actor root.
+                player.RootMotionTrack = path;
+                return;
+            }
         }
     }
 

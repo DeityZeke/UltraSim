@@ -166,6 +166,7 @@ public partial class LocalCabinClient : Node3D
     private bool _pointerPointValid;
     private WorldPublicEntityId _pointerTarget;
     private uint _pointerTargetPrefab;
+    private WorldPublicEntityId _selectedTarget;
     private bool _primaryDown;
     private bool _primaryPressed;
     private bool _primaryReleased;
@@ -619,7 +620,7 @@ public partial class LocalCabinClient : Node3D
                       : ClientWorldCommandRequestFlags.None)
                 : ClientWorldCommandRequestFlags.None;
             var context = new ClientWorldCommandContext(
-                _selection == SelectionKind.IronSword ? _pointerTarget : default,
+                SelectedInteractionTarget(),
                 flags,
                 faceRequested ? facingPoint.XMillimeters : 0,
                 faceRequested ? facingPoint.ZMillimeters : 0,
@@ -1644,7 +1645,7 @@ public partial class LocalCabinClient : Node3D
                 faceLookPoint,
                 lookPoint,
                 facingRequiresAcceptedLocomotion,
-                _selection == SelectionKind.IronSword ? _pointerTarget : default)))
+                SelectedInteractionTarget())))
             _lastOutcome = "Local command queue busy";
     }
 
@@ -1913,10 +1914,12 @@ public partial class LocalCabinClient : Node3D
         if (_pointerTarget.IsValid && _pointerTargetPrefab == GameWorldPublicPrefabIds.IronSword)
         {
             _selection = SelectionKind.IronSword;
+            _selectedTarget = _pointerTarget;
             _lastOutcome = $"Selected Iron Sword at ({point.XMillimeters / 1000d:F1}, " +
                 $"{point.ZMillimeters / 1000d:F1}) m";
             return;
         }
+        _selectedTarget = default;
         bool signPresented = _useConceptDemoWorld && IsKnownPresentedPrefabNear(
             GameWorldPublicPrefabIds.InformationalSign, point, radius: 1_500);
         _selection = signPresented && Nearest(
@@ -2125,6 +2128,9 @@ public partial class LocalCabinClient : Node3D
         return new ClientHorizontalCameraBasis(right.X, right.Z, forward.X, forward.Z);
     }
 
+    private WorldPublicEntityId SelectedInteractionTarget() =>
+        _selection == SelectionKind.IronSword ? _selectedTarget : default;
+
     private void UpdateCamera()
     {
         if (_camera is null)
@@ -2257,6 +2263,7 @@ public partial class LocalCabinClient : Node3D
             throw new InvalidOperationException("Control profile switches did not realize distinct camera modes.");
 
         ValidateCatalogAndHumanPresentation();
+        ProbeSelectedPublicTargetRetention();
         ProbePlayableChat();
         ProbePlayableInventory();
         ProbeDoorAndChestInteraction();
@@ -2367,6 +2374,40 @@ public partial class LocalCabinClient : Node3D
         }
     }
 
+    private void ProbeSelectedPublicTargetRetention()
+    {
+        if (!_useConceptDemoWorld) return;
+        if (!TryFindPublicRecord(GameWorldPublicPrefabIds.IronSword, out WorldPublicRecord sword))
+            throw new InvalidOperationException(
+                "The selected-target acceptance could not find the public Iron Sword.");
+        SelectionKind savedSelection = _selection;
+        WorldPublicEntityId savedSelectedTarget = _selectedTarget;
+        WorldPublicEntityId savedPointerTarget = _pointerTarget;
+        uint savedPointerTargetPrefab = _pointerTargetPrefab;
+        string savedOutcome = _lastOutcome;
+        try
+        {
+            _pointerTarget = sword.Id;
+            _pointerTargetPrefab = sword.PrefabId;
+            Select(new ClientControlWorldPoint(
+                sword.Position.GlobalXMillimeters,
+                sword.Position.GlobalZMillimeters));
+            _pointerTarget = default;
+            _pointerTargetPrefab = 0;
+            if (SelectedInteractionTarget() != sword.Id)
+                throw new InvalidOperationException(
+                    "The selected public target was incorrectly tied to transient hover state.");
+        }
+        finally
+        {
+            _selection = savedSelection;
+            _selectedTarget = savedSelectedTarget;
+            _pointerTarget = savedPointerTarget;
+            _pointerTargetPrefab = savedPointerTargetPrefab;
+            _lastOutcome = savedOutcome;
+        }
+    }
+
     /// <summary>
     /// D0.0 permanent-client journey over the first physical Concept Demo island. Administrative
     /// relocation is used only to choose deterministic starting points; jump, telepad interaction,
@@ -2381,6 +2422,7 @@ public partial class LocalCabinClient : Node3D
             throw new InvalidOperationException("The Concept Demo smoke requires the Concept Demo world fixture.");
         if (_settings is null)
             throw new InvalidOperationException("The Concept Demo settings are unavailable.");
+        ProbeSelectedPublicTargetRetention();
         ApplySettings(WithRenderDistance(_settings, 1));
 
         if (!WorldPosition.TryFromGlobalMillimeters(63_000, 0, 60_000, out WorldPosition outerVoid) ||

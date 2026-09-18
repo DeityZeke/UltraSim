@@ -86,6 +86,9 @@ public partial class T010PlayableWorldAcceptance : Node3D
             Expect(player is not null && HasAnimation(player, "Idle") &&
                 HasAnimation(player, "Walk") && HasAnimation(player, "Jump"),
                 "A baked body did not expose the finite Idle/Walk/Jump animation set.");
+            Expect(player!.RootMotionTrack.GetNameCount() != 0 &&
+                RootMotionTrackHasWalkTranslation(player),
+                "A baked body did not cancel imported skeleton-root translation.");
             Skeleton3D? skeleton = FindDescendant<Skeleton3D>(root!);
             Expect(skeleton is not null && skeleton.GetBoneCount() == 65,
                 "A baked body did not retain its exact 65-bone destination skeleton.");
@@ -318,6 +321,31 @@ public partial class T010PlayableWorldAcceptance : Node3D
         foreach (StringName animation in player.GetAnimationList())
             if (animation.ToString().Contains(expected, StringComparison.OrdinalIgnoreCase))
                 return true;
+        return false;
+    }
+
+    private static bool RootMotionTrackHasWalkTranslation(AnimationPlayer player)
+    {
+        foreach (StringName animationName in player.GetAnimationList())
+        {
+            if (!animationName.ToString().Contains("Walk", StringComparison.OrdinalIgnoreCase))
+                continue;
+            Animation? animation = player.GetAnimation(animationName);
+            if (animation is null) continue;
+            for (int track = 0; track < animation.GetTrackCount(); track++)
+            {
+                if (animation.TrackGetType(track) != Animation.TrackType.Position3D ||
+                    animation.TrackGetPath(track) != player.RootMotionTrack ||
+                    animation.TrackGetKeyCount(track) < 2)
+                    continue;
+                Vector3 firstValue = animation.TrackGetKeyValue(track, 0).AsVector3();
+                for (int key = 1; key < animation.TrackGetKeyCount(track); key++)
+                {
+                    if (!animation.TrackGetKeyValue(track, key).AsVector3().IsEqualApprox(firstValue))
+                        return true;
+                }
+            }
+        }
         return false;
     }
 

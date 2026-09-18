@@ -9,6 +9,7 @@ static class ClientWorldInputTests
         NormalizesAndSequencesWithoutEnginePolicyLeakage();
         SemanticLocomotionUpdatesRemainExplicit();
         OrbitCommandInterpretsMouseGestures();
+        RejectedInteractionSequenceDoesNotPoisonOrbitMovement();
         ReferenceProfilesKeepMovementAndLookIndependent();
         FocusAndActionEdgesAreCommonClientSemantics();
         SchedulerDecouplesSamplesAndPreservesEdges();
@@ -210,6 +211,57 @@ static class ClientWorldInputTests
             false,
             default,
             timestamp);
+    }
+
+    private static void RejectedInteractionSequenceDoesNotPoisonOrbitMovement()
+    {
+        var profile = new OrbitCommandProfile();
+        var sample = new ClientOrbitCommandSample(
+            GamePlayerActions.None, true, 0, 0,
+            false, false, false, false, false,
+            true, new ClientControlWorldPoint(4_000, 0), 0);
+
+        ClientControlProfileDecision interaction = profile.Evaluate(sample with
+        {
+            HeldActions = GamePlayerActions.Interact,
+            TimestampMilliseconds = 100,
+        });
+        Assert.Equal(GamePlayerActions.Interact, interaction.Command.HeldActions);
+        _ = profile.Evaluate(sample with { TimestampMilliseconds = 101 });
+
+        _ = profile.Evaluate(sample with
+        {
+            PrimaryDown = true,
+            PrimaryPressed = true,
+            TimestampMilliseconds = 200,
+        });
+        ClientControlProfileDecision heldMovement = profile.Evaluate(sample with
+        {
+            PrimaryDown = true,
+            TimestampMilliseconds = 350,
+        });
+        Assert.Equal(GameLocomotionUpdateKind.Direct, heldMovement.Command.Locomotion.Kind);
+
+        _ = profile.Evaluate(sample with
+        {
+            PrimaryReleased = true,
+            TimestampMilliseconds = 351,
+        });
+        _ = profile.Evaluate(sample with
+        {
+            PrimaryPressed = true,
+            PrimaryReleased = true,
+            TimestampMilliseconds = 500,
+        });
+        ClientControlProfileDecision doubleClickMovement = profile.Evaluate(sample with
+        {
+            PrimaryPressed = true,
+            PrimaryReleased = true,
+            TimestampMilliseconds = 700,
+        });
+        Assert.Equal(
+            GameLocomotionUpdateKind.Destination,
+            doubleClickMovement.Command.Locomotion.Kind);
     }
 
     private static void ReferenceProfilesKeepMovementAndLookIndependent()

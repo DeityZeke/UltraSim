@@ -2169,7 +2169,11 @@ A client which first sees an actor after an action records the sequence without 
 Godot derives horizontal `Idle`/`Walk` from successive committed authoritative poses. It selects
 `Rising`/`Falling` from Game's finite vertical phase, and produces one landing cue only when that
 phase transitions from airborne to `Grounded`. A jump apex or ceiling bonk therefore cannot be
-misread as landing. Godot never publishes animation state upstream. A semantic
+misread as landing. Imported skeleton-root translation is configured as extracted root motion and
+is never applied to the visual on top of the authoritative actor root; the client does not use an
+animation clip to move or jump the actor. Native acceptance requires the shipped Walk root track to
+contain real translation and proves that the presenter cancels it. Godot never publishes animation
+state upstream. A semantic
 `MainHandSocket` attaches public equipment to a matching right-hand bone or to a primitive actor's
 fixed fallback anchor. Equipped gear is excluded from independent world batching/picking; the same
 entity returns to ordinary GroundItem presentation after authoritative Drop.

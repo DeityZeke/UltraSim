@@ -47,6 +47,8 @@ public readonly record struct GamePublicWeaponPresentation(
 /// </summary>
 public sealed class GameItemGenerationState : IInventoryItemInspectionProvider
 {
+    public const int PickupRangeMillimeters = 3_000;
+
     private enum SpawnResult : byte
     {
         Spawned = 0,
@@ -535,7 +537,7 @@ public sealed class GameItemGenerationState : IInventoryItemInspectionProvider
         Int128 dx = (Int128)first.GlobalXMillimeters - second.GlobalXMillimeters;
         Int128 dy = (Int128)first.YMillimeters - second.YMillimeters;
         Int128 dz = (Int128)first.GlobalZMillimeters - second.GlobalZMillimeters;
-        Int128 range = GameWorldActions.InteractionRangeMillimeters;
+        Int128 range = PickupRangeMillimeters;
         return dx * dx + dy * dy + dz * dz <= range * range;
     }
 

@@ -755,7 +755,87 @@ static void ConceptDemoWeaponUsesPacketFreeWorldInventoryAndPrimaryPath()
             presentation.DetailText.Contains("Durability ", StringComparison.Ordinal));
     });
 
+    True(WorldPosition.TryFromGlobalMillimeters(
+        worldSword.Position.GlobalXMillimeters +
+            GameItemGenerationState.PickupRangeMillimeters + 1,
+        worldSword.Position.YMillimeters,
+        worldSword.Position.GlobalZMillimeters,
+        out WorldPosition distantPickupPosition));
+    True(fixture.Session.TryRequestRelocation(1, distantPickupPosition));
+    DriveUntil(() =>
+    {
+        fixture.Session.PumpWorld(cache);
+        return fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastAdministrativeSequence == 1 && view.LastAdministrativeSucceeded;
+    });
+
     var input = new ClientWorldInputSequencer(fixture.Session.ControlSession);
+    True(input.TryCreateSemanticCommand(
+        new ClientWorldCommandIntent(
+            GameLocomotionUpdate.Stop,
+            GamePlayerActions.Interact,
+            true),
+        out GamePlayerCommand distantPickup));
+    True(fixture.Session.TrySubmit(new LocalPlayableCommand(
+        distantPickup,
+        LocalPlayableSelection.IronSword,
+        false,
+        default,
+        false,
+        worldSword.Id)));
+    DriveUntil(() =>
+    {
+        fixture.Session.PumpWorld(cache);
+        return fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastCommandSequence == distantPickup.Sequence;
+    });
+    True(fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView distantView));
+    Equal(GameWorldActionStatus.OutOfRange, distantView.LastCommandResult.Interaction);
+
+    WorldPosition beforeMovement = distantView.PlayerPosition;
+    True(input.TryCreateSemanticCommand(
+        new ClientWorldCommandIntent(
+            GameLocomotionUpdate.CreateDirect(GamePlayerCommand.MaximumAxisMagnitude, 0),
+            GamePlayerActions.None,
+            true),
+        out GamePlayerCommand movementAfterRejection));
+    True(fixture.Session.TrySubmit(new LocalPlayableCommand(
+        movementAfterRejection,
+        LocalPlayableSelection.IronSword,
+        false,
+        default,
+        false,
+        worldSword.Id)));
+    DriveUntil(() =>
+    {
+        fixture.Session.PumpWorld(cache);
+        return fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastCommandSequence == movementAfterRejection.Sequence &&
+            view.PlayerPosition != beforeMovement;
+    });
+    True(input.TryCreateSemanticCommand(
+        new ClientWorldCommandIntent(
+            GameLocomotionUpdate.Stop,
+            GamePlayerActions.None,
+            true),
+        out GamePlayerCommand stopAfterRejection));
+    True(fixture.Session.TrySubmit(new LocalPlayableCommand(
+        stopAfterRejection, LocalPlayableSelection.IronSword,
+        false, default, false, worldSword.Id)));
+    DriveUntil(() =>
+    {
+        fixture.Session.PumpWorld(cache);
+        return fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastCommandSequence == stopAfterRejection.Sequence;
+    });
+
+    True(fixture.Session.TryRequestRelocation(2, GamePlayableWorld.PlayerStart));
+    DriveUntil(() =>
+    {
+        fixture.Session.PumpWorld(cache);
+        return fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastAdministrativeSequence == 2 && view.LastAdministrativeSucceeded;
+    });
     True(input.TryCreateSemanticCommand(
         new ClientWorldCommandIntent(
             GameLocomotionUpdate.Stop,
@@ -777,13 +857,12 @@ static void ConceptDemoWeaponUsesPacketFreeWorldInventoryAndPrimaryPath()
             view.LastCommandResult.Interaction == GameWorldActionStatus.Accepted &&
             !ContainsPublic(cache, worldSword.Id);
     }, failure: () => fixture.Session.GetSnapshot().ToString());
-
     var renderer = new MemoryRenderer();
     using var client = new UiClientRuntime(renderer, new UiClientLimits(8, 8));
     using LocalQueuedUiClient bridge = fixture.Session.AttachUiClient(
         client,
         ClientStandardUiLibrary.Resolve);
-    True(fixture.Session.TryRequestOpenInventory(1));
+    True(fixture.Session.TryRequestOpenInventory(3));
     DriveUntil(() =>
     {
         bridge.Pump();
@@ -845,7 +924,8 @@ static void ConceptDemoWeaponUsesPacketFreeWorldInventoryAndPrimaryPath()
     });
 
     Console.WriteLine(
-        $"EVIDENCE I0.12 local_packet_free pickup={pickup.Sequence} " +
+        $"EVIDENCE I0.12 local_packet_free rejected_pickup={distantPickup.Sequence} " +
+        $"movement_after_rejection={movementAfterRejection.Sequence} pickup={pickup.Sequence} " +
         $"primary={primary.Sequence} details='{details}'");
 }
 
