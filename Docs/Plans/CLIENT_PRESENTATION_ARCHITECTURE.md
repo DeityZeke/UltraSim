@@ -166,9 +166,31 @@ Deleting an engine-specific derived cache must not destroy the underlying verifi
 
 ---
 
-# 5. The four presentation/content layers
+# 5. Primitive substrate, content scopes, and presentation precedence
 
-UltraSim has four distinct content/presentation layers.
+UltraSim does **not** need four separate physical content stores.
+
+The durable model is:
+
+~~~text
+Permanent renderer substrate
+    Primitive
+
+Shared immutable content store
+    AssetBlob / CAS
+
+Content scopes
+    world.local
+    authenticated remote realm/world scopes
+
+User presentation overrides
+    resource packs
+
+Renderer-derived caches
+    Godot / future Unity / future Unreal
+~~~
+
+"Local" and "Server" remain useful **presentation precedence positions**, but they are the same species of package/catalog/content scope over the same content machinery and shared immutable blob store.
 
 ## 5.1 Layer 0 - Primitive substrate
 
@@ -199,9 +221,9 @@ The primitive substrate must be small enough to ship with every renderer product
 
 Primitive fallback is not authorization. It does not satisfy a missing required semantic artifact such as an authoritative WorldPack. It is only a realization of semantic information the client already legitimately possesses.
 
-## 5.2 Layer 1 - Local / Official content
+## 5.2 Local / Official content scope
 
-Local content is the official/default presentation and locally installed world content.
+`world.local` is the reserved local/Official content scope: official/default presentation plus locally installed world content. It is not a separate content implementation.
 
 It is **not baked into the Godot executable, APK, embedded PCK, or equivalent renderer binary**.
 
@@ -242,9 +264,9 @@ UltraSim.Local.UI
 
 Exact package splitting is not frozen; the ownership distinction is.
 
-## 5.3 Layer 2 - Server/realm content
+## 5.3 Active remote server/realm content scope
 
-Remote server content is authorized by the verified application realm and activation plan.
+Remote server content is another content scope over the same package/catalog/CAS machinery, authorized by the verified application realm and activation plan.
 
 Server content may include far more than textures/models:
 
@@ -280,7 +302,7 @@ The current A0 architecture already proves the important foundations:
 
 Server identity/authorization must not require physically duplicating bytes that another realm already uses.
 
-## 5.4 Layer 3 - User texture/resource packs
+## 5.4 User texture/resource packs
 
 The highest presentation layer is user-selected client-side passive override content, analogous to a Minecraft resource/texture pack.
 
@@ -304,9 +326,11 @@ Executable client extensions, if ever supported, remain a separate trust/install
 
 ---
 
-# 6. Resolution order versus graceful fallback order
+# 6. Presentation precedence versus graceful fallback order
 
-The conceptual composition order is:
+The following is **presentation precedence**, not a declaration of four physical stores or four semantic activation bases.
+
+The conceptual presentation composition order is:
 
 ~~~text
 Primitive
@@ -318,7 +342,7 @@ Server / Realm
 User Resource Pack
 ~~~
 
-Later compatible layers may replace or override presentation definitions from earlier layers.
+Later compatible precedence positions may replace or override presentation definitions from earlier positions. Local and Server entries are resolved from ordinary content scopes over the same shared storage.
 
 The runtime presentation fallback direction is the reverse:
 
@@ -428,37 +452,42 @@ Once applied, Client Core and the renderer should consume the same classes of se
 
 ---
 
-# 9. Global blob pool and realm-specific metadata
+# 9. Global blob pool and content-scope metadata
 
-Remote assets should be stored by immutable content hash in one global pool.
+Local and remote content bytes should be stored by immutable content hash in one shared pool within the selected content-store scope.
 
-A conceptual layout is:
+A conceptual logical layout is:
 
 ~~~text
 Assets/
-    Multiplayer/
-        BlobPool/
-            ab/abcdef...
-            cd/cdef01...
-            ef/ef0123...
+    AssetBlob/
+        ab/abcdef...
+        cd/cdef01...
+        ef/ef0123...
 
-        Servers/
-            <RealmId-A>/
-                manifests/
-                activations/
-                catalog/
-                profiles/
-                settings/
+    world.local/
+        manifests/
+        activations/
+        catalog/
+        profiles/
+        settings/
 
-            <RealmId-B>/
-                manifests/
-                activations/
-                catalog/
-                profiles/
-                settings/
+    <AuthenticatedRealmOrWorldId-A>/
+        manifests/
+        activations/
+        catalog/
+        profiles/
+        settings/
+
+    <AuthenticatedRealmOrWorldId-B>/
+        manifests/
+        activations/
+        catalog/
+        profiles/
+        settings/
 ~~~
 
-Realm A and Realm B may both resolve:
+`world.local`, Realm A, and Realm B may all resolve:
 
 ~~~text
 actors:human/male -> SHA256 ABCD...
@@ -466,7 +495,7 @@ actors:human/male -> SHA256 ABCD...
 
 The physical bytes exist once in the global pool.
 
-Each realm independently owns:
+Each content scope independently owns or references the metadata appropriate to its authority:
 
 - authorization;
 - activation identity;
@@ -476,17 +505,17 @@ Each realm independently owns:
 - server profile recommendations;
 - user per-server preferences/settings.
 
-The current ContentCache global-blob/realm-metadata architecture is the correct foundation. Do not regress to one duplicated physical asset directory per server.
+The current ContentCache global-blob/realm-metadata architecture is the correct foundation. Generalize it so `world.local` is an ordinary scope over the same store. Do not regress to duplicated Local bytes plus one physical asset directory per server.
 
 Blob possession is not realm authorization.
 
 ---
 
-# 10. Local content should use the same content machinery
+# 10. world.local is an ordinary content scope
 
-Local/Official content should not remain a bespoke second content system.
+Local/Official content must not remain a bespoke second content system.
 
-The desired distinction is source/authority, not package semantics.
+The desired distinction is scope/source/authority, not package semantics or physical storage.
 
 Remote:
 
@@ -500,10 +529,11 @@ authenticated realm
 Local:
 
 ~~~text
-installed official/local root
+world.local content scope
     -> local activation plan
     -> verified packages
     -> resolved catalog
+    -> blobs from the same shared CAS/store
 ~~~
 
 Below that boundary, reuse:
@@ -530,7 +560,7 @@ The persistent cache currently centers the server-authorized passive path. The p
 
 # 11. Suggested filesystem ownership, not frozen spelling
 
-A possible installation shape is:
+A possible logical installation shape is:
 
 ~~~text
 /GameName/
@@ -539,22 +569,22 @@ A possible installation shape is:
     native/runtime libraries/
 
     Assets/
-        Local/
-            packages/
+        AssetBlob/
+            <hash-addressed immutable bytes>
+
+        world.local/
             manifests/
-            installation metadata/
+            activations/
+            catalog/
+            profiles/
+            settings/
 
-        Multiplayer/
-            BlobPool/
-                <hash-addressed immutable bytes>
-
-            Servers/
-                <RealmId>/
-                    manifests/
-                    activations/
-                    catalog/
-                    profiles/
-                    settings/
+        <AuthenticatedRealmOrWorldId>/
+            manifests/
+            activations/
+            catalog/
+            profiles/
+            settings/
 
         ResourcePacks/
             <user pack>/
@@ -565,13 +595,15 @@ A possible installation shape is:
             Unreal/
 ~~~
 
+The same logical store may instead span a read-only install root plus platform-appropriate writable user storage. Portable mode may place both beside the executable.
+
 The architecture must not depend on these exact names.
 
 Required properties are:
 
 - executable/runtime is separable from removable Official content;
-- immutable server bytes are globally deduplicated;
-- realm-specific authorization/metadata remains realm-specific;
+- immutable Local/remote bytes are deduplicated in the shared store;
+- Local and realm/world scope authorization/metadata remain scope-specific;
 - user packs are separately owned;
 - renderer-derived caches are disposable/rebuildable.
 
