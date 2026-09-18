@@ -1,6 +1,6 @@
 # UltraSim Client Completion Plan
 
-**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign.
+**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0 is ACTIVE.**
 
 **Parent architecture:** [CLIENT_PRESENTATION_ARCHITECTURE.md](CLIENT_PRESENTATION_ARCHITECTURE.md)
 
@@ -138,6 +138,41 @@ Add or preserve snapshots for:
 - settings/profile signature.
 
 Record a fresh pre-F1 Godot client baseline on representative Concept Demo journeys.
+
+## Current source-evidence inventory
+
+F1.0 starts from existing accepted coverage rather than inventing a second client test framework.
+
+Current useful anchors include:
+
+- `_Tests/UltraSim.S0.Godot.Tests/T010PlayableWorldAcceptance.cs`: native World rendering/residency, public batching, picking, controlled actor presentation, nameplate reveal, action cues, system Chat banner, and a content-backed actor canary that already proves primitive -> exact-content visual upgrade while preserving actor-local presentation state;
+- `Client/Godot/Local/LocalPlayClientRoot.cs`: local composition, D0.0-D0.5/F0.2 smokes, native tooltip/layout crossing, Chat focus, and local session retirement;
+- `Client/Godot/ClientHost.Remote.cs`: remote A0.8 smoke plus F0.7 mixed Local -> Remote A -> Remote B -> Remote A reconnect -> Local lifecycle retirement against an exact persistent-root boundary;
+- `_Tests/UltraSim.S0.Godot.Tests/S08RemoteInventoryAcceptance.cs`: real authenticated owner-private remote Inventory/UI action path and close/reopen behavior;
+- `_Tests/UltraSim.Client.Local.Tests`: packet-free local Chat, UI, Inventory, Server Monitor, world-item/equipment, and semantic delivery behavior;
+- `_Tests/UltraSim.Network.Application.Tests/F03cClientProfileTests.cs`: canonical bounded code-free profile advertisement, proof gating, reserved-control preservation, and exact-realm reconnect behavior;
+- `_Tests/UltraSim.Client.Content.Tests`: package/catalog/CAS/application and generation/lifetime contracts that F1.1/F1.2 must preserve.
+
+These are the semantic/correctness controls for the F1 refactor.
+
+## F1.0 evidence still to capture
+
+Before F1.1 mutates content ownership, add or record the missing comparison surface:
+
+- one coordinated fresh Release run of the canonical verifier plus the representative Local/Remote native smokes;
+- exact current exported-product closure for Single Player, Online, and Complete;
+- current Godot node/resource counts for representative world, UI, actor, and dense-public scenes;
+- current public batch/MultiMesh counts and active chunk counts;
+- current content cache blob/manifest/activation/lease census at cold entry, warm entry, and retirement;
+- current open-view/focus/category ownership for Inventory, Server Monitor, Chat, world tooltip, shell menu, and Debug;
+- current actor realization census: detailed/content-backed, primitive fallback, nameplates, overhead labels, equipment/action cues;
+- current Local and Remote session-boundary residue snapshots after retirement/reconnect;
+- current settings/profile signatures before, during, and after realm-scoped recommendation use;
+- explicit notation of architecture mismatches that are expected to change during F1 rather than being mistaken for regressions.
+
+F1.0 does **not** require `world.local`, a user resource pack, direct RenderingServer RIDs, or the new window manager to exist yet. It records the old world well enough that F1.1+ can prove intentional change.
+
+The fresh baseline should be retained as an immutable evidence artifact under `_Benchmarks/Baselines` once actually executed; this source inventory is not a substitute for that run.
 
 ## Exit gate
 
