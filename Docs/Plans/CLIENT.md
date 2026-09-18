@@ -68,7 +68,7 @@ Inventory, vertical and reconnect/churn swarms, deterministic external impairmen
 actual exported Online processes. A 30-minute 64-client run retains bounded proof debt, zero source
 gaps/deadline misses/catch-up ticks, action conservation, and clean retirement. No PF5 measurement
 changes client protocol, cadence, AOI, capability packaging, or the 64-participant product cap;
-external human validation is next.
+F1 client architecture/productization completion is now active before external PF6 human validation.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -2765,7 +2765,24 @@ PF5-R5 singleton compression / prepared-hash hardening                       CLO
 PF5-R6 compatible immutable recipient-body sharing                           CLOSED (outcome A)
 PF5-R7 spatial topology / whole-server attribution                           CLOSED (characterization)
 PF5-R8 required fanout / avoidable-processing assurance                      CLOSED (measurement; R1 controls corrected)
-PF6 external human validation                                                READY TO RESUME
+        |
+        v
+F1.0 baseline and guardrails                                                  ACTIVE
+F1.1 unified content scopes/stores                                            PLANNED
+F1.2 semantic activation vs presentation resolution                           PLANNED
+F1.3 primitive substrate/fallback contract                                    PLANNED
+F1.4 Official Local content productization                                    PLANNED
+F1.5 user presentation overrides/content generations                          PLANNED
+F1.6 derived resources/atlas pipeline                                         PLANNED
+F1.7 shared UI composition/window manager                                     PLANNED
+F1.8 declarative camera/control rig profiles                                  PLANNED
+F1.9 scalable Godot presentation backend                                      PLANNED
+F1.10 actor representation tiers/interpolation seam                           PLANNED
+F1.11 renderer stress consumers/vegetation prototype                          PLANNED
+F1.12 product dogfooding/PF6 readiness                                        PLANNED
+        |
+        v
+PF6 external human validation                                                WAITING ON F1.12
         |
         v
 repository generalization / extraction readiness
