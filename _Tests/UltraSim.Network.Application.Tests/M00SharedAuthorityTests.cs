@@ -103,6 +103,9 @@ internal static class M00SharedAuthorityTests
             ulong progressDelta = 0;
             ulong reconciliationDelta = 0;
             ulong skipDelta = 0;
+            ulong actorSearchDelta = 0;
+            ulong actorRowsExaminedDelta = 0;
+            ulong actorEmptySearchDelta = 0;
             for (int index = 0; index < maximumParticipants; index++)
             {
                 progressDelta += remoteStable[index].ProgressPasses - remoteBefore[index].ProgressPasses;
@@ -110,16 +113,28 @@ internal static class M00SharedAuthorityTests
                     remoteBefore[index].ReconciliationPasses;
                 skipDelta += remoteStable[index].UnchangedSourceSkips -
                     remoteBefore[index].UnchangedSourceSkips;
+                actorSearchDelta += remoteStable[index].DeliverySearches -
+                    remoteBefore[index].DeliverySearches;
+                actorRowsExaminedDelta += remoteStable[index].DeliveryRowsExamined -
+                    remoteBefore[index].DeliveryRowsExamined;
+                actorEmptySearchDelta += remoteStable[index].EmptyDeliverySearches -
+                    remoteBefore[index].EmptyDeliverySearches;
             }
             True(progressDelta > 0);
             True(skipDelta > 0);
             True(reconciliationDelta < progressDelta);
+            True(actorSearchDelta > 0);
+            Equal(actorSearchDelta, actorEmptySearchDelta);
+            Equal(actorSearchDelta * maximumParticipants, actorRowsExaminedDelta);
             True(sourceStable.ViewReads - sourceBefore.ViewReads >= progressDelta);
             True(sourceStable.Preparations - sourceBefore.Preparations < progressDelta);
 
             ulong itemProgressDelta = 0;
             ulong itemReconciliationDelta = 0;
             ulong itemSkipDelta = 0;
+            ulong itemSearchDelta = 0;
+            ulong itemRowsExaminedDelta = 0;
+            ulong itemEmptySearchDelta = 0;
             for (int index = 0; index < maximumParticipants; index++)
             {
                 itemProgressDelta += remoteItemStable[index].ProgressPasses -
@@ -128,10 +143,21 @@ internal static class M00SharedAuthorityTests
                     remoteItemBefore[index].ReconciliationPasses;
                 itemSkipDelta += remoteItemStable[index].UnchangedSourceAndTopologySkips -
                     remoteItemBefore[index].UnchangedSourceAndTopologySkips;
+                itemSearchDelta += remoteItemStable[index].DeliverySearches -
+                    remoteItemBefore[index].DeliverySearches;
+                itemRowsExaminedDelta += remoteItemStable[index].DeliveryRowsExamined -
+                    remoteItemBefore[index].DeliveryRowsExamined;
+                itemEmptySearchDelta += remoteItemStable[index].EmptyDeliverySearches -
+                    remoteItemBefore[index].EmptyDeliverySearches;
             }
             True(itemProgressDelta > 0);
             True(itemSkipDelta > 0);
             True(itemReconciliationDelta < itemProgressDelta);
+            True(itemSearchDelta > 0);
+            Equal(itemSearchDelta, itemEmptySearchDelta);
+            Equal(
+                itemSearchDelta * SharedPlayableAuthority.MaximumPublicItemPresentations,
+                itemRowsExaminedDelta);
             True(itemSourceStable.ViewReads - itemSourceBefore.ViewReads >= itemProgressDelta);
             True(itemSourceStable.Preparations - itemSourceBefore.Preparations < itemProgressDelta);
 

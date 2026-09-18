@@ -55,6 +55,7 @@ public readonly record struct RemoteGuestPlayableServerSnapshot(
     ulong PublicPresentationDeliveriesQueued,
     ulong DuplicatePublicPresentationProofs,
     ulong RejectedPublicPresentationProofs,
+    RemotePresentationSchedulingSnapshot PresentationScheduling,
     RemoteChunkWorldStateServerSnapshot World,
     RemoteChatDeliveryServiceSnapshot Chat,
     RemoteGuestApplicationTimingSnapshot Timing);
@@ -65,6 +66,14 @@ internal readonly record struct RemoteSharedPresentationCensus(
     ulong ReconciliationPasses,
     ulong UnchangedSourceSkips,
     ulong SlotReads,
+    ulong DeliverySearches,
+    ulong DeliveryRowsExamined,
+    ulong EmptyDeliverySearches,
+    ulong QueueAttempts,
+    ulong QueueAcceptances,
+    ulong QueueRefusals,
+    ulong RetryDeferrals,
+    ulong RetryAttempts,
     ulong ProofWakeups,
     ulong LastSourceVersion);
 
@@ -76,9 +85,37 @@ internal readonly record struct RemotePublicItemPresentationCensus(
     ulong SourceRowsExamined,
     ulong SubscriptionLookups,
     ulong SubscriptionComparisons,
+    ulong DeliverySearches,
+    ulong DeliveryRowsExamined,
+    ulong EmptyDeliverySearches,
+    ulong QueueAttempts,
+    ulong QueueAcceptances,
+    ulong QueueRefusals,
+    ulong RetryDeferrals,
+    ulong RetryAttempts,
     ulong ProofWakeups,
     ulong LastSourceVersion,
     ulong SubscriptionTopologyVersion);
+
+/// <summary>Bounded owner-local operation census for one presentation-delivery table.</summary>
+public readonly record struct RemotePresentationDeliveryPollingSnapshot(
+    ulong ProgressPasses,
+    ulong ReconciliationPasses,
+    ulong UnchangedReconciliationSkips,
+    ulong DeliverySearches,
+    ulong DeliveryRowsExamined,
+    ulong EmptyDeliverySearches,
+    ulong QueueAttempts,
+    ulong QueueAcceptances,
+    ulong QueueRefusals,
+    ulong RetryDeferrals,
+    ulong RetryAttempts,
+    ulong ProofWakeups);
+
+/// <summary>Cold diagnostic snapshot for actor and public-item presentation scheduling.</summary>
+public readonly record struct RemotePresentationSchedulingSnapshot(
+    RemotePresentationDeliveryPollingSnapshot Actor,
+    RemotePresentationDeliveryPollingSnapshot PublicItem);
 
 /// <summary>
 /// Cold, bounded attribution for one remote Game/application lifetime. These
@@ -296,6 +333,14 @@ public sealed class RemoteGuestPlayableApplication :
     private ulong _sharedPresentationReconciliationPasses;
     private ulong _sharedPresentationUnchangedSourceSkips;
     private ulong _sharedPresentationSlotReads;
+    private ulong _sharedPresentationDeliverySearches;
+    private ulong _sharedPresentationDeliveryRowsExamined;
+    private ulong _sharedPresentationEmptyDeliverySearches;
+    private ulong _sharedPresentationQueueAttempts;
+    private ulong _sharedPresentationQueueAcceptances;
+    private ulong _sharedPresentationQueueRefusals;
+    private ulong _sharedPresentationRetryDeferrals;
+    private ulong _sharedPresentationRetryAttempts;
     private ulong _sharedPresentationProofWakeups;
     private bool _sharedPresentationReconcileRequired = true;
     private readonly SharedPublicPresentationRow[] _publicItemPresentations =
@@ -311,6 +356,14 @@ public sealed class RemoteGuestPlayableApplication :
     private ulong _publicItemPresentationSourceRowsExamined;
     private ulong _publicItemPresentationSubscriptionLookups;
     private ulong _publicItemPresentationSubscriptionComparisons;
+    private ulong _publicItemPresentationDeliverySearches;
+    private ulong _publicItemPresentationDeliveryRowsExamined;
+    private ulong _publicItemPresentationEmptyDeliverySearches;
+    private ulong _publicItemPresentationQueueAttempts;
+    private ulong _publicItemPresentationQueueAcceptances;
+    private ulong _publicItemPresentationQueueRefusals;
+    private ulong _publicItemPresentationRetryDeferrals;
+    private ulong _publicItemPresentationRetryAttempts;
     private ulong _publicItemPresentationProofWakeups;
     private ulong _lastPublicItemPresentationSourceVersion;
     private ulong _publicItemPresentationSubscriptionTopologyVersion;
@@ -662,6 +715,7 @@ public sealed class RemoteGuestPlayableApplication :
             _commandsConsidered, _commandsRateLimited,
             _publicPresentationApplied, _publicPresentationDeliveriesQueued,
             _duplicatePublicPresentationProofs, _rejectedPublicPresentationProofs,
+            GetPresentationSchedulingSnapshot(),
             _worldDelivery?.GetSnapshot() ?? default,
             _chatDelivery?.GetSnapshot() ?? default,
             GetTimingSnapshot());
@@ -1379,8 +1433,10 @@ public sealed class RemoteGuestPlayableApplication :
         int slot = _publicItemPresentationDeliverySlot;
         if (slot < 0)
         {
+            SaturatingIncrement(ref _publicItemPresentationDeliverySearches);
             for (int index = 0; index < _publicItemPresentations.Length; index++)
             {
+                SaturatingIncrement(ref _publicItemPresentationDeliveryRowsExamined);
                 if (!_publicItemPresentations[index].NeedsDelivery) continue;
                 slot = index;
                 ref SharedPublicPresentationRow selected =
@@ -1393,14 +1449,21 @@ public sealed class RemoteGuestPlayableApplication :
                 break;
             }
         }
-        if (slot < 0) return true;
+        if (slot < 0)
+        {
+            SaturatingIncrement(ref _publicItemPresentationEmptyDeliverySearches);
+            return true;
+        }
         ref SharedPublicPresentationRow row = ref _publicItemPresentations[slot];
         if (row.DeliveryId == 0)
             throw new InvalidOperationException("The selected public-item delivery has no identity.");
         long now = Environment.TickCount64;
         if (!force && row.LastQueuedMilliseconds != 0 &&
             now - row.LastQueuedMilliseconds < AdmissionRetryMilliseconds)
+        {
+            SaturatingIncrement(ref _publicItemPresentationRetryDeferrals);
             return true;
+        }
         var header = new RemotePublicPresentationMetadataHeader
         {
             ApplicationSessionEpoch = _applicationSessionEpoch,
@@ -1430,10 +1493,17 @@ public sealed class RemoteGuestPlayableApplication :
                 _messageScratch, in header, label, properties, out int written))
             throw new InvalidOperationException(
                 "The retained public-item presentation metadata became invalid.");
+        bool retry = row.LastQueuedMilliseconds != 0;
+        SaturatingIncrement(ref _publicItemPresentationQueueAttempts);
+        if (retry) SaturatingIncrement(ref _publicItemPresentationRetryAttempts);
         if (_peer.TryQueue(RemotePublicPresentationMetadataHeaderCodec.Descriptor.Id,
                 _messageScratch.AsSpan(0, written)) != NetworkQueueStatus.Accepted)
+        {
+            SaturatingIncrement(ref _publicItemPresentationQueueRefusals);
             return false;
+        }
         row.LastQueuedMilliseconds = now;
+        SaturatingIncrement(ref _publicItemPresentationQueueAcceptances);
         SaturatingIncrement(ref _publicPresentationDeliveriesQueued);
         return true;
     }
@@ -1656,8 +1726,10 @@ public sealed class RemoteGuestPlayableApplication :
         int slot = _sharedPresentationDeliverySlot;
         if (slot < 0)
         {
+            SaturatingIncrement(ref _sharedPresentationDeliverySearches);
             for (int index = 0; index < _sharedPresentation.Length; index++)
             {
+                SaturatingIncrement(ref _sharedPresentationDeliveryRowsExamined);
                 if (!_sharedPresentation[index].NeedsDelivery) continue;
                 slot = index;
                 ref SharedPublicPresentationRow selected = ref _sharedPresentation[index];
@@ -1671,6 +1743,7 @@ public sealed class RemoteGuestPlayableApplication :
         }
         if (slot < 0)
         {
+            SaturatingIncrement(ref _sharedPresentationEmptyDeliverySearches);
             _publicPresentationApplied = IsOwnPresentationApplied();
             return true;
         }
@@ -1679,7 +1752,10 @@ public sealed class RemoteGuestPlayableApplication :
         long now = Environment.TickCount64;
         if (!force && row.LastQueuedMilliseconds != 0 &&
             now - row.LastQueuedMilliseconds < AdmissionRetryMilliseconds)
+        {
+            SaturatingIncrement(ref _sharedPresentationRetryDeferrals);
             return true;
+        }
         var header = new RemotePublicPresentationMetadataHeader
         {
             ApplicationSessionEpoch = _applicationSessionEpoch,
@@ -1706,10 +1782,17 @@ public sealed class RemoteGuestPlayableApplication :
                 _messageScratch, in header, label, null, out int written))
             throw new InvalidOperationException(
                 "The retained shared public-presentation metadata became invalid.");
+        bool retry = row.LastQueuedMilliseconds != 0;
+        SaturatingIncrement(ref _sharedPresentationQueueAttempts);
+        if (retry) SaturatingIncrement(ref _sharedPresentationRetryAttempts);
         if (_peer.TryQueue(RemotePublicPresentationMetadataHeaderCodec.Descriptor.Id,
                 _messageScratch.AsSpan(0, written)) != NetworkQueueStatus.Accepted)
+        {
+            SaturatingIncrement(ref _sharedPresentationQueueRefusals);
             return false;
+        }
         row.LastQueuedMilliseconds = now;
+        SaturatingIncrement(ref _sharedPresentationQueueAcceptances);
         SaturatingIncrement(ref _publicPresentationDeliveriesQueued);
         return true;
     }
@@ -1856,6 +1939,14 @@ public sealed class RemoteGuestPlayableApplication :
             _sharedPresentationReconciliationPasses,
             _sharedPresentationUnchangedSourceSkips,
             _sharedPresentationSlotReads,
+            _sharedPresentationDeliverySearches,
+            _sharedPresentationDeliveryRowsExamined,
+            _sharedPresentationEmptyDeliverySearches,
+            _sharedPresentationQueueAttempts,
+            _sharedPresentationQueueAcceptances,
+            _sharedPresentationQueueRefusals,
+            _sharedPresentationRetryDeferrals,
+            _sharedPresentationRetryAttempts,
             _sharedPresentationProofWakeups,
             _lastSharedPresentationSourceVersion);
     }
@@ -1870,10 +1961,46 @@ public sealed class RemoteGuestPlayableApplication :
             _publicItemPresentationSourceRowsExamined,
             _publicItemPresentationSubscriptionLookups,
             _publicItemPresentationSubscriptionComparisons,
+            _publicItemPresentationDeliverySearches,
+            _publicItemPresentationDeliveryRowsExamined,
+            _publicItemPresentationEmptyDeliverySearches,
+            _publicItemPresentationQueueAttempts,
+            _publicItemPresentationQueueAcceptances,
+            _publicItemPresentationQueueRefusals,
+            _publicItemPresentationRetryDeferrals,
+            _publicItemPresentationRetryAttempts,
             _publicItemPresentationProofWakeups,
             _lastPublicItemPresentationSourceVersion,
             _publicItemPresentationSubscriptionTopologyVersion);
     }
+
+    private RemotePresentationSchedulingSnapshot GetPresentationSchedulingSnapshot() => new(
+        new RemotePresentationDeliveryPollingSnapshot(
+            _sharedPresentationProgressPasses,
+            _sharedPresentationReconciliationPasses,
+            _sharedPresentationUnchangedSourceSkips,
+            _sharedPresentationDeliverySearches,
+            _sharedPresentationDeliveryRowsExamined,
+            _sharedPresentationEmptyDeliverySearches,
+            _sharedPresentationQueueAttempts,
+            _sharedPresentationQueueAcceptances,
+            _sharedPresentationQueueRefusals,
+            _sharedPresentationRetryDeferrals,
+            _sharedPresentationRetryAttempts,
+            _sharedPresentationProofWakeups),
+        new RemotePresentationDeliveryPollingSnapshot(
+            _publicItemPresentationProgressPasses,
+            _publicItemPresentationReconciliationPasses,
+            _publicItemPresentationUnchangedSourceAndTopologySkips,
+            _publicItemPresentationDeliverySearches,
+            _publicItemPresentationDeliveryRowsExamined,
+            _publicItemPresentationEmptyDeliverySearches,
+            _publicItemPresentationQueueAttempts,
+            _publicItemPresentationQueueAcceptances,
+            _publicItemPresentationQueueRefusals,
+            _publicItemPresentationRetryDeferrals,
+            _publicItemPresentationRetryAttempts,
+            _publicItemPresentationProofWakeups));
 
     private void HandleInventoryMutationCompleted(InventoryMutationResult result)
     {
