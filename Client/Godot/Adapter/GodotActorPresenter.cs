@@ -374,12 +374,15 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             Modulate = new Color(1f, 1f, 0.86f),
         };
         root.AddChild(overhead);
-        Node3D mainHandSocket = CreateMainHandSocket(root, visual);
-        Node3D primaryCue = CreateMainHandPresentation();
+        Node3D mainHandSocket = CreateMainHandSocket(
+            root, visual, out Skeleton3D? mainHandSkeleton, out int mainHandBone);
+        Node3D primaryCue = CreateMainHandPresentation(out Node3D primaryActionPivot);
         mainHandSocket.AddChild(primaryCue);
         Node3D interactCue = CreateInteractCue();
         effectsAnchor.AddChild(interactCue);
         Root.AddChild(root);
+        SynchronizeMainHandSocketPosition(
+            root, mainHandSocket, mainHandSkeleton, mainHandBone);
         NormalizeMainHandPresentationScale(mainHandSocket, primaryCue);
         _slots[index] = new ActorSlot
         {
@@ -391,7 +394,10 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             Nameplate = nameplate,
             Overhead = overhead,
             PrimaryCue = primaryCue,
+            PrimaryActionPivot = primaryActionPivot,
             MainHandSocket = mainHandSocket,
+            MainHandSkeleton = mainHandSkeleton,
+            MainHandBone = mainHandBone,
             InteractCue = interactCue,
             AnimationPlayer = animations,
             PrimitiveFallback = primitive,
@@ -437,9 +443,11 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             ConfigureAuthoritativeRootMotion(visual, animations);
             ConfigureAnimationLoops(animations);
         }
-        Node3D socket = CreateMainHandSocket(root, visual);
-        Node3D primaryCue = CreateMainHandPresentation();
+        Node3D socket = CreateMainHandSocket(
+            root, visual, out Skeleton3D? mainHandSkeleton, out int mainHandBone);
+        Node3D primaryCue = CreateMainHandPresentation(out Node3D primaryActionPivot);
         socket.AddChild(primaryCue);
+        SynchronizeMainHandSocketPosition(root, socket, mainHandSkeleton, mainHandBone);
         NormalizeMainHandPresentationScale(socket, primaryCue);
 
         slot.Visual = visual;
@@ -447,6 +455,9 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         slot.AnimationPlayer = animations;
         slot.MainHandSocket = socket;
         slot.PrimaryCue = primaryCue;
+        slot.PrimaryActionPivot = primaryActionPivot;
+        slot.MainHandSkeleton = mainHandSkeleton;
+        slot.MainHandBone = mainHandBone;
         slot.PrimitiveFallback = false;
         slot.PlayedMotionPhase = (GodotActorMotionPhase)byte.MaxValue;
         if (animations is not null) _animated++;
@@ -544,6 +555,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
                 MillimetersToMeters);
         slot.Root.Rotation = new Vector3(
             0, orientation.Units * (MathF.Tau / WorldYaw.UnitsPerTurn), 0);
+        SynchronizeMainHandSocketPosition(ref slot);
         bool controlledNameGrace = controlled &&
             _currentTimeMilliseconds < _controlledNameplateExpiresAtMilliseconds;
         slot.Nameplate!.Visible = actor.NameplateEligible &&
@@ -566,20 +578,22 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
 
     private static void ApplyPrimaryCue(ref ActorSlot slot, ulong nowMilliseconds)
     {
-        if (slot.PrimaryCue is null || slot.PrimaryCueStartedAtMilliseconds == 0) return;
+        if (slot.PrimaryCue is null || slot.PrimaryActionPivot is null ||
+            slot.PrimaryCueStartedAtMilliseconds == 0) return;
         ulong elapsed = nowMilliseconds >= slot.PrimaryCueStartedAtMilliseconds
             ? nowMilliseconds - slot.PrimaryCueStartedAtMilliseconds
             : ulong.MaxValue;
         if (elapsed >= PrimaryCueDurationMilliseconds)
         {
             slot.PrimaryCueStartedAtMilliseconds = 0;
-            slot.PrimaryCue.Rotation = Vector3.Zero;
+            slot.PrimaryActionPivot.Rotation = Vector3.Zero;
             slot.PrimaryCue.Visible = slot.MainHandPrefabId != 0;
             return;
         }
         slot.PrimaryCue.Visible = true;
         float progress = elapsed / (float)PrimaryCueDurationMilliseconds;
-        slot.PrimaryCue.Rotation = new Vector3(-0.35f, Mathf.Lerp(-1.2f, 1.2f, progress), 0.25f);
+        slot.PrimaryActionPivot.Rotation = new Vector3(
+            -0.35f, Mathf.Lerp(-1.2f, 1.2f, progress), 0.25f);
     }
 
     private bool PresentAction(
@@ -873,44 +887,61 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         };
     }
 
-    private static Node3D CreateMainHandSocket(Node3D root, Node3D visual)
+    private static Node3D CreateMainHandSocket(
+        Node3D root,
+        Node3D visual,
+        out Skeleton3D? mainHandSkeleton,
+        out int mainHandBone)
     {
-        Skeleton3D? skeleton = FindFirst<Skeleton3D>(visual);
-        if (skeleton is not null)
+        mainHandSkeleton = FindFirst<Skeleton3D>(visual);
+        if (mainHandSkeleton is not null)
         {
-            string? rightHand = null;
-            for (int bone = 0; bone < skeleton.GetBoneCount(); bone++)
+            for (int bone = 0; bone < mainHandSkeleton.GetBoneCount(); bone++)
             {
-                string candidate = skeleton.GetBoneName(bone);
+                string candidate = mainHandSkeleton.GetBoneName(bone);
                 if (!candidate.EndsWith("RightHand", StringComparison.OrdinalIgnoreCase)) continue;
-                rightHand = candidate;
-                break;
-            }
-            if (rightHand is not null)
-            {
-                var attachment = new BoneAttachment3D
+                mainHandBone = bone;
+                var socket = new Marker3D
                 {
                     Name = "MainHandSocket",
-                    BoneName = rightHand,
                 };
-                skeleton.AddChild(attachment);
-                return attachment;
+                // The hand's position is sampled explicitly below. Keeping the socket under the
+                // actor root prevents unarmed Idle/Walk wrist rotations from steering the weapon.
+                root.AddChild(socket);
+                return socket;
             }
         }
 
+        mainHandSkeleton = null;
+        mainHandBone = -1;
         var fallback = new Marker3D
         {
             Name = "MainHandSocket",
-            Position = new Vector3(0.34f, 1.08f, 0),
-            // Match the imported humanoid socket convention: local +Z leaves the hand toward
-            // the ground. Presentation geometry can then use one mount in both realizations.
-            Rotation = new Vector3(MathF.PI * 0.5f, 0, 0),
+            Position = new Vector3(-0.34f, 1.08f, 0),
         };
         root.AddChild(fallback);
         return fallback;
     }
 
-    private static Node3D CreateMainHandPresentation()
+    private static void SynchronizeMainHandSocketPosition(ref ActorSlot slot)
+    {
+        if (slot.Root is null || slot.MainHandSocket is null) return;
+        SynchronizeMainHandSocketPosition(
+            slot.Root, slot.MainHandSocket, slot.MainHandSkeleton, slot.MainHandBone);
+    }
+
+    private static void SynchronizeMainHandSocketPosition(
+        Node3D root,
+        Node3D socket,
+        Skeleton3D? skeleton,
+        int bone)
+    {
+        if (skeleton is null || bone < 0) return;
+        Vector3 hand = skeleton.ToGlobal(skeleton.GetBoneGlobalPose(bone).Origin);
+        socket.Position = root.ToLocal(hand);
+    }
+
+    private static Node3D CreateMainHandPresentation(out Node3D actionPivot)
     {
         var bladeMaterial = new StandardMaterial3D
         {
@@ -937,11 +968,13 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         {
             Name = "MainHandPresentation",
             Visible = false,
-            // Keep the one-handed placeholder clear of the leg/torso without detaching it from
-            // the animated hand. Imported humanoids expose their usable grip axis as local +Z.
-            Rotation = new Vector3(-MathF.PI / 15f, 0, 0),
+            // Local +Y is the weapon's hilt-to-tip axis. In actor space this hangs the blade down
+            // and slightly outward from the right hand, independent of unarmed wrist animation.
+            Rotation = new Vector3(0, 0, MathF.PI - MathF.PI / 15f),
         };
-        pivot.AddChild(new MeshInstance3D
+        actionPivot = new Node3D { Name = "MainHandActionPivot" };
+        pivot.AddChild(actionPivot);
+        actionPivot.AddChild(new MeshInstance3D
         {
             Name = "PrimitiveBlade",
             Mesh = GodotMeshGeometry.CreateGroundedBox(
@@ -949,10 +982,9 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
                     MainHandBladeWidthMeters,
                     MainHandBladeLengthMeters,
                     MainHandBladeThicknessMeters), bladeMaterial),
-            Position = new Vector3(0, 0, MainHandBladeBaseMeters),
-            Rotation = new Vector3(MathF.PI * 0.5f, 0, 0),
+            Position = new Vector3(0, MainHandBladeBaseMeters, 0),
         });
-        pivot.AddChild(new MeshInstance3D
+        actionPivot.AddChild(new MeshInstance3D
         {
             Name = "PrimitiveGuard",
             Mesh = GodotMeshGeometry.CreateGroundedBox(
@@ -961,9 +993,9 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
                     MainHandGuardLengthMeters,
                     MainHandGuardThicknessMeters), guardMaterial),
             Position = new Vector3(
-                0, -MainHandGuardLengthMeters * 0.5f, MainHandGuardCenterMeters),
+                0, MainHandGuardCenterMeters - MainHandGuardLengthMeters * 0.5f, 0),
         });
-        pivot.AddChild(new MeshInstance3D
+        actionPivot.AddChild(new MeshInstance3D
         {
             Name = "PrimitiveGrip",
             Mesh = GodotMeshGeometry.CreateGroundedBox(
@@ -972,8 +1004,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
                     MainHandGripLengthMeters,
                     MainHandGripThicknessMeters), gripMaterial),
             // The bone socket now lands at the middle of the grip, not on the guard.
-            Position = new Vector3(0, 0, -MainHandGripLengthMeters * 0.5f),
-            Rotation = new Vector3(MathF.PI * 0.5f, 0, 0),
+            Position = new Vector3(0, -MainHandGripLengthMeters * 0.5f, 0),
         });
         return pivot;
     }
@@ -1046,7 +1077,10 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         internal Label3D? Nameplate;
         internal Label3D? Overhead;
         internal Node3D? PrimaryCue;
+        internal Node3D? PrimaryActionPivot;
         internal Node3D? MainHandSocket;
+        internal Skeleton3D? MainHandSkeleton;
+        internal int MainHandBone;
         internal Node3D? InteractCue;
         internal AnimationPlayer? AnimationPlayer;
         internal WorldPosition ObservedPosition;

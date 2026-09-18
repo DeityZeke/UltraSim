@@ -2178,10 +2178,12 @@ misread as landing. Imported skeleton-root translation is configured as extracte
 is never applied to the visual on top of the authoritative actor root; the client does not use an
 animation clip to move or jump the actor. Native acceptance requires the shipped Walk root track to
 contain real translation and proves that the presenter cancels it. Godot never publishes animation
-state upstream. A semantic
-`MainHandSocket` attaches public equipment to a matching right-hand bone or to a primitive actor's
-fixed fallback anchor. Equipped gear is excluded from independent world batching/picking; the same
-entity returns to ordinary GroundItem presentation after authoritative Drop.
+state upstream. A semantic `MainHandSocket` samples a matching right-hand bone's position while
+retaining an actor-relative equipment orientation, or uses a primitive actor's fixed fallback
+anchor. This prevents unarmed locomotion wrist rotations from steering equipped gear. A distinct
+action pivot owns the bounded Primary swing and returns to identity without modifying the resting
+mount. Equipped gear is excluded from independent world batching/picking; the same entity returns
+to ordinary GroundItem presentation after authoritative Drop.
 
 The historical V1.5 X/Y FBXs kept model and action skeletons as separate Godot imports. D0.7a moves
 those inputs out of the runtime resource tree and uses one reproducible Blender conversion per body.

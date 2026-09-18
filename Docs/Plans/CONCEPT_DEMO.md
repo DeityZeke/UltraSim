@@ -1023,10 +1023,12 @@ model. Equipped items stay attached and non-pickable; authoritative Drop returns
 ordinary GroundItem presentation.
 
 Human-play validation additionally proved that the imported body hierarchy contributes a `0.01`
-scale below the hand bone. Main-Hand presentation now cancels that inherited presentation scale,
-keeps the sword parented to the semantic socket, and extends the primitive blade away from the hand.
-The permanent local product journey requires a visible meter-scale blade mesh after authoritative
-equip, not merely a visible empty socket node.
+scale and unarmed animation rotation below the hand bone. Main-Hand presentation now samples the
+hand position into an actor-relative semantic socket, so it inherits neither that scale nor the
+Idle/Walk wrist rotation. A separate action pivot owns the temporary swing without overwriting the
+resting mount. The permanent local product journey requires a visible meter-scale blade with a
+centered grip and stable down/out orientation after authoritative equip, not merely a visible empty
+socket node.
 
 The V1.5 X/Y model and action FBXs are now authoring inputs outside Godot's runtime resource tree.
 A reproducible Blender conversion verifies an exact ordered 65-bone-name match and emits one GLB per body

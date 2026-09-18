@@ -78,6 +78,11 @@ public partial class T010PlayableWorldAcceptance : Node3D
             { ActiveActors: 2, PrimitiveFallbackActors: 0, AnimatedActors: 2,
               EquippedMainHands: 1 },
             "The baked X/Y bodies did not realize as two animated non-primitive actors.");
+        Node3D? xRoot = null;
+        Node3D? xSocket = null;
+        Skeleton3D? xSkeleton = null;
+        AnimationPlayer? xAnimations = null;
+        int xHandBone = -1;
         foreach (WorldPublicEntityId id in new[] { xId, yId })
         {
             Expect(presenter.TryGetActorRoot(id, out Node3D? root) && root is not null,
@@ -92,8 +97,24 @@ public partial class T010PlayableWorldAcceptance : Node3D
             Skeleton3D? skeleton = FindDescendant<Skeleton3D>(root!);
             Expect(skeleton is not null && skeleton.GetBoneCount() == 65,
                 "A baked body did not retain its exact 65-bone destination skeleton.");
-            Expect(FindNamedDescendant(root!, "MainHandSocket") is not null,
-                "A baked body did not expose its semantic MainHand socket.");
+            var socket = FindNamedDescendant(root!, "MainHandSocket") as Node3D;
+            Expect(socket is not null && socket.GetParent() == root &&
+                socket.Basis.IsEqualApprox(Basis.Identity),
+                "A baked body did not expose an actor-relative semantic MainHand socket.");
+            if (id == xId)
+            {
+                xRoot = root;
+                xSocket = socket;
+                xSkeleton = skeleton;
+                xAnimations = player;
+                for (int bone = 0; bone < skeleton!.GetBoneCount(); bone++)
+                    if (skeleton.GetBoneName(bone).ToString().EndsWith(
+                            "RightHand", StringComparison.OrdinalIgnoreCase))
+                    {
+                        xHandBone = bone;
+                        break;
+                    }
+            }
             Expect(presenter.TryGetActorDiagnostics(
                     id, out GodotActorPresentationDiagnostics diagnostics) &&
                 diagnostics.HasAnimationPlayer,
@@ -113,8 +134,19 @@ public partial class T010PlayableWorldAcceptance : Node3D
                 xId, out GodotActorPresentationDiagnostics walking) &&
             walking.MotionPhase == GodotActorMotionPhase.Walk,
             "The baked X body did not consume authoritative position change as Walk presentation.");
+        Expect(xRoot is not null && xSocket is not null && xSkeleton is not null &&
+            xAnimations is not null && xHandBone >= 0,
+            "The baked-body hand stabilization fixture was incomplete.");
+        xAnimations!.Advance(0.2);
+        presenter.UpdateOriginAndLifetimes(moved, 1_240);
+        Vector3 expectedHand = xRoot!.ToLocal(
+            xSkeleton!.ToGlobal(xSkeleton.GetBoneGlobalPose(xHandBone).Origin));
+        Expect(xSocket!.Position.IsEqualApprox(expectedHand) &&
+            xSocket.Basis.IsEqualApprox(Basis.Identity),
+            "Walk animation did not update hand position independently of weapon orientation.");
         GD.Print("EVIDENCE D0.7a baked_bodies=2 bones_each=65 clips=Idle,Walk,Jump " +
-            "animated=2 primitive=0 main_hand_socket=true walk_transition=true");
+            "animated=2 primitive=0 main_hand_socket=true wrist_rotation_decoupled=true " +
+            "walk_transition=true");
     }
 
     private void RunContentBackedBodyRealizationAcceptance()
@@ -548,6 +580,15 @@ public partial class T010PlayableWorldAcceptance : Node3D
                 controlledId, out GodotActorPresentationDiagnostics initialPresentation) &&
             initialPresentation.MainHandVisible && !initialPresentation.PrimaryCueActive,
             "The controlled actor did not expose its semantic MainHand socket presentation.");
+        var mainHandSocket = FindNamedDescendant(controlled, "MainHandSocket") as Node3D;
+        var mainHandPresentation = FindNamedDescendant(
+            controlled, "MainHandPresentation") as Node3D;
+        var mainHandActionPivot = FindNamedDescendant(
+            controlled, "MainHandActionPivot") as Node3D;
+        Expect(mainHandSocket is not null && mainHandSocket.GetParent() == controlled &&
+            mainHandPresentation is not null && mainHandActionPivot is not null,
+            "The controlled actor did not separate its stable hand mount from action animation.");
+        Vector3 restingMainHandRotation = mainHandPresentation!.Rotation;
         if (!presenter.TryGetActorRoot(otherId, out Node3D? other) || other is null)
             throw new InvalidOperationException("The other actor root was not realized.");
         Expect(other.Position.IsEqualApprox(new Vector3(2f, -0.3f, 3f)) &&
@@ -632,12 +673,18 @@ public partial class T010PlayableWorldAcceptance : Node3D
         Expect(presenter.GetSnapshot() is
             { VisiblePrimaryCues: 1, PrimaryCuesPresented: 1 },
             "The active Primary cue was not observable in bounded native state.");
+        Expect(mainHandPresentation.Rotation.IsEqualApprox(restingMainHandRotation) &&
+            !mainHandActionPivot!.Rotation.IsEqualApprox(Vector3.Zero),
+            "A Primary cue overwrote the equipped weapon's resting mount.");
         presenter.UpdateOriginAndLifetimes(
             nextOwnerPose,
             swingStarted + GodotActorPresenter.PrimaryCueDurationMilliseconds);
         Expect(presenter.GetSnapshot() is
             { VisiblePrimaryCues: 0, PrimaryCuesPresented: 1 },
             "The transient Primary cue did not retire at its fixed presentation lifetime.");
+        Expect(mainHandPresentation.Rotation.IsEqualApprox(restingMainHandRotation) &&
+            mainHandActionPivot!.Rotation.IsEqualApprox(Vector3.Zero),
+            "Primary-cue retirement did not preserve the resting mount and reset only its action pivot.");
 
         ClientActorPresentationRecord interacted = additions[0].Current with
         {

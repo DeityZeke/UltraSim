@@ -138,9 +138,11 @@ visible upper portions of doors and signs nominate those disclosed objects norma
 I0.12 adds the first persistent world item to both local and remote consumers. An Iron Sword can be
 selected and picked up with the ordinary Interact path, inspected in Inventory, equipped, used with
 Primary, and dropped through the compiled Inventory view. Equipped sword presentation is attached
-beneath the semantic `MainHandSocket`; imported body scale is cancelled at that socket so the
-meter-scale blade does not collapse to a one-centimeter mesh, and the blade extends away from the
-hand rather than backward through the torso. The semantic world item has a bounded
+beneath the semantic `MainHandSocket`. That actor-relative socket samples the imported hand bone's
+position without inheriting the unarmed Idle/Walk wrist rotation or the skeleton's `0.01` authoring
+scale. The one-handed blade therefore remains meter-correct and hangs down/out from the hand rather
+than snapping across the torso as locomotion blends. A separate child pivot owns the bounded swing,
+so retiring the cue cannot overwrite the resting mount. The semantic world item has a bounded
 primitive presentation/pick volume; recipient-visible rolled facts arrive through the bounded cold
 public metadata cache rather than hot movement rows. I0.13 formats that typed set through the same
 engine-neutral catalog/profile used by Inventory. The shared sign/item tooltip has no sword-sized
@@ -186,7 +188,8 @@ Game-owned `Grounded`/`Rising`/`Falling` presentation state selects vertical mot
 airborne-to-grounded transition produces the one-shot landing cue. Animation playback never becomes
 Physics or Game truth. The local X/Y presentation uses reproducibly consolidated GLBs containing one body skeleton
 plus exact `Idle`, `Walk`, and `Jump` actions. An explicit semantic `MainHandSocket` follows the
-body's right-hand bone, with a fixed primitive anchor only for fallback actors. The public actor
+body's right-hand position while retaining actor-relative equipment orientation, with a fixed
+primitive anchor only for fallback actors. The public actor
 metadata exposes only the equipped public prefab and latest accepted `Interact`/`Primary` sequence;
 private sword rolls stay in Inventory/Inspection state. Late actor realization records the sequence
 without replaying the old cue. Dropped swords return to ordinary batched world presentation, while
