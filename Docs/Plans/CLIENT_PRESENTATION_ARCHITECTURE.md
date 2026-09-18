@@ -4,6 +4,8 @@
 
 **Relationship to existing plans:** this document is the durable client/presentation/content companion to [CLIENT.md](CLIENT.md), [ASSET_STREAMING.md](ASSET_STREAMING.md), [TERRAIN.md](TERRAIN.md), and [CONCEPT_DEMO.md](CONCEPT_DEMO.md). CLIENT.md remains the checkpoint/status roadmap. This document owns details that are easy to lose when a vertical slice proves only that something can be rendered.
 
+**Implementation campaign:** [CLIENT_COMPLETION_PLAN.md](CLIENT_COMPLETION_PLAN.md) turns this architecture into the ordered F1.0-F1.12 pre-PF6 execution plan.
+
 **Current sequencing:** PF0-PF5/PF5-R11 established the server, Network, content, and semantic-client foundations strongly enough that PF6 external human validation is ready. Before PF6, the client needs one architecture-completion/productization pass. The goal is not final art polish. The goal is a coherent dumb terminal whose content, UI, camera/control, fallback, and renderer boundaries match the architecture already proven underneath.
 
 ---
