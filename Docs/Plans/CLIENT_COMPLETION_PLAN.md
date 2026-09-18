@@ -269,6 +269,42 @@ world.local activation
 
 Required semantic/structural content fails closed if absent or invalid.
 
+## Concept Demo actor-art migration
+
+The current Concept Demo activation still marks the actor Add package and actor Replace package as `Required`. F1.2 must deliberately migrate that policy rather than relying on the renderer to catch missing art after admission.
+
+The migration must identify:
+
+- which actor/public-presentation descriptors are required semantic/presentation metadata;
+- which GLB/model/texture payloads are optional high-quality presentation;
+- where primitive-fallback bounds/kind/anchors live when optional art is absent;
+- which current `Required` packages become `Optional` or move into presentation-only scope;
+- how application proof continues to prove the exact authorized semantic activation without requiring optional art bytes;
+- how an optional server presentation package can override `world.local` presentation when present without becoming required for world entry.
+
+The accepted end state must permit a remote Concept Demo session to enter with its required World/UI/semantic activation valid while actor high-quality art is absent, then realize the same disclosed actors through `world.local` or Primitive presentation according to the presentation resolver.
+
+Do not weaken content validation: an optional package that is present must still validate exactly before use.
+
+## Presentation-generation prerequisite
+
+F1.3 requires live primitive-to-content upgrades without semantic reset. Therefore F1.2 must establish or extend the minimum presentation-generation/lease fence needed by that acceptance before F1.3 begins.
+
+For an entered application/world session:
+
+~~~text
+AuthorizedSemanticActivation
+    fixed for this session unless a separately authorized semantic transition exists
+
+PresentationGeneration N
+    may be replaced by PresentationGeneration N+1
+    under the same AuthorizedSemanticActivation
+~~~
+
+A presentation generation owns resolved compatible presentation selections and native-resource publication lineage. New presentation work publishes only if its generation is still current; old resources/blobs remain leased until no active presentation uses them.
+
+F1.5 later generalizes this substrate for user-pack enable/disable/update. It does not retroactively make user presentation changes semantic activation changes.
+
 ## Presentation resolution
 
 Presentation uses compatible fallback/override candidates:
@@ -458,26 +494,33 @@ user resource pack:
 
 User packs do not replace authoritative collision, structural world truth, disclosure, or server UI action semantics.
 
-## Generation publication
+## Presentation-generation publication
 
-Content changes use transactional generations:
+User-pack enable/disable/update and other presentation-only changes use transactional **presentation generations under the same authorized semantic activation**:
 
 ~~~text
-Current generation N
+AuthorizedSemanticActivation A
+    remains fixed
+
+Current PresentationGeneration N
     remains usable
 
-prepare N+1
-    acquire blobs
-    validate packages
-    resolve semantic/presentation catalogs
+prepare PresentationGeneration N+1
+    acquire/reopen presentation blobs
+    validate presentation packages
+    resolve compatible presentation selections
     prepare required native resources
 
-publish N+1 atomically
-    reject stale async completions
-    retain N until all leases/users retire
+publish PresentationGeneration N+1 atomically
+    reject stale async completions from N
+    retain N until all presentation leases/users retire
 ~~~
 
-Uninstalling a package must not invalidate a live renderer resource underneath an active generation.
+Do **not** re-resolve or replace authoritative structural/world semantics merely because a user or optional presentation pack changed.
+
+A future live semantic/world activation replacement, if ever required, is a separate authorized transition with its own validation, proof, ordering, and publication contract. It is not part of resource-pack generation replacement.
+
+Uninstalling a package must not invalidate a live renderer resource underneath an active presentation generation.
 
 ## Exit gate
 
@@ -529,15 +572,31 @@ Companion albedo/normal/ORM pages may share region layout.
 
 ## Derived identity
 
-A candidate key includes:
+Persistent derived-cache identity and runtime publication identity have different jobs and must not be conflated.
+
+Persistent/restart-stable cache key:
 
 ~~~text
-ResolvedPresentationGeneration/Fingerprint
+StableResolvedPresentationFingerprint
 + renderer backend/version
 + atlas/packing policy version
 + platform texture capability
 + relevant resource-import policy
+= PersistentDerivedKey
 ~~~
+
+Runtime generation/session fence:
+
+~~~text
+PresentationGenerationId
+    process/session-local identity
+    rejects stale asynchronous work
+    owns native-resource lifetime/publication order
+~~~
+
+The current `ContentCatalogGenerationId` is process-local and therefore must not be used as the persistent on-disk derived-cache identity.
+
+A restart with the same stable resolved presentation fingerprint and renderer/import policy should reopen matching derived resources. Different resolved content or policy must not collide merely because a new process happens to reuse a similar runtime generation number.
 
 Do not claim that changing one texture necessarily preserves every atlas region unless the chosen allocator/page policy guarantees it.
 
@@ -563,7 +622,9 @@ Select at least one representative world/clutter case and measure:
 - deleting Derived/Godot cache causes safe rebuild from neutral source content;
 - platform/native realization can differ without changing source/semantic identity;
 - no architectural dependency requires every future texture to be atlased;
-- measured evidence records where batching helps and where it does not.
+- measured evidence records where batching helps and where it does not;
+- process restart with identical stable presentation fingerprint reuses matching derived cache;
+- process restart with different content/policy rejects the old derived cache even if runtime generation numbering starts over.
 
 ---
 
