@@ -97,10 +97,15 @@ acceptance narratives remain available through git history.
   server Add/Replace, applied-catalog, lazy native X/Y realization. F0.7/F0.8 are closed, and PF1
   now closes the real headless bot plus two-exported-Online mixed correctness gate; PF2 wire
   accounting and PF2.5 ownership/observability are closed, and PF3 now closes authenticated
-  performance policy plus independent render/input/submission/authority/Network clocks. PF4
-  measured optimization is next.
+  performance policy plus independent render/input/submission/authority/Network clocks. PF4/PF5
+  and PF5-R1 through R11 are closed; the F1 client-completion campaign is active before PF6.
 - [Client completion campaign](Plans/CLIENT_COMPLETION_PLAN.md) — ordered F1.0-F1.12 pre-PF6 implementation plan covering unified content scopes, semantic-vs-presentation resolution, primitive fallback, removable Official content, resource generations, derived resources/atlases, UI/gumps, declarative profiles, scalable Godot RenderingServer/batch tiers, actor representation tiers, renderer stress consumers, and dogfooding/PF6 readiness.
-- [Client presentation/content architecture](Plans/CLIENT_PRESENTATION_ARCHITECTURE.md) — durable\n  dumb-terminal client model, four content layers and graceful fallback, removable Local/Official\n  content, realm-scoped global CAS use, renderer-independent source/derived-resource boundaries,\n  atlas policy, UI/gump layering and lifetime, declarative camera/control profiles, and the\n  vegetation/cut-state seam for the pre-PF6 client-completion pass.\n- [Asset streaming/content layering plan](Plans/ASSET_STREAMING.md) — stable logical
+- [Client presentation/content architecture](Plans/CLIENT_PRESENTATION_ARCHITECTURE.md) — durable
+  dumb-terminal client model, unified content scopes with presentation precedence/fallback,
+  removable Official content, realm-scoped authorization over shared CAS bytes, renderer-independent
+  source/derived-resource boundaries, atlas policy, UI/gump layering and lifetime, declarative
+  camera/control profiles, and the vegetation/cut-state seam for the pre-PF6 client-completion pass.
+- [Asset streaming/content layering plan](Plans/ASSET_STREAMING.md) — stable logical
   content identity, activation/application proof, deterministic Default/Replace/Add,
   passive-content validation, content-addressed blobs with realm-scoped ownership,
   source-independent byte delivery, immutable catalog generations, Cabin parity,
@@ -217,7 +222,13 @@ consumer/deployment need earns them.
   authority-thread/local-session extraction, Direct Connect trust, settings/control-
   profile, world-presentation, and standard-UI convergence work through F0.5, the A0-derived
   F0.6 closure, M0.0 shared authority, and the remaining lifecycle/parity roadmap.
-- [Client presentation/content architecture](Plans/CLIENT_PRESENTATION_ARCHITECTURE.md) records the\n  pre-PF6 client-completion direction: primitives/Local/Server/user layers, removable Official\n  content, atlas/native realization, UI/gump categories, declarative profiles, renderer\n  independence, and the future vegetation ownership seam.\n- [Asset Streaming A0](Plans/ASSET_STREAMING.md) records the passive content package,
+- [Client presentation/content architecture](Plans/CLIENT_PRESENTATION_ARCHITECTURE.md) records the
+  pre-PF6 client-completion direction: permanent primitives, unified Local/remote content scopes,
+  presentation precedence/fallback, removable Official content, atlas/native realization, UI/gump
+  categories, declarative profiles, renderer independence, and the future vegetation ownership seam.
+- [Client completion campaign](Plans/CLIENT_COMPLETION_PLAN.md) records the active F1.0-F1.12
+  execution order and exit gates before PF6 external human validation.
+- [Asset Streaming A0](Plans/ASSET_STREAMING.md) records the passive content package,
   activation proof, CAS/cache, hosting/source, Default/Replace/Add, catalog/resource
   lifetime, Cabin parity, complete-WorldPack canary, Contentless Online, and deferred
   executable-extension boundary.
