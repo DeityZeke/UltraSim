@@ -1387,7 +1387,9 @@ selection eligibility only; exact Game identity, range, and Inventory mutation a
 by authority. Human-play hardening gives ground-item pickup its own bounded 3,000 mm authority
 radius while leaving the general 2,500 mm interaction policy unchanged. The client retains the
 selected public item identity independently of transient pointer hover, and a rejected out-of-range
-pickup cannot block the following ordinary movement command.
+pickup cannot block the following ordinary movement command. The Local Godot scheduler accepts the
+complete finite selection vocabulary through `IronSword`; the D0.0 native journey selects the sword
+and proves movement plus Stop traverse that scheduled path before any pickup.
 
 The first swing is an admitted Game action with no damage. D0.7a now projects the equipped public
 Main Hand prefab plus the actor's latest accepted Interact/Primary sequence through the bounded cold

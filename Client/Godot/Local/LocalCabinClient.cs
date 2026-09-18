@@ -1701,7 +1701,7 @@ public partial class LocalCabinClient : Node3D
     {
         sequence = 0;
         if (_localSession is null || _sequencer is null ||
-            scheduled.Context.DiagnosticTag > (ulong)LocalPlayableSelection.Unsupported ||
+            scheduled.Context.DiagnosticTag > (ulong)LocalPlayableSelection.IronSword ||
             !_sequencer.TryCreateSemanticCommand(scheduled.Intent, out GamePlayerCommand command))
             return false;
         bool faceRequested = (scheduled.Context.Flags &
@@ -2377,6 +2377,9 @@ public partial class LocalCabinClient : Node3D
     private void ProbeSelectedPublicTargetRetention()
     {
         if (!_useConceptDemoWorld) return;
+        if (_localSession is null || _sequencer is null || _inputScheduler is null)
+            throw new InvalidOperationException(
+                "The selected-target acceptance requires an active local input path.");
         if (!TryFindPublicRecord(GameWorldPublicPrefabIds.IronSword, out WorldPublicRecord sword))
             throw new InvalidOperationException(
                 "The selected-target acceptance could not find the public Iron Sword.");
@@ -2397,6 +2400,49 @@ public partial class LocalCabinClient : Node3D
             if (SelectedInteractionTarget() != sword.Id)
                 throw new InvalidOperationException(
                     "The selected public target was incorrectly tied to transient hover state.");
+
+            if (!_localSession.TryGetLatestView(out LocalPlayableAuthorityView before))
+                throw new InvalidOperationException(
+                    "The selected-target acceptance could not read the authoritative player.");
+            var context = new ClientWorldCommandContext(
+                sword.Id,
+                ClientWorldCommandRequestFlags.None,
+                0,
+                0,
+                (ulong)LocalPlayableSelection.IronSword);
+            var move = new ClientWorldCommandIntent(
+                GameLocomotionUpdate.CreateDirect(GamePlayerCommand.MaximumAxisMagnitude, 0),
+                GamePlayerActions.None,
+                true);
+            long moveObservedAt = Stopwatch.GetTimestamp();
+            if (!_inputScheduler.TryObserve(move, context, moveObservedAt) ||
+                !_inputScheduler.TryPump(moveObservedAt, TrySubmitScheduledLocalCommand))
+                throw new InvalidOperationException(
+                    "Selecting the Iron Sword blocked scheduled movement submission.");
+            DriveLocalUntil(() =>
+                _localSession.TryGetLatestView(out LocalPlayableAuthorityView current) &&
+                current.LastCommandSequence > before.LastCommandSequence &&
+                current.LastSelection == LocalPlayableSelection.IronSword &&
+                current.LastCommandResult.Locomotion == GameWorldActionStatus.Accepted &&
+                current.PlayerPosition != before.PlayerPosition);
+            if (!_localSession.TryGetLatestView(out LocalPlayableAuthorityView moved))
+                throw new InvalidOperationException(
+                    "The selected-target movement result was unavailable.");
+
+            var stop = new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Stop,
+                GamePlayerActions.None,
+                true);
+            long stopObservedAt = Stopwatch.GetTimestamp();
+            if (!_inputScheduler.TryObserve(stop, context, stopObservedAt) ||
+                !_inputScheduler.TryPump(stopObservedAt, TrySubmitScheduledLocalCommand))
+                throw new InvalidOperationException(
+                    "The selected-target acceptance could not stop scheduled movement.");
+            DriveLocalUntil(() =>
+                _localSession.TryGetLatestView(out LocalPlayableAuthorityView current) &&
+                current.LastCommandSequence > moved.LastCommandSequence &&
+                current.LastSelection == LocalPlayableSelection.IronSword &&
+                current.LastCommandResult.Locomotion == GameWorldActionStatus.Accepted);
         }
         finally
         {
