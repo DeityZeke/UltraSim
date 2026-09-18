@@ -247,13 +247,18 @@ public partial class S08HeadlessAcceptance : Control
                 Pressed = true,
             }) == GodotUiGameplayInputDisposition.UiSurface,
             "Inventory allowed a world click through its visible UI surface.");
-        Expect(renderer.ResolveGameplayInput(new InputEventMouseButton
+        Vector2 outsideInventory = inventorySurface.GetGlobalRect().End + new Vector2(8, 8);
+        GodotUiGameplayInputDisposition inventoryOutsideDisposition =
+            renderer.ResolveGameplayInput(new InputEventMouseButton
             {
-                Position = Vector2.Zero,
+                Position = outsideInventory,
                 ButtonIndex = MouseButton.Left,
                 Pressed = true,
-            }) == GodotUiGameplayInputDisposition.Gameplay && !renderer.BlocksGameplayInput,
-            "Inventory did not allow outside gameplay input while remaining open.");
+            });
+        Expect(inventoryOutsideDisposition == GodotUiGameplayInputDisposition.Gameplay &&
+            !renderer.BlocksGameplayInput,
+            $"Inventory did not allow outside gameplay input while remaining open " +
+            $"(disposition={inventoryOutsideDisposition}, blocks={renderer.BlocksGameplayInput}).");
         VBoxContainer inventoryRows = Find<VBoxContainer>(inventoryRoot, "Element_items");
         Expect(inventoryRows.GetChildCount() == 2 &&
             ContainsLabel(inventoryRows, "Bread") &&
