@@ -138,7 +138,10 @@ changed rows behind an old source version. PF5-R11 then shares bounded public gr
 preparation and skips unchanged per-recipient item reconciliation while preserving independent
 interest, delivery, retry, removal, and exact proof. The matched 64-client crowd mean falls from
 0.335 to 0.223 server core with no wire-policy change; mixed chaos proves sword lifecycle,
-reconnect, and clean proof/retirement behavior.
+reconnect, and clean proof/retirement behavior. PF5-R12 repairs fully retired item-row revision
+reuse, replaces repeated clean actor/item delivery-table scans with proof-woken readiness, and
+retains generation-capture delegates. Matched 64-client quiet/crowd/mixed-chaos controls reduce
+CPU/core by 38.5%/8.6%/7.3% and allocations by 83.2%/79.3%/77.4%, with no wire-policy change.
 A post-F0.8 defensive UI correction
 also makes
 local shutdown independent from a saturated presentation queue, contains expected view-capacity
@@ -1850,6 +1853,10 @@ then close:
     PF5-R6 compatible immutable recipient-body sharing                  CLOSED (outcome A)
     PF5-R7 spatial topology / whole-server attribution                  CLOSED (characterization)
     PF5-R8 required fanout / avoidable-processing assurance             CLOSED (measurement; R1 controls corrected)
+    PF5-R9 packet-producer assurance / cost audit                        CLOSED (outcome A; R1 measurement closure)
+    PF5-R10 shared actor presentation                                    CLOSED (outcome A; R1 repair closed)
+    PF5-R11 shared public-item presentation                              CLOSED (outcome A)
+    PF5-R12 remaining product scheduling / allocation costs              CLOSED (outcome A)
     PF6 external human validation                                       READY TO RESUME
 ```
 

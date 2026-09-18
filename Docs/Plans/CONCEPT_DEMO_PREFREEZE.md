@@ -106,7 +106,12 @@ retry, and exact proof. It also repairs stale metadata revision on same-item rea
 proven removal. Three matched 64-client crowd runs average 0.223 core versus 0.335 before (-33.4%)
 and 76.0 MB allocated versus 400.7 MB (-81.0%); a higher-wire after run still uses 31.6% less
 CPU. A 64-client mixed-chaos control covers pickup/equip/drop, reconnect, proof lifetimes, and
-clean retirement. No wire or deployment policy changes.
+clean retirement. PF5-R12 then repairs revision reuse after a fully retired item row, removes the
+remaining clean presentation-delivery polling with proof-woken readiness, and retains generation-
+capture delegates instead of allocating them on every recipient service pass. Matched 64-client
+quiet/crowd/mixed-chaos controls reduce server CPU/core by 38.5%/8.6%/7.3% and allocations by
+83.2%/79.3%/77.4%; actor and item presentation rows examined per progress call fall by 98.0% and
+98.9%. No wire or deployment policy changes.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -2540,6 +2545,9 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 36b. Repair actor preparation failure atomicity and share bounded public-item presentation.
     **CLOSED — PF5-R10-R1/PF5-R11 outcome A; transactional source preparation, proof-woken item
     reconciliation, and monotonic same-item reappearance revision selected**
+36c. Close remaining product presentation polling and recurring allocation costs.
+    **CLOSED — PF5-R12 outcome A; fully retired item-row revision repair, proof-woken readiness,
+    and retained generation-capture delegates selected**
 37. Choose/document the default deployment-performance policy.
     **CLOSED — v29 plus PF5-R3 egress and PF5-R9 opt-in detailed egress timing**
 38. Record decisive performance/bandwidth/failure evidence. **CLOSED — PF5/PF5-R8/PF5-R9**

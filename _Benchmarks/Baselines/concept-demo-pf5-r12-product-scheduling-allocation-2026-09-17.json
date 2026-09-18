@@ -1,0 +1,153 @@
+{
+  "schema": "ultrasim-concept-demo-pf5-r12-product-scheduling-allocation-v1",
+  "checkpoint": "PF5-R12",
+  "date": "2026-09-17",
+  "outcome": "A",
+  "lineage": {
+    "startingHead": "56967aaa798305aaa97843a449949a4395233b4b",
+    "itemRevisionRepair": "0117c910",
+    "measurementInstrumentation": "ea7cb405",
+    "presentationReadiness": "5e643f6d",
+    "captureDelegateReuse": "7a9f6ddf",
+    "replicationSemanticCandidate": "14e729a6ce69179cfbe4b9a3a4c4cdfa21797fa9",
+    "integratedProductImplementation": "7a9f6ddf54a15102dceba6ac29b6063252bd0faa",
+    "chunkReplicationSemanticsChanged": false,
+    "productPresentationCorrectnessChanged": true,
+    "correctnessRepair": "Per-application public-item presentation revisions no longer reset when a fully retired row is reused."
+  },
+  "environment": {
+    "configuration": "Release",
+    "sdk": "8.0.131",
+    "runtime": "Microsoft.NETCore.App 8.0.31",
+    "os": "CachyOS Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D",
+    "logicalCpus": 16,
+    "physicalCores": 8,
+    "l3": "96 MiB",
+    "processArrangement": "one ServerOnly dedicated process plus one ClientOnly 64-bot process",
+    "telemetry": "Off",
+    "backgroundEgressTiming": false
+  },
+  "policy": {
+    "replication": "ChunkPublication",
+    "bodySharing": "PF5-R6 compatible canonical body sharing enabled",
+    "representation": "CurrentBundled",
+    "compression": "multi-entry message-148 LZ4 at 384/32; singleton off",
+    "cadence": "1/2/4",
+    "aggregation": "CrossLane cap 2",
+    "egress": "BackgroundPlatformBatch",
+    "gameManifest": 29,
+    "transportRevision": 2,
+    "authorityHz": 60,
+    "participantCap": 64
+  },
+  "runs": {
+    "bots": 64,
+    "warmupSeconds": 60,
+    "measurementSeconds": 120,
+    "quietSeed": 812120,
+    "crowdSeed": 509921,
+    "mixedChaosSeed": 731911,
+    "metrics": {
+      "quiet": {
+        "before": { "cpuCore": 0.05697792417361215, "allocatedBytes": 71169920, "rssHighWaterBytes": 275673088, "managedHeapHighWaterBytes": 172960128, "udpPayloadBytesSent": 91497, "udpDatagramsSent": 1730 },
+        "after": { "cpuCore": 0.0350173839269376, "allocatedBytes": 11982584, "rssHighWaterBytes": 228528128, "managedHeapHighWaterBytes": 148433232, "udpPayloadBytesSent": 91365, "udpDatagramsSent": 1727 },
+        "cpuChangePercent": -38.54219079614172,
+        "allocationChangePercent": -83.16341510570759
+      },
+      "crowd": {
+        "before": { "cpuCore": 0.22691744828044969, "allocatedBytes": 76036024, "rssHighWaterBytes": 283103232, "managedHeapHighWaterBytes": 171437672, "udpPayloadBytesSent": 428462538, "udpDatagramsSent": 793785 },
+        "after": { "cpuCore": 0.207409871512329, "allocatedBytes": 15726032, "rssHighWaterBytes": 231796736, "managedHeapHighWaterBytes": 152664640, "udpPayloadBytesSent": 426943314, "udpDatagramsSent": 781911 },
+        "cpuChangePercent": -8.596772489707828,
+        "allocationChangePercent": -79.31765606260527
+      },
+      "mixedChaos": {
+        "before": { "cpuCore": 0.26495627016061984, "allocatedBytes": 77594888, "rssHighWaterBytes": 285941760, "managedHeapHighWaterBytes": 171001768, "udpPayloadBytesSent": 612155997, "udpDatagramsSent": 1502933 },
+        "after": { "cpuCore": 0.24566654196283827, "allocatedBytes": 17540792, "rssHighWaterBytes": 230551552, "managedHeapHighWaterBytes": 151133384, "udpPayloadBytesSent": 601162275, "udpDatagramsSent": 1495010 },
+        "cpuChangePercent": -7.280344105873738,
+        "allocationChangePercent": -77.39439742473758
+      }
+    }
+  },
+  "pollingCensus": {
+    "window": "application lifetime through measurement endpoint; compared as rows per progress call",
+    "before": {
+      "durationSeconds": 60,
+      "actor": { "progress": 6246426, "deliverySearches": 6034867, "deliveryRowsExamined": 383001804, "emptySearches": 5931123, "accepted": 103744, "refusals": 0, "retries": 0 },
+      "publicItem": { "progress": 6246426, "deliverySearches": 6246214, "deliveryRowsExamined": 399753664, "emptySearches": 6246150, "accepted": 64, "refusals": 0, "retries": 0 }
+    },
+    "after": {
+      "durationSeconds": 120,
+      "actor": { "progress": 9549452, "deliverySearches": 162127, "deliveryRowsExamined": 5274560, "cleanSkips": 9079544, "readinessRefreshes": 187177, "readinessRowsExamined": 6641438, "accepted": 162127, "refusals": 0, "retries": 0 },
+      "publicItem": { "progress": 9549452, "deliverySearches": 64, "deliveryRowsExamined": 64, "cleanSkips": 9549121, "readinessRefreshes": 102605, "readinessRowsExamined": 6562688, "accepted": 64, "refusals": 0, "retries": 0 }
+    },
+    "normalized": {
+      "actorRowsPerProgressBefore": 61.31535121043618,
+      "actorRowsPerProgressAfter": 1.2478200843357294,
+      "actorReductionPercent": 97.965,
+      "publicItemRowsPerProgressBefore": 63.9971823887772,
+      "publicItemRowsPerProgressAfter": 0.6872385975655986,
+      "publicItemReductionPercent": 98.926
+    }
+  },
+  "allocationProfile": {
+    "tool": "dotnet-trace 10.0.745401 gc-verbose; TraceEvent 3.1.8 allocation-tick analysis",
+    "durationSeconds": 45,
+    "beforeSampledBytes": 28357728,
+    "afterSampledBytes": 5974592,
+    "changePercent": -78.931,
+    "removedStacks": {
+      "QueueOwnerStateCoreDelegateBytes": 12259000,
+      "DrivePublicWorldCoreDelegateBytes": 10235864
+    },
+    "largestRemainingApplicationStack": { "method": "RemoteGuestPlayableApplication.ProcessPlayerCommandCore", "sampledBytes": 1380592 },
+    "qualification": "Allocation ticks are sampled; unprofiled process AllocatedBytes is the accepted total."
+  },
+  "cpuProfile": {
+    "tool": "perf 7.2.6-1, cycles:u at 997 Hz, frame-pointer call graph, retained .NET perf map",
+    "durationSeconds": 45,
+    "lostSamples": 0,
+    "mainThreadSamples": 8326,
+    "senderAndRuntimeSamples": 1278,
+    "afterMainLeafPercent": {
+      "QueuePublicItemPresentationMetadata": 0.1441,
+      "ReconcilePublicItemPresentation": 0.3363,
+      "QueueSharedPublicPresentationMetadata": 0.4324,
+      "ReconcileSharedPresentation": 0.9008
+    },
+    "priorPf5R11QueuePublicItemPercent": 3.0381,
+    "discardedCapture": "The first PF5-R12 perf capture lacked a retained JIT symbol map and is not used for method attribution."
+  },
+  "mixedChaosCorrectness": {
+    "applicationSessions": 65,
+    "successfulReconnects": 1,
+    "freshProofLifetimes": 65,
+    "movementAttempts": 4510,
+    "jumps": 1551,
+    "interactionCommands": 2074,
+    "primaryAttempts": 1534,
+    "swordInteractionAttempts": 634,
+    "swordPickupObserved": 1,
+    "swordEquipObserved": 1,
+    "swordDropObserved": 1,
+    "chunkCrossings": 1517,
+    "verticalTransitions": 3961,
+    "landingRecoveries": 1359,
+    "faultedBots": 0,
+    "sourceCommitGaps": 0,
+    "cleanRetirement": true
+  },
+  "memory": {
+    "newRetainedShape": "two readiness booleans, two cached delegate references/instances, and finite scalar counters per remote application",
+    "newArrays": 0,
+    "unboundedStorage": false,
+    "estimatedAdditionalBytesAt64": "approximately 20 KiB including diagnostic scalars and delegate objects; implementation-dependent object alignment"
+  },
+  "verification": {
+    "focusedCommand": "dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj -c Release -- --pf5-r12-only",
+    "focusedResult": "pass: 180 Game replication tests plus complete Network application suite",
+    "canonicalRelease": "pass: ./verify.sh --configuration=Release on the final artifact tree"
+  },
+  "rawArtifacts": "_Benchmarks/results/pf5-r12-scheduling-allocation-20260917/ (ignored)",
+  "conclusion": "Presentation readiness and delegate reuse are selected. Remaining product scheduling is not claimed minimal; command-path allocation and post-readiness reconciliation remain measured future leads, not PF6 blockers."
+}
