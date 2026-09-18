@@ -239,7 +239,7 @@ public partial class LocalCabinClient : Node3D
     public void SetGameplayInputAllowed(bool allowed)
     {
         _gameplayInputAllowed = allowed;
-        if (!allowed) _actorPresenter?.SetRevealHeld(false);
+        if (!allowed) SetWorldRevealHeld(false);
     }
 
     public void ApplySettings(ResolvedClientSettings settings)
@@ -691,7 +691,7 @@ public partial class LocalCabinClient : Node3D
         }
         if (inputEvent is InputEventKey reveal && !reveal.Echo && IsControlKey(reveal))
         {
-            _actorPresenter?.SetRevealHeld(reveal.Pressed);
+            SetWorldRevealHeld(reveal.Pressed);
             GetViewport().SetInputAsHandled();
             return;
         }
@@ -1118,11 +1118,11 @@ public partial class LocalCabinClient : Node3D
         if (actors.ActiveActors < 2 || actors.VisibleNameplates > 1)
             throw new InvalidOperationException(
                 "The shared actor presenter did not retain the controlled actor and nearby animal.");
-        _actorPresenter!.SetRevealHeld(true);
-        if (_actorPresenter.GetSnapshot().VisibleNameplates < 2)
+        SetWorldRevealHeld(true);
+        if (_actorPresenter!.GetSnapshot().VisibleNameplates < 2)
             throw new InvalidOperationException(
                 "Local Ctrl reveal did not expose already-known eligible actor labels.");
-        _actorPresenter.SetRevealHeld(false);
+        SetWorldRevealHeld(false);
         if (_actorPresenter.GetSnapshot().VisibleNameplates > 1)
             throw new InvalidOperationException(
                 "Releasing local Ctrl reveal did not restore the join-grace/hidden nameplate policy.");
@@ -1172,7 +1172,7 @@ public partial class LocalCabinClient : Node3D
             return _uiClient.OpenViewCount == 1 &&
                 _localSession.GetSnapshot().UiOperationsApplied > before;
         });
-        _actorPresenter.SetRevealHeld(true);
+        SetWorldRevealHeld(true);
         _chatInput.Text = "F0.7 local draft must retire";
         _chatInput.GrabFocus();
 
@@ -2234,7 +2234,7 @@ public partial class LocalCabinClient : Node3D
             _primaryReleased = false;
             _secondaryPressed = false;
             _cancelPressed = false;
-            _actorPresenter?.SetRevealHeld(false);
+            SetWorldRevealHeld(false);
             if (_gameplayInputAdmittedLastFrame)
             {
                 _profileStopPending = true;
@@ -2248,6 +2248,12 @@ public partial class LocalCabinClient : Node3D
     private static bool IsControlKey(InputEventKey input) =>
         input.Keycode is global::Godot.Key.Ctrl or global::Godot.Key.Meta ||
         input.PhysicalKeycode is global::Godot.Key.Ctrl or global::Godot.Key.Meta;
+
+    private void SetWorldRevealHeld(bool held)
+    {
+        _actorPresenter?.SetRevealHeld(held);
+        _renderer?.SetPublicNamesRevealHeld(held);
+    }
 
     private void ApplyResolvedSettings()
     {

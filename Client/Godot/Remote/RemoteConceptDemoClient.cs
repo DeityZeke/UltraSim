@@ -374,7 +374,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             _renderer is null || _chatInput is null)
             throw new InvalidOperationException(
                 "The F0.7 remote retirement canary requires a completed active smoke journey.");
-        _actorPresenter.SetRevealHeld(true);
+        SetWorldRevealHeld(true);
         _chatInput.Text = "F0.7 remote draft must retire";
         _chatInput.GrabFocus();
 
@@ -444,7 +444,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         }
         if (inputEvent is InputEventKey reveal && !reveal.Echo && IsControlKey(reveal))
         {
-            _actorPresenter?.SetRevealHeld(reveal.Pressed);
+            SetWorldRevealHeld(reveal.Pressed);
             GetViewport().SetInputAsHandled();
             return;
         }
@@ -661,7 +661,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             _primaryPressed = false;
             _primaryReleased = false;
             _secondaryPressed = false;
-            _actorPresenter?.SetRevealHeld(false);
+            SetWorldRevealHeld(false);
             if (_gameplayInputAdmittedLastFrame && _inputScheduler is not null)
             {
                 var stop = new ClientWorldCommandIntent(
@@ -813,7 +813,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         // verifies overhead speech and nameplates. That diagnostic reveal is not physical
         // gameplay input; keep it asserted after the modal-input gate clears held controls.
         if (_smokePhase >= 5)
-            _actorPresenter!.SetRevealHeld(true);
+            SetWorldRevealHeld(true);
 
         switch (_smokePhase)
         {
@@ -821,7 +821,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 _terrainTriangles > 0 && snapshot.World.AppliedSnapshots != 0 &&
                 _actorPresenter!.GetSnapshot().ActiveActors >= 2 &&
                 snapshot.PublicPresentation.Metadata.CurrentRecords != 0:
-                _actorPresenter.SetRevealHeld(true);
+                SetWorldRevealHeld(true);
                 _smokeStart = snapshot.Playable.Position;
                 if (!TrySubmitObservedCommand(new ClientWorldCommandIntent(
                         GameLocomotionUpdate.CreateDirect(0, -GamePlayerCommand.MaximumAxisMagnitude),
@@ -1325,6 +1325,12 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private static bool IsControlKey(InputEventKey input) =>
         input.Keycode is global::Godot.Key.Ctrl or global::Godot.Key.Meta ||
         input.PhysicalKeycode is global::Godot.Key.Ctrl or global::Godot.Key.Meta;
+
+    private void SetWorldRevealHeld(bool held)
+    {
+        _actorPresenter?.SetRevealHeld(held);
+        _renderer?.SetPublicNamesRevealHeld(held);
+    }
 
     private static bool IsChatSubmitKey(InputEventKey input) =>
         input.Keycode is global::Godot.Key.Enter or global::Godot.Key.KpEnter ||

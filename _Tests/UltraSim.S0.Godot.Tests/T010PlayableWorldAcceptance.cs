@@ -98,8 +98,7 @@ public partial class T010PlayableWorldAcceptance : Node3D
             Expect(skeleton is not null && skeleton.GetBoneCount() == 65,
                 "A baked body did not retain its exact 65-bone destination skeleton.");
             var socket = FindNamedDescendant(root!, "MainHandSocket") as Node3D;
-            Expect(socket is not null && socket.GetParent() == root &&
-                socket.Basis.IsEqualApprox(Basis.Identity),
+            Expect(socket is not null && socket.GetParent() == root,
                 "A baked body did not expose an actor-relative semantic MainHand socket.");
             if (id == xId)
             {
@@ -137,15 +136,25 @@ public partial class T010PlayableWorldAcceptance : Node3D
         Expect(xRoot is not null && xSocket is not null && xSkeleton is not null &&
             xAnimations is not null && xHandBone >= 0,
             "The baked-body hand stabilization fixture was incomplete.");
+        Transform3D idleHand = xRoot!.GlobalTransform.AffineInverse() *
+            xSkeleton!.GlobalTransform * xSkeleton.GetBoneGlobalPose(xHandBone);
+        Basis idleHandBasis = idleHand.Basis.Orthonormalized();
+        Expect(xSocket!.Position.IsEqualApprox(idleHand.Origin) &&
+            xSocket.Basis.IsEqualApprox(idleHandBasis) &&
+            xSocket.Basis.Scale.IsEqualApprox(Vector3.One),
+            "The equipped-item socket did not inherit the scale-free idle hand transform.");
         xAnimations!.Advance(0.2);
         presenter.UpdateOriginAndLifetimes(moved, 1_240);
-        Vector3 expectedHand = xRoot!.ToLocal(
-            xSkeleton!.ToGlobal(xSkeleton.GetBoneGlobalPose(xHandBone).Origin));
-        Expect(xSocket!.Position.IsEqualApprox(expectedHand) &&
-            xSocket.Basis.IsEqualApprox(Basis.Identity),
-            "Walk animation did not update hand position independently of weapon orientation.");
+        Transform3D walkingHand = xRoot.GlobalTransform.AffineInverse() *
+            xSkeleton.GlobalTransform * xSkeleton.GetBoneGlobalPose(xHandBone);
+        Basis walkingHandBasis = walkingHand.Basis.Orthonormalized();
+        Expect(xSocket.Position.IsEqualApprox(walkingHand.Origin) &&
+            xSocket.Basis.IsEqualApprox(walkingHandBasis) &&
+            !xSocket.Basis.IsEqualApprox(idleHandBasis) &&
+            xSocket.Basis.Scale.IsEqualApprox(Vector3.One),
+            "Walk animation did not carry the equipped item with the complete hand transform.");
         GD.Print("EVIDENCE D0.7a baked_bodies=2 bones_each=65 clips=Idle,Walk,Jump " +
-            "animated=2 primitive=0 main_hand_socket=true wrist_rotation_decoupled=true " +
+            "animated=2 primitive=0 main_hand_socket=true scale_free_hand_basis=true " +
             "walk_transition=true");
     }
 
@@ -403,6 +412,18 @@ public partial class T010PlayableWorldAcceptance : Node3D
         return null;
     }
 
+    private static Label3D? FindLabelByText(Node root, string text)
+    {
+        if (root is Label3D label && string.Equals(label.Text, text, StringComparison.Ordinal))
+            return label;
+        foreach (Node child in root.GetChildren())
+        {
+            Label3D? found = FindLabelByText(child, text);
+            if (found is not null) return found;
+        }
+        return null;
+    }
+
     private void RunSystemChatBannerAcceptance()
     {
         var host = new Control { Name = "SystemBannerAcceptanceHost" };
@@ -588,7 +609,12 @@ public partial class T010PlayableWorldAcceptance : Node3D
         Expect(mainHandSocket is not null && mainHandSocket.GetParent() == controlled &&
             mainHandPresentation is not null && mainHandActionPivot is not null,
             "The controlled actor did not separate its stable hand mount from action animation.");
-        Vector3 restingMainHandRotation = mainHandPresentation!.Rotation;
+        Vector3 restingBladeInActor =
+            (controlled.GlobalBasis.Inverse() * mainHandPresentation!.GlobalBasis).Y.Normalized();
+        Expect(restingBladeInActor.Y < -0.6f &&
+            new Vector2(restingBladeInActor.X, restingBladeInActor.Z).Length() > 0.35f,
+            "The equipped sword did not retain its diagonal hand-owned resting grip.");
+        Vector3 restingMainHandRotation = mainHandPresentation.Rotation;
         if (!presenter.TryGetActorRoot(otherId, out Node3D? other) || other is null)
             throw new InvalidOperationException("The other actor root was not realized.");
         Expect(other.Position.IsEqualApprox(new Vector3(2f, -0.3f, 3f)) &&
@@ -962,6 +988,15 @@ public partial class T010PlayableWorldAcceptance : Node3D
         GodotWorldRendererSnapshot initialRender = renderer.GetSnapshot();
         Expect(initialRender.ActiveRenderChunks == 9 && initialRender.CompletedBuilds == 9,
             "The authored terrain/static/Multi/public window did not render.");
+        Label3D? groundItemName = FindLabelByText(renderer.Root, "Iron Sword");
+        Expect(groundItemName is not null && !groundItemName.IsVisibleInTree(),
+            "The ground sword did not retain a hidden generic world-name label.");
+        renderer.SetPublicNamesRevealHeld(true);
+        Expect(groundItemName!.IsVisibleInTree() && groundItemName.Text == "Iron Sword",
+            "Ctrl reveal did not expose only the ground sword's generic name.");
+        renderer.SetPublicNamesRevealHeld(false);
+        Expect(!groundItemName.IsVisibleInTree(),
+            "Releasing Ctrl did not hide the generic ground-item name.");
         ValidateGodotTerrainFrontFaces(renderer.Root);
         Expect(initialRender.ActiveNodes < 9 * TerrainChunkFormat.MaterialCellCount,
             "The playable renderer created cell-shaped scene-tree identity.");
@@ -1084,6 +1119,9 @@ public partial class T010PlayableWorldAcceptance : Node3D
                     GamePlayableWorld.PlayerStart, WorldYaw.Zero, 1),
                 Public(4, 1, GameWorldPublicPrefabIds.WoodlandAnimal,
                     GamePlayableWorld.AnimalPosition, WorldYaw.Zero, 1),
+                Public(9, 1, GameWorldPublicPrefabIds.IronSword,
+                    GamePlayableWorld.IronSwordSpawnerPosition, WorldYaw.Zero, 1,
+                    WorldPublicStateFlags.Visible | WorldPublicStateFlags.GroundItem),
             ];
         }
         if (key.Coord == new SpatialChunkCoord(1, 0))
@@ -1105,13 +1143,14 @@ public partial class T010PlayableWorldAcceptance : Node3D
         uint prefab,
         WorldPosition position,
         WorldYaw orientation,
-        ulong revision) => new(
+        ulong revision,
+        WorldPublicStateFlags flags = WorldPublicStateFlags.Visible) => new(
             new WorldPublicEntityId(index, 1),
             version,
             prefab,
             position,
             orientation,
-            WorldPublicStateFlags.Visible,
+            flags,
             new ChunkPublicationRevision(revision));
 
     private static void ValidateGodotTerrainFrontFaces(Node root)

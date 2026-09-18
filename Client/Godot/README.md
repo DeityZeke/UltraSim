@@ -139,9 +139,9 @@ I0.12 adds the first persistent world item to both local and remote consumers. A
 selected and picked up with the ordinary Interact path, inspected in Inventory, equipped, used with
 Primary, and dropped through the compiled Inventory view. Equipped sword presentation is attached
 beneath the semantic `MainHandSocket`. That actor-relative socket samples the imported hand bone's
-position without inheriting the unarmed Idle/Walk wrist rotation or the skeleton's `0.01` authoring
-scale. The one-handed blade therefore remains meter-correct and hangs down/out from the hand rather
-than snapping across the torso as locomotion blends. A separate child pivot owns the bounded swing,
+complete animated transform while orthonormalizing away the skeleton's `0.01` authoring scale. An
+explicit grip correction gives the one-handed blade a stable diagonal resting pose while Idle/Walk
+carry it with the wrist instead of leaving a world-vertical pendulum. A separate child pivot owns the bounded swing,
 so retiring the cue cannot overwrite the resting mount. The semantic world item has a bounded
 primitive presentation/pick volume; recipient-visible rolled facts arrive through the bounded cold
 public metadata cache rather than hot movement rows. I0.13 formats that typed set through the same
@@ -153,6 +153,10 @@ each cached Show reasserts the top-level panel's current bound minimum. This pre
 native wrap pass from leaving intermittent blank height after repeated sword hovers. An accepted
 Primary result drives a short primitive cue on the controlled actor. It is feedback, not Combat
 authority; it remains the fallback because the current bodies have no Attack clip.
+
+Holding Ctrl also reveals the generic `Iron Sword` world label above an already-present ground item.
+It never reveals rolled item properties; those remain available only through pointer inspection or
+Inventory, and the reveal modifier performs no server query or AOI change.
 
 F0.5 is closed. The application composes the passive `Client.StandardUi` Inventory artifact into
 the same local/remote `UiClientRuntime` path used by reopened cached and content-backed exact
@@ -188,7 +192,7 @@ Game-owned `Grounded`/`Rising`/`Falling` presentation state selects vertical mot
 airborne-to-grounded transition produces the one-shot landing cue. Animation playback never becomes
 Physics or Game truth. The local X/Y presentation uses reproducibly consolidated GLBs containing one body skeleton
 plus exact `Idle`, `Walk`, and `Jump` actions. An explicit semantic `MainHandSocket` follows the
-body's right-hand position while retaining actor-relative equipment orientation, with a fixed
+body's scale-free animated right-hand transform and applies an equipment grip correction, with a fixed
 primitive anchor only for fallback actors. The public actor
 metadata exposes only the equipped public prefab and latest accepted `Interact`/`Primary` sequence;
 private sword rolls stay in Inventory/Inspection state. Late actor realization records the sequence

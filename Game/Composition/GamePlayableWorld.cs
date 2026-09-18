@@ -1003,6 +1003,19 @@ public sealed class GameWorldActions
             !worldState.TryReadPublic(world, actor, out WorldPublicDescriptor descriptor))
             return GameWorldActionStatus.MissingActor;
 
+        int index = checked((int)actor.Index);
+        if (_verticalGenerations[index] != actor.Generation ||
+            _verticalKinds[index] == GameVerticalMotionKind.None)
+            ReconcileVerticalState(world, actor);
+        if (_verticalKinds[index] == GameVerticalMotionKind.Airborne)
+        {
+            // Airborne locomotion already captures horizontal momentum at takeoff. Facing is the
+            // same physical contract: live directional/look input remains post-landing intent and
+            // cannot yaw the body independently while the flight is in progress.
+            orientation = descriptor.Orientation;
+            return GameWorldActionStatus.Accepted;
+        }
+
         long deltaX = checked(targetXMillimeters - position.GlobalXMillimeters);
         long deltaZ = checked(targetZMillimeters - position.GlobalZMillimeters);
         if (deltaX == 0 && deltaZ == 0)

@@ -905,8 +905,9 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
                 {
                     Name = "MainHandSocket",
                 };
-                // The hand's position is sampled explicitly below. Keeping the socket under the
-                // actor root prevents unarmed Idle/Walk wrist rotations from steering the weapon.
+                // The scale-free hand transform is sampled explicitly below. Keeping the socket
+                // under the actor root avoids inheriting the imported skeleton's 0.01 scene scale
+                // while retaining the animated hand's complete position and orientation.
                 root.AddChild(socket);
                 return socket;
             }
@@ -918,6 +919,9 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         {
             Name = "MainHandSocket",
             Position = new Vector3(-0.34f, 1.08f, 0),
+            // Match the imported hand's canonical idle frame so the same grip correction works
+            // for primitive fallback actors without a skeleton.
+            Basis = new Basis(Vector3.Back, Vector3.Left, Vector3.Down),
         };
         root.AddChild(fallback);
         return fallback;
@@ -937,8 +941,11 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         int bone)
     {
         if (skeleton is null || bone < 0) return;
-        Vector3 hand = skeleton.ToGlobal(skeleton.GetBoneGlobalPose(bone).Origin);
-        socket.Position = root.ToLocal(hand);
+        Transform3D handInRoot = root.GlobalTransform.AffineInverse() *
+            skeleton.GlobalTransform * skeleton.GetBoneGlobalPose(bone);
+        socket.Transform = new Transform3D(
+            handInRoot.Basis.Orthonormalized(),
+            handInRoot.Origin);
     }
 
     private static Node3D CreateMainHandPresentation(out Node3D actionPivot)
@@ -968,9 +975,10 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         {
             Name = "MainHandPresentation",
             Visible = false,
-            // Local +Y is the weapon's hilt-to-tip axis. In actor space this hangs the blade down
-            // and slightly outward from the right hand, independent of unarmed wrist animation.
-            Rotation = new Vector3(0, 0, MathF.PI - MathF.PI / 15f),
+            // Local +Y is the weapon's hilt-to-tip axis. This grip correction places the blade
+            // diagonally down/back from the Mixamo RightHand frame; locomotion then carries the
+            // whole correction with the animated hand instead of leaving a vertical pendulum.
+            Basis = CreateMainHandGripBasis(),
         };
         actionPivot = new Node3D { Name = "MainHandActionPivot" };
         pivot.AddChild(actionPivot);
@@ -1007,6 +1015,13 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             Position = new Vector3(0, -MainHandGripLengthMeters * 0.5f, 0),
         });
         return pivot;
+    }
+
+    private static Basis CreateMainHandGripBasis()
+    {
+        Vector3 blade = new Vector3(-0.20f, 0.34f, 0.92f).Normalized();
+        Vector3 guard = (Vector3.Up - blade * blade.Dot(Vector3.Up)).Normalized();
+        return new Basis(guard, blade, guard.Cross(blade).Normalized());
     }
 
     private static void NormalizeMainHandPresentationScale(Node3D socket, Node3D presentation)

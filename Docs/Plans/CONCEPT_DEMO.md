@@ -366,6 +366,10 @@ control, public-entity, and owner-private lineages inside one Game generation. T
 gate uses Host Alice through `Client.Local` plus two actual exported Online clients through Network;
 all three human actors enter the existing F0.4 presentation path.
 
+Ctrl reveal also realizes the generic name of an already-resident ground item above that object.
+For the current sword this is `Iron Sword`, not its rolled inspection properties. The latter remain
+pointer/Inventory presentation; no reveal input queries the server or expands interest.
+
 The controlled human's render pose is sourced from the latest owner-private state used as the
 player-relative world origin, not from its independently delivered public movement row. Public
 delivery may legitimately trail owner state; subtracting that older pose from the newer origin made
@@ -686,6 +690,10 @@ preserves a valid vertical-only component when the combined request is wall-bloc
 landing/ceiling contact. Permanent tests require a jump held into an authored tree to keep making
 bounded vertical progress and land without penetration, recovery, or snap. This remains a bounded
 component decomposition, not general contact sliding or capsule collision.
+
+Facing follows the same flight contract. A fresh directional/look command remains accepted while
+airborne, but it cannot yaw the authoritative body until grounded input resumes; horizontal motion
+and orientation therefore cannot become separate mid-air steering channels.
 
 The exact flat movement-diagnostic region spans chunks X -2..0 and Z -1..1 (global X -32..16 m,
 Z -16..32 m). Every BaseTerrain vertex in those nine chunks is exactly 1 m high. It gives human and
@@ -1024,10 +1032,11 @@ ordinary GroundItem presentation.
 
 Human-play validation additionally proved that the imported body hierarchy contributes a `0.01`
 scale and unarmed animation rotation below the hand bone. Main-Hand presentation now samples the
-hand position into an actor-relative semantic socket, so it inherits neither that scale nor the
-Idle/Walk wrist rotation. A separate action pivot owns the temporary swing without overwriting the
-resting mount. The permanent local product journey requires a visible meter-scale blade with a
-centered grip and stable down/out orientation after authoritative equip, not merely a visible empty
+complete hand transform into an actor-relative semantic socket and orthonormalizes away that scale.
+An explicit grip correction keeps the blade diagonal while Idle/Walk carry it with the wrist. A
+separate action pivot owns the temporary swing without overwriting the resting mount. The permanent
+local product journey requires a visible meter-scale blade with a centered grip and stable hand-owned
+orientation after authoritative equip, not merely a visible empty
 socket node.
 
 The V1.5 X/Y model and action FBXs are now authoring inputs outside Godot's runtime resource tree.

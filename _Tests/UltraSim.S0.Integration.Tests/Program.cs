@@ -2024,6 +2024,19 @@ static TestMetrics AuthoritativeJumpFallLandingAndRecovery()
         afterFirst.YMillimeters > verticalStart.YMillimeters &&
         ReadVertical(runtime.Game, entities.PlayerId).IsAirborne,
         "One authoritative jump step did not compose horizontal and upward motion.");
+    WorldYaw takeoffFacing = ReadFacing();
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+            (world, _, game) => game.WorldActions.FaceActorToward(
+                world,
+                game.WorldState,
+                ResolveInWorld(world, entities.PlayerId),
+                afterFirst.GlobalXMillimeters + 10_000,
+                afterFirst.GlobalZMillimeters,
+                out WorldYaw ignored),
+            out GameWorldActionStatus airborneFacing) &&
+        airborneFacing == GameWorldActionStatus.Accepted &&
+        ReadFacing() == takeoffFacing,
+        "Live directional facing rotated the authoritative body while airborne.");
 
     var hostileDoubleJump = new GamePlayerCommand(
         input.ControlSession,
@@ -2117,6 +2130,18 @@ static TestMetrics AuthoritativeJumpFallLandingAndRecovery()
         HashText($"{afterFirst}|{afterCorrectionAttempt}|{landing}|{recovered}|{cadence20}"),
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         "Game admits one grounded Jump edge, captures takeoff direction without live air steering, integrates exact fixed-point gravity, lands on terrain, rejects double-jump, recovers below the configured fall envelope, and converges at 20/60/120 Hz.");
+
+    WorldYaw ReadFacing() => runtime.Game.TryUseActiveGeneration<
+        IGameGenerationStateProvider, WorldYaw>(
+        (world, _, game) => game.WorldState.TryReadPublic(
+            world,
+            ResolveInWorld(world, entities.PlayerId),
+            out WorldPublicDescriptor descriptor)
+                ? descriptor.Orientation
+                : throw new InvalidOperationException("The jump actor public descriptor was missing."),
+        out WorldYaw facing)
+            ? facing
+            : throw new InvalidOperationException("The jump actor generation was unavailable.");
 
     static GameVerticalMotionSnapshot ReadVertical(ServerGameFacet gameFacet, PersistentEntityId id)
     {

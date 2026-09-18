@@ -257,6 +257,7 @@ public sealed class GodotWorldRenderer : IDisposable
     private long _lastFrameTicks;
     private long _maximumFrameTicks;
     private bool _disposed;
+    private bool _publicNamesRevealHeld;
     private bool _verticalAnchorInitialized = true;
     private int _verticalAnchorMillimeters;
 
@@ -325,6 +326,23 @@ public sealed class GodotWorldRenderer : IDisposable
     public Node3D Root { get; }
     public GodotWorldRendererLimits Limits => _limits;
     public GodotWorldFallbackMaterialMode FallbackMaterialMode => _fallbackMaterialMode;
+
+    /// <summary>
+    /// Shows only generic world-object names retained by this renderer. Detailed item inspection
+    /// remains pointer-driven and is deliberately not part of the reveal modifier.
+    /// </summary>
+    public void SetPublicNamesRevealHeld(bool held)
+    {
+        EnsureOwner();
+        ThrowIfDisposed();
+        if (_publicNamesRevealHeld == held) return;
+        _publicNamesRevealHeld = held;
+        foreach (RenderChunk? chunk in _renderChunks)
+        {
+            Node3D? names = chunk?.PublicRoot.GetNodeOrNull<Node3D>("PublicNames");
+            if (names is not null) names.Visible = held;
+        }
+    }
 
     public bool TryEnterPresentation(ClientSemanticChunkHandle handle, bool visible,
         out GodotWorldRenderQueueError error)
@@ -930,6 +948,8 @@ public sealed class GodotWorldRenderer : IDisposable
         try
         {
             var groups = new SortedDictionary<uint, List<Transform3D>>();
+            Node3D? names = null;
+            int nameCount = 0;
             float firstY = float.NaN;
             FallbackCounts fallbacks = default;
             foreach (WorldPublicRecord record in semantic.PublicRecords)
@@ -941,6 +961,25 @@ public sealed class GodotWorldRenderer : IDisposable
                 Transform3D transform = ToLocalTransform(
                     semantic.Info.Key, record.Position, record.Orientation, yAnchor);
                 transforms.Add(transform);
+                string? publicName = ResolveGenericPublicName(in record);
+                if (publicName is not null)
+                {
+                    names ??= new Node3D
+                    {
+                        Name = "PublicNames",
+                        Visible = _publicNamesRevealHeld,
+                    };
+                    names.AddChild(new Label3D
+                    {
+                        Name = $"PublicName_{record.Id.Index}_{record.Id.Generation}",
+                        Text = publicName,
+                        Position = transform.Origin + new Vector3(0, 1.05f, 0),
+                        Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
+                        NoDepthTest = true,
+                        FontSize = 28,
+                    });
+                    nameCount++;
+                }
                 if (float.IsNaN(firstY)) firstY = transform.Origin.Y;
             }
             foreach ((uint prefab, List<Transform3D> transforms) in groups)
@@ -956,7 +995,13 @@ public sealed class GodotWorldRenderer : IDisposable
                     transforms,
                     presentation.MaterialOverride));
             }
-            return new RenderLayer(root, 1 + groups.Count, groups.Count, firstY, fallbacks);
+            if (names is not null) root.AddChild(names);
+            return new RenderLayer(
+                root,
+                1 + groups.Count + (names is null ? 0 : 1 + nameCount),
+                groups.Count,
+                firstY,
+                fallbacks);
         }
         catch
         {
@@ -964,6 +1009,12 @@ public sealed class GodotWorldRenderer : IDisposable
             throw;
         }
     }
+
+    private static string? ResolveGenericPublicName(in WorldPublicRecord record) =>
+        (record.StateFlags & WorldPublicStateFlags.GroundItem) != 0 &&
+        record.PrefabId == UltraSim.Game.Composition.GameWorldPublicPrefabIds.IronSword
+            ? "Iron Sword"
+            : null;
 
     private ArrayMesh CreateTerrainMesh(ClientSemanticChunkHandle handle, SpatialChunkKey key,
         out int yAnchor, out float firstLocalY, out int triangleCount)

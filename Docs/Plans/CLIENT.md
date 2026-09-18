@@ -979,6 +979,9 @@ Holding Ctrl:
 ```text
 show all currently resident/renderable entities
 that are already known and nameplate-eligible
+
+show generic names for already-resident ground items
+without exposing their inspection properties
 ```
 
 While held:
@@ -2178,9 +2181,12 @@ misread as landing. Imported skeleton-root translation is configured as extracte
 is never applied to the visual on top of the authoritative actor root; the client does not use an
 animation clip to move or jump the actor. Native acceptance requires the shipped Walk root track to
 contain real translation and proves that the presenter cancels it. Godot never publishes animation
-state upstream. A semantic `MainHandSocket` samples a matching right-hand bone's position while
-retaining an actor-relative equipment orientation, or uses a primitive actor's fixed fallback
-anchor. This prevents unarmed locomotion wrist rotations from steering equipped gear. A distinct
+state upstream. Game likewise keeps authoritative yaw fixed while airborne; live direction/look is
+accepted as post-landing intent rather than a second mid-air steering channel. A semantic
+`MainHandSocket` samples a matching right-hand bone's complete transform,
+orthonormalizes away imported scene scale, and applies the equipment's explicit grip correction; a
+primitive actor uses a fixed fallback anchor. Idle/Walk therefore carry equipped gear with the hand
+instead of leaving it as an actor-relative vertical pendulum. A distinct
 action pivot owns the bounded Primary swing and returns to identity without modifying the resting
 mount. Equipped gear is excluded from independent world batching/picking; the same entity returns
 to ordinary GroundItem presentation after authoritative Drop.
