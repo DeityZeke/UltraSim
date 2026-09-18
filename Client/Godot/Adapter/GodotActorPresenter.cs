@@ -62,6 +62,17 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
     public const ulong MotionHoldMilliseconds = 180;
     private const int MotionThresholdMillimeters = 4;
     private const float MillimetersToMeters = 0.001f;
+    private const float MainHandBladeWidthMeters = 0.055f;
+    private const float MainHandBladeLengthMeters = 0.75f;
+    private const float MainHandBladeThicknessMeters = 0.018f;
+    private const float MainHandGuardWidthMeters = 0.20f;
+    private const float MainHandGuardLengthMeters = 0.025f;
+    private const float MainHandGuardThicknessMeters = 0.04f;
+    private const float MainHandGripWidthMeters = 0.034f;
+    private const float MainHandGripLengthMeters = 0.13f;
+    private const float MainHandGripThicknessMeters = 0.032f;
+    private const float MainHandGuardCenterMeters = 0.075f;
+    private const float MainHandBladeBaseMeters = 0.095f;
     private readonly ClientActorDefinitionCatalog _catalog;
     private readonly IGodotActorVisualResolver? _visuals;
     private readonly ActorSlot[] _slots;
@@ -891,6 +902,9 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         {
             Name = "MainHandSocket",
             Position = new Vector3(0.34f, 1.08f, 0),
+            // Match the imported humanoid socket convention: local +Z leaves the hand toward
+            // the ground. Presentation geometry can then use one mount in both realizations.
+            Rotation = new Vector3(MathF.PI * 0.5f, 0, 0),
         };
         root.AddChild(fallback);
         return fallback;
@@ -923,31 +937,42 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         {
             Name = "MainHandPresentation",
             Visible = false,
+            // Keep the one-handed placeholder clear of the leg/torso without detaching it from
+            // the animated hand. Imported humanoids expose their usable grip axis as local +Z.
+            Rotation = new Vector3(-MathF.PI / 15f, 0, 0),
         };
         pivot.AddChild(new MeshInstance3D
         {
             Name = "PrimitiveBlade",
             Mesh = GodotMeshGeometry.CreateGroundedBox(
-                new Vector3(0.14f, 1.15f, 0.065f), bladeMaterial),
-            // The imported right-hand bone points its usable grip axis along local +Z.
-            // Start the blade at the hand and extend away from the body. The previous
-            // -0.98 m offset extended the blade back through the arm/torso.
-            Position = new Vector3(0, 0, 0.08f),
+                new Vector3(
+                    MainHandBladeWidthMeters,
+                    MainHandBladeLengthMeters,
+                    MainHandBladeThicknessMeters), bladeMaterial),
+            Position = new Vector3(0, 0, MainHandBladeBaseMeters),
             Rotation = new Vector3(MathF.PI * 0.5f, 0, 0),
         });
         pivot.AddChild(new MeshInstance3D
         {
             Name = "PrimitiveGuard",
             Mesh = GodotMeshGeometry.CreateGroundedBox(
-                new Vector3(0.34f, 0.07f, 0.10f), guardMaterial),
-            Position = new Vector3(0, -0.035f, 0.04f),
+                new Vector3(
+                    MainHandGuardWidthMeters,
+                    MainHandGuardLengthMeters,
+                    MainHandGuardThicknessMeters), guardMaterial),
+            Position = new Vector3(
+                0, -MainHandGuardLengthMeters * 0.5f, MainHandGuardCenterMeters),
         });
         pivot.AddChild(new MeshInstance3D
         {
             Name = "PrimitiveGrip",
             Mesh = GodotMeshGeometry.CreateGroundedBox(
-                new Vector3(0.075f, 0.26f, 0.075f), gripMaterial),
-            Position = new Vector3(0, 0, -0.22f),
+                new Vector3(
+                    MainHandGripWidthMeters,
+                    MainHandGripLengthMeters,
+                    MainHandGripThicknessMeters), gripMaterial),
+            // The bone socket now lands at the middle of the grip, not on the guard.
+            Position = new Vector3(0, 0, -MainHandGripLengthMeters * 0.5f),
             Rotation = new Vector3(MathF.PI * 0.5f, 0, 0),
         });
         return pivot;

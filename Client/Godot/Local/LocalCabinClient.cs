@@ -2878,13 +2878,36 @@ public partial class LocalCabinClient : Node3D
                 "PrimitiveBlade", recursive: true, owned: false) is not MeshInstance3D presentedBlade ||
             presentedBlade.Mesh is null)
             throw new InvalidOperationException("The equipped sword blade was not realized.");
+        const float expectedBladeLengthMeters = 0.75f;
+        Node3D presentedSocket = presentedBlade.GetParent().GetParent<Node3D>();
+        if (presentedSocket.FindChild(
+                "PrimitiveGrip", recursive: true, owned: false) is not MeshInstance3D presentedGrip ||
+            presentedGrip.Mesh is null)
+            throw new InvalidOperationException("The equipped sword grip was not realized.");
+        Vector3 bladeSize = presentedBlade.Mesh.GetAabb().Size;
         Vector3 bladeBase = presentedBlade.ToGlobal(Vector3.Zero);
-        Vector3 bladeTip = presentedBlade.ToGlobal(new Vector3(0, 1.15f, 0));
-        if (presentedBlade.Mesh.GetAabb().Size.Y < 1.1f ||
-            bladeTip.DistanceTo(bladeBase) < 0.75f)
+        Vector3 bladeTip = presentedBlade.ToGlobal(
+            new Vector3(0, expectedBladeLengthMeters, 0));
+        Vector3 gripBase = presentedGrip.ToGlobal(Vector3.Zero);
+        Vector3 gripTip = presentedGrip.ToGlobal(new Vector3(0, 0.13f, 0));
+        Vector3 gripCenter = (gripBase + gripTip) * 0.5f;
+        Vector2 socketPlanar = new(
+            presentedSocket.GlobalPosition.X - presentedActor.GlobalPosition.X,
+            presentedSocket.GlobalPosition.Z - presentedActor.GlobalPosition.Z);
+        Vector2 tipPlanar = new(
+            bladeTip.X - presentedActor.GlobalPosition.X,
+            bladeTip.Z - presentedActor.GlobalPosition.Z);
+        if (!Mathf.IsEqualApprox(bladeSize.X, 0.055f) ||
+            !Mathf.IsEqualApprox(bladeSize.Y, expectedBladeLengthMeters) ||
+            !Mathf.IsEqualApprox(bladeSize.Z, 0.018f) ||
+            !Mathf.IsEqualApprox(bladeTip.DistanceTo(bladeBase), expectedBladeLengthMeters) ||
+            gripCenter.DistanceTo(presentedSocket.GlobalPosition) > 0.02f ||
+            bladeTip.Y > presentedSocket.GlobalPosition.Y - 0.65f ||
+            tipPlanar.Length() < socketPlanar.Length() + 0.10f)
             throw new InvalidOperationException(
-                $"The equipped sword blade had no visible world-space extent: " +
-                $"aabb={presentedBlade.Mesh.GetAabb()}, base={bladeBase}, tip={bladeTip}.");
+                $"The equipped sword lost its one-handed proportions or outward/downward mount: " +
+                $"aabb={presentedBlade.Mesh.GetAabb()}, socket={presentedSocket.GlobalPosition}, " +
+                $"gripCenter={gripCenter}, base={bladeBase}, tip={bladeTip}.");
         WorldPublicRecord equipped = default;
         if (!_localSession.TryGetLatestView(out LocalPlayableAuthorityView equippedView) ||
             !TryFindEquippedPublicRecord(equippedView.PlayerPosition, out equipped))
