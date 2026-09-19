@@ -5,7 +5,7 @@ namespace UltraSim.Client.Content;
 
 /// <summary>
 /// Source-independent persistent store for verified passive content. Physical blob identity is
-/// global; manifest and activation authorization remain scoped to a verified application realm.
+/// global; manifest and activation authorization remain scoped to Local or an authenticated realm.
 /// </summary>
 public sealed class ContentCache : IDisposable
 {
@@ -17,6 +17,8 @@ public sealed class ContentCache : IDisposable
     private readonly object _sync = new();
     private readonly string _root;
     private readonly string _blobsRoot;
+    private readonly string _scopesRoot;
+    private readonly string _localScopeRoot;
     private readonly string _realmsRoot;
     private readonly string _accessRoot;
     private readonly string _stagingRoot;
@@ -47,6 +49,8 @@ public sealed class ContentCache : IDisposable
         _cacheLimits = cacheLimits;
         _contentLimits = contentLimits;
         _blobsRoot = Path.Combine(root, "blobs", "sha256");
+        _scopesRoot = Path.Combine(root, "scopes");
+        _localScopeRoot = Path.Combine(_scopesRoot, "local");
         _realmsRoot = Path.Combine(root, "realms");
         _accessRoot = Path.Combine(root, "metadata", "access");
         _stagingRoot = Path.Combine(root, "staging");
@@ -77,10 +81,12 @@ public sealed class ContentCache : IDisposable
                 return Fail(ContentCacheError.UnsafePath, out error);
 
             string blobs = Path.Combine(root, "blobs", "sha256");
+            string scopes = Path.Combine(root, "scopes");
+            string local = Path.Combine(scopes, "local");
             string realms = Path.Combine(root, "realms");
             string access = Path.Combine(root, "metadata", "access");
             string staging = Path.Combine(root, "staging");
-            foreach (string directory in new[] { blobs, realms, access, staging })
+            foreach (string directory in new[] { blobs, scopes, local, realms, access, staging })
             {
                 Directory.CreateDirectory(directory);
                 if (IsReparsePoint(directory))
@@ -139,6 +145,21 @@ public sealed class ContentCache : IDisposable
         out InstalledContentPackage installed,
         out ContentCacheError error)
     {
+        if (!realm.IsValid)
+        {
+            installed = default;
+            return Fail(ContentCacheError.InvalidRequest, out error);
+        }
+        return TryInstallPackage(ContentScopeKey.ForRealm(realm), manifest, payloads, out installed, out error);
+    }
+
+    public bool TryInstallPackage(
+        ContentScopeKey scope,
+        ContentPackageManifest manifest,
+        IEnumerable<ContentFilePayload>? payloads,
+        out InstalledContentPackage installed,
+        out ContentCacheError error)
+    {
         ArgumentNullException.ThrowIfNull(manifest);
         installed = default;
         error = ContentCacheError.None;
@@ -146,15 +167,31 @@ public sealed class ContentCache : IDisposable
             !ContentPackageValidator.TryValidatePayloads(manifest, copy, out _, out _))
             return Fail(ContentCacheError.PayloadValidationFailed, out error);
         lock (_sync)
-            return TryInstallPackageCore(realm, manifest, copy, out installed, out error);
+            return TryInstallPackageCore(scope, manifest, copy, out installed, out error);
     }
 
     /// <summary>
     /// Installs a complete package from only the payloads not already valid in the global CAS.
-    /// Publication remains transactional: every descriptor is valid before realm metadata moves.
+    /// Publication remains transactional: every descriptor is valid before scope metadata moves.
     /// </summary>
     public bool TryInstallPackageDelta(
         ApplicationRealmId realm,
+        ContentPackageManifest manifest,
+        IEnumerable<ContentFilePayload>? acquiredPayloads,
+        out InstalledContentPackage installed,
+        out ContentCacheError error)
+    {
+        if (!realm.IsValid)
+        {
+            installed = default;
+            return Fail(ContentCacheError.InvalidRequest, out error);
+        }
+        return TryInstallPackageDelta(ContentScopeKey.ForRealm(realm), manifest, acquiredPayloads,
+            out installed, out error);
+    }
+
+    public bool TryInstallPackageDelta(
+        ContentScopeKey scope,
         ContentPackageManifest manifest,
         IEnumerable<ContentFilePayload>? acquiredPayloads,
         out InstalledContentPackage installed,
@@ -166,7 +203,7 @@ public sealed class ContentCache : IDisposable
         if (!TryCopyPayloads(acquiredPayloads, manifest.Files.Count, out ContentFilePayload[] copy))
             return Fail(ContentCacheError.PayloadValidationFailed, out error);
         lock (_sync)
-            return TryInstallPackageCore(realm, manifest, copy, out installed, out error);
+            return TryInstallPackageCore(scope, manifest, copy, out installed, out error);
     }
 
     /// <summary>Plans exact missing/corrupt blob work without publishing or mutating the cache.</summary>
@@ -176,17 +213,31 @@ public sealed class ContentCache : IDisposable
         out ContentPackageInstallPlan? plan,
         out ContentCacheError error)
     {
+        if (!realm.IsValid)
+        {
+            plan = null;
+            return Fail(ContentCacheError.InvalidRequest, out error);
+        }
+        return TryPlanPackageInstall(ContentScopeKey.ForRealm(realm), manifest, out plan, out error);
+    }
+
+    public bool TryPlanPackageInstall(
+        ContentScopeKey scope,
+        ContentPackageManifest manifest,
+        out ContentPackageInstallPlan? plan,
+        out ContentCacheError error)
+    {
         ArgumentNullException.ThrowIfNull(manifest);
         lock (_sync)
         {
             plan = null;
-            if (_disposed || !realm.IsValid)
+            if (_disposed || !scope.IsValid)
                 return Fail(ContentCacheError.InvalidRequest, out error);
-            if (manifest.TrustClass != ContentTrustClass.ServerAuthorizedPassive)
+            if (manifest.TrustClass != ContentTrustClass.ScopeAuthorizedPassive)
                 return Fail(ContentCacheError.UnsupportedTrustClass, out error);
             try
             {
-                string manifestPath = GetManifestPath(realm, manifest.ManifestHash);
+                string manifestPath = GetManifestPath(scope, manifest.ManifestHash);
                 bool manifestNeedsRepair = false;
                 if (File.Exists(manifestPath) &&
                     (!TryReadCanonicalManifest(manifestPath, manifest.ManifestHash,
@@ -236,14 +287,31 @@ public sealed class ContentCache : IDisposable
         out ContentPackageManifest? manifest,
         out ContentCacheError error)
     {
+        if (!realm.IsValid)
+        {
+            manifest = null;
+            return Fail(ContentCacheError.InvalidRequest, out error);
+        }
+        return TryOpenPackageManifest(ContentScopeKey.ForRealm(realm), packageId, manifestHash,
+            out manifest, out error);
+    }
+
+    /// <summary>Reads scope-authorized manifest metadata without treating blob absence as success.</summary>
+    public bool TryOpenPackageManifest(
+        ContentScopeKey scope,
+        ContentPackageId packageId,
+        ContentHash manifestHash,
+        out ContentPackageManifest? manifest,
+        out ContentCacheError error)
+    {
         lock (_sync)
         {
             manifest = null;
-            if (_disposed || !realm.IsValid || !packageId.IsValid || !manifestHash.IsValid)
+            if (_disposed || !scope.IsValid || !packageId.IsValid || !manifestHash.IsValid)
                 return Fail(ContentCacheError.InvalidRequest, out error);
             try
             {
-                string path = GetManifestPath(realm, manifestHash);
+                string path = GetManifestPath(scope, manifestHash);
                 if (!File.Exists(path)) return Fail(ContentCacheError.MissingManifest, out error);
                 if (!TryReadCanonicalManifest(path, manifestHash, out manifest) ||
                     manifest!.PackageId != packageId)
@@ -269,12 +337,27 @@ public sealed class ContentCache : IDisposable
         out VerifiedContentPackage? package,
         out ContentCacheError error)
     {
+        if (!realm.IsValid)
+        {
+            package = null;
+            return Fail(ContentCacheError.InvalidRequest, out error);
+        }
+        return TryOpenPackage(ContentScopeKey.ForRealm(realm), packageId, manifestHash, out package, out error);
+    }
+
+    public bool TryOpenPackage(
+        ContentScopeKey scope,
+        ContentPackageId packageId,
+        ContentHash manifestHash,
+        out VerifiedContentPackage? package,
+        out ContentCacheError error)
+    {
         lock (_sync)
-            return TryOpenPackageCore(realm, packageId, manifestHash, out package, out error);
+            return TryOpenPackageCore(scope, packageId, manifestHash, out package, out error);
     }
 
     private bool TryInstallPackageCore(
-        ApplicationRealmId realm,
+        ContentScopeKey scope,
         ContentPackageManifest manifest,
         ContentFilePayload[] payloads,
         out InstalledContentPackage installed,
@@ -282,9 +365,9 @@ public sealed class ContentCache : IDisposable
     {
         installed = default;
         error = ContentCacheError.None;
-        if (_disposed || !realm.IsValid)
+        if (_disposed || !scope.IsValid)
             return Fail(ContentCacheError.InvalidRequest, out error);
-        if (manifest.TrustClass != ContentTrustClass.ServerAuthorizedPassive)
+        if (manifest.TrustClass != ContentTrustClass.ScopeAuthorizedPassive)
             return Fail(ContentCacheError.UnsupportedTrustClass, out error);
 
         var descriptorsByPath = manifest.Files.ToDictionary(static value => value.Path);
@@ -309,8 +392,8 @@ public sealed class ContentCache : IDisposable
 
         try
         {
-            if (!TryEnsureRealmDirectories(realm, out error)) return false;
-            string manifestPath = GetManifestPath(realm, manifest.ManifestHash);
+            if (!TryEnsureScopeDirectories(scope, out error)) return false;
+            string manifestPath = GetManifestPath(scope, manifest.ManifestHash);
             byte[] metadata = ContentCacheMetadata.EncodeManifest(manifest);
             if (metadata.Length > _cacheLimits.MaximumMetadataFileBytes)
                 return Fail(ContentCacheError.CapacityExceeded, out error);
@@ -320,7 +403,7 @@ public sealed class ContentCache : IDisposable
                 (!TryReadCanonicalManifest(manifestPath, manifest.ManifestHash,
                     out ContentPackageManifest? existing) || existing!.PackageId != manifest.PackageId))
             {
-                var manifestKey = new ContentCacheManifestKey(realm, manifest.ManifestHash);
+                var manifestKey = new ContentCacheManifestKey(scope, manifest.ManifestHash);
                 if (_liveManifestPins.ContainsKey(manifestKey))
                     return Fail(ContentCacheError.CacheBusy, out error);
                 manifestCorrupt = true;
@@ -393,7 +476,7 @@ public sealed class ContentCache : IDisposable
             _reusedBlobs = checked(_reusedBlobs + (ulong)reused);
             SaturatingIncrement(ref _installs);
             installed = new InstalledContentPackage(
-                realm, manifest.PackageId, manifest.ManifestHash, visited.Count, packageBytes);
+                scope, manifest.PackageId, manifest.ManifestHash, visited.Count, packageBytes);
             return true;
         }
         catch (Exception exception) when (IsStorageException(exception))
@@ -415,14 +498,14 @@ public sealed class ContentCache : IDisposable
         {
             lease = null;
             error = ContentCacheError.None;
-            if (_disposed || !plan.Realm.IsValid)
+            if (_disposed || !plan.Scope.IsValid)
                 return Fail(ContentCacheError.InvalidRequest, out error);
             try
             {
-                string activationPath = GetActivationPath(plan.Realm, plan.Activation);
+                string activationPath = GetActivationPath(plan.Scope, plan.Activation);
                 if (File.Exists(activationPath))
                 {
-                    if (!TryReadActivation(activationPath, plan.RealmActivation, default,
+                    if (!TryReadActivation(activationPath, plan.ScopeActivation, default,
                             out ContentCacheActivationRecord existing))
                         return Corrupt(ContentCacheError.CorruptActivation, out error);
                     if (existing.Plan.PlanHash != plan.PlanHash)
@@ -443,7 +526,7 @@ public sealed class ContentCache : IDisposable
                 byte[] metadata = ContentCacheMetadata.EncodeActivation(record);
                 if (metadata.Length > _cacheLimits.MaximumMetadataFileBytes)
                     return Fail(ContentCacheError.CapacityExceeded, out error);
-                if (!TryEnsureRealmDirectories(plan.Realm, out error) ||
+                if (!TryEnsureScopeDirectories(plan.Scope, out error) ||
                     !TryWriteAtomic(activationPath, metadata, overwrite: true, out error))
                     return false;
                 lease = CreateCatalogLease(catalog, selected);
@@ -463,6 +546,22 @@ public sealed class ContentCache : IDisposable
         out ContentCatalogLease? lease,
         out ContentCacheError error)
     {
+        if (!key.IsValid)
+        {
+            lease = null;
+            return Fail(ContentCacheError.InvalidRequest, out error);
+        }
+        return TryOpenCatalog(baseCatalog, new ContentScopeActivationKey(
+            new ContentScopeActivationId(ContentScopeKey.ForRealm(key.Identity.Realm),
+                key.Identity.Activation), key.PlanHash), out lease, out error);
+    }
+
+    public bool TryOpenCatalog(
+        ContentBaseCatalog baseCatalog,
+        ContentScopeActivationKey key,
+        out ContentCatalogLease? lease,
+        out ContentCacheError error)
+    {
         ArgumentNullException.ThrowIfNull(baseCatalog);
         lock (_sync)
         {
@@ -472,7 +571,7 @@ public sealed class ContentCache : IDisposable
                 return Fail(ContentCacheError.InvalidRequest, out error);
             try
             {
-                string path = GetActivationPath(key.Identity.Realm, key.Identity.Activation);
+                string path = GetActivationPath(key.Identity.Scope, key.Identity.Activation);
                 if (!File.Exists(path)) return Fail(ContentCacheError.ActivationNotFound, out error);
                 if (!TryReadActivation(path, key.Identity, key.PlanHash,
                         out ContentCacheActivationRecord record))
@@ -498,6 +597,17 @@ public sealed class ContentCache : IDisposable
         bool pinned,
         out ContentCacheError error)
     {
+        if (!key.IsValid) return Fail(ContentCacheError.InvalidRequest, out error);
+        return TrySetActivationPinned(new ContentScopeActivationKey(
+            new ContentScopeActivationId(ContentScopeKey.ForRealm(key.Identity.Realm),
+                key.Identity.Activation), key.PlanHash), pinned, out error);
+    }
+
+    public bool TrySetActivationPinned(
+        ContentScopeActivationKey key,
+        bool pinned,
+        out ContentCacheError error)
+    {
         lock (_sync)
         {
             error = ContentCacheError.None;
@@ -505,13 +615,51 @@ public sealed class ContentCache : IDisposable
                 return Fail(ContentCacheError.InvalidRequest, out error);
             try
             {
-                string path = GetActivationPath(key.Identity.Realm, key.Identity.Activation);
+                string path = GetActivationPath(key.Identity.Scope, key.Identity.Activation);
                 if (!File.Exists(path)) return Fail(ContentCacheError.ActivationNotFound, out error);
                 if (!TryReadActivation(path, key.Identity, key.PlanHash,
                         out ContentCacheActivationRecord record))
                     return Corrupt(ContentCacheError.CorruptActivation, out error);
                 byte[] bytes = ContentCacheMetadata.EncodeActivation(record with { PersistentlyPinned = pinned });
                 return TryWriteAtomic(path, bytes, overwrite: true, out error);
+            }
+            catch (Exception exception) when (IsStorageException(exception))
+            {
+                return Fail(ContentCacheError.IoFailure, out error);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Retires one scope's authorization metadata. Global blobs remain in the CAS and become
+    /// ordinary eviction candidates only when no other persistent reachability or live lease
+    /// protects them.
+    /// </summary>
+    public bool TryRetireScope(
+        ContentScopeKey scope,
+        out ContentScopeRetirementResult result,
+        out ContentCacheError error)
+    {
+        lock (_sync)
+        {
+            result = default;
+            error = ContentCacheError.None;
+            if (_disposed || !scope.IsValid)
+                return Fail(ContentCacheError.InvalidRequest, out error);
+            if (_liveManifestPins.Keys.Any(key => key.Scope == scope))
+                return Fail(ContentCacheError.CacheBusy, out error);
+            try
+            {
+                if (!TryScanMetadata(out List<ManifestRecord> manifests,
+                        out List<ActivationFileRecord> activations, out error)) return false;
+                ManifestRecord[] ownedManifests = manifests.Where(value => value.Key.Scope == scope).ToArray();
+                ActivationFileRecord[] ownedActivations = activations
+                    .Where(value => value.Record.Plan.Scope == scope).ToArray();
+                foreach (ActivationFileRecord activation in ownedActivations) File.Delete(activation.Path);
+                foreach (ManifestRecord manifest in ownedManifests) File.Delete(manifest.Path);
+                result = new ContentScopeRetirementResult(
+                    ownedManifests.Length, ownedActivations.Length);
+                return true;
             }
             catch (Exception exception) when (IsStorageException(exception))
             {
@@ -593,7 +741,9 @@ public sealed class ContentCache : IDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             StoreCensus census = ScanStore();
             return new ContentCacheSnapshot(
-                census.BlobCount, census.BlobBytes, census.ManifestCount, census.ActivationCount,
+                census.BlobCount, census.BlobBytes, census.ScopeCount,
+                census.LocalManifestCount, census.RealmManifestCount,
+                census.LocalActivationCount, census.RealmActivationCount,
                 _liveBlobPins.Values.Sum(), _liveCatalogLeases,
                 _cacheLimits.QuotaBytes, _cacheLimits.HighWaterBytes,
                 _installs, _reusedBlobs, _corruptionsDetected, _blobsRepaired,
@@ -632,7 +782,7 @@ public sealed class ContentCache : IDisposable
     }
 
     private bool TryOpenPackageCore(
-        ApplicationRealmId realm,
+        ContentScopeKey scope,
         ContentPackageId packageId,
         ContentHash manifestHash,
         out VerifiedContentPackage? package,
@@ -640,11 +790,11 @@ public sealed class ContentCache : IDisposable
     {
         package = null;
         error = ContentCacheError.None;
-        if (_disposed || !realm.IsValid || !packageId.IsValid || !manifestHash.IsValid)
+        if (_disposed || !scope.IsValid || !packageId.IsValid || !manifestHash.IsValid)
             return Fail(ContentCacheError.InvalidRequest, out error);
         try
         {
-            string path = GetManifestPath(realm, manifestHash);
+            string path = GetManifestPath(scope, manifestHash);
             if (!File.Exists(path)) return Fail(ContentCacheError.MissingManifest, out error);
             if (!TryReadCanonicalManifest(path, manifestHash, out ContentPackageManifest? manifest) ||
                 manifest!.PackageId != packageId)
@@ -680,7 +830,7 @@ public sealed class ContentCache : IDisposable
         var packages = new List<VerifiedContentPackage>(plan.Packages.Count);
         foreach (ContentActivationPackage required in plan.Packages)
         {
-            if (TryOpenPackageCore(plan.Realm, required.PackageId, required.ManifestHash,
+            if (TryOpenPackageCore(plan.Scope, required.PackageId, required.ManifestHash,
                     out VerifiedContentPackage? package, out ContentCacheError packageError))
             {
                 packages.Add(package!);
@@ -713,7 +863,7 @@ public sealed class ContentCache : IDisposable
         for (int index = 0; index < packages.Length; index++)
         {
             PackageManifestIdentity identity = record.SelectedPackages[index];
-            if (!TryOpenPackageCore(record.Plan.Realm, identity.PackageId, identity.ManifestHash,
+            if (!TryOpenPackageCore(record.Plan.Scope, identity.PackageId, identity.ManifestHash,
                     out VerifiedContentPackage? package, out error))
                 return false;
             packages[index] = package!;
@@ -734,7 +884,7 @@ public sealed class ContentCache : IDisposable
             .Select(static file => file.Sha256).Distinct().ToArray();
         for (int index = 0; index < selected.Length; index++)
         {
-            manifests[index] = new ContentCacheManifestKey(catalog.Realm, selected[index].ManifestHash);
+            manifests[index] = new ContentCacheManifestKey(catalog.Scope, selected[index].ManifestHash);
             AddPin(_liveManifestPins, manifests[index]);
         }
         foreach (ContentHash blob in blobs) AddPin(_liveBlobPins, blob);
@@ -787,7 +937,7 @@ public sealed class ContentCache : IDisposable
             if (activation.Record.PersistentlyPinned)
                 foreach (PackageManifestIdentity package in activation.Record.SelectedPackages)
                     protectedManifests.Add(new ContentCacheManifestKey(
-                        activation.Record.Plan.Realm, package.ManifestHash));
+                        activation.Record.Plan.Scope, package.ManifestHash));
         var protectedBlobs = new HashSet<ContentHash>(_liveBlobPins.Keys);
         foreach (ManifestRecord manifest in manifests)
             if (protectedManifests.Contains(manifest.Key))
@@ -818,7 +968,7 @@ public sealed class ContentCache : IDisposable
             if (activation.Record.PersistentlyPinned) continue;
             bool remove = activation.Record.SelectedPackages.Any(package =>
                 removedManifestKeys.Contains(new ContentCacheManifestKey(
-                    activation.Record.Plan.Realm, package.ManifestHash)));
+                    activation.Record.Plan.Scope, package.ManifestHash)));
             if (remove)
             {
                 File.Delete(activation.Path);
@@ -855,41 +1005,56 @@ public sealed class ContentCache : IDisposable
         manifests = [];
         activations = [];
         error = ContentCacheError.None;
+        if (!TryScanScopeMetadata(ContentScopeKey.Local, _localScopeRoot, manifests, activations, out error))
+            return false;
         foreach (string realmDirectory in Directory.EnumerateDirectories(_realmsRoot))
         {
             if (IsReparsePoint(realmDirectory) ||
                 !ApplicationRealmId.TryParse(Path.GetFileName(realmDirectory), out ApplicationRealmId realm))
                 return Fail(ContentCacheError.UnsafePath, out error);
-            string manifestDirectory = Path.Combine(realmDirectory, "manifests");
-            if (Directory.Exists(manifestDirectory))
+            if (!TryScanScopeMetadata(ContentScopeKey.ForRealm(realm), realmDirectory,
+                    manifests, activations, out error)) return false;
+        }
+        return true;
+    }
+
+    private bool TryScanScopeMetadata(
+        ContentScopeKey scope,
+        string scopeDirectory,
+        List<ManifestRecord> manifests,
+        List<ActivationFileRecord> activations,
+        out ContentCacheError error)
+    {
+        error = ContentCacheError.None;
+        if (IsReparsePoint(scopeDirectory)) return Fail(ContentCacheError.UnsafePath, out error);
+        string manifestDirectory = Path.Combine(scopeDirectory, "manifests");
+        if (Directory.Exists(manifestDirectory))
+        {
+            if (IsReparsePoint(manifestDirectory)) return Fail(ContentCacheError.UnsafePath, out error);
+            foreach (string path in Directory.EnumerateFiles(manifestDirectory))
             {
-                if (IsReparsePoint(manifestDirectory)) return Fail(ContentCacheError.UnsafePath, out error);
-                foreach (string path in Directory.EnumerateFiles(manifestDirectory))
-                {
-                    if (IsReparsePoint(path) || !TryHashFileName(path, ManifestExtension, out ContentHash hash) ||
-                        !TryReadCanonicalManifest(path, hash, out ContentPackageManifest? manifest))
-                        return Corrupt(ContentCacheError.CorruptManifest, out error);
-                    manifests.Add(new ManifestRecord(
-                        new ContentCacheManifestKey(realm, hash), manifest!, path));
-                    if (manifests.Count > _cacheLimits.MaximumManifests)
-                        return Fail(ContentCacheError.CapacityExceeded, out error);
-                }
+                if (IsReparsePoint(path) || !TryHashFileName(path, ManifestExtension, out ContentHash hash) ||
+                    !TryReadCanonicalManifest(path, hash, out ContentPackageManifest? manifest))
+                    return Corrupt(ContentCacheError.CorruptManifest, out error);
+                manifests.Add(new ManifestRecord(new ContentCacheManifestKey(scope, hash), manifest!, path));
+                if (manifests.Count > _cacheLimits.MaximumManifests)
+                    return Fail(ContentCacheError.CapacityExceeded, out error);
             }
-            string activationDirectory = Path.Combine(realmDirectory, "activations");
-            if (Directory.Exists(activationDirectory))
+        }
+        string activationDirectory = Path.Combine(scopeDirectory, "activations");
+        if (Directory.Exists(activationDirectory))
+        {
+            if (IsReparsePoint(activationDirectory)) return Fail(ContentCacheError.UnsafePath, out error);
+            foreach (string path in Directory.EnumerateFiles(activationDirectory))
             {
-                if (IsReparsePoint(activationDirectory)) return Fail(ContentCacheError.UnsafePath, out error);
-                foreach (string path in Directory.EnumerateFiles(activationDirectory))
-                {
-                    if (IsReparsePoint(path) ||
-                        !TryActivationFileName(path, out ContentActivationId activation) ||
-                        !TryReadActivation(path, new ContentRealmActivationId(realm, activation), default,
-                            out ContentCacheActivationRecord record))
-                        return Corrupt(ContentCacheError.CorruptActivation, out error);
-                    activations.Add(new ActivationFileRecord(record, path));
-                    if (activations.Count > _cacheLimits.MaximumActivations)
-                        return Fail(ContentCacheError.CapacityExceeded, out error);
-                }
+                if (IsReparsePoint(path) ||
+                    !TryActivationFileName(path, out ContentActivationId activation) ||
+                    !TryReadActivation(path, new ContentScopeActivationId(scope, activation), default,
+                        out ContentCacheActivationRecord record))
+                    return Corrupt(ContentCacheError.CorruptActivation, out error);
+                activations.Add(new ActivationFileRecord(record, path));
+                if (activations.Count > _cacheLimits.MaximumActivations)
+                    return Fail(ContentCacheError.CapacityExceeded, out error);
             }
         }
         return true;
@@ -898,15 +1063,27 @@ public sealed class ContentCache : IDisposable
     private StoreCensus ScanStore()
     {
         List<BlobRecord> blobs = ScanBlobs();
-        int manifests = 0, activations = 0;
+        (int localManifests, int localActivations) = CountScopeMetadata(_localScopeRoot);
+        int realmManifests = 0, realmActivations = 0, realmScopes = 0;
         foreach (string realm in Directory.EnumerateDirectories(_realmsRoot))
         {
-            string manifestDirectory = Path.Combine(realm, "manifests");
-            string activationDirectory = Path.Combine(realm, "activations");
-            if (Directory.Exists(manifestDirectory)) manifests += Directory.EnumerateFiles(manifestDirectory).Count();
-            if (Directory.Exists(activationDirectory)) activations += Directory.EnumerateFiles(activationDirectory).Count();
+            (int manifests, int activations) = CountScopeMetadata(realm);
+            realmManifests += manifests;
+            realmActivations += activations;
+            if (manifests != 0 || activations != 0) realmScopes++;
         }
-        return new StoreCensus(blobs.Count, blobs.Sum(static value => value.Bytes), manifests, activations);
+        int scopeCount = realmScopes + (localManifests != 0 || localActivations != 0 ? 1 : 0);
+        return new StoreCensus(blobs.Count, blobs.Sum(static value => value.Bytes), scopeCount,
+            localManifests, realmManifests, localActivations, realmActivations);
+    }
+
+    private static (int Manifests, int Activations) CountScopeMetadata(string scopeRoot)
+    {
+        string manifests = Path.Combine(scopeRoot, "manifests");
+        string activations = Path.Combine(scopeRoot, "activations");
+        return (
+            Directory.Exists(manifests) ? Directory.EnumerateFiles(manifests).Count() : 0,
+            Directory.Exists(activations) ? Directory.EnumerateFiles(activations).Count() : 0);
     }
 
     private List<BlobRecord> ScanBlobs()
@@ -944,6 +1121,10 @@ public sealed class ContentCache : IDisposable
                     return Fail(ContentCacheError.UnsafePath, out error);
             foreach (string path in Directory.EnumerateDirectories(_stagingRoot))
                 return Fail(ContentCacheError.UnsafePath, out error);
+            foreach (string path in Directory.EnumerateFileSystemEntries(_scopesRoot))
+                if (!Directory.Exists(path) || IsReparsePoint(path) ||
+                    !string.Equals(Path.GetFileName(path), "local", StringComparison.Ordinal))
+                    return Fail(ContentCacheError.UnsafePath, out error);
             if (!TryScanMetadata(out _, out _, out error)) return false;
             StoreCensus census = ScanStore();
             if (census.BlobCount > _cacheLimits.MaximumBlobs ||
@@ -973,7 +1154,7 @@ public sealed class ContentCache : IDisposable
 
     private bool TryReadActivation(
         string path,
-        ContentRealmActivationId expected,
+        ContentScopeActivationId expected,
         ContentHash expectedPlanHash,
         out ContentCacheActivationRecord record)
     {
@@ -993,14 +1174,15 @@ public sealed class ContentCache : IDisposable
         return ContentPackageValidator.TryValidatePayload(descriptor, bytes);
     }
 
-    private bool TryEnsureRealmDirectories(ApplicationRealmId realm, out ContentCacheError error)
+    private bool TryEnsureScopeDirectories(ContentScopeKey scope, out ContentCacheError error)
     {
-        string realmPath = Path.Combine(_realmsRoot, realm.ToString());
-        string manifests = Path.Combine(realmPath, "manifests");
-        string activations = Path.Combine(realmPath, "activations");
+        if (!scope.IsValid) return Fail(ContentCacheError.InvalidRequest, out error);
+        string scopePath = GetScopeRoot(scope);
+        string manifests = Path.Combine(scopePath, "manifests");
+        string activations = Path.Combine(scopePath, "activations");
         Directory.CreateDirectory(manifests);
         Directory.CreateDirectory(activations);
-        if (IsReparsePoint(realmPath) || IsReparsePoint(manifests) || IsReparsePoint(activations))
+        if (IsReparsePoint(scopePath) || IsReparsePoint(manifests) || IsReparsePoint(activations))
             return Fail(ContentCacheError.UnsafePath, out error);
         error = ContentCacheError.None;
         return true;
@@ -1068,11 +1250,18 @@ public sealed class ContentCache : IDisposable
         return Path.Combine(_blobsRoot, text[..2], text + BlobExtension);
     }
 
-    private string GetManifestPath(ApplicationRealmId realm, ContentHash hash) =>
-        Path.Combine(_realmsRoot, realm.ToString(), "manifests", hash + ManifestExtension);
+    private string GetScopeRoot(ContentScopeKey scope) => scope.Kind switch
+    {
+        ContentScopeKind.Local => _localScopeRoot,
+        ContentScopeKind.Realm when scope.Realm.IsValid => Path.Combine(_realmsRoot, scope.Realm.ToString()),
+        _ => throw new ArgumentException("A valid content scope is required.", nameof(scope)),
+    };
 
-    private string GetActivationPath(ApplicationRealmId realm, ContentActivationId activation) =>
-        Path.Combine(_realmsRoot, realm.ToString(), "activations", activation + ActivationExtension);
+    private string GetManifestPath(ContentScopeKey scope, ContentHash hash) =>
+        Path.Combine(GetScopeRoot(scope), "manifests", hash + ManifestExtension);
+
+    private string GetActivationPath(ContentScopeKey scope, ContentActivationId activation) =>
+        Path.Combine(GetScopeRoot(scope), "activations", activation + ActivationExtension);
 
     private string GetAccessPath(ContentHash hash) => Path.Combine(_accessRoot, hash + AccessExtension);
 
@@ -1160,8 +1349,15 @@ public sealed class ContentCache : IDisposable
     private readonly record struct StoreCensus(
         int BlobCount,
         long BlobBytes,
-        int ManifestCount,
-        int ActivationCount);
+        int ScopeCount,
+        int LocalManifestCount,
+        int RealmManifestCount,
+        int LocalActivationCount,
+        int RealmActivationCount)
+    {
+        internal int ManifestCount => LocalManifestCount + RealmManifestCount;
+        internal int ActivationCount => LocalActivationCount + RealmActivationCount;
+    }
 
     private readonly record struct BlobRecord(
         ContentHash Hash,

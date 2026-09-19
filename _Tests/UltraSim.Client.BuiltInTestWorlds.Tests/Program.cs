@@ -10,6 +10,7 @@ var tests = new (string Name, Action Body)[]
     ("LocalPackagesAreExactVerifiedPayloadSets", LocalPackagesAreExactVerifiedPayloadSets),
     ("MissingRequiredVariantIsDiagnosableAndTransactional", MissingRequiredVariantIsDiagnosableAndTransactional),
     ("VerifiedPayloadsResolveByContentIdentity", VerifiedPayloadsResolveByContentIdentity),
+    ("CabinVariantsInstallReopenThroughWorldLocalStore", CabinVariantsInstallReopenThroughWorldLocalStore),
 };
 
 foreach ((string name, Action body) in tests)
@@ -18,6 +19,66 @@ foreach ((string name, Action body) in tests)
     Console.WriteLine($"PASS {name}");
 }
 Console.WriteLine($"All {tests.Length} built-in Test World content tests passed.");
+
+static void CabinVariantsInstallReopenThroughWorldLocalStore()
+{
+    CabinContentOracle oracle = CabinContentOracle.Create();
+    string root = Path.Combine(Path.GetTempPath(),
+        $"ultrasim-cabin-world-local-{Environment.ProcessId}-{Guid.NewGuid():N}");
+    var expected = new Dictionary<ContentActivationId, ResolvedContentCatalog>();
+    try
+    {
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out ContentCacheError openError));
+        using (cache)
+        {
+            True(cache!.TryInstallPackage(ContentScopeKey.Local, oracle.ReplacePackage.Manifest,
+                oracle.ReplacePackage.Payloads, out _, out ContentCacheError replaceError), replaceError.ToString());
+            True(cache.TryInstallPackage(ContentScopeKey.Local, oracle.AddPackage.Manifest,
+                oracle.AddPackage.Payloads, out _, out ContentCacheError addError), addError.ToString());
+
+            foreach (CabinResolvedContent source in Variants(oracle))
+            {
+                True(ContentActivationPlan.TryCreate(
+                    ContentScopeKey.Local, source.Plan.Activation,
+                    oracle.BaseCatalog.Fingerprint, source.Plan.Packages,
+                    out ContentActivationPlan? localPlan, out string? planError), planError);
+                True(cache.TryPublishCatalog(oracle.BaseCatalog, localPlan!, false,
+                    out ContentCatalogLease? lease, out ContentCacheError publishError), publishError.ToString());
+                using (lease)
+                {
+                    Equal(ContentScopeKey.Local, lease!.Catalog.Scope);
+                    CatalogEqual(source.Catalog, lease.Catalog);
+                    expected.Add(localPlan!.Activation, lease.Catalog);
+                }
+            }
+            ContentCacheSnapshot snapshot = cache.GetSnapshot();
+            Equal(1, snapshot.ScopeCount);
+            Equal(2, snapshot.LocalManifestCount);
+            Equal(0, snapshot.RealmManifestCount);
+            Equal(3, snapshot.LocalActivationCount);
+            Equal(0, snapshot.RealmActivationCount);
+            Equal(0, snapshot.LiveCatalogPins);
+        }
+
+        True(ContentCache.TryOpen(root, out ContentCache? reopened, out openError));
+        using (reopened)
+        {
+            foreach ((ContentActivationId activation, ResolvedContentCatalog catalog) in expected)
+            {
+                var key = new ContentScopeActivationKey(
+                    new ContentScopeActivationId(ContentScopeKey.Local, activation), catalog.PlanHash);
+                True(reopened!.TryOpenCatalog(oracle.BaseCatalog, key,
+                    out ContentCatalogLease? lease, out ContentCacheError reopenError), reopenError.ToString());
+                using (lease)
+                    CatalogEqual(catalog, lease!.Catalog);
+            }
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+}
 
 static void VerifiedPayloadsResolveByContentIdentity()
 {
@@ -58,7 +119,7 @@ static void FrozenFingerprintsAreDeterministic()
 
     foreach (CabinResolvedContent content in Variants(first))
     {
-        Equal(CabinContentOracle.FixtureRealm, content.Plan.Realm);
+        Equal(ContentScopeKey.ForRealm(CabinContentOracle.FixtureRealm), content.Plan.Scope);
         Equal(first.BaseCatalog.Fingerprint, content.Plan.RequiredBaseCatalogFingerprint);
         Equal(content.Plan.PlanHash, content.Catalog.PlanHash);
         Equal(content.Plan.Activation, content.Catalog.Activation);
@@ -235,6 +296,15 @@ static void EntryEqual(ResolvedContentEntry expected, ResolvedContentEntry actua
     Equal(expected.OwnerManifestHash, actual.OwnerManifestHash);
     Equal(expected.Definition.DefinitionHash, actual.Definition.DefinitionHash);
     SequenceEqual(expected.ReferencedFiles.ToArray(), actual.ReferencedFiles.ToArray());
+}
+
+static void CatalogEqual(ResolvedContentCatalog expected, ResolvedContentCatalog actual)
+{
+    Equal(expected.Activation, actual.Activation);
+    Equal(expected.RequiredBaseCatalogFingerprint, actual.RequiredBaseCatalogFingerprint);
+    Equal(expected.Entries.Count, actual.Entries.Count);
+    for (int index = 0; index < expected.Entries.Count; index++)
+        EntryEqual(expected.Entries[index], actual.Entries[index]);
 }
 
 static void True(bool value, string? message = null)

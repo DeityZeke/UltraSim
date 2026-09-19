@@ -180,8 +180,8 @@ internal static class ContentCacheMetadata
         writer.Write(ActivationMagic);
         writer.Write(FormatVersion);
         writer.Write(record.PersistentlyPinned ? (byte)1 : (byte)0);
-        writer.Write(plan.Realm.High);
-        writer.Write(plan.Realm.Low);
+        writer.Write(plan.Scope.IsRealm ? plan.Scope.Realm.High : 0UL);
+        writer.Write(plan.Scope.IsRealm ? plan.Scope.Realm.Low : 0UL);
         writer.Write(plan.Activation.High);
         writer.Write(plan.Activation.Low);
         WriteHash(writer, plan.RequiredBaseCatalogFingerprint);
@@ -206,7 +206,7 @@ internal static class ContentCacheMetadata
 
     internal static bool TryDecodeActivation(
         ReadOnlySpan<byte> bytes,
-        ContentRealmActivationId expectedIdentity,
+        ContentScopeActivationId expectedIdentity,
         ContentHash expectedPlanHash,
         ContentLimits limits,
         out ContentCacheActivationRecord record)
@@ -228,18 +228,20 @@ internal static class ContentCacheMetadata
             !reader.TryReadInt32(out int packageCount) || packageCount < 0 ||
             packageCount > limits.MaximumPackages)
             return false;
-        ApplicationRealmId realm;
+        ContentScopeKey scope;
         ContentActivationId activation;
         try
         {
-            realm = new ApplicationRealmId(realmHigh, realmLow);
+            scope = realmHigh == 0 && realmLow == 0
+                ? ContentScopeKey.Local
+                : ContentScopeKey.ForRealm(new ApplicationRealmId(realmHigh, realmLow));
             activation = new ContentActivationId(activationHigh, activationLow);
         }
         catch (ArgumentOutOfRangeException)
         {
             return false;
         }
-        if (new ContentRealmActivationId(realm, activation) != expectedIdentity)
+        if (new ContentScopeActivationId(scope, activation) != expectedIdentity)
             return false;
         var packages = new ContentActivationPackage[packageCount];
         for (int index = 0; index < packages.Length; index++)
@@ -277,7 +279,7 @@ internal static class ContentCacheMetadata
                 return false;
         if (!reader.IsComplete ||
             !ContentActivationPlan.TryCreate(
-                realm, activation, baseFingerprint, packages, out ContentActivationPlan? plan,
+                scope, activation, baseFingerprint, packages, out ContentActivationPlan? plan,
                 out _, limits) || plan!.PlanHash != storedPlanHash)
             return false;
         record = new ContentCacheActivationRecord(plan, resolvedFingerprint, pinned != 0, selected);

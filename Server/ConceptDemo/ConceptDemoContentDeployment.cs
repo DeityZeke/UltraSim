@@ -271,6 +271,9 @@ public sealed class ConceptDemoContentDeployment : IDisposable
         ContentHash expectedCatalog,
         IReadOnlyList<ContentPackageAcquisition> acquisitions)
     {
+        if (!plan.Scope.IsRealm)
+            throw new ArgumentException("Remote authorization requires an authenticated Realm content scope.",
+                nameof(plan));
         var packages = new RemoteContentPackageRequirement[plan.Packages.Count];
         for (int index = 0; index < packages.Length; index++)
         {

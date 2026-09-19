@@ -141,7 +141,10 @@ public sealed class CabinContentOracle
         Add = addContent;
     }
 
-    /// <summary>Stable fixture realm only; possession does not claim remote authentication.</summary>
+    /// <summary>
+    /// Stable authenticated realm used by historical remote-protocol oracle fixtures. Persistent
+    /// Local acceptance creates a scope-owned activation directly and never impersonates it.
+    /// </summary>
     public static ApplicationRealmId FixtureRealm { get; } =
         new(0x554C_5452_4153_494DUL, 0x4341_4249_4E00_0001UL);
 

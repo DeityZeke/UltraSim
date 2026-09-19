@@ -78,7 +78,7 @@ internal static class ContentCanonicalHash
     {
         using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         AppendString(hash, "ultrasim.content-activation-plan.v1");
-        AppendRealm(hash, plan.Realm);
+        AppendScope(hash, plan.Scope);
         AppendUInt64(hash, plan.Activation.High);
         AppendUInt64(hash, plan.Activation.Low);
         AppendHash(hash, plan.RequiredBaseCatalogFingerprint);
@@ -98,7 +98,7 @@ internal static class ContentCanonicalHash
     {
         using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         AppendString(hash, "ultrasim.resolved-content-catalog.v1");
-        AppendRealm(hash, plan.Realm);
+        AppendScope(hash, plan.Scope);
         AppendUInt64(hash, plan.Activation.High);
         AppendUInt64(hash, plan.Activation.Low);
         AppendHash(hash, plan.PlanHash);
@@ -127,6 +127,20 @@ internal static class ContentCanonicalHash
     {
         AppendUInt64(hash, realm.High);
         AppendUInt64(hash, realm.Low);
+    }
+
+    private static void AppendScope(IncrementalHash hash, ContentScopeKey scope)
+    {
+        if (!scope.IsValid) throw new InvalidOperationException("The content scope is not canonical.");
+        // Realm bytes remain exactly v1-compatible. The otherwise-invalid all-zero realm encoding
+        // is the private canonical marker for the reserved Local scope.
+        if (scope.IsLocal)
+        {
+            AppendUInt64(hash, 0);
+            AppendUInt64(hash, 0);
+            return;
+        }
+        AppendRealm(hash, scope.Realm);
     }
 
     private static void AppendString(IncrementalHash hash, string value)

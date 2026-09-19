@@ -362,7 +362,7 @@ required lower/base catalog fingerprint
 ordered PackageId + exact ManifestHash entries
 ```
 
-`ContentActivationId` is a stable realm-scoped authored activation/revision identity, not a
+`ContentActivationId` is a stable scope-owned authored activation/revision identity, not a
 connection-local counter or process-local catalog handle. Reusing it for different plan bytes is an
 error. `PlanHash` hashes the canonical encoding of every other plan field, including realm,
 activation identity, required base catalog fingerprint, and exact ordered package entries.
@@ -674,6 +674,21 @@ Cache/
     writer.lock
 ```
 
+F1.1 retains that Realm layout and its version-1 activation bytes for backward-compatible reopen,
+then adds the reserved Local scope without creating a second content implementation:
+
+```text
+Cache/
+    scopes/local/manifests/<ManifestHash>.manifest
+    scopes/local/activations/<ContentActivationId>.activation
+```
+
+`ContentScopeKey.Local` and `ContentScopeKey.ForRealm(authenticatedRealm)` now pass through the
+same install, activation, catalog, global CAS, lease, reachability, and retirement code. Local has
+no arbitrary text/path constructor; a remote realm cannot claim Local trust. Remote Game wire and
+application proof stay Realm-shaped. The current one-writable-root policy remains; a future
+read-only install root can compose above this typed ownership seam without changing scope identity.
+
 All variable path components are fixed-width canonical identity encodings. The initial cache root
 has one owning client process so live pins and mutation remain coherent; simultaneous clients use
 separate roots until cross-process pin coordination is explicitly designed.
@@ -694,7 +709,7 @@ Rules:
 - a remote peer may test reuse only for hashes present in its authenticated content requirement; the
   global blob store is not exposed as an arbitrary remote cache-membership oracle.
 
-Eviction initially uses reachability: pinned realm activations/manifests and live engine resource
+Eviction initially uses reachability: pinned scope activations/manifests and live engine resource
 handles mark referenced blobs; unmarked blobs are eligible under quota/retention policy. User packs,
 built-ins, and future executable installations keep their separate ownership/lifecycle rules.
 

@@ -31,7 +31,7 @@ public static class ContentUiDefinitionPath
 }
 
 /// <summary>
-/// Resolves an exact typed UI definition only from packages selected by one applied realm catalog.
+/// Resolves an exact typed UI definition only from packages selected by one applied scope catalog.
 /// File paths and generic logical content IDs never become UI definition identity.
 /// </summary>
 public static class ContentUiDefinitionResolver
@@ -57,7 +57,7 @@ public static class ContentUiDefinitionResolver
         foreach (PackageManifestIdentity selected in catalog.SelectedPackages)
         {
             if (!cache.TryOpenPackage(
-                    catalog.Catalog.Realm,
+                    catalog.Catalog.Scope,
                     selected.PackageId,
                     selected.ManifestHash,
                     out VerifiedContentPackage? package,

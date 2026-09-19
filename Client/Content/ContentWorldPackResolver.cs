@@ -25,7 +25,7 @@ public readonly record struct ContentWorldPackResolutionResult(
 }
 
 /// <summary>
-/// Opens and binds one exact World-owned artifact selected by an applied realm catalog. Content
+/// Opens and binds one exact World-owned artifact selected by an applied scope catalog. Content
 /// authorizes and supplies bytes; World retains container, fingerprint, and structural binding
 /// authority.
 /// </summary>
@@ -60,7 +60,7 @@ public static class ContentWorldPackResolver
         if (!Contains(catalog.SelectedPackages, owner))
             return Fail(ContentWorldPackResolutionStatus.DefinitionNotSelected, out result);
         if (!cache.TryOpenPackage(
-                catalog.Catalog.Realm, owner.PackageId, owner.ManifestHash,
+                catalog.Catalog.Scope, owner.PackageId, owner.ManifestHash,
                 out VerifiedContentPackage? package, out _))
             return Fail(ContentWorldPackResolutionStatus.CacheFailure, out result);
         if (!package!.Manifest.TryGetFile(

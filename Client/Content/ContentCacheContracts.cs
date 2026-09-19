@@ -68,20 +68,24 @@ public enum ContentCacheError : byte
 }
 
 public readonly record struct InstalledContentPackage(
-    ApplicationRealmId Realm,
+    ContentScopeKey Scope,
     ContentPackageId PackageId,
     ContentHash ManifestHash,
     int BlobCount,
     long BlobBytes)
 {
-    public bool IsValid => Realm.IsValid && PackageId.IsValid && ManifestHash.IsValid &&
+    public ApplicationRealmId Realm => Scope.Realm;
+    public bool IsValid => Scope.IsValid && PackageId.IsValid && ManifestHash.IsValid &&
         BlobCount >= 0 && BlobBytes >= 0;
 }
 
 public readonly record struct ContentCacheSnapshot(
     int BlobCount,
     long BlobBytes,
+    int ScopeCount,
+    int LocalManifestCount,
     int RealmManifestCount,
+    int LocalActivationCount,
     int RealmActivationCount,
     int LiveBlobPins,
     int LiveCatalogPins,
@@ -93,7 +97,11 @@ public readonly record struct ContentCacheSnapshot(
     ulong BlobsRepaired,
     ulong ManifestsRepaired,
     ulong BlobsEvicted,
-    long BytesEvicted);
+    long BytesEvicted)
+{
+    public int ManifestCount => LocalManifestCount + RealmManifestCount;
+    public int ActivationCount => LocalActivationCount + RealmActivationCount;
+}
 
 /// <summary>
 /// Immutable preflight for one package install. Required payloads are the unique missing or
@@ -127,5 +135,9 @@ public readonly record struct ContentCacheEvictionResult(
     long RemainingBlobBytes);
 
 internal readonly record struct ContentCacheManifestKey(
-    ApplicationRealmId Realm,
+    ContentScopeKey Scope,
     ContentHash ManifestHash);
+
+public readonly record struct ContentScopeRetirementResult(
+    int ManifestsRemoved,
+    int ActivationsRemoved);

@@ -12,6 +12,7 @@ using UltraSim.UI;
 var tests = new (string Name, Action Body)[]
 {
     ("IdentityGrammarAndDefaultsFailClosed", IdentityGrammarAndDefaultsFailClosed),
+    ("TypedContentScopeIdentityCannotConfuseLocalAndRealm", TypedContentScopeIdentityCannotConfuseLocalAndRealm),
     ("EmptyBaseCatalogIsCanonicalPrimitiveOnlyBaseline", EmptyBaseCatalogIsCanonicalPrimitiveOnlyBaseline),
     ("ManifestIdentityIsCanonicalAndBounded", ManifestIdentityIsCanonicalAndBounded),
     ("BoundedAdmissionsStopBeforeOversizedMaterialization", BoundedAdmissionsStopBeforeOversizedMaterialization),
@@ -24,6 +25,8 @@ var tests = new (string Name, Action Body)[]
     ("OptionalPackageFallbackAndApplicationProofAreExact", OptionalPackageFallbackAndApplicationProofAreExact),
     ("PersistentCacheInstallsPublishesAndReopensWithoutSource", PersistentCacheInstallsPublishesAndReopensWithoutSource),
     ("GlobalBlobDedupDoesNotGrantCrossRealmAuthorization", GlobalBlobDedupDoesNotGrantCrossRealmAuthorization),
+    ("LocalAndRealmsShareCasButNotAuthorization", LocalAndRealmsShareCasButNotAuthorization),
+    ("ScopeCatalogsWarmReopenAndRetireWithoutDeletingSharedBytes", ScopeCatalogsWarmReopenAndRetireWithoutDeletingSharedBytes),
     ("FailedInstallAndInterruptedStagingNeverPublish", FailedInstallAndInterruptedStagingNeverPublish),
     ("CorruptBlobCannotReopenOrPublish", CorruptBlobCannotReopenOrPublish),
     ("CorruptCanonicalMetadataFailsClosedAtOpen", CorruptCanonicalMetadataFailsClosedAtOpen),
@@ -46,6 +49,32 @@ foreach ((string name, Action body) in tests)
     Console.WriteLine($"PASS {name}");
 }
 Console.WriteLine($"All {tests.Length} Client Content tests passed.");
+
+static void TypedContentScopeIdentityCannotConfuseLocalAndRealm()
+{
+    False(default(ContentScopeKey).IsValid);
+    Equal(ContentScopeKind.Invalid, default(ContentScopeKey).Kind);
+    ContentScopeKey local = ContentScopeKey.Local;
+    True(local.IsValid);
+    True(local.IsLocal);
+    False(local.IsRealm);
+    Equal("world.local", local.ToString());
+    False(local.TryGetRealm(out _));
+
+    ApplicationRealmId realmA = new(1, 2);
+    ApplicationRealmId realmB = new(1, 3);
+    ContentScopeKey first = ContentScopeKey.ForRealm(realmA);
+    ContentScopeKey second = ContentScopeKey.ForRealm(realmB);
+    True(first.IsRealm);
+    True(first.TryGetRealm(out ApplicationRealmId projected));
+    Equal(realmA, projected);
+    NotEqual(local, first);
+    NotEqual(first, second);
+    bool rejected = false;
+    try { _ = ContentScopeKey.ForRealm(default); }
+    catch (ArgumentException) { rejected = true; }
+    True(rejected, "A default or textual pseudo-realm must not manufacture Local.");
+}
 
 static void EmptyBaseCatalogIsCanonicalPrimitiveOnlyBaseline()
 {
@@ -103,7 +132,7 @@ static void LocalPackageSourceIsRootedBoundedAndExact()
         var descriptor = new ContentSourceDescriptor(
             ContentSourceKind.Local, "packages/replace.uspkg");
         var request = new ContentPackageFetchRequest(
-            new ApplicationRealmId(9, 9), fixture.Manifest.PackageId,
+            ContentScopeKey.Local, fixture.Manifest.PackageId,
             fixture.Manifest.ManifestHash, descriptor);
         var source = new LocalContentPackageSource(root);
         True(source.TryFetch(in request, out FetchedContentPackage? fetched,
@@ -674,6 +703,140 @@ static void GlobalBlobDedupDoesNotGrantCrossRealmAuthorization()
         Equal(1, blobs.Length);
         Equal(package.Manifest.Files[0].Sha256 + ".blob", Path.GetFileName(blobs[0]));
         False(blobs[0].Contains(package.Manifest.Files[0].Path.Value!, StringComparison.Ordinal));
+    });
+}
+
+static void LocalAndRealmsShareCasButNotAuthorization()
+{
+    WithCacheRoot(root =>
+    {
+        ContentScopeKey local = ContentScopeKey.Local;
+        ContentScopeKey realmA = ContentScopeKey.ForRealm(new ApplicationRealmId(11, 101));
+        ContentScopeKey realmB = ContentScopeKey.ForRealm(new ApplicationRealmId(12, 101));
+        PackageFixture package = CreateReplacePackage();
+        PackageFixture realmOnly = CreateAddPackage();
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out var openError), openError.ToString());
+        using (cache)
+        {
+            True(cache!.TryInstallPackage(local, package.Manifest, package.Payloads,
+                out InstalledContentPackage localInstall, out var localError), localError.ToString());
+            False(cache.TryOpenPackage(realmA, package.Manifest.PackageId, package.Manifest.ManifestHash,
+                out _, out ContentCacheError localDoesNotAuthorizeRealm));
+            Equal(ContentCacheError.MissingManifest, localDoesNotAuthorizeRealm);
+            True(cache.TryInstallPackage(realmA, package.Manifest, package.Payloads,
+                out InstalledContentPackage realmAInstall, out var realmAError), realmAError.ToString());
+            False(cache.TryOpenPackage(realmB, package.Manifest.PackageId, package.Manifest.ManifestHash,
+                out _, out ContentCacheError realmADoesNotAuthorizeRealmB));
+            Equal(ContentCacheError.MissingManifest, realmADoesNotAuthorizeRealmB);
+            True(cache.TryInstallPackage(realmB, package.Manifest, package.Payloads,
+                out InstalledContentPackage realmBInstall, out var realmBError), realmBError.ToString());
+            True(cache.TryInstallPackage(realmA, realmOnly.Manifest, realmOnly.Payloads,
+                out _, out var realmOnlyError), realmOnlyError.ToString());
+            False(cache.TryOpenPackage(local, realmOnly.Manifest.PackageId, realmOnly.Manifest.ManifestHash,
+                out _, out ContentCacheError realmDoesNotAuthorizeLocal));
+            Equal(ContentCacheError.MissingManifest, realmDoesNotAuthorizeLocal);
+            Equal(local, localInstall.Scope);
+            Equal(realmA, realmAInstall.Scope);
+            Equal(realmB, realmBInstall.Scope);
+
+            ContentCacheSnapshot snapshot = cache.GetSnapshot();
+            Equal(2, snapshot.BlobCount);
+            Equal(3, snapshot.ScopeCount);
+            Equal(1, snapshot.LocalManifestCount);
+            Equal(3, snapshot.RealmManifestCount);
+            True(snapshot.ReusedBlobs >= 2);
+
+            ContentScopeKey unauthorized = ContentScopeKey.ForRealm(new ApplicationRealmId(13, 101));
+            False(cache.TryOpenPackage(unauthorized, package.Manifest.PackageId,
+                package.Manifest.ManifestHash, out _, out ContentCacheError missing));
+            Equal(ContentCacheError.MissingManifest, missing);
+        }
+
+        string[] blobs = Directory.GetFiles(Path.Combine(root, "blobs", "sha256"), "*.blob",
+            SearchOption.AllDirectories);
+        Equal(2, blobs.Length);
+        Equal(1, blobs.Count(path => Path.GetFileName(path) == package.Manifest.Files[0].Sha256 + ".blob"));
+        Equal(1, Directory.GetFiles(Path.Combine(root, "scopes", "local", "manifests"),
+            "*.manifest").Length);
+        Equal(3, Directory.GetFiles(Path.Combine(root, "realms"), "*.manifest",
+            SearchOption.AllDirectories).Length);
+    });
+}
+
+static void ScopeCatalogsWarmReopenAndRetireWithoutDeletingSharedBytes()
+{
+    WithCacheRoot(root =>
+    {
+        ContentScopeKey local = ContentScopeKey.Local;
+        ContentScopeKey realm = ContentScopeKey.ForRealm(new ApplicationRealmId(21, 201));
+        ContentBaseCatalog baseCatalog = BaseCatalog();
+        PackageFixture package = CreateReplacePackage();
+        ContentActivationId activation = new(22, 202);
+        ContentActivationPlan localPlan = ScopePlan(
+            local, activation, baseCatalog.Fingerprint, [Required(package.Manifest)]);
+        ContentActivationPlan realmPlan = ScopePlan(
+            realm, activation, baseCatalog.Fingerprint, [Required(package.Manifest)]);
+        ContentHash localFingerprint;
+        ContentHash realmFingerprint;
+
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out var openError), openError.ToString());
+        using (cache)
+        {
+            True(cache!.TryInstallPackage(local, package.Manifest, package.Payloads, out _, out var localError),
+                localError.ToString());
+            True(cache.TryInstallPackage(realm, package.Manifest, package.Payloads, out _, out var realmError),
+                realmError.ToString());
+            True(cache.TryPublishCatalog(baseCatalog, localPlan, false,
+                out ContentCatalogLease? localLease, out var localPublish), localPublish.ToString());
+            True(cache.TryPublishCatalog(baseCatalog, realmPlan, false,
+                out ContentCatalogLease? realmLease, out var realmPublish), realmPublish.ToString());
+            using (localLease)
+            using (realmLease)
+            {
+                Equal(local, localLease!.Catalog.Scope);
+                Equal(realm, realmLease!.Catalog.Scope);
+                localFingerprint = localLease.Catalog.Fingerprint;
+                realmFingerprint = realmLease.Catalog.Fingerprint;
+                NotEqual(localFingerprint, realmFingerprint);
+                CatalogEntriesEqual(localLease.Catalog, realmLease.Catalog);
+            }
+        }
+
+        True(ContentCache.TryOpen(root, out ContentCache? reopened, out openError), openError.ToString());
+        using (reopened)
+        {
+            var localKey = new ContentScopeActivationKey(localPlan.ScopeActivation, localPlan.PlanHash);
+            var realmKey = new ContentScopeActivationKey(realmPlan.ScopeActivation, realmPlan.PlanHash);
+            True(reopened!.TryOpenCatalog(baseCatalog, localKey,
+                out ContentCatalogLease? localLease, out var localOpen), localOpen.ToString());
+            True(reopened.TryOpenCatalog(baseCatalog, realmKey,
+                out ContentCatalogLease? realmLease, out var realmOpen), realmOpen.ToString());
+            Equal(localFingerprint, localLease!.Catalog.Fingerprint);
+            Equal(realmFingerprint, realmLease!.Catalog.Fingerprint);
+
+            False(reopened.TryRetireScope(local, out _, out ContentCacheError busy));
+            Equal(ContentCacheError.CacheBusy, busy);
+            localLease.Dispose();
+            True(reopened.TryRetireScope(local, out ContentScopeRetirementResult retired,
+                out ContentCacheError retireError), retireError.ToString());
+            Equal(1, retired.ManifestsRemoved);
+            Equal(1, retired.ActivationsRemoved);
+            False(reopened.TryOpenPackage(local, package.Manifest.PackageId, package.Manifest.ManifestHash,
+                out _, out ContentCacheError localMissing));
+            Equal(ContentCacheError.MissingManifest, localMissing);
+            True(reopened.TryOpenPackage(realm, package.Manifest.PackageId, package.Manifest.ManifestHash,
+                out _, out ContentCacheError realmStillAuthorized), realmStillAuthorized.ToString());
+            True(reopened.TryOpenBlob(package.Manifest.Files[0], out ContentBlobLease? blob,
+                out ContentCacheError blobError), blobError.ToString());
+            blob!.Dispose();
+            realmLease.Dispose();
+            ContentCacheSnapshot snapshot = reopened.GetSnapshot();
+            Equal(1, snapshot.BlobCount);
+            Equal(0, snapshot.LocalManifestCount);
+            Equal(1, snapshot.RealmManifestCount);
+            Equal(0, snapshot.LiveBlobPins);
+            Equal(0, snapshot.LiveCatalogPins);
+        }
     });
 }
 
@@ -1330,6 +1493,33 @@ static ContentActivationPlan Plan(
     True(ContentActivationPlan.TryCreate(realm, activation, baseFingerprint, packages,
         out ContentActivationPlan? plan, out _));
     return plan!;
+}
+
+static ContentActivationPlan ScopePlan(
+    ContentScopeKey scope,
+    ContentActivationId activation,
+    ContentHash baseFingerprint,
+    IEnumerable<ContentActivationPackage> packages)
+{
+    True(ContentActivationPlan.TryCreate(scope, activation, baseFingerprint, packages,
+        out ContentActivationPlan? plan, out _));
+    return plan!;
+}
+
+static void CatalogEntriesEqual(ResolvedContentCatalog expected, ResolvedContentCatalog actual)
+{
+    Equal(expected.Entries.Count, actual.Entries.Count);
+    for (int index = 0; index < expected.Entries.Count; index++)
+    {
+        ResolvedContentEntry left = expected.Entries[index];
+        ResolvedContentEntry right = actual.Entries[index];
+        Equal(left.Id, right.Id);
+        Equal(left.Kind, right.Kind);
+        Equal(left.OwnerPackageId, right.OwnerPackageId);
+        Equal(left.OwnerManifestHash, right.OwnerManifestHash);
+        Equal(left.Definition.DefinitionHash, right.Definition.DefinitionHash);
+        True(left.ReferencedFiles.SequenceEqual(right.ReferencedFiles));
+    }
 }
 
 static VerifiedContentPackage Verified(PackageFixture fixture)

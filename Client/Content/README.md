@@ -7,8 +7,9 @@ contains no Godot or Network dependency.
 The accepted boundary is:
 
 ```text
-authenticated Game/application authority (later remote composition)
-    ApplicationRealmId
+scope selection / authenticated Game authority
+    ContentScopeKey.Local
+    OR ContentScopeKey.ForRealm(authenticated ApplicationRealmId)
     ContentActivationId + PlanHash
     exact required base fingerprint
     ordered PackageId + ManifestHash + Required/Optional
@@ -26,8 +27,9 @@ Godot realization (later checkpoint)
 
 Logical ids are strict lowercase ASCII `namespace:path/segments`. File paths are package-local
 addresses, never semantic identity. Exact SHA-256 identifies immutable blobs globally;
-`ApplicationRealmId + ContentActivationId` owns authorization and detects reuse of an activation
-identity with different plan bytes. Download URLs, local paths, connection identity, and
+`ContentScopeKey + ContentActivationId` owns authorization and detects reuse of an activation
+identity with different plan bytes. Remote wire/application proof remains explicitly
+`ApplicationRealmId`-shaped and rejects Local plans at that boundary. Download URLs, local paths, connection identity, and
 process-local catalog-generation handles do not enter resolved fingerprints.
 
 The catalog is above the renderer-owned primitive/bootstrap emergency substrate. Local/default
@@ -76,13 +78,16 @@ is not permission to pass downloaded scenes or arbitrary resources to `ResourceL
 resource packs and executable extensions have vocabulary values so they cannot be confused with
 normal server-passive trust, but the normal manifest factory still rejects both trust classes.
 
-## A0.2 persistent cache
+## A0.2 persistent cache / F1.1 unified scopes
 
 The accepted source-independent cache uses only fixed, validated identities in physical paths:
 
 ```text
 root/
     blobs/sha256/ab/<64-lowercase-hex>.blob
+    scopes/local/
+        manifests/<ManifestHash>.manifest
+        activations/<ContentActivationId>.activation
     realms/<32-lowercase-hex ApplicationRealmId>/
         manifests/<ManifestHash>.manifest
         activations/<ContentActivationId>.activation
@@ -92,22 +97,32 @@ root/
 ```
 
 Manifest-controlled relative paths and source URLs never become cache paths. Exact blobs deduplicate
-globally, but manifest and activation metadata remain realm-scoped: physical possession of bytes
-does not authorize another realm to publish them. A0.2's realm cache admits only
-`ServerAuthorizedPassive` packages. Local/default installation and future user/executable content
-retain separate lifecycles.
+globally, but manifest and activation metadata remain scope-owned: physical possession of bytes
+does not authorize Local or another realm to publish them. F1.1 preserves the accepted `realms/`
+layout and version-1 remote activation bytes for backward-compatible reopen; the reserved Local
+scope is added under `scopes/local/`. There is no text/path constructor capable of turning a remote
+realm into Local. Both scope kinds use the same install, manifest, activation, catalog, lease, and
+eviction implementation.
+
+The cache continues to admit only numeric trust class 2 activation packages for both Local and
+Realm scopes. `ScopeAuthorizedPassive` is the scope-neutral source name;
+`ServerAuthorizedPassive` remains its exact numeric alias for canonical/wire compatibility. Local
+selects who authorizes/mounts the package; it does not bypass passive validation.
+Primitive fallback remains below Content and is never a package. `BuiltIn` packages may still form
+the verified base catalog but are not silently admitted as ordinary cached activation packages.
+User resource packs and executable content remain unsupported.
 
 Install validates supplied payloads through the A0.0 passive allowlist. A full-package call
 requires the complete payload set; A0.5's delta call requires every missing/corrupt unique hash and
 permits already-valid CAS hashes to be omitted. New or repaired blobs are written and flushed
 through private staging names, verified by their descriptors, and atomically moved before the
-realm manifest becomes visible. A crash may leave an unreferenced
+scope manifest becomes visible. A crash may leave an unreferenced
 immutable blob; it cannot leave a published partial package, and abandoned staging is removed on
 the next open. Canonical binary manifest/activation metadata is strictly decoded and re-encoded on
 reopen. No source location is persisted.
 
 Catalog publication reloads every selected package from the cache, resolves privately, persists
-the exact realm/activation/plan/result tuple, and only then returns a new immutable catalog
+the exact scope/activation/plan/result tuple, and only then returns a new immutable catalog
 generation. Restart reopening repeats that validation and must reproduce the stored fingerprint.
 Required packages fail closed; primitive/local presentation fallback does not manufacture a
 successful activation.
@@ -116,12 +131,21 @@ Quota eviction is reachability-based and oldest-access-first. Persistently pinne
 live catalog leases, and live blob/resource leases protect their manifests and blobs. Unpinned
 activation/manifest metadata is retired before an unreachable blob is deleted. If enough safe
 space cannot be reclaimed, admission fails without partial arbitrary eviction. A0.5 repairs a
-corrupt blob or canonical realm manifest only from a newly hash-validated candidate; a live-pinned
+corrupt blob or canonical scope manifest only from a newly hash-validated candidate; a live-pinned
 artifact returns `CacheBusy` rather than being replaced underneath its consumer.
 
 The initial implementation gives one owning client process exclusive mutation ownership for a
 cache root. Multiple simultaneously running clients use distinct roots until cross-process live-pin
 coordination is explicitly earned; this does not alter the canonical on-disk identities.
+
+F1.1 acceptance installs the Cabin Replace/Add passive packages into `world.local`, publishes and
+warm-reopens its Default/Replace/Add catalogs through `ContentCache`, and compares their exact
+logical entries with the frozen oracle. Local and two Realm scopes reference one physical shared
+blob while retaining separate manifests. Explicit scope retirement refuses live catalog pins,
+removes only the selected scope's authorization metadata, and leaves shared CAS bytes available to
+the remaining authorized scope. The current store still has one writable physical root; typed
+scope ownership no longer blocks a later read-only install-root composition, but F1.1 does not add
+that virtual filesystem.
 
 ## Current boundary
 

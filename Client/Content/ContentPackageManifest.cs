@@ -72,8 +72,8 @@ public sealed class ContentPackageManifest
             return Fail("The package or namespace identity is invalid.", out error);
         if (!ValidDisplay(name, 128) || !ValidDisplay(version, 48))
             return Fail("The package name or version is invalid.", out error);
-        if (trustClass is not (ContentTrustClass.BuiltIn or ContentTrustClass.ServerAuthorizedPassive))
-            return Fail("Only built-in and server-authorized passive packages use this manifest.", out error);
+        if (trustClass is not (ContentTrustClass.BuiltIn or ContentTrustClass.ScopeAuthorizedPassive))
+            return Fail("Only built-in and scope-authorized passive packages use this manifest.", out error);
 
         if (!ContentBoundedCopy.TryCopy(files, limits.MaximumFilesPerPackage,
                 out ContentFileDescriptor[] orderedFiles) ||

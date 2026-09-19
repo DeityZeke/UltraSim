@@ -573,6 +573,22 @@ internal static class F03bRemotePlayableTests
         Equal(NetworkLane.Event, RemoteContentRequirementHeaderCodec.Descriptor.Lane);
         Equal(NetworkLane.Control, RemoteContentSetAppliedMessageCodec.Descriptor.Lane);
         Equal((ushort)30, UltraSimGameProtocol.Manifest.Version);
+
+        True(ContentActivationPlan.TryCreate(
+            ContentScopeKey.Local, oracle.Replace.Plan.Activation,
+            oracle.Replace.Plan.RequiredBaseCatalogFingerprint, oracle.Replace.Plan.Packages,
+            out ContentActivationPlan? localPlan, out _));
+        bool localRejected = false;
+        try
+        {
+            _ = RemoteContentAuthorizationProjection.Create(
+                localPlan!, oracle.Replace.Catalog.Fingerprint, [acquisition]);
+        }
+        catch (ArgumentException)
+        {
+            localRejected = true;
+        }
+        True(localRejected);
     }
 
     private static void ColdCacheContentProofGatesAdmissionAndMatchesCabinOracle()

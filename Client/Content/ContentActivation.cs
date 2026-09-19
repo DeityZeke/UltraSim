@@ -4,7 +4,7 @@ using UltraSim.Game.Application;
 
 namespace UltraSim.Client.Content;
 
-/// <summary>Stable authored identity of one realm-scoped content activation.</summary>
+/// <summary>Stable authored identity of one scope-owned content activation.</summary>
 [StructLayout(LayoutKind.Sequential, Size = 16)]
 public readonly struct ContentActivationId :
     IEquatable<ContentActivationId>, IComparable<ContentActivationId>
@@ -53,27 +53,30 @@ public sealed class ContentActivationPlan
     private readonly ReadOnlyCollection<ContentActivationPackage> _packages;
 
     private ContentActivationPlan(
-        ApplicationRealmId realm,
+        ContentScopeKey scope,
         ContentActivationId activation,
         ContentHash requiredBaseCatalogFingerprint,
         ContentActivationPackage[] packages)
     {
-        Realm = realm;
+        Scope = scope;
         Activation = activation;
         RequiredBaseCatalogFingerprint = requiredBaseCatalogFingerprint;
         _packages = Array.AsReadOnly(packages);
         PlanHash = ContentCanonicalHash.ComputePlan(this);
     }
 
-    public ApplicationRealmId Realm { get; }
+    public ContentScopeKey Scope { get; }
+    /// <summary>Compatibility projection for remote protocol adapters. Invalid for Local.</summary>
+    public ApplicationRealmId Realm => Scope.Realm;
     public ContentActivationId Activation { get; }
+    public ContentScopeActivationId ScopeActivation => new(Scope, Activation);
     public ContentRealmActivationId RealmActivation => new(Realm, Activation);
     public ContentHash RequiredBaseCatalogFingerprint { get; }
     public ReadOnlyCollection<ContentActivationPackage> Packages => _packages;
     public ContentHash PlanHash { get; }
 
     public static bool TryCreate(
-        ApplicationRealmId realm,
+        ContentScopeKey scope,
         ContentActivationId activation,
         ContentHash requiredBaseCatalogFingerprint,
         IEnumerable<ContentActivationPackage>? packages,
@@ -84,7 +87,7 @@ public sealed class ContentActivationPlan
         plan = null;
         error = null;
         limits = ContentLimits.Resolve(limits);
-        if (!realm.IsValid || !activation.IsValid || !requiredBaseCatalogFingerprint.IsValid)
+        if (!scope.IsValid || !activation.IsValid || !requiredBaseCatalogFingerprint.IsValid)
             return Fail("The activation lineage or required base catalog is invalid.", out error);
         if (!ContentBoundedCopy.TryCopy(packages, limits.MaximumPackages,
                 out ContentActivationPackage[] copy))
@@ -97,8 +100,27 @@ public sealed class ContentActivationPlan
             if (!identities.Add(package.PackageId))
                 return Fail("One package identity may occur only once in an activation.", out error);
         }
-        plan = new ContentActivationPlan(realm, activation, requiredBaseCatalogFingerprint, copy);
+        plan = new ContentActivationPlan(scope, activation, requiredBaseCatalogFingerprint, copy);
         return true;
+    }
+
+    /// <summary>Authenticated-remote convenience adapter over the scope-aware implementation.</summary>
+    public static bool TryCreate(
+        ApplicationRealmId realm,
+        ContentActivationId activation,
+        ContentHash requiredBaseCatalogFingerprint,
+        IEnumerable<ContentActivationPackage>? packages,
+        out ContentActivationPlan? plan,
+        out string? error,
+        ContentLimits limits = default)
+    {
+        if (!realm.IsValid)
+        {
+            plan = null;
+            return Fail("The activation lineage or required base catalog is invalid.", out error);
+        }
+        return TryCreate(ContentScopeKey.ForRealm(realm), activation, requiredBaseCatalogFingerprint,
+            packages, out plan, out error, limits);
     }
 
     private static bool Fail(string message, out string? error)
@@ -106,6 +128,22 @@ public sealed class ContentActivationPlan
         error = message;
         return false;
     }
+}
+
+/// <summary>Stable scope-owned activation identity used by the generic content store.</summary>
+public readonly record struct ContentScopeActivationId(
+    ContentScopeKey Scope,
+    ContentActivationId Activation)
+{
+    public bool IsValid => Scope.IsValid && Activation.IsValid;
+}
+
+/// <summary>Exact authorization key for one immutable plan in one content scope.</summary>
+public readonly record struct ContentScopeActivationKey(
+    ContentScopeActivationId Identity,
+    ContentHash PlanHash)
+{
+    public bool IsValid => Identity.IsValid && PlanHash.IsValid;
 }
 
 /// <summary>

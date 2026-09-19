@@ -46,31 +46,43 @@ public readonly record struct ContentActivationAcquirerLimits
 }
 
 public readonly record struct ContentPackageFetchRequest(
-    ApplicationRealmId Realm,
+    ContentScopeKey Scope,
     ContentPackageId PackageId,
     ContentHash ManifestHash,
     ContentSourceDescriptor Source)
 {
-    public bool IsValid => Realm.IsValid && PackageId.IsValid && ManifestHash.IsValid && Source.IsValid;
+    public ContentPackageFetchRequest(ApplicationRealmId realm, ContentPackageId packageId,
+        ContentHash manifestHash, ContentSourceDescriptor source)
+        : this(ContentScopeKey.ForRealm(realm), packageId, manifestHash, source) { }
+    public ApplicationRealmId Realm => Scope.Realm;
+    public bool IsValid => Scope.IsValid && PackageId.IsValid && ManifestHash.IsValid && Source.IsValid;
 }
 
 public readonly record struct ContentPackageManifestFetchRequest(
-    ApplicationRealmId Realm,
+    ContentScopeKey Scope,
     ContentPackageId PackageId,
     ContentHash ManifestHash,
     ContentSourceDescriptor Source)
 {
-    public bool IsValid => Realm.IsValid && PackageId.IsValid && ManifestHash.IsValid && Source.IsValid;
+    public ContentPackageManifestFetchRequest(ApplicationRealmId realm, ContentPackageId packageId,
+        ContentHash manifestHash, ContentSourceDescriptor source)
+        : this(ContentScopeKey.ForRealm(realm), packageId, manifestHash, source) { }
+    public ApplicationRealmId Realm => Scope.Realm;
+    public bool IsValid => Scope.IsValid && PackageId.IsValid && ManifestHash.IsValid && Source.IsValid;
 }
 
 public readonly record struct ContentFileFetchRequest(
-    ApplicationRealmId Realm,
+    ContentScopeKey Scope,
     ContentPackageId PackageId,
     ContentHash ManifestHash,
     ContentFileDescriptor File,
     ContentSourceDescriptor Source)
 {
-    public bool IsValid => Realm.IsValid && PackageId.IsValid && ManifestHash.IsValid &&
+    public ContentFileFetchRequest(ApplicationRealmId realm, ContentPackageId packageId,
+        ContentHash manifestHash, ContentFileDescriptor file, ContentSourceDescriptor source)
+        : this(ContentScopeKey.ForRealm(realm), packageId, manifestHash, file, source) { }
+    public ApplicationRealmId Realm => Scope.Realm;
+    public bool IsValid => Scope.IsValid && PackageId.IsValid && ManifestHash.IsValid &&
         File.IsValid && Source.IsValid;
 }
 
@@ -222,7 +234,7 @@ public static class ContentActivationAcquirer
                 return Fail(ContentActivationAcquisitionStatus.InvalidRequirement, progress, out result);
             if (requirement.Requirement == ContentRequirementPolicy.Required) progress.Required++;
 
-            if (cache.TryOpenPackage(plan.Realm, requirement.PackageId, requirement.ManifestHash,
+            if (cache.TryOpenPackage(plan.Scope, requirement.PackageId, requirement.ManifestHash,
                     out VerifiedContentPackage? installed, out ContentCacheError openError))
             {
                 progress.PackagesReused++;
@@ -235,7 +247,7 @@ public static class ContentActivationAcquirer
                     cacheError: openError);
 
             ContentPackageManifest? cachedManifest = null;
-            _ = cache.TryOpenPackageManifest(plan.Realm, requirement.PackageId, requirement.ManifestHash,
+            _ = cache.TryOpenPackageManifest(plan.Scope, requirement.PackageId, requirement.ManifestHash,
                 out cachedManifest, out ContentCacheError manifestOpenError);
             if (manifestOpenError is not (ContentCacheError.None or ContentCacheError.MissingManifest or
                     ContentCacheError.CorruptManifest))
@@ -261,13 +273,13 @@ public static class ContentActivationAcquirer
                 ContentCacheError installError;
                 if (granular)
                 {
-                    success = TryAcquireGranular(cache, plan.Realm, requirement, candidate,
+                    success = TryAcquireGranular(cache, plan.Scope, requirement, candidate,
                         (IContentPackageFileSource)source, cachedManifest, limits,
                         progress, cancellationToken, out installError, out lastSourceError);
                 }
                 else
                 {
-                    success = TryAcquireArchive(cache, plan.Realm, requirement, candidate, source,
+                    success = TryAcquireArchive(cache, plan.Scope, requirement, candidate, source,
                         progress, cancellationToken, out installError, out lastSourceError);
                 }
                 if (success)
@@ -310,7 +322,7 @@ public static class ContentActivationAcquirer
 
     private static bool TryAcquireArchive(
         ContentCache cache,
-        ApplicationRealmId realm,
+        ContentScopeKey scope,
         ContentActivationPackage requirement,
         ContentSourceDescriptor candidate,
         IContentPackageSource source,
@@ -320,7 +332,7 @@ public static class ContentActivationAcquirer
         out ContentSourceFetchError sourceError)
     {
         installError = ContentCacheError.None;
-        var request = new ContentPackageFetchRequest(realm, requirement.PackageId,
+        var request = new ContentPackageFetchRequest(scope, requirement.PackageId,
             requirement.ManifestHash, candidate);
         try
         {
@@ -337,7 +349,7 @@ public static class ContentActivationAcquirer
             long bytes = 0;
             foreach (ContentFilePayload payload in downloaded.Payloads)
                 bytes = checked(bytes + payload.Bytes.Length);
-            if (!cache.TryInstallPackage(realm, downloaded.Manifest, downloaded.Payloads,
+            if (!cache.TryInstallPackage(scope, downloaded.Manifest, downloaded.Payloads,
                     out _, out installError))
             {
                 if (installError == ContentCacheError.PayloadValidationFailed)
@@ -365,7 +377,7 @@ public static class ContentActivationAcquirer
 
     private static bool TryAcquireGranular(
         ContentCache cache,
-        ApplicationRealmId realm,
+        ContentScopeKey scope,
         ContentActivationPackage requirement,
         ContentSourceDescriptor candidate,
         IContentPackageFileSource source,
@@ -383,7 +395,7 @@ public static class ContentActivationAcquirer
             if (manifest is null)
             {
                 var manifestRequest = new ContentPackageManifestFetchRequest(
-                    realm, requirement.PackageId, requirement.ManifestHash, candidate);
+                    scope, requirement.PackageId, requirement.ManifestHash, candidate);
                 if (!source.TryFetchManifest(
                         in manifestRequest, cancellationToken, out manifest, out sourceError))
                     return false;
@@ -394,7 +406,7 @@ public static class ContentActivationAcquirer
                     return false;
                 }
             }
-            if (!cache.TryPlanPackageInstall(realm, manifest,
+            if (!cache.TryPlanPackageInstall(scope, manifest,
                     out ContentPackageInstallPlan? installPlan, out installError))
             {
                 sourceError = ContentSourceFetchError.None;
@@ -415,7 +427,7 @@ public static class ContentActivationAcquirer
                 try
                 {
                     var fileRequest = new ContentFileFetchRequest(
-                        realm, requirement.PackageId, requirement.ManifestHash, needed[index], candidate);
+                        scope, requirement.PackageId, requirement.ManifestHash, needed[index], candidate);
                     if (!source.TryFetchFile(in fileRequest, cancellationToken,
                             out ContentFilePayload payload,
                             out ContentSourceFetchError fetchError) ||
@@ -450,7 +462,7 @@ public static class ContentActivationAcquirer
                 sourceError = firstError;
                 return false;
             }
-            if (!cache.TryInstallPackageDelta(realm, manifest, payloads, out _, out installError))
+            if (!cache.TryInstallPackageDelta(scope, manifest, payloads, out _, out installError))
             {
                 sourceError = ContentSourceFetchError.None;
                 return false;

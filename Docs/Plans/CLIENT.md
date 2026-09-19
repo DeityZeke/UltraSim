@@ -2768,8 +2768,8 @@ PF5-R8 required fanout / avoidable-processing assurance                      CLO
         |
         v
 F1.0 baseline and guardrails                                                  CLOSED
-F1.1 unified content scopes/stores                                            PLANNED
-F1.2 semantic activation vs presentation resolution                           PLANNED
+F1.1 unified content scopes/stores                                             CLOSED
+F1.2 semantic activation vs presentation resolution                           NEXT / PLANNED
 F1.3 primitive substrate/fallback contract                                    PLANNED
 F1.4 Official Local content productization                                    PLANNED
 F1.5 user presentation overrides/content generations                          PLANNED
@@ -2787,5 +2787,12 @@ PF6 external human validation                                                WAI
         v
 repository generalization / extraction readiness
 ```
+
+F1.1's closed store boundary is `ContentScopeKey.Local` or
+`ContentScopeKey.ForRealm(authenticated ApplicationRealmId)`. Both kinds use one persistent
+ContentCache implementation and global CAS; only manifests, activations, and authorization are
+scope-owned. The existing Realm disk layout and remote application proof remain compatible, while
+Local metadata is rooted under `scopes/local`. Official actor-art productization and semantic vs
+presentation activation remain F1.2/F1.4 work and were not pulled into F1.1.
 
 **Hard stop:** do not silently turn this roadmap into discovery, matchmaking, executable mod loading, account redesign, or unrelated gameplay campaigns. Review each checkpoint before advancing.

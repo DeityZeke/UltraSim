@@ -509,6 +509,13 @@ The current ContentCache global-blob/realm-metadata architecture is the correct 
 
 Blob possession is not realm authorization.
 
+F1.1 implements that foundation with a finite `ContentScopeKey`: reserved `Local` or an exact
+authenticated `ApplicationRealmId`. Both use the same persistent install/open/activation/catalog,
+CAS, lease, reachability, and retirement machinery. `world.local` metadata is stored under
+`scopes/local`; the accepted `realms/<ApplicationRealmId>` layout remains backward-compatible.
+Remote protocol projection accepts only Realm scopes. This is storage/authorization unification,
+not the later presentation-precedence or Official-art migration.
+
 ---
 
 # 10. world.local is an ordinary content scope

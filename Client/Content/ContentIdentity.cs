@@ -1,7 +1,67 @@
 using System.Buffers.Binary;
 using System.Security.Cryptography;
+using UltraSim.Game.Application;
 
 namespace UltraSim.Client.Content;
+
+/// <summary>The finite authorization owner kinds understood by the passive-content store.</summary>
+public enum ContentScopeKind : byte
+{
+    Invalid = 0,
+    Local = 1,
+    Realm = 2,
+}
+
+/// <summary>
+/// Canonical authorization owner for persistent content metadata. Local is one reserved scope;
+/// Realm preserves the exact authenticated application-realm identity. Filesystem text is never
+/// accepted as a scope identity.
+/// </summary>
+public readonly struct ContentScopeKey :
+    IEquatable<ContentScopeKey>, IComparable<ContentScopeKey>
+{
+    private ContentScopeKey(ContentScopeKind kind, ApplicationRealmId realm)
+    {
+        Kind = kind;
+        Realm = realm;
+    }
+
+    public static ContentScopeKey Local { get; } = new(ContentScopeKind.Local, default);
+
+    public ContentScopeKind Kind { get; }
+    public ApplicationRealmId Realm { get; }
+    public bool IsValid => Kind == ContentScopeKind.Local && !Realm.IsValid ||
+        Kind == ContentScopeKind.Realm && Realm.IsValid;
+    public bool IsLocal => Kind == ContentScopeKind.Local && IsValid;
+    public bool IsRealm => Kind == ContentScopeKind.Realm && IsValid;
+
+    public static ContentScopeKey ForRealm(ApplicationRealmId realm)
+    {
+        if (!realm.IsValid) throw new ArgumentException("An authenticated realm is required.", nameof(realm));
+        return new ContentScopeKey(ContentScopeKind.Realm, realm);
+    }
+
+    public bool TryGetRealm(out ApplicationRealmId realm)
+    {
+        realm = IsRealm ? Realm : default;
+        return realm.IsValid;
+    }
+
+    public int CompareTo(ContentScopeKey other)
+    {
+        int kind = Kind.CompareTo(other.Kind);
+        if (kind != 0) return kind;
+        int high = Realm.High.CompareTo(other.Realm.High);
+        return high != 0 ? high : Realm.Low.CompareTo(other.Realm.Low);
+    }
+
+    public bool Equals(ContentScopeKey other) => Kind == other.Kind && Realm == other.Realm;
+    public override bool Equals(object? obj) => obj is ContentScopeKey other && Equals(other);
+    public override int GetHashCode() => HashCode.Combine((byte)Kind, Realm);
+    public override string ToString() => IsLocal ? "world.local" : IsRealm ? $"realm:{Realm}" : "invalid";
+    public static bool operator ==(ContentScopeKey left, ContentScopeKey right) => left.Equals(right);
+    public static bool operator !=(ContentScopeKey left, ContentScopeKey right) => !left.Equals(right);
+}
 
 /// <summary>Exact SHA-256 value used by content descriptors and canonical identities.</summary>
 public readonly struct ContentHash : IEquatable<ContentHash>, IComparable<ContentHash>

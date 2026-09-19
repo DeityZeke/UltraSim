@@ -224,7 +224,7 @@ public sealed class ResolvedContentCatalog
 
     internal ResolvedContentCatalog(ContentActivationPlan plan, ResolvedContentEntry[] entries)
     {
-        Realm = plan.Realm;
+        Scope = plan.Scope;
         Activation = plan.Activation;
         PlanHash = plan.PlanHash;
         RequiredBaseCatalogFingerprint = plan.RequiredBaseCatalogFingerprint;
@@ -233,7 +233,9 @@ public sealed class ResolvedContentCatalog
         Generation = ContentCatalogGenerationId.Next();
     }
 
-    public UltraSim.Game.Application.ApplicationRealmId Realm { get; }
+    public ContentScopeKey Scope { get; }
+    /// <summary>Compatibility projection for remote protocol adapters. Invalid for Local.</summary>
+    public UltraSim.Game.Application.ApplicationRealmId Realm => Scope.Realm;
     public ContentActivationId Activation { get; }
     public ContentHash PlanHash { get; }
     public ContentHash RequiredBaseCatalogFingerprint { get; }
@@ -287,7 +289,7 @@ public static class ContentCatalogResolver
                 if (requirement.Requirement == ContentRequirementPolicy.Optional) continue;
                 return Fail(ContentCatalogResolutionError.MissingRequiredPackage, out error);
             }
-            if (package.TrustClass != ContentTrustClass.ServerAuthorizedPassive)
+            if (package.TrustClass != ContentTrustClass.ScopeAuthorizedPassive)
                 return Fail(ContentCatalogResolutionError.UnauthorizedPackageTrust, out error);
             if (!ContentBaseCatalog.ManifestWithinLimits(package, limits))
                 return Fail(ContentCatalogResolutionError.CatalogCapacityExceeded, out error);

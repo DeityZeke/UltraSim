@@ -97,7 +97,7 @@ public sealed class ActorPresentationContentLease : IDisposable
 }
 
 /// <summary>
-/// Resolves one passive actor artifact only through a live applied realm catalog, then leaves
+/// Resolves one passive actor artifact only through a live applied scope catalog, then leaves
 /// native import and scene ownership to the engine adapter.
 /// </summary>
 public static class ContentActorPresentationResolver
@@ -125,7 +125,7 @@ public static class ContentActorPresentationResolver
             entry.ReferencedFiles.Count != 1)
             return Fail(ContentActorPresentationResolutionError.DefinitionKindMismatch, out error);
         if (!cache.TryOpenPackage(
-                catalog.Catalog.Realm,
+                catalog.Catalog.Scope,
                 entry.OwnerPackageId,
                 entry.OwnerManifestHash,
                 out VerifiedContentPackage? package,

@@ -1,6 +1,6 @@
 # UltraSim Client Completion Plan
 
-**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0 is CLOSED; F1.1 is the next planned checkpoint.**
+**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0 and F1.1 are CLOSED; F1.2 is NEXT / PLANNED.**
 
 **Parent architecture:** [CLIENT_PRESENTATION_ARCHITECTURE.md](CLIENT_PRESENTATION_ARCHITECTURE.md)
 
@@ -81,8 +81,8 @@ This campaign continues the completed F0 reconstruction/proof line as **F1 Clien
 
 ~~~text
 F1.0  Baseline and guardrails
-F1.1  Unified content scopes and stores
-F1.2  Semantic activation vs presentation resolution
+F1.1  Unified content scopes and stores (CLOSED)
+F1.2  Semantic activation vs presentation resolution (NEXT / PLANNED)
 F1.3  Primitive substrate and fallback contract
 F1.4  Official Local content productization
 F1.5  User presentation overrides and content generations
@@ -278,8 +278,32 @@ The architecture must not require the executable/install directory to be writabl
 - both can reference the same blob without duplicate physical storage;
 - remote scope cannot use world.local authorization;
 - Local scope does not require bespoke Cabin/PresentationAssets lookup to participate;
-- install-root and user-root lookup order is deterministic and tested;
+- the current writable root remains deterministic and the typed store API does not equate a scope
+  with a physical root, leaving a later read-only install-root composition unblocked;
 - deleting one scope does not remove blobs still referenced by another or by live resources.
+
+## F1.1 closure evidence
+
+F1.1 introduced the finite engine-neutral `ContentScopeKey`: one reserved `Local` identity and
+`ForRealm(ApplicationRealmId)` for authenticated remote ownership. Activation plans, resolved
+catalogs, acquisition requests, cache keys, install/open/publication, live pins, reachability, and
+scope retirement now use that key through one implementation. Existing Realm overloads are only
+compatibility adapters.
+
+The accepted remote layout and version-1 activation encoding remain compatible under
+`realms/<ApplicationRealmId>/`; Local metadata lives at `scopes/local/`. Immutable blobs remain in
+the one global CAS. The all-zero private realm field, which cannot be a valid
+`ApplicationRealmId`, canonically encodes Local in activation metadata while the in-memory identity
+remains explicitly typed. Remote authorization projection rejects Local plans and the Game wire,
+application proof, manifest identity, and transport remain unchanged.
+
+Permanent acceptance covers typed-identity fail-closed behavior, Local + Realm A + Realm B physical
+blob deduplication, per-scope manifest isolation, equivalent logical catalog resolution, cold/warm
+reopen, live-lease retirement refusal, safe metadata retirement, and the Cabin
+Default/Replace/Add path through persistent `world.local`. The old Cabin remote oracle fingerprints
+remain frozen; Local scope plans deliberately have their own authorization/result identity. F1.1
+does not add read-only-root overlay behavior, actor-art optionality, presentation precedence, user
+packs, or resource realization changes.
 
 ---
 

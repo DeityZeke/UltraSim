@@ -50,7 +50,10 @@ public readonly record struct ContentLimits
 public enum ContentTrustClass : byte
 {
     BuiltIn = 1,
+    /// <summary>Legacy name retained at its canonical numeric value for wire/manifest compatibility.</summary>
     ServerAuthorizedPassive = 2,
+    /// <summary>Passive package authorized by a typed Local or Realm content scope.</summary>
+    ScopeAuthorizedPassive = ServerAuthorizedPassive,
     UserResourcePack = 3,
     ExecutableExtension = 4,
 }

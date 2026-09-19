@@ -61,6 +61,9 @@ public static class RemoteContentAuthorizationProjection
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(acquisitions);
+        if (!plan.Scope.IsRealm)
+            throw new ArgumentException("Remote authorization requires an authenticated Realm content scope.",
+                nameof(plan));
         ContentPackageAcquisition[] sourcePlans = acquisitions
             .Take(plan.Packages.Count + 1).ToArray();
         if (sourcePlans.Length != plan.Packages.Count)
