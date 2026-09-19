@@ -36,7 +36,21 @@ public readonly record struct RemoteConceptDemoClientSnapshot(
     bool SmokeComplete,
     string? Fault,
     ClientWorldInputScheduleSnapshot InputSchedule,
-    GodotNativeTelemetrySnapshot NativeTelemetry);
+    GodotNativeTelemetrySnapshot NativeTelemetry,
+    ContentCacheSnapshot ContentCacheAtOpen,
+    ContentCacheSnapshot ContentCacheCurrent,
+    RemoteConceptDemoUiOwnershipSnapshot UiOwnership);
+
+/// <summary>
+/// Cold, engine-thread-only observation of the pre-F1 remote HUD ownership tree. This preserves
+/// the current single-HUD mismatch as evidence; it is not the future F1.7 window contract.
+/// </summary>
+public readonly record struct RemoteConceptDemoUiOwnershipSnapshot(
+    int HudHostChildren,
+    int ServerUiHostChildren,
+    int OpenSemanticViews,
+    bool ChatFocused,
+    bool GameplayInputAllowed);
 
 public readonly record struct RemoteConceptDemoLifecycleResidueSnapshot(
     ulong ApplicationSessionEpoch,
@@ -47,7 +61,15 @@ public readonly record struct RemoteConceptDemoLifecycleResidueSnapshot(
     int VisibleOverheadLabels,
     int RenderedChunks,
     int RetainedActorResources,
-    bool ChatFocused);
+    bool ChatFocused,
+    long RetainedActorResourceBytes,
+    int RendererNodes,
+    int RendererResources,
+    int PrimitiveFallbackActors,
+    int AnimatedActors,
+    int EquippedPresentations,
+    ContentCacheSnapshot ContentCache,
+    RemoteConceptDemoUiOwnershipSnapshot Ui);
 
 /// <summary>
 /// Native A0.8 consumer over one authenticated remote application session. The Online product
@@ -71,6 +93,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private readonly ClientChatOccurrence[] _chatRows = new ClientChatOccurrence[64];
     private readonly GodotNativeTelemetry _nativeTelemetry = new();
     private ContentCache? _cache;
+    private ContentCacheSnapshot _contentCacheAtOpen;
+    private ContentCacheSnapshot _contentCacheObserved;
     private HttpContentPackageSource? _source;
     private RemotePlayableSession? _session;
     private NetworkProtocolPeer? _networkPeer;
@@ -149,6 +173,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         if (!ContentCache.TryOpen(
                 cacheRoot, out _cache, out ContentCacheError cacheError))
             throw new InvalidOperationException($"The content cache could not open: {cacheError}.");
+        _contentCacheAtOpen = _cache!.GetSnapshot();
+        _contentCacheObserved = _contentCacheAtOpen;
         try
         {
             _source = new HttpContentPackageSource(new ContentPackageSourceLimits(
@@ -249,6 +275,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             if (_state == RemoteConceptDemoClientState.AwaitingContent &&
                 snapshot.StructuralWorld.State == RemoteStructuralWorldState.Ready)
             {
+                _contentCacheObserved = _cache!.GetSnapshot();
                 _state = RemoteConceptDemoClientState.AwaitingGuest;
                 UpdateHud("Required world and UI content applied; choose a guest identity.");
             }
@@ -318,8 +345,29 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             _smokePhase == 8,
             _fault,
             _inputScheduler?.GetSnapshot() ?? default,
-            _nativeTelemetry.Capture(in actors, in renderer));
+            _nativeTelemetry.Capture(in actors, in renderer),
+            _contentCacheAtOpen,
+            _contentCacheObserved,
+            GetUiOwnershipSnapshot());
     }
+
+    /// <summary>
+    /// Explicit cold-path F1.0 census. Unlike <see cref="GetSnapshot"/>, this may scan the
+    /// persistent cache store and therefore must never be called from the ordinary frame pump.
+    /// </summary>
+    public RemoteConceptDemoClientSnapshot CaptureF10BaselineSnapshot()
+    {
+        EnsureOperational();
+        _contentCacheObserved = _cache?.GetSnapshot() ?? default;
+        return GetSnapshot();
+    }
+
+    private RemoteConceptDemoUiOwnershipSnapshot GetUiOwnershipSnapshot() => new(
+        _ownedHud?.GetChildCount() ?? 0,
+        _uiHost?.GetChildCount() ?? 0,
+        _session?.UiClient.OpenViewCount ?? 0,
+        _chatInput?.HasFocus() == true,
+        _gameplayInputAllowed);
 
     /// <summary>Starts a fresh native/client diagnostic window only.</summary>
     public void ResetTelemetryWindow()
@@ -380,6 +428,10 @@ public sealed partial class RemoteConceptDemoClient : Node3D
 
         RemotePlayableSessionSnapshot session = _session.GetSnapshot();
         GodotActorPresenterSnapshot actors = _actorPresenter.GetSnapshot();
+        GodotWorldRendererSnapshot renderer = _renderer.GetSnapshot();
+        GodotContentActorVisualResolverSnapshot actorResources = _actorVisuals.GetSnapshot();
+        ContentCacheSnapshot contentCache = _cache?.GetSnapshot() ?? default;
+        RemoteConceptDemoUiOwnershipSnapshot ui = GetUiOwnershipSnapshot();
         var result = new RemoteConceptDemoLifecycleResidueSnapshot(
             session.Playable.ApplicationSessionEpoch,
             session.Playable.ServerGenerationId,
@@ -387,9 +439,17 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             actors.ActiveActors,
             actors.VisibleNameplates,
             actors.VisibleOverheadLabels,
-            _renderer.GetSnapshot().ActiveRenderChunks,
-            _actorVisuals.GetSnapshot().RealizedResources,
-            _chatInput.HasFocus());
+            renderer.ActiveRenderChunks,
+            actorResources.RealizedResources,
+            _chatInput.HasFocus(),
+            actorResources.RetainedArtifactBytes,
+            renderer.ActiveNodes,
+            renderer.ActiveResources,
+            actors.PrimitiveFallbackActors,
+            actors.AnimatedActors,
+            actors.EquippedMainHands,
+            contentCache,
+            ui);
         if (result.OpenUiViews != 1 || result.ActiveActors < 2 ||
             result.VisibleNameplates < 2 || result.VisibleOverheadLabels < 1 ||
             result.RenderedChunks <= 0 || result.RetainedActorResources <= 0 ||

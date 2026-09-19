@@ -52,7 +52,24 @@ public readonly record struct LocalCabinPresentationSnapshot(
     int PeakSemanticResidentChunks,
     int RenderedChunks,
     int PeakRenderedChunks,
-    string? InitializationError);
+    string? InitializationError,
+    ClientWorldSemanticCacheSnapshot SemanticWorld,
+    ClientStructuralResidencySnapshot Residency,
+    GodotWorldRendererSnapshot Renderer,
+    GodotActorPresenterSnapshot Actors,
+    LocalCabinUiOwnershipSnapshot Ui);
+
+/// <summary>
+/// Cold, engine-thread-only observation of the UI nodes owned by one local gameplay lifetime.
+/// It deliberately records the pre-F1 HUD/World placement without defining a future window model.
+/// </summary>
+public readonly record struct LocalCabinUiOwnershipSnapshot(
+    int WorldUiHostChildren,
+    int HudHostChildren,
+    int InventoryHostChildren,
+    int OpenSemanticViews,
+    bool ChatFocused,
+    bool GameplayInputAllowed);
 
 public readonly record struct LocalCabinLifecycleResidueSnapshot(
     int OpenUiViews,
@@ -61,7 +78,13 @@ public readonly record struct LocalCabinLifecycleResidueSnapshot(
     int VisibleOverheadLabels,
     int RenderedChunks,
     bool ChatFocused,
-    bool GameplayInputAllowed);
+    bool GameplayInputAllowed,
+    int RendererNodes,
+    int RendererResources,
+    int PrimitiveFallbackActors,
+    int AnimatedActors,
+    int EquippedPresentations,
+    LocalCabinUiOwnershipSnapshot Ui);
 
 /// <summary>
 /// Permanent Godot consumer for one Network-free local playable application session.
@@ -288,6 +311,9 @@ public partial class LocalCabinClient : Node3D
         LocalPlayableSessionSnapshot local = _localSession?.GetSnapshot() ?? default;
         ClientStructuralResidencySnapshot residency = _residency?.GetSnapshot() ?? default;
         GodotWorldRendererSnapshot render = _renderer?.GetSnapshot() ?? default;
+        ClientWorldSemanticCacheSnapshot semantic = _cache?.GetSnapshot() ?? default;
+        GodotActorPresenterSnapshot actors = _actorPresenter?.GetSnapshot() ?? default;
+        LocalCabinUiOwnershipSnapshot ui = GetUiOwnershipSnapshot();
         _peakRenderedChunks = Math.Max(_peakRenderedChunks, render.ActiveRenderChunks);
         LocalPlayableAuthorityView authority = default;
         if (_localSession is not null) _ = _localSession.TryGetLatestView(out authority);
@@ -321,8 +347,21 @@ public partial class LocalCabinClient : Node3D
             residency.PeakSemanticResidentChunks,
             render.ActiveRenderChunks,
             _peakRenderedChunks,
-            _initializationError);
+            _initializationError,
+            semantic,
+            residency,
+            render,
+            actors,
+            ui);
     }
+
+    private LocalCabinUiOwnershipSnapshot GetUiOwnershipSnapshot() => new(
+        _ownedWorldUiRoot?.GetChildCount() ?? 0,
+        _ownedHudRoot?.GetChildCount() ?? 0,
+        _inventoryHost?.GetChildCount() ?? 0,
+        _uiClient?.OpenViewCount ?? 0,
+        _chatInput?.HasFocus() == true,
+        _gameplayInputAllowed);
 
     /// <summary>Permanent D0.1 canary for a live, settings-shaped window rebuild.</summary>
     public LocalCabinPresentationSnapshot RunD01Acceptance()
@@ -1177,14 +1216,22 @@ public partial class LocalCabinClient : Node3D
         _chatInput.GrabFocus();
 
         GodotActorPresenterSnapshot actors = _actorPresenter.GetSnapshot();
+        GodotWorldRendererSnapshot renderer = _renderer.GetSnapshot();
+        LocalCabinUiOwnershipSnapshot ui = GetUiOwnershipSnapshot();
         var result = new LocalCabinLifecycleResidueSnapshot(
             _uiClient.OpenViewCount,
             actors.ActiveActors,
             actors.VisibleNameplates,
             actors.VisibleOverheadLabels,
-            _renderer.GetSnapshot().ActiveRenderChunks,
+            renderer.ActiveRenderChunks,
             _chatInput.HasFocus(),
-            _gameplayInputAllowed);
+            _gameplayInputAllowed,
+            renderer.ActiveNodes,
+            renderer.ActiveResources,
+            actors.PrimitiveFallbackActors,
+            actors.AnimatedActors,
+            actors.EquippedMainHands,
+            ui);
         if (result.OpenUiViews != 1 || result.ActiveActors < 2 ||
             result.VisibleNameplates < 2 || result.VisibleOverheadLabels < 1 ||
             result.RenderedChunks <= 0 || !result.ChatFocused)

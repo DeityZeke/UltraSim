@@ -138,6 +138,10 @@ public readonly record struct GodotWorldRendererSnapshot(
     int PendingRetirements,
     int ActiveNodes,
     int ActiveResources,
+    int ActiveTerrainSurfaceMeshes,
+    int ActiveStaticBatchGroups,
+    int ActivePublicBatchGroups,
+    int ActiveFallbackGroups,
     ulong CompletedBuilds,
     ulong CompletedRetirements,
     ulong Rebuilds,
@@ -237,6 +241,10 @@ public sealed class GodotWorldRenderer : IDisposable
     private int _visibleChunks;
     private int _activeNodes;
     private int _activeResources;
+    private int _activeTerrainSurfaceMeshes;
+    private int _activeStaticBatchGroups;
+    private int _activePublicBatchGroups;
+    private int _activeFallbackGroups;
     private ulong _completedBuilds;
     private ulong _completedRetirements;
     private ulong _rebuilds;
@@ -692,7 +700,10 @@ public sealed class GodotWorldRenderer : IDisposable
         EnsureOwner();
         return new GodotWorldRendererSnapshot(
             _activeChunks, _freeRenderSlotCount, _visibleChunks, _buildCount, _retireCount,
-            _activeNodes, _activeResources, _completedBuilds, _completedRetirements,
+            _activeNodes, _activeResources,
+            _activeTerrainSurfaceMeshes, _activeStaticBatchGroups,
+            _activePublicBatchGroups, _activeFallbackGroups,
+            _completedBuilds, _completedRetirements,
             _rebuilds, _publicRefreshes, _renderCapacityRejections, _groupCapacityRejections,
             _rebases, _windowMoves, _cancelledBuilds, _cancelledRetirements,
             _chunkRootTransformWrites, _groupValidationCalls, _verticalRebases,
@@ -833,6 +844,10 @@ public sealed class GodotWorldRenderer : IDisposable
         if (candidate.Root.Visible) _visibleChunks++;
         _activeNodes += candidate.NodeCount;
         _activeResources += candidate.ResourceCount;
+        _activeTerrainSurfaceMeshes += candidate.TerrainSurfaceMeshCount;
+        _activeStaticBatchGroups += candidate.StaticBatchGroupCount;
+        _activePublicBatchGroups += candidate.PublicResourceCount;
+        _activeFallbackGroups += candidate.FallbackGroupCount;
         _completedBuilds++;
         if (replacing) _rebuilds++;
         _lastResourceCommitTicks = Stopwatch.GetTimestamp() - commitStart;
@@ -854,6 +869,8 @@ public sealed class GodotWorldRenderer : IDisposable
         if (GodotObject.IsInstanceValid(chunk.PublicRoot)) chunk.PublicRoot.Free();
         _activeNodes -= chunk.PublicNodeCount;
         _activeResources -= chunk.PublicResourceCount;
+        _activePublicBatchGroups -= chunk.PublicResourceCount;
+        _activeFallbackGroups -= FallbackGroupCount(chunk.PublicFallbacks);
         chunk.PublicRoot = candidate.Root;
         chunk.PublicNodeCount = candidate.NodeCount;
         chunk.PublicResourceCount = candidate.ResourceCount;
@@ -863,6 +880,8 @@ public sealed class GodotWorldRenderer : IDisposable
         chunk.Root.AddChild(candidate.Root);
         _activeNodes += candidate.NodeCount;
         _activeResources += candidate.ResourceCount;
+        _activePublicBatchGroups += candidate.ResourceCount;
+        _activeFallbackGroups += FallbackGroupCount(candidate.Fallbacks);
         _publicRefreshes++;
         _lastResourceCommitTicks = Stopwatch.GetTimestamp() - commitStart;
         _maximumResourceCommitTicks = Math.Max(_maximumResourceCommitTicks, _lastResourceCommitTicks);
@@ -1382,6 +1401,10 @@ public sealed class GodotWorldRenderer : IDisposable
         _activeChunks--;
         _activeNodes -= chunk.NodeCount;
         _activeResources -= chunk.ResourceCount;
+        _activeTerrainSurfaceMeshes -= chunk.TerrainSurfaceMeshCount;
+        _activeStaticBatchGroups -= chunk.StaticBatchGroupCount;
+        _activePublicBatchGroups -= chunk.PublicResourceCount;
+        _activeFallbackGroups -= chunk.FallbackGroupCount;
         if (GodotObject.IsInstanceValid(chunk.Root)) chunk.Root.Free();
         _renderChunks[renderSlot] = null;
         int semanticIndex = checked((int)chunk.Handle.Index);
@@ -1567,6 +1590,9 @@ public sealed class GodotWorldRenderer : IDisposable
                 left.ModelAndTexture + right.ModelAndTexture);
     }
 
+    private static int FallbackGroupCount(in FallbackCounts counts) =>
+        counts.Model + counts.Texture + counts.ModelAndTexture;
+
     private readonly record struct RenderLayer(
         Node3D Root,
         int NodeCount,
@@ -1635,6 +1661,12 @@ public sealed class GodotWorldRenderer : IDisposable
         internal int StructuralResourceCount { get; }
         internal int PublicNodeCount { get; set; }
         internal int PublicResourceCount { get; set; }
+        internal int TerrainSurfaceMeshCount => 1 + AdditionalTerrainSurfaceFragmentCount;
+        internal int StaticBatchGroupCount =>
+            StructuralResourceCount - TerrainSurfaceMeshCount;
+        internal int FallbackGroupCount =>
+            GodotWorldRenderer.FallbackGroupCount(StructuralFallbacks) +
+            GodotWorldRenderer.FallbackGroupCount(PublicFallbacks);
         internal int NodeCount => StructuralNodeCount + PublicNodeCount;
         internal int ResourceCount => StructuralResourceCount + PublicResourceCount;
     }

@@ -4758,6 +4758,7 @@ static void VerifyMixedSessionLifecycleNative(
                 "F0.7 requires distinct realm-bound deployment/catalog identities over the same " +
                 "World, actor, and client-profile payload contract.");
 
+        string f10Evidence = Path.Combine(scope, "f1.0-client-baseline.json");
         string output = RunCaptured(root, godot,
         [
             "--headless",
@@ -4772,8 +4773,10 @@ static void VerifyMixedSessionLifecycleNative(
             $"--a0-8-cache={Path.Combine(scope, "content-cache")}",
             $"--a0-8-trust={Path.Combine(scope, "client", "trusted-servers.json")}",
             $"--f0-3c-profile-decisions={Path.Combine(scope, "client", "server-profiles.json")}",
+            $"--f1-0-evidence={f10Evidence}",
         ], 240_000);
         if (!output.Contains("F0.7 MIXED SESSION LIFECYCLE PASS", StringComparison.Ordinal) ||
+            !output.Contains("F1.0 CLIENT BASELINE PASS", StringComparison.Ordinal) ||
             !output.Contains($"realms={readyA.Realm}/{readyB.Realm}/{readyA.Realm}",
                 StringComparison.Ordinal) ||
             !output.Contains("profile_reuse=False/False/True", StringComparison.Ordinal) ||
@@ -4782,6 +4785,19 @@ static void VerifyMixedSessionLifecycleNative(
             !output.Contains("boundaries=clean", StringComparison.Ordinal))
             throw new InvalidOperationException(
                 $"The F0.7 native lifecycle evidence was incomplete:\n{Tail(output, 8_000)}");
+        VerifyF10ClientBaselineEvidence(f10Evidence);
+        string? retainedF10Evidence =
+            Environment.GetEnvironmentVariable("ULTRASIM_F10_EVIDENCE_OUTPUT");
+        if (!string.IsNullOrWhiteSpace(retainedF10Evidence))
+        {
+            string full = Path.GetFullPath(retainedF10Evidence);
+            string? directory = Path.GetDirectoryName(full);
+            if (string.IsNullOrWhiteSpace(directory))
+                throw new InvalidOperationException(
+                    "ULTRASIM_F10_EVIDENCE_OUTPUT has no parent directory.");
+            Directory.CreateDirectory(directory);
+            File.Copy(f10Evidence, full, overwrite: true);
+        }
         Console.WriteLine(
             $"PASS F0.7_MixedSessionLifecycleNative realms={readyA.Realm}/{readyB.Realm} " +
             "sequence=local-local-remoteA-remoteB-remoteA-local profileReuse=exact " +
@@ -4795,6 +4811,103 @@ static void VerifyMixedSessionLifecycleNative(
         serverA?.Dispose();
         if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
     }
+}
+
+static void VerifyF10ClientBaselineEvidence(string path)
+{
+    if (!File.Exists(path))
+        throw new InvalidOperationException("The F1.0 native baseline did not write its evidence file.");
+    using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
+    JsonElement root = document.RootElement;
+    if (root.GetProperty("SchemaVersion").GetInt32() != 1 ||
+        root.GetProperty("Checkpoint").GetString() != "F1.0" ||
+        root.GetProperty("Product").GetString() != "Complete" ||
+        root.GetProperty("RetirementBoundariesChecked").GetInt32() != 6)
+        throw new InvalidOperationException("The F1.0 native baseline identity was incomplete.");
+
+    JsonElement persistent = root.GetProperty("PersistentBaseline");
+    JsonElement local = root.GetProperty("Local").GetProperty("First");
+    JsonElement localSnapshot = local.GetProperty("Snapshot");
+    JsonElement localRenderer = localSnapshot.GetProperty("Renderer");
+    JsonElement localActors = localSnapshot.GetProperty("Actors");
+    JsonElement localUi = localSnapshot.GetProperty("Ui");
+    JsonElement localBoundary = local.GetProperty("ActiveBoundary");
+    if (localSnapshot.GetProperty("SemanticWorld").GetProperty("ResidentChunks").GetInt32() <= 0 ||
+        localRenderer.GetProperty("ActiveRenderChunks").GetInt32() <= 0 ||
+        localRenderer.GetProperty("ActiveNodes").GetInt32() <= 0 ||
+        localRenderer.GetProperty("ActiveResources").GetInt32() <= 0 ||
+        localRenderer.GetProperty("ActiveTerrainSurfaceMeshes").GetInt32() <= 0 ||
+        localRenderer.GetProperty("ActiveStaticBatchGroups").GetInt32() <= 0 ||
+        localRenderer.GetProperty("ActivePublicBatchGroups").GetInt32() <= 0 ||
+        localActors.GetProperty("ActiveActors").GetInt32() < 2 ||
+        localUi.GetProperty("OpenSemanticViews").GetInt32() != 0 ||
+        localBoundary.GetProperty("WorldUiChildren").GetInt32() !=
+            persistent.GetProperty("WorldUiChildren").GetInt32() + 1 ||
+        localBoundary.GetProperty("HudChildren").GetInt32() !=
+            persistent.GetProperty("HudChildren").GetInt32() + 1)
+        throw new InvalidOperationException(
+            "The F1.0 local semantic/native/UI ownership census was incomplete.");
+
+    JsonElement remote = root.GetProperty("Remote");
+    JsonElement cold = remote.GetProperty("ColdRealmA");
+    JsonElement coldSnapshot = cold.GetProperty("Snapshot");
+    JsonElement coldAcquisition = coldSnapshot.GetProperty("Session")
+        .GetProperty("Content").GetProperty("Acquisition");
+    JsonElement coldCurrentCache = coldSnapshot.GetProperty("ContentCacheCurrent");
+    JsonElement warm = remote.GetProperty("WarmRealmAReconnect");
+    JsonElement warmSnapshot = warm.GetProperty("Snapshot");
+    JsonElement warmAcquisition = warmSnapshot.GetProperty("Session")
+        .GetProperty("Content").GetProperty("Acquisition");
+    if (coldSnapshot.GetProperty("ContentCacheAtOpen").GetProperty("BlobCount").GetInt32() != 0 ||
+        coldAcquisition.GetProperty("PackagesFetched").GetInt32() <= 0 ||
+        coldAcquisition.GetProperty("BytesFetched").GetInt64() <= 0 ||
+        coldCurrentCache.GetProperty("BlobCount").GetInt32() <= 0 ||
+        coldCurrentCache.GetProperty("LiveBlobPins").GetInt32() <= 0 ||
+        coldSnapshot.GetProperty("ActorResources").GetProperty("RealizedResources").GetInt32() <= 0 ||
+        coldSnapshot.GetProperty("ActorResources").GetProperty("RetainedArtifactBytes").GetInt64() <= 0 ||
+        cold.GetProperty("ActiveBoundary").GetProperty("HudChildren").GetInt32() !=
+            persistent.GetProperty("HudChildren").GetInt32() + 1 ||
+        warmSnapshot.GetProperty("ContentCacheAtOpen").GetProperty("BlobCount").GetInt32() <= 0 ||
+        warmAcquisition.GetProperty("PackagesReused").GetInt32() <= 0 ||
+        warmAcquisition.GetProperty("BytesFetched").GetInt64() != 0 ||
+        warm.GetProperty("ApplicationSessionEpoch").GetUInt64() ==
+            cold.GetProperty("ApplicationSessionEpoch").GetUInt64())
+        throw new InvalidOperationException(
+            "The F1.0 remote cold/warm content, native-resource, or lineage census was incomplete.");
+
+    JsonElement finalBoundary = root.GetProperty("FinalBoundary");
+    if (finalBoundary.GetProperty("ControllerChildren").GetInt32() !=
+            persistent.GetProperty("ControllerChildren").GetInt32() ||
+        finalBoundary.GetProperty("ContentCatalogChildren").GetInt32() !=
+            persistent.GetProperty("ContentCatalogChildren").GetInt32() ||
+        finalBoundary.GetProperty("WorldChildren").GetInt32() !=
+            persistent.GetProperty("WorldChildren").GetInt32() ||
+        finalBoundary.GetProperty("WorldUiChildren").GetInt32() !=
+            persistent.GetProperty("WorldUiChildren").GetInt32() ||
+        finalBoundary.GetProperty("HudChildren").GetInt32() !=
+            persistent.GetProperty("HudChildren").GetInt32() ||
+        finalBoundary.GetProperty("MenuChildren").GetInt32() !=
+            persistent.GetProperty("MenuChildren").GetInt32() ||
+        finalBoundary.GetProperty("DebugChildren").GetInt32() !=
+            persistent.GetProperty("DebugChildren").GetInt32() ||
+        finalBoundary.GetProperty("ServerProfileActive").GetBoolean())
+        throw new InvalidOperationException(
+            "The F1.0 final persistent-root/session-profile boundary was not clean.");
+
+    JsonElement mismatches = root.GetProperty("KnownPreF1UiOwnership");
+    if (!mismatches.GetProperty("LocalInventoryUnderHud").GetBoolean() ||
+        !mismatches.GetProperty("LocalTooltipUnderWorld").GetBoolean() ||
+        !mismatches.GetProperty("RemoteUiChatBannerAndTooltipUnderHud").GetBoolean() ||
+        mismatches.GetProperty("ContextTooltipLayerPresent").GetBoolean() ||
+        mismatches.GetProperty("MultiWindowManagerPresent").GetBoolean())
+        throw new InvalidOperationException(
+            "The F1.0 baseline did not preserve the known pre-F1 UI ownership mismatches.");
+    Console.WriteLine(
+        $"PASS F1.0_ClientBaselineGuardrails localChunks=" +
+        $"{localSnapshot.GetProperty("SemanticWorld").GetProperty("ResidentChunks").GetInt32()} " +
+        $"remoteColdBytes={coldAcquisition.GetProperty("BytesFetched").GetInt64()} " +
+        $"remoteWarmPackages={warmAcquisition.GetProperty("PackagesReused").GetInt32()} " +
+        "retirementBoundaries=6");
 }
 
 static string[] NativeSharedClientArguments(

@@ -988,6 +988,11 @@ public partial class T010PlayableWorldAcceptance : Node3D
         GodotWorldRendererSnapshot initialRender = renderer.GetSnapshot();
         Expect(initialRender.ActiveRenderChunks == 9 && initialRender.CompletedBuilds == 9,
             "The authored terrain/static/Multi/public window did not render.");
+        Expect(initialRender.ActiveTerrainSurfaceMeshes >= 9 &&
+            initialRender.ActiveStaticBatchGroups > 0 &&
+            initialRender.ActivePublicBatchGroups > 0 &&
+            initialRender.ActiveFallbackGroups > 0,
+            "The bounded renderer realization census omitted an active presentation family.");
         Label3D? groundItemName = FindLabelByText(renderer.Root, "Iron Sword");
         Expect(groundItemName is not null && !groundItemName.IsVisibleInTree(),
             "The ground sword did not retain a hidden generic world-name label.");
@@ -1072,6 +1077,10 @@ public partial class T010PlayableWorldAcceptance : Node3D
             $"T0.10 METRICS pack_bytes={pack.Length} identity_index_bytes={bound!.StructuralIdentityIndexReservedBytes} " +
             $"semantic_reserved_bytes={cache.GetSnapshot().ReservedBytes} active_chunks={afterRefresh.ActiveRenderChunks} " +
             $"active_nodes={afterRefresh.ActiveNodes} active_resources={afterRefresh.ActiveResources} " +
+            $"terrain_surfaces={afterRefresh.ActiveTerrainSurfaceMeshes} " +
+            $"static_batches={afterRefresh.ActiveStaticBatchGroups} " +
+            $"public_batches={afterRefresh.ActivePublicBatchGroups} " +
+            $"fallback_groups={afterRefresh.ActiveFallbackGroups} " +
             $"builds={afterRefresh.CompletedBuilds} public_refreshes={afterRefresh.PublicRefreshes} " +
             $"crossing_frames={frames} frame_max_us={afterRefresh.MaximumFrameMicroseconds:F3} " +
             $"mesh_max_us={afterRefresh.MaximumMeshBuildMicroseconds:F3} " +

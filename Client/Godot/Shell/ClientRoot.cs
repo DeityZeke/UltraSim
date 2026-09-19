@@ -14,7 +14,8 @@ public readonly record struct GodotClientRootSnapshot(
     bool WorldUiLayerPresent,
     bool HudLayerPresent,
     bool MenuLayerPresent,
-    bool DebugLayerPresent);
+    bool DebugLayerPresent,
+    GodotClientSessionBoundarySnapshot Boundary);
 
 /// <summary>
 /// Exact persistent-root shape captured at a session boundary. Capability implementations use
@@ -27,7 +28,10 @@ public readonly record struct GodotClientSessionBoundarySnapshot(
     int WorldChildren,
     int WorldUiChildren,
     int HudChildren,
+    int MenuChildren,
     int DebugChildren,
+    int MenuHostChildren,
+    string? FocusedControlType,
     bool ServerProfileActive,
     ClientControlGrammar ControlGrammar,
     ClientCameraProfile CameraProfile,
@@ -128,7 +132,10 @@ public abstract partial class ClientRoot : Control
             WorldRoot.GetChildCount(),
             WorldUiLayer.GetChildCount(),
             HudLayer.GetChildCount(),
+            _menuLayer?.GetChildCount() ?? 0,
             _debugLayer?.GetChildCount() ?? 0,
+            _menuHost?.GetChildCount() ?? 0,
+            GetViewport().GuiGetFocusOwner()?.GetType().Name,
             _activeSettingsScope.IsValid || _activeProfileRecommendation is not null ||
             _activeProfileMode != ClientProfileApplicationMode.Ignore,
             _resolved.ControlGrammar,
@@ -150,7 +157,9 @@ public abstract partial class ClientRoot : Control
             current.WorldChildren != baseline.WorldChildren ||
             current.WorldUiChildren != baseline.WorldUiChildren ||
             current.HudChildren != baseline.HudChildren ||
+            current.MenuChildren != baseline.MenuChildren ||
             current.DebugChildren != baseline.DebugChildren ||
+            current.MenuHostChildren != baseline.MenuHostChildren ||
             current.ServerProfileActive ||
             current.ControlGrammar != baseline.ControlGrammar ||
             current.CameraProfile != baseline.CameraProfile ||
@@ -311,7 +320,8 @@ public abstract partial class ClientRoot : Control
             _worldUiLayer is not null,
             _hudLayer is not null,
             _menuLayer is not null,
-            _debugLayer is not null);
+            _debugLayer is not null,
+            CaptureSessionBoundary());
     }
 
     /// <summary>F0.2/F0.3 composition roots replace this with real session activation.</summary>

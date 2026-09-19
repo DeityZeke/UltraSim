@@ -1049,6 +1049,8 @@ public partial class ClientHost
         ClientControlGrammar ControlGrammar,
         ClientCameraProfile CameraProfile,
         string CatalogFingerprint,
+        RemoteConceptDemoClientSnapshot Snapshot,
+        GodotClientSessionBoundarySnapshot ActiveBoundary,
         RemoteConceptDemoLifecycleResidueSnapshot Residue);
 
     private async void RunF07MixedSessionLifecycleSmoke()
@@ -1061,6 +1063,7 @@ public partial class ClientHost
                 localOneName, CabinHumanBody.XBot);
             LocalCabinLifecycleResidueSnapshot localOneResidue =
                 PrepareF07LocalRetirement(localOneName, CabinHumanBody.XBot);
+            GodotClientSessionBoundarySnapshot localOneBoundary = CaptureSessionBoundary();
             await RetireF07ToCleanMenu(baseline, "first local");
 
             const string localTwoName = "F0.7 Local Two";
@@ -1068,6 +1071,7 @@ public partial class ClientHost
                 localTwoName, CabinHumanBody.YBot);
             LocalCabinLifecycleResidueSnapshot localTwoResidue =
                 PrepareF07LocalRetirement(localTwoName, CabinHumanBody.YBot);
+            GodotClientSessionBoundarySnapshot localTwoBoundary = CaptureSessionBoundary();
             if (localTwo.ApplicationSessionEpoch == localOne.ApplicationSessionEpoch ||
                 localTwo.ControlSessionEpoch == localOne.ControlSessionEpoch ||
                 localTwo.ContentGeneration == localOne.ContentGeneration)
@@ -1126,7 +1130,17 @@ public partial class ClientHost
                     "The final local session retained prior local or realm-scoped client state.");
             LocalCabinLifecycleResidueSnapshot finalLocalResidue =
                 PrepareF07LocalRetirement(finalLocalName, CabinHumanBody.XBot);
+            GodotClientSessionBoundarySnapshot finalLocalBoundary = CaptureSessionBoundary();
             await RetireF07ToCleanMenu(baseline, "final local");
+
+            GodotClientSessionBoundarySnapshot finalBoundary = CaptureSessionBoundary();
+            WriteF10BaselineEvidence(
+                in baseline,
+                in localOne, in localOneBoundary, in localOneResidue,
+                in localTwo, in localTwoBoundary, in localTwoResidue,
+                in remoteA, in remoteB, in remoteAReconnect,
+                in finalLocal, in finalLocalBoundary, in finalLocalResidue,
+                in finalBoundary);
 
             GD.Print(
                 "F0.7 MIXED SESSION LIFECYCLE PASS " +
@@ -1142,6 +1156,18 @@ public partial class ClientHost
                 $"remote_surfaces={remoteA.Residue.OpenUiViews}/" +
                 $"{remoteB.Residue.OpenUiViews}/{remoteAReconnect.Residue.OpenUiViews} " +
                 "boundaries=clean");
+            GD.Print(
+                "F1.0 CLIENT BASELINE PASS " +
+                $"local_chunks={localOne.SemanticWorld.ResidentChunks}/" +
+                $"{localOne.Renderer.ActiveRenderChunks} " +
+                $"local_batches={localOne.Renderer.ActiveStaticBatchGroups}/" +
+                $"{localOne.Renderer.ActivePublicBatchGroups} " +
+                $"remote_cold_bytes={remoteA.Snapshot.Session.Content.Acquisition.BytesFetched} " +
+                $"remote_warm_reused={remoteAReconnect.Snapshot.Session.Content.Acquisition.PackagesReused}/" +
+                $"{remoteAReconnect.Snapshot.Session.Content.Acquisition.FilesReused} " +
+                $"remote_resources={remoteA.Snapshot.ActorResources.RealizedResources}/" +
+                $"{remoteA.Snapshot.ActorResources.RetainedArtifactBytes} " +
+                "retirement=clean");
             GetTree().Quit(0);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -1187,6 +1213,7 @@ public partial class ClientHost
                     "The F0.7 remote session completed without an active shell/profile lifetime.");
             ClientDirectConnectSnapshot connected = _remoteSession.GetSnapshot();
             RemoteClientProfileSnapshot profile = _remoteProfile.GetSnapshot();
+            snapshot = playable.CaptureF10BaselineSnapshot();
             RemoteConceptDemoLifecycleResidueSnapshot residue =
                 playable.PrepareF07RetirementCanary();
             return new F07RemoteLifetime(
@@ -1197,6 +1224,8 @@ public partial class ClientHost
                 EffectiveSettings.ControlGrammar,
                 EffectiveSettings.CameraProfile,
                 snapshot.Session.Content.ResolvedCatalogFingerprint.ToString(),
+                snapshot,
+                CaptureSessionBoundary(),
                 residue);
         }
         throw new TimeoutException(
@@ -1223,6 +1252,78 @@ public partial class ClientHost
         ReadArgument(prefix) is { Length: > 0 } value
             ? value
             : throw new InvalidOperationException($"F0.7 requires '{prefix}<value>'.");
+
+    private void WriteF10BaselineEvidence(
+        in GodotClientSessionBoundarySnapshot persistentBaseline,
+        in LocalCabinPresentationSnapshot localOne,
+        in GodotClientSessionBoundarySnapshot localOneBoundary,
+        in LocalCabinLifecycleResidueSnapshot localOneResidue,
+        in LocalCabinPresentationSnapshot localTwo,
+        in GodotClientSessionBoundarySnapshot localTwoBoundary,
+        in LocalCabinLifecycleResidueSnapshot localTwoResidue,
+        in F07RemoteLifetime remoteA,
+        in F07RemoteLifetime remoteB,
+        in F07RemoteLifetime remoteAReconnect,
+        in LocalCabinPresentationSnapshot finalLocal,
+        in GodotClientSessionBoundarySnapshot finalLocalBoundary,
+        in LocalCabinLifecycleResidueSnapshot finalLocalResidue,
+        in GodotClientSessionBoundarySnapshot finalBoundary)
+    {
+        string? path = ReadArgument("--f1-0-evidence=");
+        if (string.IsNullOrWhiteSpace(path)) return;
+        var evidence = new
+        {
+            SchemaVersion = 1,
+            Checkpoint = "F1.0",
+            Product = CompiledEdition,
+            PersistentBaseline = persistentBaseline,
+            Local = new
+            {
+                First = new { Snapshot = localOne, ActiveBoundary = localOneBoundary,
+                    RetirementCanary = localOneResidue },
+                Second = new { Snapshot = localTwo, ActiveBoundary = localTwoBoundary,
+                    RetirementCanary = localTwoResidue },
+                Final = new { Snapshot = finalLocal, ActiveBoundary = finalLocalBoundary,
+                    RetirementCanary = finalLocalResidue },
+            },
+            Remote = new
+            {
+                ColdRealmA = remoteA,
+                ColdRealmBWithSharedCas = remoteB,
+                WarmRealmAReconnect = remoteAReconnect,
+            },
+            FinalBoundary = finalBoundary,
+            RetirementBoundariesChecked = 6,
+            KnownPreF1UiOwnership = new
+            {
+                LocalInventoryUnderHud = true,
+                LocalTooltipUnderWorld = true,
+                RemoteUiChatBannerAndTooltipUnderHud = true,
+                ContextTooltipLayerPresent = false,
+                MultiWindowManagerPresent = false,
+            },
+        };
+        string full = Path.GetFullPath(path);
+        string? directory = Path.GetDirectoryName(full);
+        if (string.IsNullOrWhiteSpace(directory))
+            throw new InvalidOperationException("The F1.0 evidence path has no parent directory.");
+        Directory.CreateDirectory(directory);
+        string temporary = full + $".{System.Environment.ProcessId}.tmp";
+        try
+        {
+            File.WriteAllText(
+                temporary,
+                System.Text.Json.JsonSerializer.Serialize(
+                    evidence,
+                    new System.Text.Json.JsonSerializerOptions { WriteIndented = true }) +
+                global::System.Environment.NewLine);
+            File.Move(temporary, full, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
+    }
 #endif
 }
 #endif
