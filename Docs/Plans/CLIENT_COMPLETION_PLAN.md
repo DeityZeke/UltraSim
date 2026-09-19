@@ -305,6 +305,11 @@ remain frozen; Local scope plans deliberately have their own authorization/resul
 does not add read-only-root overlay behavior, actor-art optionality, presentation precedence, user
 packs, or resource realization changes.
 
+The immutable closure evidence is
+[`client-f1.1-unified-content-scopes-2026-09-19.md`](../../_Benchmarks/Baselines/client-f1.1-unified-content-scopes-2026-09-19.md)
+with a machine-readable
+[`JSON companion`](../../_Benchmarks/Baselines/client-f1.1-unified-content-scopes-2026-09-19.json).
+
 ---
 
 # 6. F1.2 - Separate semantic activation from presentation resolution

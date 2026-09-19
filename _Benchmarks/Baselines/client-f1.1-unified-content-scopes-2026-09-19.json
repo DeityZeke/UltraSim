@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "F1.1",
+  "capturedUtcDate": "2026-09-19",
+  "status": "accepted",
+  "lineage": {
+    "startingHead": "cac114652d94ae0ac75ef72f769df4a096c9dcd1",
+    "testedImplementationCommit": "17b273122e7aa4fa78e0bc188ae97541f6416663",
+    "gameAuthoritySemanticsChanged": false,
+    "remoteWireOrApplicationProofChanged": false,
+    "f1_2OrLaterImplemented": false
+  },
+  "environment": {
+    "configuration": "Release",
+    "os": "CachyOS Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "logicalProcessors": 16,
+    "dotnetSdk": "8.0.131",
+    "dotnetRuntime": "8.0.31",
+    "godot": "4.7.1.stable.mono.official.a13da4feb"
+  },
+  "scopeIdentity": {
+    "type": "ContentScopeKey",
+    "kinds": ["Local", "Realm"],
+    "localFactory": "ContentScopeKey.Local",
+    "localDisplayIdentity": "world.local",
+    "realmFactory": "ContentScopeKey.ForRealm(ApplicationRealmId)",
+    "defaultRejected": true,
+    "arbitraryTextOrPathConstructor": false,
+    "realmRetainsAuthenticatedApplicationRealmId": true
+  },
+  "storage": {
+    "globalBlobPath": "blobs/sha256/<prefix>/<hash>.blob",
+    "localMetadataPath": "scopes/local/{manifests,activations}",
+    "realmMetadataPath": "realms/<ApplicationRealmId>/{manifests,activations}",
+    "compatibilityStrategy": "Retain existing Realm paths and version-1 Realm activation encoding unchanged; add typed Local metadata without migration.",
+    "singleWritableRootRetained": true,
+    "readOnlyInstallRootOverlayImplemented": false
+  },
+  "sharedCasAcceptance": {
+    "scopes": ["world.local", "Realm A", "Realm B"],
+    "scopeCount": 3,
+    "sharedBlobPhysicalFilesForSharedHash": 1,
+    "fixtureTotalPhysicalBlobsIncludingRealmOnlyBlob": 2,
+    "localManifestCount": 1,
+    "realmManifestCount": 3,
+    "minimumReusedBlobCount": 2,
+    "blobPossessionGrantedCrossScopeAuthorization": false
+  },
+  "scopeIsolation": {
+    "localManifestUnavailableToRealmBeforeRealmInstall": true,
+    "realmAManifestUnavailableToRealmBBeforeRealmBInstall": true,
+    "realmOnlyManifestUnavailableToLocal": true,
+    "missingAuthorizationError": "MissingManifest",
+    "remoteProjectionRejectsLocalPlan": true
+  },
+  "activationAndLifecycle": {
+    "localAndRealmLogicalCatalogEntriesEqual": true,
+    "localAndRealmFingerprintsDeliberatelyDistinct": true,
+    "localWarmReopenExact": true,
+    "realmWarmReopenExact": true,
+    "retirementWithLiveCatalogLease": "CacheBusy",
+    "retiredLocalManifests": 1,
+    "retiredLocalActivations": 1,
+    "realmStillAuthorizedAfterLocalRetirement": true,
+    "sharedBlobStillOpenableAfterLocalRetirement": true,
+    "finalLiveBlobPins": 0,
+    "finalLiveCatalogPins": 0
+  },
+  "worldLocalCabinAcceptance": {
+    "scopeCount": 1,
+    "localManifestCount": 2,
+    "localActivationCount": 3,
+    "realmManifestCount": 0,
+    "realmActivationCount": 0,
+    "catalogsPublishedAndWarmReopened": ["Default", "Replace", "Add"],
+    "exactLogicalEqualityWithFrozenOracle": true,
+    "frozenRemoteFingerprintsUnchanged": true
+  },
+  "f1_0Comparison": {
+    "journey": [
+      "Local", "Menu", "Local", "Menu", "RemoteA", "Menu",
+      "RemoteB", "Menu", "RemoteAReconnect", "Menu", "Local", "Menu"
+    ],
+    "residentLocalChunks": 49,
+    "renderedLocalChunks": 25,
+    "localStaticBatchGroups": 64,
+    "localPublicBatchGroups": 7,
+    "remoteColdBytesFetched": 7669834,
+    "remoteWarmPackagesReused": 3,
+    "remoteWarmFilesReused": 6,
+    "remoteActorResources": 1,
+    "remoteActorResourceBytes": 2213268,
+    "retirementBoundariesChecked": 6,
+    "allRetirementBoundariesClean": true,
+    "semanticOrPresentationDifference": false,
+    "intentionalDifference": "Scope-aware cache metadata and diagnostics plus standalone persistent world.local acceptance."
+  },
+  "verification": [
+    {
+      "command": "./verify.sh --architecture-only",
+      "result": "pass",
+      "summary": "4/4"
+    },
+    {
+      "command": "dotnet run --project _Tests/UltraSim.Client.Content.Tests/UltraSim.Client.Content.Tests.csproj -c Release",
+      "result": "pass",
+      "summary": "30/30"
+    },
+    {
+      "command": "dotnet run --project _Tests/UltraSim.Client.BuiltInTestWorlds.Tests/UltraSim.Client.BuiltInTestWorlds.Tests.csproj -c Release",
+      "result": "pass",
+      "summary": "8/8"
+    },
+    {
+      "command": "Network Application test project",
+      "result": "pass",
+      "note": "Includes remote authorization projection rejecting Local activation plans."
+    },
+    {
+      "command": "./verify.sh",
+      "result": "pass",
+      "note": "Canonical Release verification ended with PASS repository verification; all required native/export gates were available."
+    }
+  ],
+  "deferred": [
+    "F1.2 semantic activation versus presentation resolution",
+    "optional actor art and presentation fallback precedence",
+    "Official Local asset productization",
+    "user resource packs",
+    "derived resource/atlas work",
+    "UI, camera, and RenderingServer architecture changes"
+  ],
+  "closure": {
+    "oneUnderlyingPersistentApiForLocalAndRealm": true,
+    "crossScopePhysicalDeduplicationProved": true,
+    "scopeAuthorizationIsolationProved": true,
+    "remoteAuthenticationAndProofPreserved": true,
+    "localRequiresFakeRealmForPersistentStorage": false,
+    "remoteColdWarmAcquisitionPassed": true,
+    "localPersistentInstallAndReopenPassed": true,
+    "leaseAndReachabilitySafetyPassed": true,
+    "f1_0LifecycleEquivalent": true,
+    "canonicalVerificationPassed": true,
+    "blockers": [],
+    "next": "F1.2 PLANNED"
+  }
+}
