@@ -1,9 +1,9 @@
 UltraSim Dungeon Lab — Dungeon Core, Generator, Simulation Harness, and Tooling Plan
 
-Status: Implementation-ready architecture / engineering plan — EngineHost/Core boundary integrated
+Status: Implementation-ready architecture / engineering plan — Dungeon implementation follows the Mine/subterranean proof campaign
 Project: UltraSim
 Subsystem: Dungeon Core / Dungeon Generator / Dungeon Lab
-Purpose: Define a coherent, testable dungeon-organism subsystem and a dedicated lab application/tooling environment that can be built before the full Sim Core is available, while remaining compatible with later UltraSim integration.
+Purpose: Define a coherent, testable dungeon-organism subsystem and a dedicated lab application/tooling environment that can be built before the full Sim Core is available, while remaining compatible with later UltraSim integration. The simpler Mine subsystem now precedes Dungeon implementation and proves the first subterranean planning/excavation machinery; see MINE.md.
 
 1. Executive Summary
 
@@ -40,6 +40,60 @@ The Dungeon Lab exists to prove this organism before connecting it to full Ultra
 The Dungeon Lab must use the real Dungeon Core and generator, but fake the surrounding civilization only as much as necessary to apply useful pressure to it.
 
 The synthetic adventurers are test fixtures. The dungeon is not.
+
+1.1 Mine-First Implementation Order
+
+Dungeon is no longer the first implementation consumer of subterranean planning.
+
+The Mine campaign in MINE.md intentionally runs first because Mine needs a much smaller semantic surface:
+
+~~~text
+Mine:
+    where can excavation go?
+    what has been excavated?
+    what geology has been exposed?
+    what finite material remains?
+    how much work/progress exists?
+    who is working?
+    how is output hauled/exported?
+~~~
+
+Dungeon then becomes the harder second consumer:
+
+~~~text
+Dungeon:
+    everything above that is genuinely reusable
+    +
+    autonomous Core/organism semantics
+    Essence
+    personality/strategy
+    semantic room purposes
+    monsters
+    treasure
+    traps
+    puzzles
+    illusions
+    visitor-pressure economics
+    Core protection/relocation/death
+~~~
+
+Implementation direction:
+
+~~~text
+Mine proves subterranean implementation
+        ↓
+Dungeon consumes/reuses the proven spatial concepts
+        ↓
+Mine + Dungeon comparison proves what is actually generic
+        ↓
+only then extract a shared subterranean subsystem
+~~~
+
+Hard rule:
+
+Dungeon.Core must not become a Mine controller with renamed resources, and Mine must not subclass/configure Dungeon.Core.
+
+Mine and Dungeon may share spatial planning/excavation machinery only after the second consumer demonstrates literal common invariants.
 
 2. Core Architectural Position
 
@@ -189,7 +243,7 @@ Those belong to integration layers.
 
 2.4 EngineHost v0 — Composition and Lifecycle Only
 
-The Dungeon subsystem is the first strong reason to bring a minimal internal EngineHost v0 forward.
+Mine may now become the earlier concrete composition/lifecycle consumer. Dungeon remains a strong consumer of the same minimal EngineHost direction, but Dungeon must not be used to force EngineHost ahead merely to prove subterranean spatial planning.
 
 EngineHost exists to own composition and lifecycle, not Dungeon semantics.
 
@@ -480,11 +534,66 @@ SideCar is not:
 
 2.11 Proof Before Extraction
 
-Dungeon should be implemented concretely in UltraSim first.
+The extraction rule is now two-stage.
 
-Do not invent a public generic Engines.Dungeon package before the subsystem has earned its seams.
+Stage 1 — Mine proves the first implementation
 
-Recommended current conceptual ownership:
+Build the Mine subsystem concretely in UltraSim first.
+
+Mine should use concrete Mine-domain concepts while keeping likely spatial seams clean:
+
+MineOpportunity
+MineConnector
+MineExcavationSection
+MineBuiltTopology
+MinePlanRevision
+Mine spatial legality / CanFit queries
+
+Do not invent a public generic subterranean package before Dungeon exists as a second consumer.
+
+Stage 2 — Dungeon proves generality
+
+When Dungeon implementation begins, compare its actual needs against the Mine implementation.
+
+Extract only concepts that are literally shared, such as proven candidates:
+
+opportunity volumes
+connectors
+connected topology
+world-space legality / CanFit
+occupancy/reservation
+vertical connectors
+built-vs-future state
+incremental excavation/construction
+bounded partial replan
+persistent structural identity
+diagnostic geometry
+
+Do not extract Mine-specific semantics:
+
+geology knowledge
+ore/deposit depletion
+labor
+hauling
+mine economics
+
+Do not extract Dungeon-specific semantics:
+
+Essence
+Core
+personality
+room purpose
+monsters
+treasure
+traps
+puzzles
+illusions
+visitor pressure
+Core defense/relocation/death
+
+Dungeon.Core itself still follows Build → Prove → Harden → Extract → Publish.
+
+Recommended current conceptual ownership remains:
 
 UltraSim/
     Game/
@@ -515,19 +624,8 @@ Dungeon Lab consumes the Core.
 
 Game consumes the Core through its Host/Gameplay composition.
 
-Later post-proof extraction may move/repackage the proven Core into a future Engines/Dungeon-style boundary.
+If Mine + Dungeon prove a stable shared subterranean package later, both should migrate to that one implementation. Do not copy one planner into the other and allow two spatial truths to diverge.
 
-Do not create a copied second Core and allow two sources of truth to diverge.
-
-This preserves UltraSim's broader:
-
-Build
-→ Prove
-→ Harden
-→ Extract
-→ Publish
-
-philosophy.
 
 3. Dungeon Identity and Lifecycle
 
@@ -1472,7 +1570,32 @@ Different families use different continuation curves.
 
 18. Dungeon Generator Architecture
 
-The generator should have two layers.
+Dungeon generation is now a second consumer of the subterranean spatial concepts first proven by Mine.
+
+Where Mine and Dungeon require the same spatial invariant, prefer reusing or extracting the Mine-proven implementation rather than independently inventing a second planner. Where Dungeon requires organism-specific semantics, keep those above the shared spatial layer.
+
+In particular:
+
+~~~text
+Mine-proven / candidate shared spatial machinery
+    connected opportunity volumes
+    connectors
+    spatial legality / CanFit
+    vertical transitions
+    built/future topology
+    partial replan
+    incremental realization
+
+Dungeon-specific generator semantics
+    room archetypes/purposes
+    Core-capable sanctums
+    defensive rings
+    decoys
+    encounter/treasure/puzzle intent
+    personality-biased planning
+~~~
+
+The Dungeon generator should have two Dungeon-facing layers.
 
 Logical Plan
 
@@ -4027,6 +4150,22 @@ Suggested Implementation Path
 
 Checkpoint names remain placeholders.
 
+Pre-Dungeon gate:
+
+The Mine plan (MINE.md) should first close enough of MIN0-MIN9 to prove:
+
+- deterministic persistent subterranean identity/time;
+- deterministic world geology;
+- connected opportunity planning;
+- spatial realization / CanFit;
+- incremental excavation;
+- built-topology persistence;
+- finite deposit exposure/depletion;
+- bounded replan;
+- an abandoned persistent mine fixture suitable for Dungeon origin.
+
+Dungeon implementation may begin before every future Mine feature is polished, but it should not be the first code proving those spatial primitives.
+
 Lab observability is intentionally interleaved with Dungeon Core implementation. Debug visualization, state dumps, event logs, and decision traces are development infrastructure, not post-Core polish.
 
 HOST0 — Minimal EngineHost v0 / Composition Seam
@@ -4134,13 +4273,13 @@ event log.
 
 Accept when: same initial state/input produces same state hashes, including across save/load, whether the Core is driven by the standalone harness or the in-process host adapter.
 
-DUN1 — Logical Opportunity Blueprint
+DUN1 — Dungeon Semantic Opportunity Blueprint over Mine-Proven Spatial Planning
 
-Implement:
+Implement/extend from the Mine-proven spatial planner:
 
-logical room graph;
+logical dungeon room graph over connected subterranean opportunities;
 
-room opportunity records;
+Dungeon room-opportunity records;
 
 branches/loops;
 
@@ -4154,7 +4293,11 @@ Core-capable sanctum opportunities;
 
 growth frontiers;
 
-structural vs semantic-plan separation.
+Dungeon structural vs semantic-plan separation;
+
+explicit adapter/mapping between shared spatial opportunity identity and Dungeon room semantic identity.
+
+Do not re-implement Mine geology, labor, hauling, or depletion semantics.
 
 Hard invariant:
 
@@ -4180,11 +4323,11 @@ Core/entrance markers.
 
 Accept when: deterministic blueprints are inspectable and connected.
 
-DUN2 — Spatial Opportunity Realization / Reachability
+DUN2 — Dungeon Spatial Specialization / Reachability
 
-Implement:
+Implement/extend the Mine-proven spatial realization where Dungeon needs richer structure:
 
-2×2 macro planning cells;
+Dungeon macro planning cells / room masks where still useful;
 
 irregular orthogonal room masks;
 
@@ -4196,11 +4339,15 @@ vertical connectors;
 
 multi-entrance roots;
 
-reusable structural/mechanical/current reachability query;
+Dungeon-specific structural/mechanical/current reachability query;
 
 bounded mechanic-prerequisite projection/evaluation;
 
-bounded placement/search budgets.
+bounded placement/search budgets;
+
+compatibility with existing excavated Mine topology as an initial built/root structure.
+
+If Mine's proven spatial representation makes the old 2×2 macro-cell assumption unnecessary, revise Dungeon around the proven representation rather than preserving a duplicate planner for historical reasons.
 
 LAB2 — Spatial / Reachability Diagnostics
 
@@ -4220,7 +4367,9 @@ generator timing metrics.
 
 Accept when: structural plan maps into legal 3D opportunity space and Core routes are provable.
 
-DUN3 — Built Growth / Transactional Mutation
+DUN3 — Dungeon Built Growth / Transactional Mutation
+
+Reuse the proven Mine excavation/construction state machine where the invariant is literally the same; layer Dungeon Essence/economic semantics above it rather than duplicating spatial mutation machinery.
 
 Implement:
 
@@ -4558,7 +4707,9 @@ heavily farmed.
 
 70. First Vertical Slice
 
-Keep the first end-to-end proof small.
+Precondition: the Mine campaign has already proved the basic subterranean planning/excavation/persistence path and provides an abandoned/existing-workings fixture.
+
+Keep the first Dungeon end-to-end proof small.
 
 1 dungeon
 Depth target ~3
@@ -4608,6 +4759,12 @@ This is enough to prove the organism.
 71. Definition of “Dungeon Core Works”
 
 The Dungeon Core is fundamentally proven when:
+
+the Mine-first sequencing has been respected: Dungeon is not the first implementation of basic subterranean planning/excavation;
+
+shared Mine/Dungeon spatial machinery is reused or extracted only where the second consumer proves literal common invariants;
+
+Dungeon.Core remains semantically independent from Mine labor/geology/economy logic;
 
 Dungeon.Core is runnable without EngineHost, Game bootstrap, Network, Godot, Dungeon Lab, or SideCar hosting;
 
