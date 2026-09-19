@@ -1,6 +1,6 @@
 # UltraSim Client Completion Plan
 
-**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0 is ACTIVE.**
+**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0 is CLOSED; F1.1 is the next planned checkpoint.**
 
 **Parent architecture:** [CLIENT_PRESENTATION_ARCHITECTURE.md](CLIENT_PRESENTATION_ARCHITECTURE.md)
 
@@ -155,24 +155,30 @@ Current useful anchors include:
 
 These are the semantic/correctness controls for the F1 refactor.
 
-## F1.0 evidence still to capture
+## F1.0 closure evidence
 
-Before F1.1 mutates content ownership, add or record the missing comparison surface:
+F1.0 closed on tested commit `29ae5aa732f9ce38a253f4010636ca0f01093061` with the
+immutable [human-readable](../../_Benchmarks/Baselines/client-f1.0-pre-rework-baseline-2026-09-19.md)
+and [machine-readable](../../_Benchmarks/Baselines/client-f1.0-pre-rework-baseline-2026-09-19.json)
+baselines.
 
-- one coordinated fresh Release run of the canonical verifier plus the representative Local/Remote native smokes;
-- exact current exported-product closure for Single Player, Online, and Complete;
-- current Godot node/resource counts for representative world, UI, actor, and dense-public scenes;
-- current public batch/MultiMesh counts and active chunk counts;
-- current content cache blob/manifest/activation/lease census at cold entry, warm entry, and retirement;
-- current open-view/focus/category ownership for Inventory, Server Monitor, Chat, world tooltip, shell menu, and Debug;
-- current actor realization census: detailed/content-backed, primitive fallback, nameplates, overhead labels, equipment/action cues;
-- current Local and Remote session-boundary residue snapshots after retirement/reconnect;
-- current settings/profile signatures before, during, and after realm-scoped recommendation use;
-- explicit notation of architecture mismatches that are expected to change during F1 rather than being mistaken for regressions.
+The accepted Complete-product F0.7 journey now emits one coordinated snapshot across three Local
+lifetimes, cold Remote A, cold Remote B over the shared CAS, warm Remote A reconnect, and all six
+clean retirement boundaries. It records semantic residency, maintained native node/resource and
+batch counts, actor representation/resource state, current UI ownership/focus, settings/profile
+identity, content blobs/manifests/activations/live pins, acquisition reuse, and the exact persistent
+root boundary. The canonical Release verifier asserts the comparison surface and still executes the
+physical SinglePlayer, Online, and Complete exports plus the maintained native/content lifecycle
+gates.
+
+The archive V2 client was consulted for design-history context: its persistent layer convention and
+separation of persistent cache state from live session/presentation ownership agree with the guardrail
+used here. No V2 code was restored.
 
 F1.0 does **not** require `world.local`, a user resource pack, direct RenderingServer RIDs, or the new window manager to exist yet. It records the old world well enough that F1.1+ can prove intentional change.
 
-The fresh baseline should be retained as an immutable evidence artifact under `_Benchmarks/Baselines` once actually executed; this source inventory is not a substitute for that run.
+The accepted artifacts above are the immutable pre-rework comparison surface. Do not regenerate or
+overwrite them; future F1 checkpoints must add new evidence against the same semantic journey.
 
 ## Exit gate
 

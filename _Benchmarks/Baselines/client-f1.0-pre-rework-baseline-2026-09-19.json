@@ -1,0 +1,261 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "F1.0",
+  "capturedUtcDate": "2026-09-19",
+  "status": "accepted",
+  "lineage": {
+    "startingHead": "1345a4ca391818bac02c896e6d4f2deee63c4ddf",
+    "testedMeasurementCommit": "29ae5aa732f9ce38a253f4010636ca0f01093061",
+    "productionSemanticsChanged": false,
+    "laterF1ArchitectureStarted": false
+  },
+  "environment": {
+    "configuration": "Release",
+    "productUnderCoordinatedLifecycle": "Complete",
+    "verifiedProducts": [
+      "SinglePlayer",
+      "Online",
+      "Complete"
+    ],
+    "os": "CachyOS Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "logicalProcessors": 16,
+    "dotnetSdk": "8.0.131",
+    "dotnetRuntime": "8.0.31",
+    "godot": "4.7.1.stable.mono.official.a13da4feb",
+    "processArrangement": "canonical verifier; native products and Direct Connect authorities run in their maintained separate-process gates; the F0.7 coordinated lifecycle runs in one Complete Godot process against two separate Direct Connect authorities"
+  },
+  "verification": [
+    {
+      "command": "dotnet build Client/Godot/UltraSim.Client.Application.Godot.csproj -c Release -p:UltraSimEdition=Complete -p:UltraSimNetworkFlavor=Full",
+      "result": "pass",
+      "warnings": 0,
+      "errors": 0
+    },
+    {
+      "command": "./verify.sh --architecture-only",
+      "result": "pass"
+    },
+    {
+      "command": "dotnet build _Tests/UltraSim.S0.Godot.Tests/UltraSim.S0.Godot.Tests.csproj -c Debug",
+      "result": "pass",
+      "warnings": 0,
+      "errors": 0
+    },
+    {
+      "command": "/mnt/data/Programs/Godot v4.7.1 Mono/Godot_v4.7.1-stable_mono_linux.x86_64 --headless --path _Tests/UltraSim.S0.Godot.Tests --scene res://T010PlayableWorldAcceptance.tscn",
+      "result": "pass",
+      "note": "T0.10 native Godot acceptance, including actor/content upgrade and new renderer census assertions"
+    },
+    {
+      "command": "ULTRASIM_F10_EVIDENCE_OUTPUT=/tmp/ultrasim-f1.0-client-baseline.raw.json ./verify.sh",
+      "result": "pass",
+      "note": "canonical Release verification, physical exports, native content and lifecycle gates"
+    }
+  ],
+  "localConceptDemo": {
+    "applicationSessionEpochsAcrossJourney": [2, 4, 6],
+    "contentGenerationsAcrossJourney": [1, 4, 10],
+    "settings": {
+      "controlGrammar": "OrbitCommand",
+      "cameraProfile": "Orbit",
+      "cameraDistanceMeters": 14.0,
+      "cameraFovDegrees": 70.0,
+      "renderDistanceChunks": 2,
+      "physicalBindingSignature": "1:1:4:F4;2:1:0:ESCAPE;3:1:0:F8;4:1:0:F10;5:1:0:A;6:1:0:D;7:1:0:W;8:1:0:S;9:2:0:LEFT;10:2:0:LEFT_DOUBLE;11:2:0:RIGHT;12:2:0:MIDDLE;13:1:0:E;14:1:0:I;15:1:0:ENTER;16:1:0:SPACE;17:1:0:F4"
+    },
+    "semantic": {
+      "authoredChunks": 162,
+      "residentChunks": 49,
+      "renderedChunks": 25,
+      "knownPublicIdentities": 9,
+      "semanticReservedBytes": 1014389
+    },
+    "nativeRealization": {
+      "activeRenderChunks": 25,
+      "activeNodes": 177,
+      "activeResources": 99,
+      "terrainSurfaceMeshes": 28,
+      "staticBatchGroups": 64,
+      "publicBatchGroups": 7,
+      "fallbackGroups": 3
+    },
+    "actors": {
+      "active": 2,
+      "primitiveFallback": 1,
+      "animatedContentBacked": 1,
+      "equippedPresentations": 0,
+      "visibleNameplates": 1,
+      "visibleOverheadLabels": 0
+    },
+    "uiAtOrdinaryActiveSnapshot": {
+      "worldUiHostChildren": 3,
+      "hudHostChildren": 3,
+      "inventoryHostChildren": 0,
+      "openSemanticViews": 0,
+      "chatFocused": false,
+      "gameplayInputAllowed": true
+    },
+    "retirementCanaryBeforeEachExit": {
+      "openSemanticViews": 1,
+      "inventoryHostChildren": 1,
+      "chatFocused": true,
+      "visibleNameplates": 2,
+      "visibleOverheadLabels": 1
+    }
+  },
+  "remoteConceptDemo": {
+    "coldRealmA": {
+      "applicationSessionEpoch": "14806081585061057654",
+      "serverGeneration": 1,
+      "profileRemembered": false,
+      "catalogFingerprint": "2ab3bd65b321585ced69555292acf5a16e5d51556d7eeda9b60ad9d37211c64b",
+      "contentCacheBefore": {
+        "blobCount": 0,
+        "blobBytes": 0,
+        "manifestCount": 0,
+        "activationCount": 0,
+        "liveBlobPins": 0,
+        "liveCatalogPins": 0
+      },
+      "acquisition": {
+        "packagesRequired": 3,
+        "packagesReused": 0,
+        "packagesFetched": 3,
+        "filesFetched": 6,
+        "bytesFetched": 7669834
+      },
+      "contentCacheActive": {
+        "blobCount": 6,
+        "blobBytes": 7669834,
+        "manifestCount": 3,
+        "activationCount": 1,
+        "liveBlobPins": 7,
+        "liveCatalogPins": 1
+      },
+      "nativeRealization": {
+        "renderedChunks": 9,
+        "activeNodes": 81,
+        "activeResources": 51,
+        "terrainSurfaceMeshes": 12,
+        "staticBatchGroups": 32,
+        "publicBatchGroups": 7,
+        "fallbackGroups": 39
+      },
+      "actors": {
+        "active": 2,
+        "primitiveFallback": 1,
+        "animatedContentBacked": 1,
+        "visibleNameplates": 2,
+        "visibleOverheadLabels": 1,
+        "realizedActorResources": 1,
+        "retainedActorResourceBytes": 2213268
+      },
+      "ui": {
+        "hudHostChildren": 7,
+        "serverUiHostChildren": 1,
+        "openSemanticViews": 1
+      }
+    },
+    "coldRealmBUsingSharedProcessCas": {
+      "applicationSessionEpoch": "12293057366703312343",
+      "serverGeneration": 1,
+      "catalogFingerprint": "3990fd9947e172231425c1df4b842c694ac5f31d4420f36433e2544d466d0cec",
+      "cacheAtOpenBlobCount": 6,
+      "cacheAtOpenBlobBytes": 7669834,
+      "cacheReportedReusedBlobs": 6,
+      "note": "realm B still performs its authenticated package acquisition; immutable CAS installation reuses all six already-present blobs"
+    },
+    "warmRealmAReconnect": {
+      "applicationSessionEpoch": "9014875344218368973",
+      "serverGeneration": 1,
+      "profileRemembered": true,
+      "catalogFingerprint": "2ab3bd65b321585ced69555292acf5a16e5d51556d7eeda9b60ad9d37211c64b",
+      "packagesReused": 3,
+      "packagesFetched": 0,
+      "filesReused": 6,
+      "filesFetched": 0,
+      "bytesFetched": 0,
+      "cacheAtOpenBlobCount": 6,
+      "cacheAtOpenBlobBytes": 7669834,
+      "livePinsAtOpen": 0,
+      "activeRealizedActorResources": 1,
+      "activeRetainedActorResourceBytes": 2213268,
+      "freshApplicationLifetime": true,
+      "staleNativePresentationObserved": false
+    }
+  },
+  "lifecycle": {
+    "sequence": [
+      "Local",
+      "Menu",
+      "Local",
+      "Menu",
+      "RemoteA",
+      "Menu",
+      "RemoteB",
+      "Menu",
+      "RemoteAReconnect",
+      "Menu",
+      "Local",
+      "Menu"
+    ],
+    "retirementBoundariesChecked": 6,
+    "allBoundariesClean": true,
+    "persistentRootBeforeAndAfter": {
+      "controllerChildren": 0,
+      "contentCatalogChildren": 0,
+      "worldChildren": 4,
+      "worldUiChildren": 0,
+      "hudChildren": 1,
+      "menuChildren": 1,
+      "debugChildren": 1,
+      "menuHostChildren": 2,
+      "activeServerProfile": false,
+      "sessionActive": false,
+      "focusedControlType": "Button"
+    },
+    "persistentCacheAfterSessionRetirement": {
+      "blobCount": 6,
+      "blobBytes": 7669834,
+      "manifestCount": 6,
+      "activationCount": 2
+    },
+    "liveSessionLeasesAfterEachRetirement": {
+      "blobPins": 0,
+      "catalogPins": 0,
+      "nativeSessionPresentation": 0,
+      "activeServerProfile": false
+    }
+  },
+  "knownPreF1ArchitectureMismatchesPreserved": [
+    "Local Inventory is owned under the HUD path.",
+    "Local hover tooltip is owned under World UI.",
+    "Remote server UI, Chat, system banner and hover tooltip share the HUD ownership tree.",
+    "No final Context/Tooltip layer exists.",
+    "The generic UI renderer is a simple host/center renderer, not a multi-gump/window manager.",
+    "ContextMenu input also serves OrbitCommand stop/cancel.",
+    "High-quality Local X/Y actor presentation remains export-packaged under res://Assets.",
+    "Online actor packages remain required by Concept Demo semantic activation.",
+    "No V3 general atlas pipeline exists.",
+    "Local and Remote native presentation composition remain duplicated and drifted."
+  ],
+  "v2Reference": {
+    "sourcesInspected": [
+      "_Archive/_V2/Client/GODOT_CLIENT_SHELL_ROADMAP.md",
+      "_Archive/_V2/Client/AGENTS.md"
+    ],
+    "reusedIdeas": [
+      "persistent World/HUD/Menus/Debug layers with dynamic session children",
+      "separate persistent caches from live presentation/session ownership"
+    ],
+    "codePorted": false
+  },
+  "closure": {
+    "canonicalVerificationPassed": true,
+    "representativeLocalAndRemoteSmokesPassed": true,
+    "immutableEvidenceRecorded": true,
+    "blockers": [],
+    "f1_1OrLaterImplemented": false
+  }
+}

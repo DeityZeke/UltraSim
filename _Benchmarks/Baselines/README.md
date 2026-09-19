@@ -26,6 +26,11 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `client-f1.0-pre-rework-baseline-2026-09-19.json` — coordinated Complete-product
+  Local/cold-Remote/warm-reconnect/mixed-lifecycle ownership census; maintained semantic,
+  renderer-node/resource/batch, actor, UI, content-cache/pin, profile, and exact retirement
+  guardrails; physical SinglePlayer/Online/Complete export verification; explicit preservation of
+  known pre-F1 architecture mismatches; and confirmation that F1.1+ did not begin;
 - `concept-demo-pf5-r7-adversarial-follow-up-2026-09-16.json` — independent reproduction and
   closure of late compatible-body lookup, canonical record-byte reuse, and telemetry-Off slab
   processing; permanent proof-debt scan census; byte-for-byte 120/129 parity; matched R64/R300

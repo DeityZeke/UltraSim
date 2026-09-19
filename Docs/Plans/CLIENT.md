@@ -2767,7 +2767,7 @@ PF5-R7 spatial topology / whole-server attribution                           CLO
 PF5-R8 required fanout / avoidable-processing assurance                      CLOSED (measurement; R1 controls corrected)
         |
         v
-F1.0 baseline and guardrails                                                  ACTIVE
+F1.0 baseline and guardrails                                                  CLOSED
 F1.1 unified content scopes/stores                                            PLANNED
 F1.2 semantic activation vs presentation resolution                           PLANNED
 F1.3 primitive substrate/fallback contract                                    PLANNED

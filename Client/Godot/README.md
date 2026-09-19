@@ -111,6 +111,15 @@ Godot lifecycle overrides remain in the canonical scene script, `ClientHost.cs`;
 implementation files provide helpers but do not declare `_Process`/`_ExitTree`. This preserves
 Godot's generated native dispatch while retaining compile-time product separation.
 
+F1.0 freezes the pre-rework client ownership surface through the existing F0.7 Complete-product
+journey. With `--f1-0-evidence=<path>`, that journey emits one bounded JSON snapshot covering Local,
+cold Remote A, cold Remote B over the shared CAS, warm Remote A reconnect, settings/profile identity,
+semantic residency, native renderer/actor/UI ownership, and all six clean retirement boundaries.
+The canonical verifier owns the assertions and may retain the raw capture through
+`ULTRASIM_F10_EVIDENCE_OUTPUT`. The accepted immutable summary lives under
+`_Benchmarks/Baselines/client-f1.0-pre-rework-baseline-2026-09-19.*`. These are diagnostic
+guardrails only; they do not introduce F1.1 content scopes or the later UI/rendering architecture.
+
 Runtime-batched frozen/public `MultiMeshInstance3D` groups publish an exact combined transformed
 custom AABB. Godot otherwise leaves these programmatic MultiMeshes with a zero native bound and may
 frustum-cull a door, chest, telepad, gate, or sign from the chunk origin even while its authoritative
