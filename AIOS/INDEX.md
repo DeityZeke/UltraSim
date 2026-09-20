@@ -2,6 +2,13 @@
 
 Start here. This file is intentionally small.
 
+> **Before contributing to AIOS or promoting design decisions, read [AGENT_GUIDE.md](AGENT_GUIDE.md). Discussion is not a decision.**
+
+## AIOS usage
+
+- [Agent / contribution guide](AGENT_GUIDE.md) — required rules for reading, capturing, status, and promotion.
+- [AIOS overview](README.md)
+
 ## Repository documentation map
 
 - [Repository documentation map](../Docs/README.md) — existing current documentation authority/map.
