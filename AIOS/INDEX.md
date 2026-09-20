@@ -22,6 +22,7 @@ Start here. This file is intentionally small.
 ## Current gameplay/content references
 
 - [Dungeon Lab / Dungeon Core](../Docs/Plans/Content/UltraSim_Dungeon_Lab_and_Dungeon_Core_Plan_FINAL.md)
+- [Mine / Subterranean Excavation](../Docs/Plans/MINE.md)
 - [Items, Crafting, and Descriptor Language](../Docs/Plans/Content/UltraSim_Item_Crafting_Descriptor_Language.md)
 - [Magic, Elements, Reification, and Traditions](../Docs/Plans/Content/UltraSim_Magic_Elements_Reification_Semantics_v2.md)
 - [Resource Pools](../Docs/Plans/Content/UltraSim_Resource_Pools_Reference.md)
@@ -33,6 +34,7 @@ Start here. This file is intentionally small.
 
 - [Client](../Docs/Plans/CLIENT.md)
 - [Inventory](../Docs/Plans/INVENTORY.md)
+- [Movement / Camera / Control](../Docs/Plans/MOVEMENT.md)
 - [Network](../Docs/Plans/NETWORK.md)
 - [Physics](../Docs/Plans/PHYSICS.md)
 - [Terrain / World](../Docs/Plans/TERRAIN.md)
@@ -48,6 +50,10 @@ Start here. This file is intentionally small.
 - [Campaign stakes / long simulation](topics/campaign-stakes.md)
 - [Actor motivations / aspirations / predispositions](topics/actor-motivation-and-traits.md)
 - [Post-v2 Wizardry history / substrate manipulation](topics/magic-post-v2-refinements.md)
+- [Project shape / player experience](topics/project-shape-and-player-experience.md)
+- [Deterministic Fate / timelines / Parallel Realities](topics/deterministic-fate-timelines-realities.md)
+- [Social conversation / claims / overhearing](topics/social-conversation-and-information-reveal.md)
+- [Socketables / gems / Augment crafting](topics/socketables-gems-and-augments.md)
 
 ## Open / parked
 
