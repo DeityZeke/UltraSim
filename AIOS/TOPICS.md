@@ -5,12 +5,21 @@ This registry is intentionally broad. A topic does not need to be large or canon
 | Topic | Status | Primary reference / note | Related |
 |---|---|---|---|
 | Dungeon Core / Dungeon Lab | CANONICAL | [Existing plan](../Docs/Plans/Content/UltraSim_Dungeon_Lab_and_Dungeon_Core_Plan_FINAL.md) | generation, simulation harness, tooling |
+| Mine / subterranean excavation | CANONICAL implementation plan | [Mine plan](../Docs/Plans/MINE.md) | finite geology, connected excavation, Mine-first proof for shared subterranean machinery |
+| Mine ↔ Dungeon shared subterranean planning | CANONICAL current sequencing | [Mine plan](../Docs/Plans/MINE.md), [Dungeon plan](../Docs/Plans/Content/UltraSim_Dungeon_Lab_and_Dungeon_Core_Plan_FINAL.md) | prove with Mine first; extract/reuse only literal common invariants |
+| Dungeon EngineHost / SideCar boundary | CANONICAL | [Dungeon plan](../Docs/Plans/Content/UltraSim_Dungeon_Lab_and_Dungeon_Core_Plan_FINAL.md) | Core agnosticism, HostAdapter, Gameplay integration, minimal SideCar boundary |
+| Reusable Dungeon diagnostic viewer | CANONICAL | [Dungeon plan](../Docs/Plans/Content/UltraSim_Dungeon_Lab_and_Dungeon_Core_Plan_FINAL.md) | DungeonDebugSnapshot, Lab viewer, authorized in-game/admin reuse |
+| Movement / camera / control | TENTATIVE / active design direction | [Movement plan](../Docs/Plans/MOVEMENT.md) | orbital simulation camera, client policy, authoritative locomotion separation |
+| Inventory hybrid / nested containers / effective weight | TENTATIVE design direction | [Inventory plan](../Docs/Plans/INVENTORY.md) | Diablo-like backpack, UO nesting, Project Zomboid/Kenshi-like effective weight |
 | Item identity grammar | CANONICAL | [Item/Crafting reference](../Docs/Plans/Content/UltraSim_Item_Crafting_Descriptor_Language.md) | Quality, Style/Characteristic, Scale/Size, Type/Form |
 | Mutable ObjectProperties vs identity | CANONICAL | [Item/Crafting reference](../Docs/Plans/Content/UltraSim_Item_Crafting_Descriptor_Language.md) | durability, enchantments, condition |
 | Gem naming | CANONICAL | [Item/Crafting reference](../Docs/Plans/Content/UltraSim_Item_Crafting_Descriptor_Language.md) | size, clarity, integrity, type |
 | Potion naming | CANONICAL | [Item/Crafting reference](../Docs/Plans/Content/UltraSim_Item_Crafting_Descriptor_Language.md) | compact/full names, size/refinement/delivery/resource |
 | Food naming / serving scale | CANONICAL | [Item/Crafting reference](../Docs/Plans/Content/UltraSim_Item_Crafting_Descriptor_Language.md) | bite/mouthful/snack/serving/meal |
 | Craft quality degradation | CANONICAL | [Item/Crafting reference](../Docs/Plans/Content/UltraSim_Item_Crafting_Descriptor_Language.md) | failure lowers quality to floor |
+| Socketables / Augment crafting | TENTATIVE | [socketables-gems-and-augments.md](topics/socketables-gems-and-augments.md) | raw materials/gems vs intentional host-independent Augments |
+| Raw gem contextual socket effects | TENTATIVE | [socketables-gems-and-augments.md](topics/socketables-gems-and-augments.md) | simple host-dependent expression; gem affinity package |
+| Socket sizing / host socket count | TENTATIVE | [socketables-gems-and-augments.md](topics/socketables-gems-and-augments.md) | no socket size classes; host form/craft determines count |
 | Materials / material families | EXPLORING | [materials-and-processing.md](topics/materials-and-processing.md) | recipes require Metal/Wood/etc.; exact material supplies properties |
 | Mithril formation / manufacture | TENTATIVE | [materials-and-processing.md](topics/materials-and-processing.md) | iron+carbon+silver + extreme magic / catalyst |
 | Bloodwood | TENTATIVE | [materials-and-processing.md](topics/materials-and-processing.md) | blood-fed/battlefield wood, Blood Magic affinity |
@@ -38,6 +47,11 @@ This registry is intentionally broad. A topic does not need to be large or canon
 | Rich → Summary → Trend | CANONICAL | [History reference](../Docs/Plans/Content/UltraSim_World_History_Knowledge_Pools_Reference_v2.md) | semantic compaction |
 | Episodes / multi-part crisis history | CANONICAL | [History reference](../Docs/Plans/Content/UltraSim_World_History_Knowledge_Pools_Reference_v2.md) | bounded Parts/chapters |
 | Working Knowledge / Personal Memory | CANONICAL | [History reference](../Docs/Plans/Content/UltraSim_World_History_Knowledge_Pools_Reference_v2.md) | pooled truth vs actor belief |
+| Project broad shape / player experience | CANONICAL broad direction | [project-shape-and-player-experience.md](topics/project-shape-and-player-experience.md) | Sims-like local control over autonomous persistent simulation |
+| Deterministic Fate / canonical no-interference history | CANONICAL conceptual model | [deterministic-fate-timelines-realities.md](topics/deterministic-fate-timelines-realities.md) | same seed/definitions/inputs → same history; addressed RNG |
+| Timelines / Parallel Realities | CANONICAL conceptual model | [deterministic-fate-timelines-realities.md](topics/deterministic-fate-timelines-realities.md) | branches coexist per save; divergence; full stabilization to independent save |
+| Social conversation / structured claim reveal | CANONICAL design direction | [social-conversation-and-information-reveal.md](topics/social-conversation-and-information-reveal.md) | Sims-like topics, simlish, surfaced noteworthy claims |
+| Overhearing / town-crier / local information transfer | CANONICAL design direction | [social-conversation-and-information-reveal.md](topics/social-conversation-and-information-reveal.md) | shared claim-delivery/perception machinery |
 | Campaign stake / main historical crisis | EXPLORING | [campaign-stakes.md](topics/campaign-stakes.md) | optional narrative drive + decades-long continuation |
 | Aspirations / wants / desires | PARKED | [actor-motivation-and-traits.md](topics/actor-motivation-and-traits.md) | future motivation layer |
 | Predispositions / gifted-deficient traits | PARKED | [actor-motivation-and-traits.md](topics/actor-motivation-and-traits.md) | persistent skill bias/penalty |
