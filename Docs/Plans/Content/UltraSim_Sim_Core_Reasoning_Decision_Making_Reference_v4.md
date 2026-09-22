@@ -2015,6 +2015,16 @@ Same intent.
 
 Different resolution.
 
+### Cross-System Resolution Invariant
+
+Decision LOD must preserve the cross-system simulation-time/resolution contract defined in [Simulation Time / Resolution / Control Authority](../../../AIOS/canonical/simulation-time-resolution-and-control.md).
+
+Background/Dormant processing is not permission to invent unrelated "fake NPC" rules. When the starting state, definitions, ordered external inputs, and deterministic Fate are the same, safe fine/coarse resolution should preserve the same meaningful authoritative outcome.
+
+A causally sealed Intent or interaction may be advanced headlessly or collapsed into an equivalent larger state transition. If an external actor/event could observe or change the outcome, advancement must stop at that next causal boundary and materialize/escalate as needed.
+
+Decision authority is orthogonal to LOD: an actor may be Direct, Autonomous+Intervention, Command/Queue, or governed through higher-level policy while still moving between Active/Nearby/Background/Dormant resolution.
+
 ---
 
 ## 55. Animals and Monsters Use the Same Architecture

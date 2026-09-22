@@ -13,6 +13,11 @@ acceptance narratives remain available through git history.
   boundedness, and the source-of-truth hierarchy.
 - [Runtime](RUNTIME.md) — `ServerRuntime`, generations, hosts, lifecycle,
   publication, and authoritative cadence.
+- [Simulation time / resolution / control](../AIOS/canonical/simulation-time-resolution-and-control.md) —
+  canonical cross-system design for world-time/playback separation, deterministic causal
+  aggregation, Immediate/Near/Far simulation resolution, player autonomy/direct/command/
+  governance control, and possession/controller binding. This is a design target, not a
+  claim that all high-speed mechanisms are implemented.
 - [Persistence](PERSISTENCE.md) — ECS snapshots, save-set transactions, game
   participant composition, recovery, and generation publication.
 - [UI](UI.md) — neutral UI protocol, authoritative workflows, client state, and

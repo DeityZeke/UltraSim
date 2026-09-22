@@ -101,3 +101,20 @@ behavior is allowed only as an explicit design choice.
 Cadence independence is an engine capability. Adaptive load control is future
 deployment policy above Runtime and may not hide a fixed-60 performance
 regression.
+
+## Cross-system simulation-speed design boundary
+
+The executable clock contract above describes current Runtime behavior. The accepted
+higher-level design for accelerated world simulation is documented in
+[Simulation Time / Resolution / Control Authority](../AIOS/canonical/simulation-time-resolution-and-control.md).
+
+That design keeps execution cadence, durable WorldTime, playback/simulation speed,
+and simulation resolution conceptually separate. In particular, very high playback
+rates must not be interpreted as a requirement to execute proportionally more
+full-detail ECS work. Game/Sim scheduling may instead advance causally sealed work
+through larger deterministic intervals while preserving authoritative outcomes and
+stopping at meaningful external/decision boundaries.
+
+This paragraph is a cross-system design reference, not a claim that semantic
+aggregation/control-authority modes are already implemented by Runtime. Exact API
+integration remains future work; current Runtime source/tests remain executable truth.
