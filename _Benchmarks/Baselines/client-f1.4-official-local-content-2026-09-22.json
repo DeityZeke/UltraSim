@@ -1,0 +1,233 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "F1.4",
+  "capturedUtcDate": "2026-09-22",
+  "status": "accepted",
+  "lineage": {
+    "startingHead": "132b070c5d04f3225ca78f5c124e6adc9e6d7035",
+    "implementationCommits": [
+      "e81f050113858e2b978b36a20c22ed8ec7cd9e0a",
+      "e2905575e7d55756903bd8e425d5c5622f0b0cb6",
+      "576828eeceb8ccf5afcba2fce7ab4dc783261d2a"
+    ],
+    "testedImplementationCommit": "576828eeceb8ccf5afcba2fce7ab4dc783261d2a",
+    "finalHeadDisposition": "the evidence-owning closure commit; reported by the final handoff because a Git commit cannot self-embed its own hash",
+    "gameAuthoritySemanticsChanged": false,
+    "remoteApplicationProofChanged": false,
+    "gameManifestVersion": 31,
+    "networkTransportRevision": 2,
+    "f1_5OrLaterImplemented": false
+  },
+  "environment": {
+    "configuration": "Release; maintained Godot editor-host gates also build matching Debug assemblies",
+    "os": "CachyOS Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "physicalCores": 8,
+    "logicalProcessors": 16,
+    "dotnetSdk": "8.0.131",
+    "dotnetRuntime": "8.0.31",
+    "godot": "4.7.1.stable.mono.official.a13da4feb"
+  },
+  "officialPackage": {
+    "packageId": "official.world-local.actor-presentations",
+    "archiveFileName": "ultrasim-official-actors-v1.uspkg",
+    "archiveBytes": 4723829,
+    "archiveSha256": "03f77dd361bdf7c9edf564fc92c95ced31aa71378a5d14555cc670b1cda6c554",
+    "manifestHash": "e4b767436784db6c42447d4fbbcf58e0c653bd168e81582fa6f1d1962821aaad",
+    "activationPlanHash": "e6fd8000f009acf952e5f024b28e3a130fd72085e042b97a70ef36bd02b5192a",
+    "scope": "world.local",
+    "trustClass": "ScopeAuthorizedPassive",
+    "definitionOperation": "Add",
+    "definitions": [
+      {
+        "path": "actors/human-x.glb",
+        "bytes": 2213380,
+        "sha256": "2704d59bee5f8046f335d7e4da05fb8f4f3c7c8f30cdf1e636c4de75ff3b5833"
+      },
+      {
+        "path": "actors/human-y.glb",
+        "bytes": 2509988,
+        "sha256": "553fb71ebe61caede890e582b93a37335ff554f1bb907c034658c5f434e6a567"
+      }
+    ],
+    "payloadBytes": 4723368,
+    "archiveDeterministic": true,
+    "canonicalSourceRoot": "Client/PresentationAssets",
+    "serverConsumesSameArchive": true,
+    "readOnlySourceInstallPassed": true,
+    "changedArchiveFailsClosed": true
+  },
+  "storageAndLifecycle": {
+    "distributionSource": "read-only Content/Official archive or exact configured source",
+    "writableStore": "ContentCache global CAS plus scope metadata under the user cache",
+    "activationPersistentlyPinned": true,
+    "warmReopenWithoutSourcePassed": true,
+    "sourceRemovalRevokesPersistedActivation": false,
+    "authorizationRetirementSeparateFromSourceRemoval": true,
+    "blobEvictionReachabilityAndLeaseAware": true,
+    "liveUninstallOrPackManagerAdded": false
+  },
+  "physicalExports": {
+    "executableBytes": {
+      "SinglePlayer": 73630168,
+      "Online": 73630168,
+      "Complete": 73630168
+    },
+    "singlePlayer": {
+      "localAuthorityAssembliesPresent": true,
+      "officialArchiveExternal": true,
+      "optionalActorArtInPck": false,
+      "legacyAssetNamesInManagedResources": false
+    },
+    "online": {
+      "localAuthorityAssembliesPresent": false,
+      "bundledWorldPacks": 0,
+      "bundledPackages": 0,
+      "optionalActorArtInPck": false
+    },
+    "complete": {
+      "localAndRemoteCapabilitiesPresent": true,
+      "officialArchiveExternal": true,
+      "optionalActorArtInPck": false
+    },
+    "sameSinglePlayerExecutableInstalledAbsentRestored": true
+  },
+  "acceptanceMatrix": {
+    "singlePlayerInstalled": {
+      "result": "pass",
+      "actors": 2,
+      "animatedActors": 1,
+      "primitiveActors": 1,
+      "localSelections": 2,
+      "blobCount": 2,
+      "liveBlobPins": 4,
+      "liveCatalogPins": 1
+    },
+    "singlePlayerWarm": {
+      "result": "pass",
+      "activation": "reopened",
+      "fetchedBytes": 0
+    },
+    "singlePlayerAbsent": {
+      "result": "pass",
+      "actors": 2,
+      "animatedActors": 0,
+      "primitiveActors": 2,
+      "localSelections": 0,
+      "blobCount": 0,
+      "liveBlobPins": 0,
+      "liveCatalogPins": 0
+    },
+    "singlePlayerRestored": "pass",
+    "completeInstalled": {
+      "result": "pass",
+      "actors": 2,
+      "animatedActors": 1,
+      "primitiveActors": 1,
+      "localSelections": 2
+    },
+    "completeAbsent": {
+      "result": "pass",
+      "actors": 2,
+      "animatedActors": 0,
+      "primitiveActors": 2,
+      "localSelections": 0
+    },
+    "completeHosted": "pass: packet-free Local path plus two exported remote clients, clean detach",
+    "onlineNoOfficial": {
+      "result": "pass",
+      "official": "Unavailable",
+      "realmSelections": 2,
+      "localSelections": 0,
+      "localAuthorityPresent": false
+    },
+    "onlineOfficialAvailableRealmWins": {
+      "result": "pass",
+      "official": "Installed/Reopened",
+      "realmSelections": 2,
+      "localSelections": 0,
+      "localAuthorityPresent": false
+    }
+  },
+  "casIsolation": {
+    "scopes": ["world.local", "Realm A"],
+    "physicalBlobCountAfterBothInstalls": 2,
+    "realmInstallReusedBlobs": 2,
+    "localManifestCount": 1,
+    "realmManifestCount": 1,
+    "realmCouldOpenLocalManifestBeforeAuthorization": false,
+    "blobPossessionGrantedRealmAuthorization": false
+  },
+  "f1_3Comparison": {
+    "semanticCatalogFingerprint": "633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503",
+    "semanticCatalogFingerprintChanged": false,
+    "primitiveOnly": {
+      "residentChunks": 49,
+      "renderedChunks": 25,
+      "actors": 2,
+      "primitiveActors": 2,
+      "staticBatchGroups": 64,
+      "publicBatchGroups": 7,
+      "fallbackGroups": 71,
+      "activeRendererNodes": 177,
+      "activeRendererResources": 99
+    },
+    "intentionalChanges": [
+      "optional X/Y art moved from PCK/res://Assets to external world.local package",
+      "Local actor source is now PresentationGeneration plus GodotContentActorVisualResolver",
+      "installed Local art adds scope metadata, CAS blobs and live presentation leases"
+    ],
+    "inventoryChatInteractionsAndActorIdentityEquivalent": true,
+    "remoteProofAndEditionClosureEquivalent": true
+  },
+  "mixedLifecycle": {
+    "sequence": "Local -> Local -> Remote A -> Remote B -> Remote A reconnect -> Local",
+    "result": "pass",
+    "persistentStateAtFirstRemoteAfterLocal": {
+      "blobCount": 2,
+      "localManifestCount": 1,
+      "localActivationCount": 1,
+      "liveBlobPins": 0,
+      "liveCatalogPins": 0
+    },
+    "allTransientSessionBoundariesClean": true
+  },
+  "localContentClassification": {
+    "permanentRendererBootstrap": "Primitive, minimum shell/fonts and renderer/client code",
+    "gameCodeAuthority": "Local session/authority, Physics, Inventory, Chat and simulation/runtime code",
+    "requiredLocalSemantic": "Concept Demo WorldPack/world truth remains Game/local-authority produced; Standard UI remains compiled capability",
+    "optionalOfficialPresentation": "X/Y GLB actor presentation package",
+    "testOnly": "CabinContentOracle deterministic Default/Replace/Add fixtures",
+    "remainingSeam": "full Local semantic WorldPack/informational-UI productization requires later world-authoring/capability work and was not faked"
+  },
+  "verification": {
+    "architectureOnly": "pass",
+    "clientContent": "32/32 pass",
+    "builtInTestWorlds": "8/8 pass",
+    "nativeT010": "pass",
+    "f1_3PrimitiveOnly": "pass",
+    "canonicalRelease": "one uninterrupted run passed at testedImplementationCommit with PASS repository verification",
+    "physicalExports": "SinglePlayer/Online/Complete pass",
+    "officialInstalledAbsentRestored": "pass",
+    "contentlessOnlineColdWarmProfile": "pass",
+    "completeHosted": "pass",
+    "pf1MixedExportedHeadless": "pass",
+    "pf2MixedExportedHeadless": "pass",
+    "f0_7MixedLifecycle": "pass",
+    "gitDiffCheck": "pass",
+    "sharedAuthorityConvergenceFlakeObservedInFinalRun": false,
+    "nonAuthoritativePriorAttemptNotes": [
+      "stale Godot process from a prior task was terminated before the authoritative run",
+      "one unrelated hosting wrapper-ratio run failed under host noise; isolated 23/23 and final canonical ratio 1.002 passed",
+      "edition-switch restore-graph and intentional lifecycle-census verifier defects were repaired before the authoritative run"
+    ]
+  },
+  "deferred": [
+    "F1.5 user presentation packs, live enable/disable/update and arbitrary overrides",
+    "full Local semantic WorldPack/informational-UI packaging seam",
+    "atlas/native derived cache",
+    "Gameplay Frame and UI/window work",
+    "camera and prediction/reconciliation work",
+    "RenderingServer rewrite, actor batching and vegetation"
+  ]
+}
