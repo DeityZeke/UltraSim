@@ -2442,6 +2442,12 @@ foreach (string configuration in configurations)
         [
             "--headless",
             "--path", "Client/Godot",
+            "--", "--f1-3-primitive-smoke", "--expect-edition=SinglePlayer",
+        ]);
+        Run(root, godot,
+        [
+            "--headless",
+            "--path", "Client/Godot",
             "--", "--d0-5-smoke", "--expect-edition=SinglePlayer",
         ]);
 

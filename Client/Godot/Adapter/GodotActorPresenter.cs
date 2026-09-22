@@ -759,9 +759,12 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
     private static void ApplyPrimitiveMotion(ref ActorSlot slot, ulong nowMilliseconds)
     {
         if (!slot.PrimitiveFallback || slot.Visual is null) return;
+        float groundedCapsuleCentre = slot.Visual is MeshInstance3D
+            { Mesh: CapsuleMesh capsule } ? capsule.Height * 0.5f : 0f;
         slot.Visual.Position = slot.MotionPhase == GodotActorMotionPhase.Walk
-            ? new Vector3(0, 0.035f * MathF.Sin(nowMilliseconds * 0.024f), 0)
-            : Vector3.Zero;
+            ? new Vector3(0, groundedCapsuleCentre +
+                0.035f * MathF.Sin(nowMilliseconds * 0.024f), 0)
+            : new Vector3(0, groundedCapsuleCentre, 0);
         slot.Visual.Rotation = slot.MotionPhase switch
         {
             GodotActorMotionPhase.Rising => new Vector3(-0.08f, 0, 0),
@@ -868,27 +871,8 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         return -1;
     }
 
-    private static Node3D CreatePrimitive(ClientActorVisualKind kind)
-    {
-        Vector3 size = kind == ClientActorVisualKind.WoodlandAnimal
-            ? new Vector3(1.1f, 1.15f, 0.55f)
-            : new Vector3(0.6f, 1.8f, 0.6f);
-        Color color = kind switch
-        {
-            ClientActorVisualKind.HumanX => new Color(0.25f, 0.72f, 0.92f),
-            ClientActorVisualKind.HumanY => new Color(0.86f, 0.52f, 0.24f),
-            _ => new Color(0.48f, 0.35f, 0.23f),
-        };
-        var material = new StandardMaterial3D
-        {
-            AlbedoColor = color,
-            Roughness = 0.9f,
-        };
-        return new MeshInstance3D
-        {
-            Mesh = GodotMeshGeometry.CreateGroundedBox(size, material),
-        };
-    }
+    private static Node3D CreatePrimitive(ClientActorVisualKind kind) =>
+        GodotPrimitiveSubstrate.CreateActor(kind);
 
     private static Node3D CreateMainHandSocket(
         Node3D root,

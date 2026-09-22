@@ -1007,6 +1007,15 @@ public partial class T010PlayableWorldAcceptance : Node3D
         ValidateGodotTerrainFrontFaces(renderer.Root);
         Expect(initialRender.ActiveNodes < 9 * TerrainChunkFormat.MaterialCellCount,
             "The playable renderer created cell-shaped scene-tree identity.");
+        var swordPrimitive = FindNamedDescendant(renderer.Root,
+            $"Public_{GameWorldPublicPrefabIds.IronSword}") as MultiMeshInstance3D;
+        ClientPrimitivePresentation swordBounds = ClientPrimitivePresentationCatalog.ForPublic(
+            GameWorldPublicPrefabIds.IronSword);
+        Expect(swordPrimitive?.Multimesh?.Mesh is not null &&
+            swordPrimitive.CustomAabb.Size.IsEqualApprox(new Vector3(
+                swordBounds.WidthMillimeters, swordBounds.HeightMillimeters,
+                swordBounds.DepthMillimeters) * 0.001f),
+            "The missing sword model and pointer descriptor no longer share one visible bound.");
 
         for (int z = -1; z <= 1; z++) StageIfMissing(cache, epoch, Key(2, z));
         WorldPosition crossed = GamePlayableWorld.ChestPosition;

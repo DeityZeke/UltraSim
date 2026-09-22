@@ -302,30 +302,12 @@ public sealed class GodotWorldRenderer : IDisposable
         _desiredVisible = new bool[cache.Limits.MaximumResidentChunks];
         _desiredResident = new bool[cache.Limits.MaximumResidentChunks];
         _desiredWindowOffsets = new ClientPresentationOffset[cache.Limits.MaximumResidentChunks];
-        _neutralFallbackMaterial = new StandardMaterial3D
-        {
-            AlbedoColor = new Color(0.48f, 0.5f, 0.52f),
-            Roughness = 0.95f,
-        };
-        _diagnosticFallbackMaterial = new ShaderMaterial
-        {
-            Shader = new Shader
-            {
-                Code = "shader_type spatial;\n" +
-                    "render_mode diffuse_lambert;\n" +
-                    "void fragment() {\n" +
-                    "  vec3 world = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;\n" +
-                    "  vec3 p = floor(world * 5.0);\n" +
-                    "  float c = mod(p.x + p.y + p.z, 2.0);\n" +
-                    "  ALBEDO = mix(vec3(1.0, 0.0, 0.85), vec3(1.0, 0.95, 0.0), c);\n" +
-                    "  ROUGHNESS = 0.8;\n" +
-                    "}\n",
-            },
-        };
+        _neutralFallbackMaterial = GodotPrimitiveSubstrate.CreateNeutralMaterial();
+        _diagnosticFallbackMaterial = GodotPrimitiveSubstrate.CreateMissingTextureMaterial();
         _fallbackStaticMesh = GodotMeshGeometry.CreateGroundedBox(
             Vector3.One, _neutralFallbackMaterial);
         _fallbackPublicMesh = GodotMeshGeometry.CreateGroundedBox(
-            new Vector3(0.6f, 1.8f, 0.6f), _neutralFallbackMaterial);
+            Vector3.One, _neutralFallbackMaterial);
         Root = new Node3D { Name = "UltraSimWorld" };
         host.AddChild(Root);
         _activeNodes = 1;
@@ -915,16 +897,18 @@ public sealed class GodotWorldRenderer : IDisposable
                 if (float.IsNaN(firstAdditionalTerrainY)) firstAdditionalTerrainY = fragmentFirstY;
             }
 
-            var staticGroups = new SortedDictionary<WorldStaticRenderKey, List<Transform3D>>();
+            var staticGroups = new SortedDictionary<WorldStaticRenderKey, RenderTransforms>();
             float firstStaticY = float.NaN;
             FallbackCounts structuralFallbacks = default;
             foreach (WorldFrozenStaticRecord record in semantic.FrozenStatics)
                 AddStatic(staticGroups, semantic.Info.Key, record.RenderKey, record.Position,
-                    record.Orientation, record.Flags, yAnchor, ref firstStaticY);
+                    record.Orientation, record.Flags, record.Bounds, false,
+                    yAnchor, ref firstStaticY);
             foreach (WorldMultiFragmentRecord record in semantic.MultiFragments)
                 AddStatic(staticGroups, semantic.Info.Key, record.RenderKey, record.Position,
-                    record.Orientation, record.Flags, yAnchor, ref firstStaticY);
-            foreach ((WorldStaticRenderKey key, List<Transform3D> transforms) in staticGroups)
+                    record.Orientation, record.Flags, record.Bounds, true,
+                    yAnchor, ref firstStaticY);
+            foreach ((WorldStaticRenderKey key, RenderTransforms transforms) in staticGroups)
             {
                 ResolvedMesh presentation = ResolveMesh(
                     _assets?.ResolveStaticMesh(key) ??
@@ -936,7 +920,9 @@ public sealed class GodotWorldRenderer : IDisposable
                         (_assets is null ? string.Empty :
                             FallbackNameSuffix(presentation.Availability)),
                     presentation.Mesh,
-                    transforms,
+                    presentation.Availability is GodotWorldAssetAvailability.ModelMissing or
+                        GodotWorldAssetAvailability.ModelAndTextureMissing
+                        ? transforms.Fallback : transforms.Resolved,
                     presentation.MaterialOverride));
             }
 
@@ -966,7 +952,7 @@ public sealed class GodotWorldRenderer : IDisposable
         var root = new Node3D { Name = "Public" };
         try
         {
-            var groups = new SortedDictionary<uint, List<Transform3D>>();
+            var groups = new SortedDictionary<uint, RenderTransforms>();
             Node3D? names = null;
             int nameCount = 0;
             float firstY = float.NaN;
@@ -975,11 +961,21 @@ public sealed class GodotWorldRenderer : IDisposable
             {
                 if ((record.StateFlags & WorldPublicStateFlags.Visible) == 0 ||
                     _publicBatchFilter?.ShouldBatch(in record) == false) continue;
-                if (!groups.TryGetValue(record.PrefabId, out List<Transform3D>? transforms))
-                    groups.Add(record.PrefabId, transforms = []);
+                if (!groups.TryGetValue(record.PrefabId, out RenderTransforms? transforms))
+                    groups.Add(record.PrefabId, transforms = new RenderTransforms());
                 Transform3D transform = ToLocalTransform(
                     semantic.Info.Key, record.Position, record.Orientation, yAnchor);
-                transforms.Add(transform);
+                // Only the missing model uses declared fallback bounds. A valid model keeps
+                // its own authored geometry; the same stock bounds also drive pointer nomination.
+                // The primitive mesh is unit-sized and shared across every public group.
+                ClientPrimitivePresentation primitive =
+                    ClientPrimitivePresentationCatalog.ForPublic(record.PrefabId);
+                Transform3D fallbackTransform = new(
+                    transform.Basis.Scaled(new Vector3(
+                        primitive.WidthMillimeters, primitive.HeightMillimeters,
+                        primitive.DepthMillimeters) * MillimetersToMeters), transform.Origin);
+                transforms.Resolved.Add(transform);
+                transforms.Fallback.Add(fallbackTransform);
                 string? publicName = ResolveGenericPublicName(in record);
                 if (publicName is not null)
                 {
@@ -1001,7 +997,7 @@ public sealed class GodotWorldRenderer : IDisposable
                 }
                 if (float.IsNaN(firstY)) firstY = transform.Origin.Y;
             }
-            foreach ((uint prefab, List<Transform3D> transforms) in groups)
+            foreach ((uint prefab, RenderTransforms transforms) in groups)
             {
                 GodotWorldMeshResolution resolution = _assets?.ResolvePublicMesh(prefab) ??
                     GodotWorldMeshResolution.MissingModelAndTexture();
@@ -1011,7 +1007,9 @@ public sealed class GodotWorldRenderer : IDisposable
                     $"Public_{prefab}" + (_assets is null ? string.Empty :
                         FallbackNameSuffix(presentation.Availability)),
                     presentation.Mesh,
-                    transforms,
+                    presentation.Availability is GodotWorldAssetAvailability.ModelMissing or
+                        GodotWorldAssetAvailability.ModelAndTextureMissing
+                        ? transforms.Fallback : transforms.Resolved,
                     presentation.MaterialOverride));
             }
             if (names is not null) root.AddChild(names);
@@ -1208,15 +1206,39 @@ public sealed class GodotWorldRenderer : IDisposable
             ? string.Empty
             : $"_Fallback_{availability}";
 
-    private static void AddStatic(SortedDictionary<WorldStaticRenderKey, List<Transform3D>> groups,
+    private static void AddStatic(SortedDictionary<WorldStaticRenderKey, RenderTransforms> groups,
         SpatialChunkKey key, WorldStaticRenderKey renderKey, WorldPosition position,
-        WorldYaw orientation, WorldStaticFlags flags, int yAnchor, ref float firstY)
+        WorldYaw orientation, WorldStaticFlags flags, WorldStaticBounds bounds,
+        bool multiFragment, int yAnchor, ref float firstY)
     {
         if ((flags & WorldStaticFlags.Renderable) == 0) return;
-        if (!groups.TryGetValue(renderKey, out List<Transform3D>? transforms))
-            groups.Add(renderKey, transforms = []);
+        if (!groups.TryGetValue(renderKey, out RenderTransforms? transforms))
+            groups.Add(renderKey, transforms = new RenderTransforms());
         Transform3D transform = ToLocalTransform(key, position, orientation, yAnchor);
-        transforms.Add(transform);
+        if (!ClientPrimitivePresentation.TryFromStructuralBounds(
+                bounds, position, multiFragment, out ClientPrimitivePresentation primitive))
+            primitive = ClientPrimitivePresentation.Grounded(
+                ClientPrimitiveKind.InteractiveMarker, ClientPrimitiveShape.Marker,
+                400, 900, 400);
+        // The source AABB already includes orientation. Scale one shared unit box and place it
+        // at that exact structural volume, independently for every static or Multi fragment.
+        Vector3 size = new(primitive.WidthMillimeters, primitive.HeightMillimeters,
+            primitive.DepthMillimeters);
+        Vector3 centre = new(
+            (primitive.MinimumXMillimeters + primitive.MaximumXMillimeters) * 0.5f,
+            primitive.MinimumYMillimeters,
+            (primitive.MinimumZMillimeters + primitive.MaximumZMillimeters) * 0.5f);
+        Vector3 positionFromBounds = new(
+            checked((float)(position.GlobalXMillimeters -
+                (long)key.Coord.X * GameWorldSpatialProfile.WorldChunkEdgeUnits)),
+            checked((float)((long)position.YMillimeters - yAnchor)),
+            checked((float)(position.GlobalZMillimeters -
+                (long)key.Coord.Z * GameWorldSpatialProfile.WorldChunkEdgeUnits)));
+        Transform3D fallback = new(
+            Basis.Identity.Scaled(size * MillimetersToMeters),
+            (positionFromBounds + centre) * MillimetersToMeters);
+        transforms.Resolved.Add(transform);
+        transforms.Fallback.Add(fallback);
         if (float.IsNaN(firstY)) firstY = transform.Origin.Y;
     }
 
@@ -1568,6 +1590,12 @@ public sealed class GodotWorldRenderer : IDisposable
     private readonly record struct RenderAssociation(uint Generation, int RenderSlotPlusOne);
     private readonly record struct RenderWorkItem(ClientSemanticChunkHandle Handle, RenderWorkKind Kind);
     private enum RenderWorkKind : byte { FullBuild, PublicRefresh }
+    private sealed class RenderTransforms
+    {
+        internal readonly List<Transform3D> Resolved = [];
+        internal readonly List<Transform3D> Fallback = [];
+    }
+
     private readonly record struct ResolvedMesh(
         Mesh Mesh,
         Material? MaterialOverride,

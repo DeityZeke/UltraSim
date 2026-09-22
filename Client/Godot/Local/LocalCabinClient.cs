@@ -135,6 +135,7 @@ public partial class LocalCabinClient : Node3D
     // F0.2 acceptance retains the historical Cabin fixture in the maintained application;
     // normal Single Player composition selects the Concept Demo explicitly.
     private bool _useConceptDemoWorld;
+    private bool _primitiveOnlyPresentation;
     private ResolvedClientSettings? _settings;
     private CabinCatalogAssetResolver? _assetResolver;
     private LocalPlayableSession? _localSession;
@@ -232,7 +233,8 @@ public partial class LocalCabinClient : Node3D
         ResolvedClientSettings? settings = null,
         bool useConceptDemoWorld = false,
         string? guestDisplayName = null,
-        ILocalPlayableServerExtensionFactory? serverExtensionFactory = null)
+        ILocalPlayableServerExtensionFactory? serverExtensionFactory = null,
+        bool primitiveOnlyPresentation = false)
     {
         ArgumentNullException.ThrowIfNull(contentOracle);
         ArgumentNullException.ThrowIfNull(resolvedContent);
@@ -255,6 +257,7 @@ public partial class LocalCabinClient : Node3D
                 ? "Human Female"
                 : "Human Male"));
         _useConceptDemoWorld = useConceptDemoWorld;
+        _primitiveOnlyPresentation = primitiveOnlyPresentation;
         _serverExtensionFactory = serverExtensionFactory;
         _settings = settings ?? ClientSettingsResolver.Resolve(ClientSettingsDocument.Empty);
     }
@@ -866,7 +869,7 @@ public partial class LocalCabinClient : Node3D
             this,
             ClientActorDefinitionCatalog.ConceptDemo,
             64,
-            new BundledActorVisualResolver());
+            _primitiveOnlyPresentation ? null : new BundledActorVisualResolver());
         _actorPresenter.SetControlledActorPose(
             view.PublicActor, view.PlayerPosition, view.PlayerOrientation, Time.GetTicksMsec());
         RebuildClientProjection(view);
@@ -1084,6 +1087,27 @@ public partial class LocalCabinClient : Node3D
             bothMissing.MaterialOverride is not ShaderMaterial)
             throw new InvalidOperationException(
                 "The Fallback Lab did not preserve model and material failure as independent axes.");
+        if (!_cache.TryGetResidentView(handle, out ClientSemanticChunkView lab) ||
+            !TryFindLabFragment(lab.MultiFragments,
+                GameWorldStaticVariants.FallbackLabModelMissing,
+                out WorldMultiFragmentRecord missingFragment))
+            throw new InvalidOperationException("The fallback Multi fragment lost its structural source.");
+        WorldStaticBounds declared = missingFragment.Bounds;
+        long chunkX = (long)labKey.Coord.X * GameWorldSpatialProfile.WorldChunkEdgeUnits;
+        long chunkZ = (long)labKey.Coord.Z * GameWorldSpatialProfile.WorldChunkEdgeUnits;
+        Vector3 expectedMinimum = new(
+            (declared.MinimumXMillimeters - chunkX) * 0.001f,
+            (declared.MinimumYMillimeters - diagnostics.YAnchorMillimeters) * 0.001f,
+            (declared.MinimumZMillimeters - chunkZ) * 0.001f);
+        Vector3 expectedSize = new(
+            (declared.MaximumXExclusiveMillimeters - declared.MinimumXMillimeters) * 0.001f,
+            (declared.MaximumYExclusiveMillimeters - declared.MinimumYMillimeters) * 0.001f,
+            (declared.MaximumZExclusiveMillimeters - declared.MinimumZMillimeters) * 0.001f);
+        if (!modelMissing.CustomAabb.Position.IsEqualApprox(expectedMinimum) ||
+            !modelMissing.CustomAabb.Size.IsEqualApprox(expectedSize))
+            throw new InvalidOperationException(
+                $"The missing Multi model no longer matches declared structural bounds: " +
+                $"actual={modelMissing.CustomAabb}, expected={expectedMinimum}/{expectedSize}.");
 
         RelocateControlledActor(GamePlayableWorld.FallbackLabApproachPosition);
         if (!TrySetPointerWorldPoint(
@@ -1117,6 +1141,175 @@ public partial class LocalCabinClient : Node3D
         close.EmitSignal(BaseButton.SignalName.Pressed);
         DriveLocalUntil(() => _uiClient.OpenViewCount == 0);
         return GetPresentationSnapshot();
+
+        static bool TryFindLabFragment(ReadOnlySpan<WorldMultiFragmentRecord> fragments,
+            ushort variant, out WorldMultiFragmentRecord found)
+        {
+            foreach (WorldMultiFragmentRecord fragment in fragments)
+                if (fragment.Variant == variant)
+                {
+                    found = fragment;
+                    return true;
+                }
+            found = default;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// F1.3 acceptance over a normal required semantic world with both optional native actor art
+    /// and the local static/public mesh resolver deliberately suppressed. This is not F1.4
+    /// physical packaging or a different authority/content activation.
+    /// </summary>
+    public LocalCabinPresentationSnapshot RunF13PrimitiveOnlyAcceptance()
+    {
+        if (!_primitiveOnlyPresentation || !_initialized || !_useConceptDemoWorld ||
+            _renderer is null || _actorPresenter is null || _cache is null)
+            throw new InvalidOperationException("F1.3 requires an entered primitive-only Concept Demo.");
+        LocalCabinPresentationSnapshot before = GetPresentationSnapshot();
+        if (before.Actors.ActiveActors < 2 ||
+            before.Actors.PrimitiveFallbackActors != before.Actors.ActiveActors ||
+            before.Actors.AnimatedActors != 0 ||
+            before.Renderer.ActiveStaticBatchGroups <= 0 ||
+            before.Renderer.ActivePublicBatchGroups <= 0 ||
+            before.Renderer.ActiveFallbackGroups <
+                before.Renderer.ActiveStaticBatchGroups + before.Renderer.ActivePublicBatchGroups ||
+            _renderer.FallbackMaterialMode != GodotWorldFallbackMaterialMode.Neutral)
+            throw new InvalidOperationException(
+                $"Primitive-only presentation did not cover disclosed actors/statics/Multis/public objects: {before}.");
+        (int frozen, int multi, int publicRecords) = GetF13PrimitiveCensus();
+        if (frozen <= 0 || multi <= 0 || publicRecords <= 0)
+            throw new InvalidOperationException(
+                $"Primitive-only world lacks frozen/Multi/public source facts: {frozen}/{multi}/{publicRecords}.");
+        foreach (uint prefab in new[]
+        {
+            GameWorldPublicPrefabIds.CabinDoor, GameWorldPublicPrefabIds.WorldChest,
+            GameWorldPublicPrefabIds.InformationalSign, GameWorldPublicPrefabIds.FarGate,
+            GameWorldPublicPrefabIds.SkyTelepad,
+        })
+            if (!TryFindPublicRecord(prefab, out _) ||
+                !ClientPrimitivePresentationCatalog.ForPublic(prefab).IsValid)
+                throw new InvalidOperationException(
+                    $"Disclosed public prefab {prefab} lost its primitive representation.");
+
+        if (!TryFindPublicRecord(GameWorldPublicPrefabIds.IronSword, out WorldPublicRecord sword) ||
+            !GodotPublicPointerPicker.TryIntersect(
+                sword.PrefabId,
+                new Vector3(sword.Position.GlobalXMillimeters * 0.001f,
+                    sword.Position.YMillimeters * 0.001f + 3f,
+                    sword.Position.GlobalZMillimeters * 0.001f),
+                Vector3.Down,
+                new Vector3(sword.Position.GlobalXMillimeters * 0.001f,
+                    sword.Position.YMillimeters * 0.001f,
+                    sword.Position.GlobalZMillimeters * 0.001f), out _))
+            throw new InvalidOperationException("The primitive sword lost its declared pick volume.");
+
+        RunD00Acceptance(); // pickup/equip/Inventory, selection, telepad, jump/fall/recovery
+        ProbeDoorAndChestInteraction();
+        OpenServerMonitor();
+        DriveLocalUntil(() => FindOpenServerMonitorView() is not null);
+        OpenServerMonitor();
+        DriveLocalUntil(() => _uiClient!.OpenViewCount == 0);
+        if (_sequencer is null)
+            throw new InvalidOperationException("The primitive-only action sequencer retired early.");
+        ulong primaryBefore = _actorPresenter.GetSnapshot().PrimaryCuesPresented;
+        if (!_sequencer.TryCreateSemanticCommand(
+                new ClientWorldCommandIntent(GameLocomotionUpdate.Stop,
+                    GamePlayerActions.Primary, true), out GamePlayerCommand primary))
+            throw new InvalidOperationException("The primitive-only Primary intent was not formed.");
+        ApplyCommand(primary, false, default, false);
+        DriveLocalUntil(() => _actorPresenter.GetSnapshot().PrimaryCuesPresented > primaryBefore);
+        _ = RunD05Acceptance(_displayName, _humanBody); // actor/nameplate/Chat/overhead
+        ProbeF13PrimitiveDropAndPickup();
+        LocalCabinPresentationSnapshot after = GetPresentationSnapshot();
+        if (!after.IsInitialized || after.Actors.PrimitiveFallbackActors !=
+            after.Actors.ActiveActors || after.OpenUiViews != 0)
+            throw new InvalidOperationException("The primitive-only journey lost actor or UI state.");
+        return before;
+    }
+
+    private void ProbeF13PrimitiveDropAndPickup()
+    {
+        if (_uiClient is null || _uiBridge is null || _sequencer is null || _localSession is null)
+            throw new InvalidOperationException("Primitive item acceptance lost its local session.");
+        OpenInventory();
+        DriveLocalUntil(() => _uiClient.OpenViewCount == 1);
+        Control inventory = FindOpenInventoryView() ??
+            throw new InvalidOperationException("Primitive item acceptance lost Inventory.");
+        const string viewPrefix = "UiView_";
+        string name = inventory.Name.ToString();
+        if (!name.StartsWith(viewPrefix, StringComparison.Ordinal) ||
+            !ulong.TryParse(name.AsSpan(viewPrefix.Length), out ulong value))
+            throw new InvalidOperationException("Primitive item Inventory identity is invalid.");
+        var viewId = new UiViewInstanceId(value);
+        UiRowId swordRow = default;
+        foreach (UiListRow row in _uiClient.GetRows(viewId, InventoryUi.Items))
+            if (row.Values.Length != 0 && row.Values[0].Text == "Iron Sword")
+            {
+                swordRow = row.Id;
+                break;
+            }
+        if (!swordRow.IsValid)
+            throw new InvalidOperationException("The equipped primitive sword was absent from Inventory.");
+        _uiClient.SubmitAction(viewId, InventoryUi.Select, swordRow);
+        DriveLocalUntil(() => _uiClient.GetActionState(viewId, InventoryUi.Drop).Enabled);
+        _uiClient.SubmitAction(viewId, InventoryUi.Drop);
+        DriveLocalUntil(() =>
+            _localSession.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.MainHandPrefabId == 0 &&
+            TryFindPublicRecord(GameWorldPublicPrefabIds.IronSword, out WorldPublicRecord dropped) &&
+            (dropped.StateFlags & WorldPublicStateFlags.GroundItem) != 0);
+        OpenInventory();
+        DriveLocalUntil(() => _uiClient.OpenViewCount == 0);
+
+        if (!TryFindPublicRecord(GameWorldPublicPrefabIds.IronSword, out WorldPublicRecord sword))
+            throw new InvalidOperationException("The dropped primitive sword was not public truth.");
+        if (!WorldPosition.TryFromGlobalMillimeters(
+                sword.Position.GlobalXMillimeters, GamePlayableWorld.PlayerStart.YMillimeters,
+                sword.Position.GlobalZMillimeters, out WorldPosition pickupApproach))
+            throw new InvalidOperationException("The dropped primitive sword position is invalid.");
+        RelocateControlledActor(pickupApproach);
+        _pointerTarget = sword.Id;
+        _pointerTargetPrefab = sword.PrefabId;
+        Select(new ClientControlWorldPoint(
+            sword.Position.GlobalXMillimeters, sword.Position.GlobalZMillimeters));
+        if (!_sequencer.TryCreateSemanticCommand(
+                new ClientWorldCommandIntent(GameLocomotionUpdate.Stop,
+                    GamePlayerActions.Interact, true), out GamePlayerCommand pickup))
+            throw new InvalidOperationException("Primitive sword re-pickup command failed to form.");
+        ApplyCommand(pickup, false, default, false);
+        DriveLocalUntil(() =>
+            _localSession.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastCommandSequence == pickup.Sequence);
+        if (!_localSession.TryGetLatestView(out LocalPlayableAuthorityView picked) ||
+            picked.LastCommandResult.Interaction != GameWorldActionStatus.Accepted)
+            throw new InvalidOperationException(
+                $"The dropped primitive sword was not picked up: " +
+                $"result={picked.LastCommandResult.Interaction}, target={sword.Id}, " +
+                $"actor={picked.PlayerPosition}, item={sword.Position}.");
+        // The authored world may contain another sword; require retirement of this exact
+        // dropped public identity, not absence of every sword-shaped object in the AOI.
+        DriveLocalUntil(() => !TryFindPublicAnchor(sword.Id, out _));
+    }
+
+    /// <summary>Bounded acceptance-only census over currently rendered semantic chunks.</summary>
+    public (int FrozenStatics, int MultiFragments, int PublicRecords) GetF13PrimitiveCensus()
+    {
+        if (!_primitiveOnlyPresentation || _cache is null || _renderer is null ||
+            !_cache.TryCopyResidentInfo(_chatChunkInfo, out int count, out _))
+            throw new InvalidOperationException("Primitive-only semantic census is unavailable.");
+        int frozen = 0;
+        int multi = 0;
+        int publicRecords = 0;
+        for (int index = 0; index < count; index++)
+        {
+            ClientSemanticChunkInfo info = _chatChunkInfo[index];
+            if (!_renderer.TryGetChunkDiagnostics(info.Handle, out _)) continue;
+            frozen = checked(frozen + info.FrozenStaticCount);
+            multi = checked(multi + info.MultiFragmentCount);
+            publicRecords = checked(publicRecords + info.PublicRecordCount);
+        }
+        return (frozen, multi, publicRecords);
     }
 
     /// <summary>
@@ -1419,12 +1612,16 @@ public partial class LocalCabinClient : Node3D
         }
         _residency = new ClientStructuralResidency(_cache, renderRadius);
 
-        _assetResolver = new CabinCatalogAssetResolver(_contentOracle!, _resolvedContent!);
+        _assetResolver = _primitiveOnlyPresentation ? null :
+            new CabinCatalogAssetResolver(_contentOracle!, _resolvedContent!);
         _renderer = new GodotWorldRenderer(
             this,
             _cache,
             GodotWorldRendererLimits.ForStructuralWindow(renderRadius, 5, 32),
             _assetResolver,
+            fallbackMaterialMode: _primitiveOnlyPresentation
+                ? GodotWorldFallbackMaterialMode.Neutral
+                : GodotWorldFallbackMaterialMode.Diagnostic,
             publicBatchFilter: _actorPresenter);
         _window = new GodotSlidingRenderWindow(_cache, _renderer, renderRadius);
         int maximumPresented = _window.MaximumActiveChunks;

@@ -29,6 +29,7 @@ var tests = new (string Name, Action Body)[]
     ("ClientPresentationWindowIsEngineNeutralAndTransactional", ClientPresentationWindowTests.Run),
     ("ClientStructuralResidencyIsBoundedAndTransactional", ClientStructuralResidencyTests.Run),
     ("ClientActorPresentationIsColdMetadataAwareAndAbaSafe", ClientActorPresentationTests.Run),
+    ("PrimitivePresentationDescriptorsAreBoundedAndDeterministic", ClientPrimitivePresentationTests.Run),
     ("ClientWorldInputIsEngineNeutralAndSequenced", ClientWorldInputTests.Run),
     ("ClientSettingsAreLayeredReadableAndReserved", ClientApplicationSettingsTests.Run),
     ("ClientSettingsFilePersistenceIsAtomicAndFailClosed", ClientSettingsFileStoreTests.Run),

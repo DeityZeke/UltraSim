@@ -23,6 +23,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
     private string _guestAdmissionName = string.Empty;
     private GameGuestBody _guestAdmissionBody = GameGuestBody.HumanFemale;
     private string? _guestAdmissionError;
+    private GodotClientSessionBoundarySnapshot _f13PrimitiveBaseline;
 
     public override void _Ready()
     {
@@ -33,6 +34,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         bool farIslandSmoke = arguments.Contains("--d0-2-smoke", StringComparer.Ordinal);
         bool signSmoke = arguments.Contains("--d0-3-smoke", StringComparer.Ordinal);
         bool fallbackLabSmoke = arguments.Contains("--d0-4-smoke", StringComparer.Ordinal);
+        bool primitiveOnlySmoke = arguments.Contains("--f1-3-primitive-smoke", StringComparer.Ordinal);
         bool guestAdmissionSmoke = arguments.Contains("--d0-5-smoke", StringComparer.Ordinal);
         bool f02Smoke = arguments.Contains("--f0-2-smoke", StringComparer.Ordinal);
 #if ULTRASIM_COMPLETE
@@ -42,7 +44,8 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
 #endif
         if (arguments.Contains("--composition-smoke", StringComparer.Ordinal) ||
             !conceptDemoSmoke && !residencySmoke && !farIslandSmoke && !signSmoke &&
-            !fallbackLabSmoke && !guestAdmissionSmoke && !f02Smoke && !sharedHostSmoke)
+            !fallbackLabSmoke && !primitiveOnlySmoke && !guestAdmissionSmoke &&
+            !f02Smoke && !sharedHostSmoke)
             return;
         try
         {
@@ -63,6 +66,14 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
                 StartLocalCabin(
                     CabinContentVariant.Default, CabinHumanBody.XBot, useConceptDemoWorld: true);
                 RunPresentationSmokeAfterNativeFrames(fallbackLabSmoke);
+                return;
+            }
+            if (primitiveOnlySmoke)
+            {
+                _f13PrimitiveBaseline = CaptureSessionBoundary();
+                StartLocalCabin(CabinContentVariant.Default, CabinHumanBody.XBot,
+                    useConceptDemoWorld: true, primitiveOnlyPresentation: true);
+                RunF13PrimitiveSmokeAfterNativeFrames();
                 return;
             }
             if (conceptDemoSmoke || residencySmoke || farIslandSmoke)
@@ -183,6 +194,40 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         catch (Exception exception)
         {
             GD.PushError($"D0.{(fallbackLab ? 4 : 3)} native presentation failed: {exception}");
+            RetireCurrentSession();
+            FailSession(exception.Message);
+            GetTree().Quit(1);
+        }
+    }
+
+    private async void RunF13PrimitiveSmokeAfterNativeFrames()
+    {
+        try
+        {
+            for (int frame = 0; frame < 3; frame++)
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            LocalCabinPresentationSnapshot evidence = _cabin!.RunF13PrimitiveOnlyAcceptance();
+            (int frozen, int multi, int publicRecords) = _cabin.GetF13PrimitiveCensus();
+            GD.Print("F1.3 PRIMITIVE ONLY PASS " +
+                $"semantic={evidence.ContentFingerprint} " +
+                $"chunks={evidence.SemanticResidentChunks}/{evidence.RenderedChunks} " +
+                $"actors={evidence.Actors.ActiveActors}/" +
+                $"{evidence.Actors.PrimitiveFallbackActors} " +
+                $"static/public/fallback-groups=" +
+                $"{evidence.Renderer.ActiveStaticBatchGroups}/" +
+                $"{evidence.Renderer.ActivePublicBatchGroups}/" +
+                $"{evidence.Renderer.ActiveFallbackGroups} " +
+                $"frozen/multi/public-records={frozen}/{multi}/{publicRecords} " +
+                $"nodes/resources={evidence.Renderer.ActiveNodes}/" +
+                $"{evidence.Renderer.ActiveResources}");
+            RetireCurrentSession();
+            ReturnToMainMenu("F1.3 primitive-only Concept Demo passed.");
+            RequireCleanSessionBoundary(_f13PrimitiveBaseline, "F1.3 primitive-only retirement");
+            GetTree().Quit(0);
+        }
+        catch (Exception exception)
+        {
+            GD.PushError($"F1.3 primitive-only presentation failed: {exception}");
             RetireCurrentSession();
             FailSession(exception.Message);
             GetTree().Quit(1);
@@ -467,7 +512,8 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         CabinHumanBody human,
         bool useConceptDemoWorld,
         string? guestDisplayName = null,
-        ILocalPlayableServerExtensionFactory? serverExtensionFactory = null)
+        ILocalPlayableServerExtensionFactory? serverExtensionFactory = null,
+        bool primitiveOnlyPresentation = false)
     {
         if (_cabin is not null)
             throw new InvalidOperationException("A local Cabin session is already active.");
@@ -502,7 +548,8 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             EffectiveSettings,
             useConceptDemoWorld,
             guestDisplayName,
-            extensionFactory);
+            extensionFactory,
+            primitiveOnlyPresentation);
         _cabin = cabin;
         WorldRoot.AddChild(cabin);
         LocalCabinPresentationSnapshot snapshot = cabin.GetPresentationSnapshot();

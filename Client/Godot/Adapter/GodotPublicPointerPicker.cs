@@ -1,4 +1,5 @@
 using Godot;
+using UltraSim.Client.Core;
 using UltraSim.Game.Composition;
 using UltraSim.Game.World;
 
@@ -29,14 +30,18 @@ public static class GodotPublicPointerPicker
         in Vector3 basePosition,
         out float distance)
     {
-        if (!TryGetBounds(prefabId, out Vector3 halfExtents, out float height))
+        if (!HasKnownPickVolume(prefabId))
         {
             distance = 0;
             return false;
         }
-
-        Vector3 minimum = basePosition - new Vector3(halfExtents.X, 0, halfExtents.Z);
-        Vector3 maximum = basePosition + new Vector3(halfExtents.X, height, halfExtents.Z);
+        ClientPrimitivePresentation bounds = ClientPrimitivePresentationCatalog.ForPublic(prefabId);
+        Vector3 minimum = basePosition + new Vector3(
+            bounds.MinimumXMillimeters, bounds.MinimumYMillimeters,
+            bounds.MinimumZMillimeters) * 0.001f;
+        Vector3 maximum = basePosition + new Vector3(
+            bounds.MaximumXMillimeters, bounds.MaximumYMillimeters,
+            bounds.MaximumZMillimeters) * 0.001f;
         float near = 0;
         float far = MaximumPickDistanceMeters;
         if (!ClipAxis(rayOrigin.X, rayDirection.X, minimum.X, maximum.X, ref near, ref far) ||
@@ -51,20 +56,15 @@ public static class GodotPublicPointerPicker
         return true;
     }
 
-    private static bool TryGetBounds(uint prefabId, out Vector3 halfExtents, out float height)
+    private static bool HasKnownPickVolume(uint prefabId)
     {
-        (halfExtents, height) = prefabId switch
-        {
-            GameWorldPublicPrefabIds.CabinDoor => (new Vector3(0.9f, 0, 0.35f), 2.1f),
-            GameWorldPublicPrefabIds.WorldChest => (new Vector3(0.7f, 0, 0.5f), 0.8f),
-            GameWorldPublicPrefabIds.WoodlandAnimal => (new Vector3(0.65f, 0, 0.4f), 1.15f),
-            GameWorldPublicPrefabIds.SkyTelepad => (new Vector3(1f, 0, 1f), 0.25f),
-            GameWorldPublicPrefabIds.FarGate => (new Vector3(0.85f, 0, 0.4f), 2.8f),
-            GameWorldPublicPrefabIds.InformationalSign => (new Vector3(0.7f, 0, 0.25f), 1.65f),
-            GameWorldPublicPrefabIds.IronSword => (new Vector3(0.25f, 0, 0.25f), 1.2f),
-            _ => default,
-        };
-        return height > 0;
+        return prefabId is GameWorldPublicPrefabIds.CabinDoor or
+            GameWorldPublicPrefabIds.WorldChest or
+            GameWorldPublicPrefabIds.WoodlandAnimal or
+            GameWorldPublicPrefabIds.SkyTelepad or
+            GameWorldPublicPrefabIds.FarGate or
+            GameWorldPublicPrefabIds.InformationalSign or
+            GameWorldPublicPrefabIds.IronSword;
     }
 
     private static bool ClipAxis(

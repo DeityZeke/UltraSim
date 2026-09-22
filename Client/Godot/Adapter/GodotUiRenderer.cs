@@ -498,8 +498,9 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
             StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
         };
-        if (_assets is not null && !string.IsNullOrEmpty(element.AssetRole))
-            image.Texture = _assets.Resolve(element.AssetRole);
+        if (!string.IsNullOrEmpty(element.AssetRole))
+            image.Texture = _assets?.Resolve(element.AssetRole) ??
+                GodotPrimitiveSubstrate.MissingIcon;
         return image;
     }
 
