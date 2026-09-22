@@ -4985,12 +4985,19 @@ static void VerifyF10ClientBaselineEvidence(string path)
     JsonElement coldSnapshot = cold.GetProperty("Snapshot");
     JsonElement coldAcquisition = coldSnapshot.GetProperty("Session")
         .GetProperty("Content").GetProperty("Acquisition");
+    JsonElement coldCacheAtOpen = coldSnapshot.GetProperty("ContentCacheAtOpen");
     JsonElement coldCurrentCache = coldSnapshot.GetProperty("ContentCacheCurrent");
     JsonElement warm = remote.GetProperty("WarmRealmAReconnect");
     JsonElement warmSnapshot = warm.GetProperty("Snapshot");
     JsonElement warmAcquisition = warmSnapshot.GetProperty("Session")
         .GetProperty("Content").GetProperty("Acquisition");
-    if (coldSnapshot.GetProperty("ContentCacheAtOpen").GetProperty("BlobCount").GetInt32() != 0 ||
+    if (coldCacheAtOpen.GetProperty("BlobCount").GetInt32() != 2 ||
+        coldCacheAtOpen.GetProperty("LocalManifestCount").GetInt32() != 1 ||
+        coldCacheAtOpen.GetProperty("RealmManifestCount").GetInt32() != 0 ||
+        coldCacheAtOpen.GetProperty("LocalActivationCount").GetInt32() != 1 ||
+        coldCacheAtOpen.GetProperty("RealmActivationCount").GetInt32() != 0 ||
+        coldCacheAtOpen.GetProperty("LiveBlobPins").GetInt32() != 0 ||
+        coldCacheAtOpen.GetProperty("LiveCatalogPins").GetInt32() != 0 ||
         coldAcquisition.GetProperty("PackagesFetched").GetInt32() <= 0 ||
         coldAcquisition.GetProperty("BytesFetched").GetInt64() <= 0 ||
         coldCurrentCache.GetProperty("BlobCount").GetInt32() <= 0 ||
