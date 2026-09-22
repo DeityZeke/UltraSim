@@ -9,6 +9,7 @@ Primary references:
 - [Dungeon Core / Dungeon Lab](../../Docs/Plans/Content/UltraSim_Dungeon_Lab_and_Dungeon_Core_Plan_FINAL.md)
 - [Mine / Subterranean Excavation](../../Docs/Plans/MINE.md)
 - [Deterministic Fate / Timelines / Realities](deterministic-fate-timelines-realities.md)
+- [Simulation Time / Resolution / Control](../canonical/simulation-time-resolution-and-control.md)
 - [Social Conversation / Information Reveal](social-conversation-and-information-reveal.md)
 
 ## Current understanding
@@ -37,6 +38,40 @@ UO / OSRS / Kenshi
 ```
 
 These are influence labels, not requirements to copy their exact mechanics.
+
+## Control authority layers
+
+The same underlying actor/simulation supports multiple player-control styles. These are control/authority choices, not separate worlds or actor types.
+
+~~~text
+Direct
+    player chooses intentions/actions or queues work
+
+Autonomous + Intervention
+    actor normally runs Sim Core
+    player can override direction at any time
+
+Command / Queue
+    player assigns orders/goals
+    actor resolves allowed tactical/subgoal details
+
+Governance / Policy
+    player influences settlements/organizations/priorities
+    individuals remain simulated actors
+~~~
+
+The mode can change during play.
+
+At high simulation speed:
+
+- Direct actors remain idle if given no Intent/queue, but already-selected work may aggregate.
+- Autonomous actors continue living their lives.
+- Commanded actors continue pursuing assigned goals.
+- Governance continues through institutions/actors reacting to policy.
+
+Possession/takeover uses the same model: an autonomous NPC remains the same actor while its active decision provider is temporarily switched to the selected human/direct policy. Releasing control returns authority to autonomous reasoning, which may resume or reconsider the prior Intent.
+
+See [Simulation Time / Resolution / Control](../canonical/simulation-time-resolution-and-control.md).
 
 ## Agreed broad points
 

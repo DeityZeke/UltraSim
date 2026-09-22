@@ -7,6 +7,7 @@ Related:
 - [Sim Core](../../Docs/Plans/Content/UltraSim_Sim_Core_Reasoning_Decision_Making_Reference_v4.md)
 - [World History / Knowledge](../../Docs/Plans/Content/UltraSim_World_History_Knowledge_Pools_Reference_v2.md)
 - [Persistence](../../Docs/PERSISTENCE.md)
+- [Simulation Time / Resolution / Control](../canonical/simulation-time-resolution-and-control.md)
 
 ## Deterministic Fate invariant
 
@@ -51,6 +52,20 @@ Consequences:
 - parallel execution must not alter semantic outcomes.
 
 To obtain a different result, change meaningful circumstances rather than reload until the RNG changes.
+
+## Resolution invariance and causal compression
+
+Deterministic Fate also enables safe temporal/causal aggregation.
+
+Given the same authoritative starting state, rules, ordered external inputs, and semantic Fate, a safely collapsed interaction should reach the same meaningful authoritative result as fine-grained resolution.
+
+If an interaction is causally sealed, the simulator may replace its internal deterministic trace with an equivalent authoritative state transition.
+
+If an outside actor/event could observe or alter the interaction, aggregation may advance only to that next causal boundary before state is materialized/escalated.
+
+This means authoritative randomness must belong to semantic occurrences rather than to the number of ECS ticks or resolver calls that happened to execute.
+
+See [Simulation Time / Resolution / Control](../canonical/simulation-time-resolution-and-control.md).
 
 ## Canonical Fate
 

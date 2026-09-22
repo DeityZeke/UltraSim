@@ -19,6 +19,10 @@ Start here. This file is intentionally small.
 - [UI](../Docs/UI.md)
 - [Full current Markdown inventory](REPOSITORY_DOCS.md)
 
+## Cross-system canonical design references
+
+- [Simulation Time / Resolution / Control Authority](canonical/simulation-time-resolution-and-control.md) — independent world time/playback, deterministic causal aggregation, Immediate/Near/Far resolution, player autonomy/direct/command/governance control, and possession/controller binding.
+
 ## Current gameplay/content references
 
 - [Dungeon Lab / Dungeon Core](../Docs/Plans/Content/UltraSim_Dungeon_Lab_and_Dungeon_Core_Plan_FINAL.md)
