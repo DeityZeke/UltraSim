@@ -62,10 +62,11 @@ public readonly record struct ActorPresentationResolutionRequirements(
 /// </summary>
 public sealed class ActorPresentationContentLease : IDisposable
 {
-    private ContentBlobLease? _blob;
+    private IDisposable? _lifetime;
+    private readonly byte[] _bytes;
 
     internal ActorPresentationContentLease(
-        ContentBlobLease blob,
+        IDisposable lifetime,
         byte[] bytes,
         ActorPresentationArtifactInfo info,
         ContentCatalogGenerationId catalogGeneration,
@@ -74,7 +75,8 @@ public sealed class ActorPresentationContentLease : IDisposable
         ContentHash ownerManifest,
         ContentHash fileHash)
     {
-        _blob = blob;
+        _lifetime = lifetime;
+        _bytes = bytes;
         Bytes = bytes;
         Info = info;
         CatalogGeneration = catalogGeneration;
@@ -91,9 +93,25 @@ public sealed class ActorPresentationContentLease : IDisposable
     public ContentPackageId OwnerPackage { get; }
     public ContentHash OwnerManifest { get; }
     public ContentHash FileHash { get; }
-    public bool IsDisposed => Volatile.Read(ref _blob) is null;
+    public bool IsDisposed => Volatile.Read(ref _lifetime) is null;
 
-    public void Dispose() => Interlocked.Exchange(ref _blob, null)?.Dispose();
+    internal ActorPresentationContentLease WithLifetime(IDisposable lifetime) => new(
+        lifetime, _bytes, Info, CatalogGeneration, DefinitionId,
+        OwnerPackage, OwnerManifest, FileHash);
+
+    internal ActorPresentationContentLease WithLifetime(
+        IDisposable lifetime, PresentationGenerationId generation, PresentationSourceKind source)
+    {
+        var result = WithLifetime(lifetime);
+        result.PresentationGeneration = generation;
+        result.PresentationSource = source;
+        return result;
+    }
+
+    public PresentationGenerationId PresentationGeneration { get; private set; }
+    public PresentationSourceKind PresentationSource { get; private set; }
+
+    public void Dispose() => Interlocked.Exchange(ref _lifetime, null)?.Dispose();
 }
 
 /// <summary>

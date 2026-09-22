@@ -20,14 +20,17 @@ public sealed class ConceptDemoContentDeployment : IDisposable
     private ConceptDemoContentDeployment(
         StaticContentHttpHost host,
         RemoteContentAuthorization authorization,
+        RemoteContentAuthorization presentationAuthorization,
         ContentDeploymentSnapshot snapshot)
     {
         _host = host;
         Authorization = authorization;
+        PresentationAuthorization = presentationAuthorization;
         Snapshot = snapshot;
     }
 
     public RemoteContentAuthorization Authorization { get; }
+    public RemoteContentAuthorization PresentationAuthorization { get; }
     public ContentDeploymentSnapshot Snapshot { get; }
 
     /// <summary>
@@ -128,16 +131,22 @@ public sealed class ConceptDemoContentDeployment : IDisposable
                 realm,
                 new ContentActivationId(0x4130_2E38_2D4E_4154UL, 1),
                 ContentBaseCatalog.Empty.Fingerprint,
-                [
-                    Required(manifest!),
-                    Required(actors.Manifest),
-                    Required(actorReplacement.Manifest),
-                ],
+                [Required(manifest!)],
                 out ContentActivationPlan? plan, out planError) ||
             !ContentCatalogResolver.TryResolve(
                 ContentBaseCatalog.Empty, plan!,
-                [bootstrap, actors.Verified, actorReplacement.Verified],
+                [bootstrap],
                 out ResolvedContentCatalog? catalog, out catalogError) ||
+            !ContentActivationPlan.TryCreate(
+                realm,
+                new ContentActivationId(0x4631_2E32_2D50_5245UL, 1),
+                ContentBaseCatalog.Empty.Fingerprint,
+                [Required(actors.Manifest), Required(actorReplacement.Manifest)],
+                out ContentActivationPlan? presentationPlan, out planError) ||
+            !ContentCatalogResolver.TryResolve(
+                ContentBaseCatalog.Empty, presentationPlan!,
+                [actors.Verified, actorReplacement.Verified],
+                out ResolvedContentCatalog? presentationCatalog, out catalogError) ||
             !ContentPackageArchive.TryEncodeCanonical(manifest!, payloads, out byte[] archive) ||
             !ContentPackageArchive.TryEncodeCanonical(
                 actors.Manifest, actors.Payloads, out byte[] actorArchive) ||
@@ -146,7 +155,7 @@ public sealed class ConceptDemoContentDeployment : IDisposable
             throw new InvalidOperationException(
                 $"The Concept Demo content deployment is invalid: plan={planError}, catalog={catalogError}.");
 
-        ResolvedContentCatalog resolvedCatalog = catalog!;
+        ResolvedContentCatalog resolvedCatalog = presentationCatalog!;
         RequireActorCatalogOwner(
             resolvedCatalog, ConceptDemoActorPresentationProfile.HumanXDefinitionId,
             actorReplacement.Manifest.PackageId);
@@ -170,18 +179,26 @@ public sealed class ConceptDemoContentDeployment : IDisposable
                 Acquisition(actorReplacement.Manifest, host.GetUri(ActorReplaceArchiveRoute)),
             ];
             RemoteContentAuthorization authorization = ProjectAuthorization(
-                plan!, resolvedCatalog.Fingerprint, acquisitions);
+                plan!, catalog!.Fingerprint, [acquisitions[0]]);
+            RemoteContentAuthorization presentationAuthorization = ProjectAuthorization(
+                presentationPlan!, resolvedCatalog.Fingerprint,
+                [acquisitions[1], acquisitions[2]]);
             return new ConceptDemoContentDeployment(
                 host,
                 authorization,
+                presentationAuthorization,
                 new ContentDeploymentSnapshot(
                     host.GetUri(ArchiveRoute),
                     checked(archive.Length + actorArchive.Length + actorReplaceArchive.Length),
                     worldBytes.Length,
                     checked(uiBytes.Length + monitorUiBytes.Length),
                     checked(actorX.Length + actorY.Length + actorXReplacement.Length),
-                    manifest!.ManifestHash, plan!.PlanHash, resolvedCatalog.Fingerprint,
-                    pack.Fingerprint, pack.ContentFingerprint, pack.ChunkCount));
+                    manifest!.ManifestHash, plan!.PlanHash, catalog!.Fingerprint,
+                    pack.Fingerprint, pack.ContentFingerprint, pack.ChunkCount)
+                {
+                    PresentationPlanHash = presentationPlan!.PlanHash,
+                    PresentationCatalogFingerprint = resolvedCatalog.Fingerprint,
+                });
         }
         catch
         {
@@ -322,4 +339,8 @@ public readonly record struct ContentDeploymentSnapshot(
     ContentHash CatalogFingerprint,
     WorldPackFingerprint WorldPackFingerprint,
     WorldContentFingerprint WorldContentFingerprint,
-    int WorldChunks);
+    int WorldChunks)
+{
+    public ContentHash PresentationPlanHash { get; init; }
+    public ContentHash PresentationCatalogFingerprint { get; init; }
+}

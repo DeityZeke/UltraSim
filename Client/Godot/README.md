@@ -211,16 +211,19 @@ equipped swords remain attached, visible, and non-pickable.
 The archived source has no Attack or Interact clips. Those actions therefore retain short bounded
 primitive cues; a missing animation can never block accepted gameplay. D0.7b adds the runtime
 content path without adding another presenter. Online excludes `Assets/**`, resolves logical X/Y
-ActorPresentation definitions only through the live applied realm catalog, pins their verified CAS
-blobs, and lazily imports an UltraSim-controlled inert GLB scene. Passive and native validation both
-require the exact skeleton/socket/Idle-Walk-Jump profile. The server package Adds X/Y and an ordered
-package visibly Replaces X; equivalent loose files cannot bypass activation/application proof.
+ActorPresentation definitions through an independently authorized presentation generation, pins
+their verified CAS blobs, and lazily imports an UltraSim-controlled inert GLB scene. Passive and
+native validation both require the exact skeleton/socket/Idle-Walk-Jump profile. The Realm
+presentation plan Adds X/Y and an ordered package visibly Replaces X. It does not gate the
+WorldPack/UI application proof. Equivalent loose files cannot bypass scope authorization; missing
+or incompatible art falls through `world.local` then the humanoid primitive.
 
 `GodotActorPresenter.RefreshResolvedVisuals()` replaces only the visual child after a resource is
 realized. The actor root, generational public identity, controlled role, nameplate, overhead Chat,
 action fence, and equipped Main Hand survive. Import failure has a finite diagnostic and leaves the
-humanoid primitive. The actual cold/warm Online export canary contains no body GLB, downloads actor
-bytes only on cold entry, and reopens them from CAS with fresh session proof on warm entry.
+humanoid primitive. The actual cold/warm Online export canary contains no body GLB. Required
+World/UI acquisition proves the application independently; Realm art can arrive later from CAS
+and upgrade an existing primitive visual without replacing its actor root or semantic identity.
 
 F0.7 adds a permanent Complete-client mixed-session lifecycle canary. One native process enters
 two independent local sessions, remote deployment A, distinct remote deployment B, deployment A

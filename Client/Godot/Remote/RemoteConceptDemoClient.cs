@@ -103,6 +103,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private ClientActorPresentationState? _actorState;
     private GodotActorPresenter? _actorPresenter;
     private GodotContentActorVisualResolver? _actorVisuals;
+    private PresentationGenerationId _lastPresentationGeneration;
     private ResolvedClientSettings? _settings;
     private ClientWorldInputScheduler? _inputScheduler;
     private Camera3D? _camera;
@@ -288,6 +289,14 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 UpdateHud("Remote Concept Demo active");
             }
             if (_state != RemoteConceptDemoClientState.Active) return;
+            PresentationGenerationId currentPresentation =
+                _session.Presentation?.CurrentPresentationGeneration ?? default;
+            if (currentPresentation != _lastPresentationGeneration)
+            {
+                _lastPresentationGeneration = currentPresentation;
+                _ = _actorPresenter!.RefreshResolvedVisuals();
+                _actorVisuals!.ReleaseRetiredResources();
+            }
             _inputScheduler!.ObserveCompleted(snapshot.Playable.LastProcessedCommandSequence);
             _ = _inputScheduler.TryPump(Stopwatch.GetTimestamp(), TrySubmitScheduledCommand);
 
@@ -593,8 +602,9 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         _actorState = new ClientActorPresentationState(
             ClientActorDefinitionCatalog.ConceptDemo, 64);
         _actorVisuals = new GodotContentActorVisualResolver(
-            _session.Content ?? throw new InvalidOperationException(
-                "Remote actor presentation requires an applied content catalog."));
+            _session.Presentation ?? throw new InvalidOperationException(
+                "Remote actor presentation requires an authenticated presentation source."));
+        _lastPresentationGeneration = _session.Presentation!.CurrentPresentationGeneration;
         _actorPresenter = new GodotActorPresenter(
             this, ClientActorDefinitionCatalog.ConceptDemo, 64, _actorVisuals);
         _actorPresenter.SetControlledActorPose(

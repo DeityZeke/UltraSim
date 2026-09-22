@@ -5,6 +5,9 @@ Connect and Complete-hosted Concept Demo servers:
 
 - the exact authenticated content activation containing the canonical Concept Demo WorldPack plus
   standard Inventory and read-only Server Monitor UI definitions;
+- a separate authenticated, non-gating presentation authorization containing actor Add X/Y and
+  ordered Replace X packages. Message 149 advertises the exact Realm layer after semantic proof;
+  actor package failure never supplies a successful semantic proof or blocks valid world entry;
 - the finite stock client-profile advertisements used by F0.3c.
 
 It references server/Game/Network/content foundations but deliberately does not reference

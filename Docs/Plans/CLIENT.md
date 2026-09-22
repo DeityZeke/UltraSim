@@ -9,6 +9,13 @@ A0.2-A0.8. M0.0 now closes the first shared multi-participant authority in both 
 Complete-hosted deployment shapes. I0.12 human-play hardening prevents visible equipped gear from
 remaining a pointer-nominated world pickup, and I0.13 replaces its temporary cold property text
 with bounded typed Inspection Properties plus content-sized world-hover/Inventory presentation.
+
+F1.2 now separates the required remote WorldPack/UI activation and its exact application proof
+from optional Realm-authorized actor-art presentation. Game manifest v31 advertises the latter
+on message 149 without changing transport revision 2. The client publishes a separate immutable
+presentation generation with Realm → `world.local` → Primitive actor selection; late art replaces
+only the native visual child. This does not productize Official Local art, add user packs, or close
+F1.3+.
 C0.2 now closes the first routed Global Chat mode plus explicit authority-originated System
 broadcast/feed/banner convergence. D0.6 now closes direct ping indication plus the first sanitized,
 read-only, content-backed Server Monitor and trusted test-marker producer. D0.7a now closes shared

@@ -27,6 +27,7 @@
     <ProjectReference Include="../../Kernels/Network/UltraSim.Network.csproj" />
     <ProjectReference Include="../../Kernels/Network.Testing/UltraSim.Network.Testing.csproj" />
     <ProjectReference Include="../../Server/Hosting/UltraSim.Server.Hosting.csproj" />
+    <ProjectReference Include="../../Server/ConceptDemo/UltraSim.Server.ConceptDemo.csproj" />
     <ProjectReference Include="../../Server/Persistence/UltraSim.Server.Persistence.csproj" />
   </ItemGroup>
 </Project>

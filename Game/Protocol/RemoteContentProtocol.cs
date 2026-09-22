@@ -144,6 +144,44 @@ public readonly record struct RemoteContentRequirement(
     public bool IsValid => ApplicationSessionEpoch != 0 && RequirementSequence != 0 && Authorization is not null;
 }
 
+/// <summary>
+/// An independently authorized, non-gating presentation layer. It deliberately uses the same
+/// bounded package/source envelope as required content, but never participates in ContentSetApplied.
+/// The authenticated application epoch and Realm fence both remain mandatory.
+/// </summary>
+public readonly record struct RemotePresentationAdvertisement(
+    ulong ApplicationSessionEpoch,
+    ulong AdvertisementSequence,
+    RemoteContentAuthorization Authorization)
+{
+    public bool IsValid => ApplicationSessionEpoch != 0 && AdvertisementSequence != 0 &&
+        Authorization is not null;
+}
+
+/// <summary>
+/// The envelope fields match message 140 exactly; the distinct message identity is the semantic
+/// boundary between required application truth and optional presentation authorization.
+/// </summary>
+[NetworkMessage(149, "ultrasim.game.presentation-advertisement", 1, NetworkLane.Event)]
+public partial struct RemotePresentationAdvertisementHeader
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong RequirementSequence;
+    public ulong ApplicationRealmHigh;
+    public ulong ApplicationRealmLow;
+    public ulong ActivationHigh;
+    public ulong ActivationLow;
+    public ulong BaseHash0;
+    public ulong BaseHash1;
+    public ulong BaseHash2;
+    public ulong BaseHash3;
+    public ulong PlanHash0;
+    public ulong PlanHash1;
+    public ulong PlanHash2;
+    public ulong PlanHash3;
+    public byte PackageCount;
+}
+
 /// <summary>Header followed by ordered package requirements and their ordered approved sources.</summary>
 [NetworkMessage(140, "ultrasim.game.content-requirement", 1, NetworkLane.Event)]
 public partial struct RemoteContentRequirementHeader
@@ -193,6 +231,71 @@ public static partial class UltraSimGameProtocol
     public const int MaximumContentPackageIdUtf8Bytes = 96;
     public const int MaximumContentSourceLocatorUtf8Bytes = 2_048;
     public const int MaximumContentRequirementMessageBytes = MaximumMessageBytes;
+    public const int PresentationExpectedResultBytes = 32;
+    public const int MaximumPresentationAdvertisementMessageBytes = MaximumMessageBytes;
+
+    public static bool TryWritePresentationAdvertisement(
+        Span<byte> destination,
+        in RemotePresentationAdvertisement advertisement,
+        out int written)
+    {
+        written = 0;
+        if (!advertisement.IsValid ||
+            !advertisement.Authorization.ExpectedResolvedCatalogFingerprint.IsValid ||
+            destination.Length < PresentationExpectedResultBytes ||
+            RemotePresentationAdvertisementHeaderCodec.EncodedSize !=
+            RemoteContentRequirementHeaderCodec.EncodedSize)
+            return false;
+        var sharedEnvelope = new RemoteContentRequirement(
+            advertisement.ApplicationSessionEpoch,
+            advertisement.AdvertisementSequence,
+            advertisement.Authorization);
+        if (!TryWriteContentRequirement(destination[..^PresentationExpectedResultBytes],
+                in sharedEnvelope, out written) ||
+            written > MaximumPresentationAdvertisementMessageBytes - PresentationExpectedResultBytes)
+        {
+            written = 0;
+            return false;
+        }
+        var trailer = new NetworkPacketWriter(destination.Slice(written, PresentationExpectedResultBytes));
+        if (!WriteHash(ref trailer, advertisement.Authorization.ExpectedResolvedCatalogFingerprint))
+        {
+            written = 0;
+            return false;
+        }
+        written += trailer.WrittenCount;
+        return true;
+    }
+
+    public static bool TryReadPresentationAdvertisement(
+        ReadOnlySpan<byte> source,
+        out RemotePresentationAdvertisement advertisement)
+    {
+        advertisement = default;
+        if (source.Length < RemoteContentRequirementHeaderCodec.EncodedSize +
+                PresentationExpectedResultBytes ||
+            source.Length > MaximumPresentationAdvertisementMessageBytes ||
+            RemotePresentationAdvertisementHeaderCodec.EncodedSize !=
+                RemoteContentRequirementHeaderCodec.EncodedSize ||
+            !TryReadContentRequirement(source[..^PresentationExpectedResultBytes],
+                out RemoteContentRequirement sharedEnvelope))
+            return false;
+        var trailer = new NetworkPacketReader(source[^PresentationExpectedResultBytes..]);
+        if (!ReadHash(ref trailer, out RemoteContentHash expected) ||
+            !expected.IsValid || !trailer.IsComplete)
+            return false;
+        RemoteContentAuthorization original = sharedEnvelope.Authorization;
+        var authorization = new RemoteContentAuthorization(
+            original.RealmHigh, original.RealmLow,
+            original.ActivationHigh, original.ActivationLow,
+            original.RequiredBaseCatalogFingerprint, original.PlanHash,
+            expected, original.Packages);
+        advertisement = new RemotePresentationAdvertisement(
+            sharedEnvelope.ApplicationSessionEpoch,
+            sharedEnvelope.RequirementSequence,
+            authorization);
+        return true;
+    }
 
     public static bool TryWriteContentRequirement(
         Span<byte> destination,

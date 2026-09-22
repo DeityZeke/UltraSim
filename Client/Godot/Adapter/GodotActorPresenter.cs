@@ -213,8 +213,10 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             if (!slot.Used) continue;
             ClientActorDefinition definition = slot.Record.Definition;
             Node3D? visual = _visuals.Instantiate(in definition);
-            if (visual is null) continue;
-            ReplaceVisual(index, ref slot, visual);
+            bool primitive = visual is null;
+            if (primitive && slot.PrimitiveFallback) continue;
+            visual ??= CreatePrimitive(definition.VisualKind);
+            ReplaceVisual(index, ref slot, visual, primitive);
             replaced++;
             SaturatingIncrement(ref _visualReplacements);
         }
@@ -414,7 +416,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         ApplySlot(index, nowMilliseconds: 0);
     }
 
-    private void ReplaceVisual(int index, ref ActorSlot slot, Node3D visual)
+    private void ReplaceVisual(int index, ref ActorSlot slot, Node3D visual, bool primitive)
     {
         Node3D root = slot.Root ?? throw new InvalidOperationException("The actor root is absent.");
         if (slot.PrimitiveFallback) _primitive--;
@@ -425,12 +427,12 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         if (oldSocket is not null && oldSocket.GetParent() == root)
         {
             root.RemoveChild(oldSocket);
-            oldSocket.QueueFree();
+            oldSocket.Free();
         }
         if (oldVisual is not null && GodotObject.IsInstanceValid(oldVisual))
         {
             oldVisual.GetParent()?.RemoveChild(oldVisual);
-            oldVisual.QueueFree();
+            oldVisual.Free();
         }
 
         visual.Name = "Visual";
@@ -458,7 +460,8 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         slot.PrimaryActionPivot = primaryActionPivot;
         slot.MainHandSkeleton = mainHandSkeleton;
         slot.MainHandBone = mainHandBone;
-        slot.PrimitiveFallback = false;
+        slot.PrimitiveFallback = primitive;
+        if (primitive) _primitive++;
         slot.PlayedMotionPhase = (GodotActorMotionPhase)byte.MaxValue;
         if (animations is not null) _animated++;
         primaryCue.Visible = slot.MainHandPrefabId != 0 ||
@@ -523,7 +526,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         if (slot.Root is not null && GodotObject.IsInstanceValid(slot.Root))
         {
             slot.Root.GetParent()?.RemoveChild(slot.Root);
-            slot.Root.QueueFree();
+            slot.Root.Free();
         }
         if (slot.PrimitiveFallback) _primitive--;
         if (slot.AnimationPlayer is not null) _animated--;

@@ -18,6 +18,14 @@ ActorPresentation Add/Replace definitions, applied-catalog-only resolution, reta
 and lazy Godot realization. General mesh/animation/audio import, package dependencies, executable
 extensions, mutable overlay artifacts, and independently streamed chunk artifacts remain deferred.
 
+F1.2 separates this historical actor-art path from required semantic application. The Concept
+Demo's exact required plan now contains only its WorldPack and compiled Inventory/Server Monitor
+UI bootstrap package. Actor Add/Replace packages remain exact Realm-authorized passive content,
+but an independent message-149 presentation advertisement acquires/publishes them without
+participating in application proof or guest admission. The optional Realm layer resolves above
+`world.local` and Primitive; corrupt/missing/incompatible art cannot replace required semantic
+truth. Game manifest v31 adds message 149; Network transport revision remains 2.
+
 **Purpose:** restore the useful V2 content-pack, resolver, cache, server-patch, and asset-streaming ideas without reviving old ownership mistakes. The first proof uses the same Cabin in the Woods world locally and remotely so a preinstalled Single Player composition can act as a deterministic oracle for Online content.
 
 The central decisions are:

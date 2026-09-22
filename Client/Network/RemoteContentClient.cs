@@ -36,19 +36,25 @@ public sealed class RemoteRequiredContentBinding
         ApplicationRealmId realm,
         ContentCache cache,
         ContentBaseCatalog baseCatalog,
-        IContentPackageSource source)
+        IContentPackageSource source,
+        ContentScopeActivationKey? localPresentationKey = null)
     {
         if (!realm.IsValid) throw new ArgumentOutOfRangeException(nameof(realm));
         Realm = realm;
         Cache = cache ?? throw new ArgumentNullException(nameof(cache));
         BaseCatalog = baseCatalog ?? throw new ArgumentNullException(nameof(baseCatalog));
         Source = source ?? throw new ArgumentNullException(nameof(source));
+        if (localPresentationKey is { } key && (!key.IsValid || !key.Identity.Scope.IsLocal))
+            throw new ArgumentException("A Local presentation activation is required.",
+                nameof(localPresentationKey));
+        LocalPresentationKey = localPresentationKey;
     }
 
     public ApplicationRealmId Realm { get; }
     public ContentCache Cache { get; }
     public ContentBaseCatalog BaseCatalog { get; }
     public IContentPackageSource Source { get; }
+    public ContentScopeActivationKey? LocalPresentationKey { get; }
 }
 
 /// <summary>Maps engine-neutral content identities to the Game-owned authenticated wire projection.</summary>
@@ -101,6 +107,52 @@ public static class RemoteContentAuthorizationProjection
         BinaryPrimitives.WriteUInt64BigEndian(digest[24..], hash.Part3);
         return ContentHash.FromDigest(digest);
     }
+
+    public static bool TryProject(
+        RemoteContentAuthorization remote,
+        out ContentActivationPlan? plan,
+        out ContentPackageAcquisition[] acquisitions)
+    {
+        plan = null;
+        acquisitions = [];
+        try
+        {
+            var realm = new ApplicationRealmId(remote.RealmHigh, remote.RealmLow);
+            var activation = new ContentActivationId(remote.ActivationHigh, remote.ActivationLow);
+            ContentHash baseHash = ToContent(remote.RequiredBaseCatalogFingerprint);
+            ContentHash advertisedPlanHash = ToContent(remote.PlanHash);
+            var packages = new ContentActivationPackage[remote.Packages.Count];
+            acquisitions = new ContentPackageAcquisition[remote.Packages.Count];
+            for (int index = 0; index < packages.Length; index++)
+            {
+                RemoteContentPackageRequirement package = remote.Packages[index];
+                if (!ContentPackageId.TryCreate(package.PackageId, out ContentPackageId packageId))
+                    return false;
+                ContentHash manifestHash = ToContent(package.ManifestHash);
+                packages[index] = new ContentActivationPackage(
+                    packageId, manifestHash, (ContentRequirementPolicy)package.Policy);
+                acquisitions[index] = new ContentPackageAcquisition(
+                    packageId, manifestHash,
+                    package.Sources.Select(static value => new ContentSourceDescriptor(
+                        (ContentSourceKind)value.Kind, value.Locator)));
+            }
+            if (!ContentActivationPlan.TryCreate(
+                    realm, activation, baseHash, packages, out plan, out _) ||
+                plan!.PlanHash != advertisedPlanHash)
+            {
+                plan = null;
+                acquisitions = [];
+                return false;
+            }
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            plan = null;
+            acquisitions = [];
+            return false;
+        }
+    }
 }
 
 /// <summary>
@@ -108,7 +160,7 @@ public static class RemoteContentAuthorizationProjection
 /// the exact immutable catalog publishes and its retained semantic proof crosses Control.
 /// </summary>
 public sealed class RemoteContentClient : IRemoteGameProtocolHandler, IRemoteGameProtocolProgressor,
-    IActorPresentationContentSource, IDisposable
+    IDisposable
 {
     private readonly NetworkProtocolPeer _peer;
     private readonly ulong _applicationSessionEpoch;
@@ -168,6 +220,19 @@ public sealed class RemoteContentClient : IRemoteGameProtocolHandler, IRemoteGam
         }
     }
 
+    public AuthorizedSemanticActivation SemanticActivation
+    {
+        get
+        {
+            EnsureOperational();
+            if (_state != RemoteContentClientState.Applied || _catalog is null)
+                return default;
+            return new AuthorizedSemanticActivation(
+                ContentScopeKey.ForRealm(_realm), _activation, _planHash,
+                _resolvedFingerprint, _applicationSessionEpoch);
+        }
+    }
+
     /// <summary>
     /// Resolves an exact passive UI definition from this application session's applied realm
     /// catalog. Possessing a blob outside that selected catalog is deliberately insufficient.
@@ -221,29 +286,6 @@ public sealed class RemoteContentClient : IRemoteGameProtocolHandler, IRemoteGam
         return ContentWorldPackResolver.TryResolve(
             _catalog, definitionId, expectedPackFingerprint, binding,
             out world, out result, limits);
-    }
-
-    /// <summary>
-    /// Resolves one bounded passive actor model/animation artifact from this session's exact
-    /// applied catalog. Native engine realization is deliberately not performed here.
-    /// </summary>
-    public bool TryResolveActorPresentation(
-        LogicalContentId definitionId,
-        ActorPresentationResolutionRequirements requirements,
-        out ActorPresentationContentLease? lease,
-        out ContentActorPresentationResolutionError error,
-        ActorPresentationArtifactLimits limits = default)
-    {
-        EnsureOperational();
-        lease = null;
-        error = ContentActorPresentationResolutionError.None;
-        if (_state != RemoteContentClientState.Applied || _catalog is null)
-        {
-            error = ContentActorPresentationResolutionError.InvalidRequest;
-            return false;
-        }
-        return ContentActorPresentationResolver.TryResolve(
-            _catalog, definitionId, requirements, out lease, out error, limits);
     }
 
     public bool TryProcess(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
@@ -305,7 +347,8 @@ public sealed class RemoteContentClient : IRemoteGameProtocolHandler, IRemoteGam
         if (!UltraSimGameProtocol.TryReadContentRequirement(payload, out RemoteContentRequirement remote) ||
             remote.ApplicationSessionEpoch != _applicationSessionEpoch ||
             remote.Authorization.RealmHigh != _realm.High || remote.Authorization.RealmLow != _realm.Low ||
-            !TryProject(remote.Authorization, out ContentActivationPlan? plan,
+            !RemoteContentAuthorizationProjection.TryProject(
+                remote.Authorization, out ContentActivationPlan? plan,
                 out ContentPackageAcquisition[] acquisitions))
         {
             SaturatingIncrement(ref _rejectedMessages);
@@ -403,53 +446,6 @@ public sealed class RemoteContentClient : IRemoteGameProtocolHandler, IRemoteGam
         _state = RemoteContentClientState.Applied;
         _detail = null;
         QueueProof(RemoteContentApplyStatus.Applied);
-    }
-
-    private bool TryProject(
-        RemoteContentAuthorization remote,
-        out ContentActivationPlan? plan,
-        out ContentPackageAcquisition[] acquisitions)
-    {
-        plan = null;
-        acquisitions = [];
-        try
-        {
-            var realm = new ApplicationRealmId(remote.RealmHigh, remote.RealmLow);
-            var activation = new ContentActivationId(remote.ActivationHigh, remote.ActivationLow);
-            ContentHash baseHash = RemoteContentAuthorizationProjection.ToContent(
-                remote.RequiredBaseCatalogFingerprint);
-            ContentHash advertisedPlanHash = RemoteContentAuthorizationProjection.ToContent(remote.PlanHash);
-            var packages = new ContentActivationPackage[remote.Packages.Count];
-            acquisitions = new ContentPackageAcquisition[remote.Packages.Count];
-            for (int index = 0; index < packages.Length; index++)
-            {
-                RemoteContentPackageRequirement package = remote.Packages[index];
-                if (!ContentPackageId.TryCreate(package.PackageId, out ContentPackageId packageId))
-                    return false;
-                ContentHash manifestHash = RemoteContentAuthorizationProjection.ToContent(package.ManifestHash);
-                packages[index] = new ContentActivationPackage(
-                    packageId, manifestHash, (ContentRequirementPolicy)package.Policy);
-                acquisitions[index] = new ContentPackageAcquisition(
-                    packageId, manifestHash,
-                    package.Sources.Select(static value => new ContentSourceDescriptor(
-                        (ContentSourceKind)value.Kind, value.Locator)));
-            }
-            if (!ContentActivationPlan.TryCreate(
-                    realm, activation, baseHash, packages, out plan, out _) ||
-                plan!.PlanHash != advertisedPlanHash)
-            {
-                plan = null;
-                acquisitions = [];
-                return false;
-            }
-            return true;
-        }
-        catch (ArgumentException)
-        {
-            plan = null;
-            acquisitions = [];
-            return false;
-        }
     }
 
     private void QueueProof(RemoteContentApplyStatus status)

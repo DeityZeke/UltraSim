@@ -176,7 +176,8 @@ public sealed class ConceptDemoHostedServerExtension : ILocalPlayableServerExten
                 ],
                 profile,
                 serverPerformanceProfile: performance,
-                firstParticipantId: 1);
+                firstParticipantId: 1,
+                presentationAuthorization: content.PresentationAuthorization);
             var shared = SharedUdpProtocolLimits.Default with
             {
                 MaximumSessions = _options.MaximumParticipants - 1,

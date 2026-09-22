@@ -64,7 +64,8 @@ using HostedUdpAdmissionHost host = CreateHost(
     ], clientProfile, performanceProfile,
     options.MaximumParticipants, options.AdmissionBurstPerAddress,
     options.PublicationPolicy, options.UnreliableFrameCap,
-    options.UnreliableAggregationScope);
+    options.UnreliableAggregationScope,
+    content.PresentationAuthorization);
 host.ConfigureTelemetry(options.TelemetryLevel);
 authority.ConfigureTelemetry(options.TelemetryLevel == NetworkTelemetryLevel.Off
     ? GameTelemetryLevel.Off
@@ -229,7 +230,8 @@ static HostedUdpAdmissionHost CreateHost(
     RemoteChunkPublicationPolicy publicationPolicy = default,
     int unreliableFrameCap = 1,
     NetworkUnreliableAggregationScope unreliableAggregationScope =
-        NetworkUnreliableAggregationScope.CrossLane)
+        NetworkUnreliableAggregationScope.CrossLane,
+    RemoteContentAuthorization? presentationAuthorization = null)
 {
     if (publicationPolicy == default)
         publicationPolicy = RemoteChunkPublicationPolicy.CurrentBundled;
@@ -242,7 +244,8 @@ static HostedUdpAdmissionHost CreateHost(
     var applications = new SharedRemoteGuestPlayableApplicationFactory(
         authority, realm, contentAuthorization, contentBackedUiDefinitions, clientProfile,
         serverPerformanceProfile: serverPerformanceProfile,
-        publicationPolicy: publicationPolicy);
+        publicationPolicy: publicationPolicy,
+        presentationAuthorization: presentationAuthorization);
     return new HostedUdpAdmissionHost(
         endpoint,
         identity,

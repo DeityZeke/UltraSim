@@ -206,3 +206,18 @@ public readonly record struct ContentSetAppliedProof(
     public bool IsValid => ApplicationSessionEpoch != 0 && Realm.IsValid && Activation.IsValid &&
         PlanHash.IsValid && ResolvedCatalogFingerprint.IsValid;
 }
+
+/// <summary>
+/// Exact semantic authorization applied for one client application lifetime. Presentation
+/// generations, renderer handles, and optional actor art are deliberately absent.
+/// </summary>
+public readonly record struct AuthorizedSemanticActivation(
+    ContentScopeKey Scope,
+    ContentActivationId Activation,
+    ContentHash PlanHash,
+    ContentHash ResolvedFingerprint,
+    ulong ApplicationSessionEpoch)
+{
+    public bool IsValid => Scope.IsValid && Activation.IsValid && PlanHash.IsValid &&
+        ResolvedFingerprint.IsValid && ApplicationSessionEpoch != 0;
+}

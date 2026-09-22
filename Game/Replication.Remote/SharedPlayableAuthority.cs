@@ -1465,6 +1465,7 @@ public sealed class SharedRemoteGuestPlayableApplicationFactory : IHostedUdpSess
     private readonly SharedPlayableAuthority _authority;
     private readonly ApplicationRealmId _realm;
     private readonly RemoteContentAuthorization? _contentAuthorization;
+    private readonly RemoteContentAuthorization? _presentationAuthorization;
     private readonly UiDefinitionIdentity[] _contentBackedUiDefinitions;
     private readonly UiDefinitionIdentity[] _standardUiDefinitions;
     private readonly RemoteClientProfileAdvertisement? _clientProfile;
@@ -1481,7 +1482,8 @@ public sealed class SharedRemoteGuestPlayableApplicationFactory : IHostedUdpSess
         IEnumerable<UiDefinitionIdentity>? standardUiDefinitions = null,
         RemoteServerPerformanceProfile? serverPerformanceProfile = null,
         RemoteChunkPublicationPolicy publicationPolicy = default,
-        ulong firstParticipantId = 1)
+        ulong firstParticipantId = 1,
+        RemoteContentAuthorization? presentationAuthorization = null)
     {
         _authority = authority ?? throw new ArgumentNullException(nameof(authority));
         if (!realm.IsValid) throw new ArgumentOutOfRangeException(nameof(realm));
@@ -1496,6 +1498,12 @@ public sealed class SharedRemoteGuestPlayableApplicationFactory : IHostedUdpSess
                 nameof(contentAuthorization));
         _realm = realm;
         _contentAuthorization = contentAuthorization;
+        if (presentationAuthorization is not null &&
+            (presentationAuthorization.RealmHigh != realm.High ||
+             presentationAuthorization.RealmLow != realm.Low))
+            throw new ArgumentException("Presentation authorization must belong to this realm.",
+                nameof(presentationAuthorization));
+        _presentationAuthorization = presentationAuthorization;
         _contentBackedUiDefinitions = CopyDefinitions(
             contentBackedUiDefinitions, nameof(contentBackedUiDefinitions));
         _standardUiDefinitions = CopyDefinitions(
@@ -1536,7 +1544,8 @@ public sealed class SharedRemoteGuestPlayableApplicationFactory : IHostedUdpSess
             _standardUiDefinitions,
             _authority,
             _serverPerformanceProfile,
-            _publicationPolicy);
+            _publicationPolicy,
+            _presentationAuthorization);
         try
         {
             _authority.RegisterRemoteApplication(application);

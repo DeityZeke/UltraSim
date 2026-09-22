@@ -341,7 +341,10 @@ Required semantic/structural content fails closed if absent or invalid.
 
 ## Concept Demo actor-art migration
 
-The current Concept Demo activation still marks the actor Add package and actor Replace package as `Required`. F1.2 must deliberately migrate that policy rather than relying on the renderer to catch missing art after admission.
+The pre-F1.2 Concept Demo activation marked actor Add and Replace packages as required. F1.2
+migrated them into a distinct Realm presentation authorization; the semantic activation retains
+the exact WorldPack and compiled Inventory/Server Monitor UI bootstrap package. The separate
+message-149 plan has its own plan/result identity and never participates in application proof.
 
 The migration must identify:
 
@@ -353,6 +356,11 @@ The migration must identify:
 - how an optional server presentation package can override `world.local` presentation when present without becoming required for world entry.
 
 The accepted end state must permit a remote Concept Demo session to enter with its required World/UI/semantic activation valid while actor high-quality art is absent, then realize the same disclosed actors through `world.local` or Primitive presentation according to the presentation resolver.
+
+The F1.2 acceptance exercises that split with actor acquisition blocked through admission,
+followed by Realm publication under a new presentation generation. Persistent `world.local`
+actor-package acceptance independently proves Realm → Local → Primitive resolution and lease
+retention. This is not F1.4 Official Local packaging; shipped local X/Y assets remain in place.
 
 Do not weaken content validation: an optional package that is present must still validate exactly before use.
 

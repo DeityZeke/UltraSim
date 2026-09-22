@@ -408,12 +408,19 @@ static void LocalShutdownMustContainUiCloseBackpressure()
 {
     string executable = Environment.ProcessPath ??
         throw new InvalidOperationException("The current test executable path is unavailable.");
-    using var process = Process.Start(new ProcessStartInfo(executable, "--ui-shutdown-backpressure-child")
+    var start = new ProcessStartInfo(executable)
     {
         RedirectStandardOutput = true,
         RedirectStandardError = true,
         UseShellExecute = false,
-    }) ?? throw new InvalidOperationException("The shutdown regression child did not start.");
+    };
+    // A framework-dependent test can run either via its apphost or via `dotnet <dll>`
+    // (including on noexec source mounts). Re-launch the same managed assembly in both cases.
+    if (Path.GetFileNameWithoutExtension(executable) == "dotnet")
+        start.ArgumentList.Add(System.Reflection.Assembly.GetEntryAssembly()!.Location);
+    start.ArgumentList.Add("--ui-shutdown-backpressure-child");
+    using var process = Process.Start(start) ??
+        throw new InvalidOperationException("The shutdown regression child did not start.");
     if (!process.WaitForExit(15_000))
     {
         process.Kill(entireProcessTree: true);

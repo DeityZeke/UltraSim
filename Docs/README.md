@@ -133,7 +133,9 @@ acceptance narratives remain available through git history.
   preserved 3D region/property seams, dynamic public chunk publication, bounded
   dirty history, client streaming, Godot batching, and the playable woods/cabin
   vertical.
-- [Mine / subterranean excavation plan](Plans/MINE.md) — Mine-first proof of deterministic world geology, connected underground opportunity planning, coarse incremental excavation, finite depletion, labor/hauling/output, bounded replanning, abandonment, and the future Mine-to-Dungeon handoff.\n- [Dungeon Core / Dungeon Lab plan](Plans/UltraSim_Dungeon_Lab_and_Dungeon_Core_Plan_FINAL.md) — persistent autonomous dungeon-organism architecture. Dungeon now follows the Mine spatial/excavation proof and becomes the harder second consumer that proves what subterranean machinery is actually generic.\n- [Concept Demo / live-test plan](Plans/CONCEPT_DEMO.md) — concrete future consumer
+- [Mine / subterranean excavation plan](Plans/MINE.md) — Mine-first proof of deterministic world geology, connected underground opportunity planning, coarse incremental excavation, finite depletion, labor/hauling/output, bounded replanning, abandonment, and the future Mine-to-Dungeon handoff.
+- [Dungeon Core / Dungeon Lab plan](Plans/Content/UltraSim_Dungeon_Lab_and_Dungeon_Core_Plan_FINAL.md) — persistent autonomous dungeon-organism architecture. Dungeon now follows the Mine spatial/excavation proof and becomes the harder second consumer that proves what subterranean machinery is actually generic.
+- [Concept Demo / live-test plan](Plans/CONCEPT_DEMO.md) — concrete future consumer
   for intentional surface absence, upper/lower terrain surfaces, cave and sky
   topology, far-distance AOI/residency transitions, and human-facing streaming
   evidence without redefining the owning Terrain/Physics contracts.
@@ -232,7 +234,9 @@ consumer/deployment need earns them.
   activation proof, CAS/cache, hosting/source, Default/Replace/Add, catalog/resource
   lifetime, Cabin parity, complete-WorldPack canary, Contentless Online, and deferred
   executable-extension boundary.
-- [Mine](Plans/MINE.md) is the planned first implementation consumer for subterranean spatial planning/excavation. It owns geology, prospecting/knowledge, finite depletion, labor/hauling/output, and persistent mine lifecycle while deliberately deferring generic extraction until Dungeon becomes the second consumer.\n- [Dungeon Core / Dungeon Lab](Plans/UltraSim_Dungeon_Lab_and_Dungeon_Core_Plan_FINAL.md) remains implementation-ready for the richer autonomous dungeon organism, but its spatial planning/build checkpoints now follow the Mine proof and must reuse/extract only the common invariants demonstrated by both consumers.\n- [Concept Demo](Plans/CONCEPT_DEMO.md) records the accepted cross-cutting Round 1
+- [Mine](Plans/MINE.md) is the planned first implementation consumer for subterranean spatial planning/excavation. It owns geology, prospecting/knowledge, finite depletion, labor/hauling/output, and persistent mine lifecycle while deliberately deferring generic extraction until Dungeon becomes the second consumer.
+- [Dungeon Core / Dungeon Lab](Plans/Content/UltraSim_Dungeon_Lab_and_Dungeon_Core_Plan_FINAL.md) remains implementation-ready for the richer autonomous dungeon organism, but its spatial planning/build checkpoints now follow the Mine proof and must reuse/extract only the common invariants demonstrated by both consumers.
+- [Concept Demo](Plans/CONCEPT_DEMO.md) records the accepted cross-cutting Round 1
   human demo/stress target and explicitly defers Combat damage/HP/death to Round 2;
   subsystem APIs remain owned by their respective plans.
 

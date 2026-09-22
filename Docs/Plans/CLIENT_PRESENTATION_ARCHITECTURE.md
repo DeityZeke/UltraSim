@@ -6,6 +6,15 @@
 
 **Implementation campaign:** [CLIENT_COMPLETION_PLAN.md](CLIENT_COMPLETION_PLAN.md) turns this architecture into the ordered F1.0-F1.12 pre-PF6 execution plan.
 
+**F1.2 implementation boundary:** the current Concept Demo now proves WorldPack and compiled
+Inventory/Server Monitor UI through one exact Realm semantic activation, while an independent
+authenticated message-149 plan authorizes X/Y actor art. Actor-art acquisition is non-gating.
+An engine-neutral, immutable `PresentationGeneration` selects compatible Realm art, then
+`world.local`, then renderer Primitive per logical actor ID. Its process-local generation fences
+late native work; its effective-selection fingerprint is stable content identity. User packs,
+general fallback descriptors, productized Official Local art, and derived caches remain later F1
+checkpoints.
+
 **Current sequencing:** PF0-PF5/PF5-R11 established the server, Network, content, and semantic-client foundations strongly enough that PF6 external human validation is ready. Before PF6, the client needs one architecture-completion/productization pass. The goal is not final art polish. The goal is a coherent dumb terminal whose content, UI, camera/control, fallback, and renderer boundaries match the architecture already proven underneath.
 
 ---

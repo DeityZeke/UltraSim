@@ -94,7 +94,10 @@ public readonly record struct RemotePlayableSessionSnapshot(
     RemotePublicPresentationMetadataClientSnapshot PublicPresentation,
     RemoteUiClientSnapshot Ui,
     RemoteStructuralWorldSnapshot StructuralWorld,
-    RemotePlayableSessionTimingSnapshot Timing);
+    RemotePlayableSessionTimingSnapshot Timing)
+{
+    public RemotePresentationClientSnapshot Presentation { get; init; }
+}
 
 /// <summary>
 /// One bounded engine-neutral remote client composition over an already authenticated Direct
@@ -112,6 +115,7 @@ public sealed class RemotePlayableSession : IDisposable
     private readonly RemoteGameProtocolComposition _protocol;
     private readonly RemoteUiClientBridge _ui;
     private readonly RemoteContentClient? _content;
+    private readonly RemotePresentationClient? _presentation;
     private readonly RemoteRequiredWorldBinding? _requiredWorld;
     private readonly ulong _applicationSessionEpoch;
     private readonly int _maximumPendingWorldProofs;
@@ -188,9 +192,14 @@ public sealed class RemotePlayableSession : IDisposable
         Performance = new RemoteServerPerformanceClient(peer, applicationSessionEpoch);
         Playable = new RemotePlayableClient(peer, applicationSessionEpoch);
         if (requiredContent is not null)
+        {
             _content = new RemoteContentClient(
                 peer, applicationSessionEpoch, requiredContent.Realm,
                 requiredContent.Cache, requiredContent.BaseCatalog, requiredContent.Source);
+            _presentation = new RemotePresentationClient(
+                applicationSessionEpoch, requiredContent.Realm, requiredContent.Cache,
+                requiredContent.Source, _content, requiredContent.LocalPresentationKey);
+        }
         ChatState = new ClientChatState(applicationSessionEpoch, chatLimits);
         Chat = new RemoteChatClient(peer, applicationSessionEpoch, ChatState);
         UiClient = new UiClientRuntime(uiRenderer, uiLimits);
@@ -208,6 +217,7 @@ public sealed class RemotePlayableSession : IDisposable
         _protocol = new RemoteGameProtocolComposition(7);
         _protocol.Add(Performance);
         if (_content is not null) _protocol.Add(_content);
+        if (_presentation is not null) _protocol.Add(_presentation);
         _protocol.Add(Playable);
         _protocol.Add(PublicPresentation);
         if (worldCache is not null)
@@ -256,6 +266,7 @@ public sealed class RemotePlayableSession : IDisposable
     public RemotePublicPresentationMetadataClient PublicPresentation { get; }
     public UiClientRuntime UiClient { get; }
     public RemoteContentClient? Content => _content;
+    public RemotePresentationClient? Presentation => _presentation;
 
     public bool TrySubmitGuest(in GameGuestAdmissionRequest request)
     {
@@ -295,6 +306,7 @@ public sealed class RemotePlayableSession : IDisposable
             {
                 claimed = Performance.TryProcess(in message, payload) ||
                     _content?.TryProcess(in message, payload) == true ||
+                    _presentation?.TryProcess(in message, payload) == true ||
                     Playable.TryProcess(in message, payload) ||
                     PublicPresentation.TryProcess(in message, payload);
             }
@@ -316,6 +328,7 @@ public sealed class RemotePlayableSession : IDisposable
         }
         _ = Performance.TryProgress();
         _ = _content?.TryProgress();
+        _ = _presentation?.TryProgress();
         _ = TryPublishRequiredWorld();
         _ = Playable.TryProgress();
         if (Playable.GetSnapshot().State == RemotePlayableClientState.Active)
@@ -338,7 +351,10 @@ public sealed class RemotePlayableSession : IDisposable
             PublicPresentation.GetSnapshot(),
             _ui.GetSnapshot(),
             _structuralWorld,
-            GetTimingSnapshot());
+            GetTimingSnapshot())
+        {
+            Presentation = _presentation?.GetSnapshot() ?? default,
+        };
     }
 
     public void ConfigureTelemetry(NetworkTelemetryLevel level)
@@ -386,6 +402,7 @@ public sealed class RemotePlayableSession : IDisposable
         if (_disposed) return;
         _disposed = true;
         _ui.Dispose();
+        _presentation?.Dispose();
         _content?.Dispose();
     }
 

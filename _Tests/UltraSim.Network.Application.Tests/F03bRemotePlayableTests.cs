@@ -7,6 +7,7 @@ using UltraSim.Client.Core;
 using UltraSim.Client.Network;
 using UltraSim.Client.StandardUi;
 using UltraSim.Game.Admission;
+using UltraSim.Game.Application;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Inspection;
 using UltraSim.Game.Input;
@@ -16,6 +17,7 @@ using UltraSim.Game.UI;
 using UltraSim.Game.World;
 using UltraSim.Network;
 using UltraSim.Server.Hosting;
+using UltraSim.Server.ConceptDemo;
 using UltraSim.UI;
 
 internal static class F03bRemotePlayableTests
@@ -26,10 +28,11 @@ internal static class F03bRemotePlayableTests
     internal const int A05TestCount = 1;
     internal const int A06TestCount = 2;
     internal const int A07TestCount = 2;
+    internal const int F12TestCount = 1;
     internal const int F04TestCount = 2;
     internal const int F05TestCount = 1;
     internal const int TestCount = F03bTestCount + A03TestCount + A04TestCount + A05TestCount +
-        A06TestCount + A07TestCount + F04TestCount + F05TestCount;
+        A06TestCount + A07TestCount + F04TestCount + F05TestCount + F12TestCount;
 
     internal static void RunAll()
     {
@@ -45,6 +48,8 @@ internal static class F03bRemotePlayableTests
             OneShotUiRequestSurvivesClientQueueBackpressure);
         Run("RequiredContentProtocolIsCanonicalAndBounded",
             RequiredContentProtocolIsCanonicalAndBounded);
+        Run("F12SemanticEntryPrecedesOptionalActorPresentation",
+            F12SemanticEntryPrecedesOptionalActorPresentation);
         Run("ColdCacheContentProofGatesAdmissionAndMatchesCabinOracle",
             ColdCacheContentProofGatesAdmissionAndMatchesCabinOracle);
         Run("ContentAcquisitionRunsOutsideProtocolPumpAndCancelsWithSession",
@@ -546,6 +551,24 @@ internal static class F03bRemotePlayableTests
         False(UltraSimGameProtocol.TryReadContentRequirement(
             bytes.AsSpan(0, written + 1), out _));
 
+        var presentation = new RemotePresentationAdvertisement(77, 1, authorization);
+        True(UltraSimGameProtocol.TryWritePresentationAdvertisement(
+            bytes, in presentation, out int presentationWritten));
+        True(UltraSimGameProtocol.TryReadPresentationAdvertisement(
+            bytes.AsSpan(0, presentationWritten), out RemotePresentationAdvertisement decodedPresentation));
+        Equal(77UL, decodedPresentation.ApplicationSessionEpoch);
+        Equal(authorization.PlanHash, decodedPresentation.Authorization.PlanHash);
+        Equal(authorization.ExpectedResolvedCatalogFingerprint,
+            decodedPresentation.Authorization.ExpectedResolvedCatalogFingerprint);
+        byte[] malformedPresentation = bytes.AsSpan(0, presentationWritten).ToArray();
+        malformedPresentation.AsSpan(presentationWritten -
+            UltraSimGameProtocol.PresentationExpectedResultBytes).Clear();
+        False(UltraSimGameProtocol.TryReadPresentationAdvertisement(
+            malformedPresentation, out _));
+        False(UltraSimGameProtocol.TryReadPresentationAdvertisement(
+            bytes.AsSpan(0, presentationWritten + 1), out _));
+        Equal(NetworkLane.Event, RemotePresentationAdvertisementHeaderCodec.Descriptor.Lane);
+
         False(UltraSimGameProtocol.IsValidContentApplied(default));
         RemoteContentHash plan = RemoteContentAuthorizationProjection.ToRemote(
             oracle.Replace.Plan.PlanHash);
@@ -572,7 +595,7 @@ internal static class F03bRemotePlayableTests
         True(UltraSimGameProtocol.IsValidContentApplied(in proof));
         Equal(NetworkLane.Event, RemoteContentRequirementHeaderCodec.Descriptor.Lane);
         Equal(NetworkLane.Control, RemoteContentSetAppliedMessageCodec.Descriptor.Lane);
-        Equal((ushort)30, UltraSimGameProtocol.Manifest.Version);
+        Equal((ushort)31, UltraSimGameProtocol.Manifest.Version);
 
         True(ContentActivationPlan.TryCreate(
             ContentScopeKey.Local, oracle.Replace.Plan.Activation,
@@ -589,6 +612,125 @@ internal static class F03bRemotePlayableTests
             localRejected = true;
         }
         True(localRejected);
+    }
+
+    private static void F12SemanticEntryPrecedesOptionalActorPresentation()
+    {
+        ApplicationRealmId realm = new(0xF12, 0x100);
+        using ConceptDemoContentDeployment deployment = ConceptDemoContentDeployment.Create(
+            realm, new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()));
+        Equal(1, deployment.Authorization.Packages.Count);
+        Equal(2, deployment.PresentationAuthorization.Packages.Count);
+        True(deployment.Snapshot.PlanHash != deployment.Snapshot.PresentationPlanHash);
+        using var http = new HttpContentPackageSource(
+            FixtureHttpLimits(deployment.Snapshot.ArchiveBytes, allowInsecureHttp: true));
+        using var source = new BlockedActorPackageSource(
+            http, deployment.Authorization.Packages[0].PackageId);
+        using var fixture = RemotePlayableFixture.CreateWithConceptDeployment(
+            realm, deployment, source);
+
+        fixture.DriveUntil(() => fixture.Content!.Applied &&
+            fixture.SessionSnapshot.StructuralWorld.State == RemoteStructuralWorldState.Ready);
+        AuthorizedSemanticActivation semanticBefore = fixture.Content!.SemanticActivation;
+        True(semanticBefore.IsValid);
+        Equal(deployment.Snapshot.PlanHash, semanticBefore.PlanHash);
+        Equal(deployment.Snapshot.CatalogFingerprint, semanticBefore.ResolvedFingerprint);
+        fixture.Admit("Presentation Optional", GameGuestBody.HumanFemale);
+        fixture.DriveUntil(() => source.ArtFetchStarted);
+        RemotePlayableSessionSnapshot before = fixture.SessionSnapshot;
+        True(before.RequiredContentApplied);
+        True(before.SemanticConsumersActive);
+        Equal(2, before.Presentation.Generation.PrimitiveSelections);
+        Equal(0, before.Presentation.Generation.RealmSelections);
+        fixture.DriveUntil(() => fixture.TryFindPublic(
+            GameWorldPublicPrefabIds.Character, out _));
+        True(fixture.Playable.TrySubmitCommand(new ClientWorldCommandIntent(
+            GameLocomotionUpdate.Stop, GamePlayerActions.None, true),
+            flags: RemotePlayableCommandFlags.OpenInventoryRequested));
+        fixture.DriveUntil(() => fixture.UiClient.OpenViewCount == 1);
+        True(fixture.Chat.TrySubmit("art is optional", ClientChatSpeechMode.Say));
+        fixture.DriveUntil(() => fixture.ChatState.GetSnapshot().Applied == 1);
+
+        source.ReleaseArt();
+        fixture.DriveUntil(() => fixture.SessionSnapshot.Presentation.Generation.RealmSelections == 2);
+        RemotePlayableSessionSnapshot after = fixture.SessionSnapshot;
+        Equal(semanticBefore, fixture.Content.SemanticActivation);
+        Equal(before.StructuralWorld.WorldPackFingerprint,
+            after.StructuralWorld.WorldPackFingerprint);
+        Equal(before.Playable.Participant, after.Playable.Participant);
+        True(before.Presentation.Generation.Generation !=
+            after.Presentation.Generation.Generation);
+        Equal(2, after.Presentation.Generation.RealmSelections);
+        using var unavailable = new BlockedActorPackageSource(
+            http, deployment.Authorization.Packages[0].PackageId, rejectArt: true);
+        using var noArt = RemotePlayableFixture.CreateWithConceptDeployment(
+            realm, deployment, unavailable);
+        noArt.DriveUntil(() => noArt.Content!.Applied &&
+            noArt.SessionSnapshot.StructuralWorld.State == RemoteStructuralWorldState.Ready);
+        noArt.Admit("No Actor Art", GameGuestBody.HumanMale);
+        noArt.DriveUntil(() => unavailable.ArtFetchStarted);
+        Equal(2, noArt.SessionSnapshot.Presentation.Generation.PrimitiveSelections);
+        Equal(semanticBefore.PlanHash, noArt.Content!.SemanticActivation.PlanHash);
+        Equal(semanticBefore.ResolvedFingerprint,
+            noArt.Content.SemanticActivation.ResolvedFingerprint);
+        True(semanticBefore.ApplicationSessionEpoch !=
+            noArt.Content.SemanticActivation.ApplicationSessionEpoch);
+        using var corruptSource = new BlockedActorPackageSource(
+            http, deployment.Authorization.Packages[0].PackageId, corruptArt: true);
+        using var corruptArt = RemotePlayableFixture.CreateWithConceptDeployment(
+            realm, deployment, corruptSource);
+        corruptArt.DriveUntil(() => corruptArt.Content!.Applied &&
+            corruptArt.SessionSnapshot.StructuralWorld.State == RemoteStructuralWorldState.Ready);
+        corruptArt.Admit("Corrupt Actor Art", GameGuestBody.HumanFemale);
+        corruptArt.DriveUntil(() => corruptSource.ArtFetchStarted &&
+            !corruptArt.SessionSnapshot.Presentation.Acquiring);
+        Equal(2, corruptArt.SessionSnapshot.Presentation.Generation.PrimitiveSelections);
+        Equal(semanticBefore.PlanHash, corruptArt.Content!.SemanticActivation.PlanHash);
+        Equal(semanticBefore.ResolvedFingerprint,
+            corruptArt.Content.SemanticActivation.ResolvedFingerprint);
+        using var localFallbackSource = new BlockedActorPackageSource(
+            http, deployment.Authorization.Packages[0].PackageId, rejectArt: true);
+        using var withLocal = RemotePlayableFixture.CreateWithConceptDeployment(
+            realm, deployment, localFallbackSource, installLocalPresentation: true);
+        withLocal.DriveUntil(() => withLocal.Content!.Applied &&
+            withLocal.SessionSnapshot.StructuralWorld.State == RemoteStructuralWorldState.Ready);
+        withLocal.Admit("Local Actor Art", GameGuestBody.HumanFemale);
+        withLocal.DriveUntil(() => localFallbackSource.ArtFetchStarted);
+        Equal(2, withLocal.SessionSnapshot.Presentation.Generation.LocalSelections);
+        Equal(0, withLocal.SessionSnapshot.Presentation.Generation.RealmSelections);
+        Equal(semanticBefore.PlanHash, withLocal.Content!.SemanticActivation.PlanHash);
+        Equal(semanticBefore.ResolvedFingerprint,
+            withLocal.Content.SemanticActivation.ResolvedFingerprint);
+        True(before.Presentation.Generation.Generation !=
+            withLocal.SessionSnapshot.Presentation.Generation.Generation);
+
+        using var staleSource = new BlockedActorPackageSource(
+            http, deployment.Authorization.Packages[0].PackageId);
+        using var stale = RemotePlayableFixture.CreateWithConceptDeployment(
+            realm, deployment, staleSource);
+        stale.DriveUntil(() => stale.Content!.Applied &&
+            stale.SessionSnapshot.StructuralWorld.State == RemoteStructuralWorldState.Ready);
+        stale.Admit("Stale Art", GameGuestBody.HumanFemale);
+        stale.DriveUntil(() => staleSource.ArtFetchStarted);
+        PresentationGenerationId preReset =
+            stale.SessionSnapshot.Presentation.Generation.Generation;
+        stale.Presentation!.ResetToLocalFallback();
+        staleSource.ReleaseArt();
+        stale.DriveUntil(() => !stale.SessionSnapshot.Presentation.Acquiring);
+        Equal(2, stale.SessionSnapshot.Presentation.Generation.PrimitiveSelections);
+        True(stale.SessionSnapshot.Presentation.Generation.Generation != preReset);
+        Equal(semanticBefore.PlanHash, stale.Content!.SemanticActivation.PlanHash);
+        Console.WriteLine(
+            $"EVIDENCE F1.2 semantic_plan={semanticBefore.PlanHash} " +
+            $"semantic_catalog={semanticBefore.ResolvedFingerprint} " +
+            $"presentation_plan={deployment.Snapshot.PresentationPlanHash} " +
+            $"primitive_generation={before.Presentation.Generation.Generation.Value} " +
+            $"realm_generation={after.Presentation.Generation.Generation.Value} " +
+            $"semantic_payload_bytes={fixture.Content.GetSnapshot().Acquisition.BytesFetched} " +
+            $"actor_payload_bytes={after.Presentation.Acquisition.BytesFetched} " +
+            $"actor_source_bytes={deployment.Snapshot.ActorPresentationBytes} " +
+            "unavailable_art_semantic_entry=pass corrupt_art_fallback=pass " +
+            "local_fallback=pass stale_cancel=pass");
     }
 
     private static void ColdCacheContentProofGatesAdmissionAndMatchesCabinOracle()
@@ -1619,6 +1761,71 @@ internal static class F03bRemotePlayableTests
         }
     }
 
+    private sealed class BlockedActorPackageSource : IContentPackageSource, IDisposable
+    {
+        private readonly HttpContentPackageSource _http;
+        private readonly string _semanticPackage;
+        private readonly ManualResetEventSlim _artStarted = new(false);
+        private readonly ManualResetEventSlim _artRelease = new(false);
+
+        private readonly bool _rejectArt;
+        private readonly bool _corruptArt;
+
+        internal BlockedActorPackageSource(
+            HttpContentPackageSource http, string semanticPackage,
+            bool rejectArt = false, bool corruptArt = false)
+        {
+            if (rejectArt && corruptArt) throw new ArgumentException("Choose one art fault.");
+            _http = http;
+            _semanticPackage = semanticPackage;
+            _rejectArt = rejectArt;
+            _corruptArt = corruptArt;
+        }
+
+        internal bool ArtFetchStarted => _artStarted.IsSet;
+        internal void ReleaseArt() => _artRelease.Set();
+        public bool CanFetch(ContentSourceKind kind) => _http.CanFetch(kind);
+
+        public bool TryFetch(in ContentPackageFetchRequest request,
+            out FetchedContentPackage? package, out ContentSourceFetchError error) =>
+            TryFetch(in request, CancellationToken.None, out package, out error);
+
+        public bool TryFetch(in ContentPackageFetchRequest request,
+            CancellationToken cancellationToken,
+            out FetchedContentPackage? package, out ContentSourceFetchError error)
+        {
+            if (request.PackageId.Value != _semanticPackage)
+            {
+                _artStarted.Set();
+                if (_rejectArt)
+                {
+                    package = null;
+                    error = ContentSourceFetchError.Unavailable;
+                    return false;
+                }
+                if (!_corruptArt) _artRelease.Wait(cancellationToken);
+            }
+            if (!_http.TryFetch(in request, cancellationToken, out package, out error))
+                return false;
+            if (_corruptArt && request.PackageId.Value != _semanticPackage)
+            {
+                ContentFilePayload[] payloads = package!.Payloads.ToArray();
+                byte[] bytes = payloads[0].Bytes.ToArray();
+                bytes[^1] ^= 0x80;
+                payloads[0] = new ContentFilePayload(payloads[0].Path, bytes);
+                package = new FetchedContentPackage(package.Manifest, payloads);
+            }
+            return true;
+        }
+
+        public void Dispose()
+        {
+            _artRelease.Set();
+            _artStarted.Dispose();
+            _artRelease.Dispose();
+        }
+    }
+
     private sealed class CancellableBlockingSource : IContentPackageSource
     {
         private readonly CabinContentOracle _oracle;
@@ -1736,6 +1943,7 @@ internal static class F03bRemotePlayableTests
             _session.PublicPresentationState;
         internal UiClientRuntime UiClient => _session.UiClient;
         internal RemoteContentClient? Content => _session.Content;
+        internal RemotePresentationClient? Presentation => _session.Presentation;
         internal ClientDirectConnectState DirectState => _direct.State;
         internal ContentCache? ContentStore => _contentCache;
         internal ClientWorldSemanticCache Cache => _session.WorldCache;
@@ -1750,6 +1958,60 @@ internal static class F03bRemotePlayableTests
                 standardUiDefinitions:
                     [UiDefinitionIdentity.From(InventoryUi.Definition)],
                 standardUiDefinitionResolver: ClientStandardUiLibrary.Resolve);
+
+        internal static RemotePlayableFixture CreateWithConceptDeployment(
+            ApplicationRealmId realm,
+            ConceptDemoContentDeployment deployment,
+            IContentPackageSource source,
+            bool installLocalPresentation = false)
+        {
+            string root = TemporaryDirectory("ultrasim-f12-cache");
+            if (!ContentCache.TryOpen(root, out ContentCache? cache, out ContentCacheError error))
+                throw new InvalidOperationException($"The F1.2 cache could not open: {error}.");
+            try
+            {
+                ContentScopeActivationKey? localKey = null;
+                if (installLocalPresentation)
+                {
+                    True(RemoteContentAuthorizationProjection.TryProject(
+                        deployment.PresentationAuthorization,
+                        out ContentActivationPlan? realmPresentation,
+                        out ContentPackageAcquisition[] actorSources));
+                    True(ContentActivationPlan.TryCreate(
+                        ContentScopeKey.Local,
+                        new ContentActivationId(0xF12, 0x4),
+                        ContentBaseCatalog.Empty.Fingerprint,
+                        realmPresentation!.Packages,
+                        out ContentActivationPlan? localPlan, out _));
+                    using var localHttp = new HttpContentPackageSource(
+                        FixtureHttpLimits(deployment.Snapshot.ArchiveBytes,
+                            allowInsecureHttp: true));
+                    True(ContentActivationAcquirer.TryAcquireAndPublish(
+                        cache!, ContentBaseCatalog.Empty, localPlan!, actorSources,
+                        localHttp, persistentlyPinned: false,
+                        out ContentCatalogLease? localCatalog,
+                        out ContentActivationAcquisitionResult result));
+                    localCatalog!.Dispose();
+                    localKey = new ContentScopeActivationKey(
+                        localPlan!.ScopeActivation, localPlan.PlanHash);
+                }
+                var binding = new RemoteRequiredContentBinding(
+                    realm, cache!, ContentBaseCatalog.Empty, source, localKey);
+                return CreateCore(realm, deployment.Authorization, binding,
+                    cache, root, preserveContentRoot: false,
+                    contentBackedUiDefinitions:
+                    [UiDefinitionIdentity.From(InventoryUi.Definition),
+                     UiDefinitionIdentity.From(ServerMonitorUi.Definition)],
+                    requiredWorld: RemoteConceptDemoWorldProfile.CreateRequiredBinding(),
+                    presentationAuthorization: deployment.PresentationAuthorization);
+            }
+            catch
+            {
+                cache!.Dispose();
+                if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+                throw;
+            }
+        }
 
         internal static RemotePlayableFixture CreateWithContent(
             CabinContentOracle oracle,
@@ -1864,7 +2126,8 @@ internal static class F03bRemotePlayableTests
             IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null,
             RemoteRequiredWorldBinding? requiredWorld = null,
             IEnumerable<UiDefinitionIdentity>? standardUiDefinitions = null,
-            Func<UiDefinitionCacheKey, CompiledUiDefinition?>? standardUiDefinitionResolver = null)
+            Func<UiDefinitionCacheKey, CompiledUiDefinition?>? standardUiDefinitionResolver = null,
+            RemoteContentAuthorization? presentationAuthorization = null)
         {
             string trustDirectory = Path.Combine(Path.GetTempPath(),
                 $"ultrasim-f03b-{Environment.ProcessId}-{Guid.NewGuid():N}");
@@ -1882,7 +2145,8 @@ internal static class F03bRemotePlayableTests
                     Owners,
                     new RemoteGuestPlayableApplicationFactory(
                         realm, contentAuthorization, contentBackedUiDefinitions,
-                        standardUiDefinitions: standardUiDefinitions),
+                        standardUiDefinitions: standardUiDefinitions,
+                        presentationAuthorization: presentationAuthorization),
                     UltraSimGameProtocol.Manifest);
                 try
                 {

@@ -3673,7 +3673,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             !wire.GetProperty("physicalTransportReconciled").GetBoolean() ||
             !wire.GetProperty("logicalMessageReconciled").GetBoolean() ||
             wire.GetProperty("lanes").GetArrayLength() != 7 ||
-            wire.GetProperty("families").GetArrayLength() != 12 ||
+            wire.GetProperty("families").GetArrayLength() != 13 ||
             bot.GetProperty("lifetimeHttpBody").GetProperty("archiveBodyBytes").GetInt64() == 0 ||
             measuredPump.GetProperty("samples").GetUInt64() == 0 ||
             bot.GetProperty("faultedBots").GetInt32() != 0 ||
@@ -3708,7 +3708,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             accounting.GetProperty("ListenerUdpPayload").GetProperty("PayloadBytesSent").GetUInt64() == 0 ||
             accounting.GetProperty("ListenerUdpPayload").GetProperty("PayloadBytesReceived").GetUInt64() == 0 ||
             accounting.GetProperty("Lanes").GetArrayLength() != 7 ||
-            accounting.GetProperty("Families").GetArrayLength() != 12)
+            accounting.GetProperty("Families").GetArrayLength() != 13)
             throw new InvalidOperationException(
                 "The dedicated authority did not reconcile ordinary bot/native PF2 traffic.");
         if (expectedBotCheckpoint is "PF4D" or "PF4E" or "PF4F" or "PF5" &&
@@ -5162,15 +5162,19 @@ static string RunCaptured(
     IEnumerable<string> arguments,
     int timeoutMilliseconds)
 {
-    var start = new ProcessStartInfo(executable)
+    // A source checkout may reside on a noexec mount. Bash can still interpret the exact
+    // tracked script; this changes only process launching, not the verification gate.
+    bool shellScript = executable.EndsWith(".sh", StringComparison.Ordinal);
+    var start = new ProcessStartInfo(shellScript ? "bash" : executable)
     {
         WorkingDirectory = root,
         UseShellExecute = false,
         RedirectStandardOutput = true,
         RedirectStandardError = true,
     };
+    if (shellScript) start.ArgumentList.Add(executable);
     foreach (string argument in arguments) start.ArgumentList.Add(argument);
-    Console.WriteLine($"> {executable} {string.Join(' ', start.ArgumentList.Select(Quote))}");
+    Console.WriteLine($"> {start.FileName} {string.Join(' ', start.ArgumentList.Select(Quote))}");
     using Process process = Process.Start(start) ??
         throw new InvalidOperationException($"Unable to start '{executable}'.");
     Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
@@ -5845,7 +5849,9 @@ static void Run(
     IEnumerable<string> arguments,
     IReadOnlyDictionary<string, string>? environment = null)
 {
-    var start = new ProcessStartInfo(executable)
+    // Execute the same tracked script through Bash when the checkout is mounted noexec.
+    bool shellScript = executable.EndsWith(".sh", StringComparison.Ordinal);
+    var start = new ProcessStartInfo(shellScript ? "bash" : executable)
     {
         WorkingDirectory = root,
         UseShellExecute = false,
@@ -5853,8 +5859,9 @@ static void Run(
     if (environment is not null)
         foreach ((string key, string value) in environment)
             start.Environment[key] = value;
+    if (shellScript) start.ArgumentList.Add(executable);
     foreach (string argument in arguments) start.ArgumentList.Add(argument);
-    Console.WriteLine($"> {executable} {string.Join(' ', start.ArgumentList.Select(Quote))}");
+    Console.WriteLine($"> {start.FileName} {string.Join(' ', start.ArgumentList.Select(Quote))}");
     using Process process = Process.Start(start) ?? throw new InvalidOperationException($"Unable to start '{executable}'.");
     process.WaitForExit();
     if (process.ExitCode != 0)

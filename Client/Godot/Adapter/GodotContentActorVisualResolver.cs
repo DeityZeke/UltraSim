@@ -32,7 +32,11 @@ public readonly record struct GodotContentActorResourceDiagnostics(
     ContentHash OwnerManifest,
     ContentHash FileHash,
     ContentCatalogGenerationId CatalogGeneration,
-    ActorPresentationArtifactInfo Artifact);
+    ActorPresentationArtifactInfo Artifact)
+{
+    public PresentationGenerationId PresentationGeneration { get; init; }
+    public PresentationSourceKind Source { get; init; }
+}
 
 /// <summary>
 /// Lazy engine-thread cache which turns exact applied-catalog actor bytes into inert Godot scene
@@ -42,6 +46,7 @@ public sealed class GodotContentActorVisualResolver : IGodotActorVisualResolver,
 {
     private readonly IActorPresentationContentSource _source;
     private readonly ResourceEntry?[] _entries = new ResourceEntry?[4];
+    private readonly List<ResourceEntry> _retired = new(4);
     private readonly ActorPresentationResolutionRequirements _requirements;
     private readonly int _ownerThreadId = System.Environment.CurrentManagedThreadId;
     private ulong _attempts;
@@ -62,6 +67,14 @@ public sealed class GodotContentActorVisualResolver : IGodotActorVisualResolver,
         if (!TryDefinitionId(definition.VisualKind, out LogicalContentId id)) return null;
         int slot = (int)definition.VisualKind;
         ResourceEntry? entry = _entries[slot];
+        if (_source is IActorPresentationGenerationSource generations &&
+            entry is not null &&
+            entry.Lease.PresentationGeneration != generations.CurrentPresentationGeneration)
+        {
+            _retired.Add(entry);
+            _entries[slot] = null;
+            entry = null;
+        }
         if (entry is null)
         {
             SaturatingIncrement(ref _attempts);
@@ -120,8 +133,20 @@ public sealed class GodotContentActorVisualResolver : IGodotActorVisualResolver,
         ActorPresentationContentLease lease = entry.Lease;
         diagnostics = new GodotContentActorResourceDiagnostics(
             lease.DefinitionId, lease.OwnerPackage, lease.OwnerManifest, lease.FileHash,
-            lease.CatalogGeneration, lease.Info);
+            lease.CatalogGeneration, lease.Info)
+        {
+            PresentationGeneration = lease.PresentationGeneration,
+            Source = lease.PresentationSource,
+        };
         return true;
+    }
+
+    /// <summary>Call after actor visuals have been replaced/freed for a new generation.</summary>
+    public void ReleaseRetiredResources()
+    {
+        EnsureOperational();
+        foreach (ResourceEntry entry in _retired) FreeEntry(entry);
+        _retired.Clear();
     }
 
     public GodotContentActorVisualResolverSnapshot GetSnapshot()
@@ -148,10 +173,17 @@ public sealed class GodotContentActorVisualResolver : IGodotActorVisualResolver,
         {
             ResourceEntry? entry = _entries[index];
             if (entry is null) continue;
-            if (GodotObject.IsInstanceValid(entry.Template)) entry.Template.Free();
-            entry.Lease.Dispose();
+            FreeEntry(entry);
             _entries[index] = null;
         }
+        foreach (ResourceEntry entry in _retired) FreeEntry(entry);
+        _retired.Clear();
+    }
+
+    private static void FreeEntry(ResourceEntry entry)
+    {
+        if (GodotObject.IsInstanceValid(entry.Template)) entry.Template.Free();
+        entry.Lease.Dispose();
     }
 
     private static bool TryRealize(

@@ -172,6 +172,7 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
     private const int MaximumHotOpenUiDefinitions = 256;
     private readonly ApplicationRealmId _realm;
     private readonly RemoteContentAuthorization? _contentAuthorization;
+    private readonly RemoteContentAuthorization? _presentationAuthorization;
     private readonly UiDefinitionIdentity[] _contentBackedUiDefinitions;
     private readonly UiDefinitionIdentity[] _standardUiDefinitions;
     private readonly RemoteClientProfileAdvertisement? _clientProfile;
@@ -186,7 +187,8 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
         RemoteClientProfileAdvertisement? clientProfile = null,
         IEnumerable<UiDefinitionIdentity>? standardUiDefinitions = null,
         RemoteServerPerformanceProfile? serverPerformanceProfile = null,
-        RemoteChunkPublicationPolicy publicationPolicy = default)
+        RemoteChunkPublicationPolicy publicationPolicy = default,
+        RemoteContentAuthorization? presentationAuthorization = null)
     {
         if (!realm.IsValid) throw new ArgumentOutOfRangeException(nameof(realm));
         if (contentAuthorization is not null &&
@@ -197,6 +199,12 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
                 nameof(contentAuthorization));
         _realm = realm;
         _contentAuthorization = contentAuthorization;
+        if (presentationAuthorization is not null &&
+            (presentationAuthorization.RealmHigh != realm.High ||
+             presentationAuthorization.RealmLow != realm.Low))
+            throw new ArgumentException("Presentation authorization must belong to this realm.",
+                nameof(presentationAuthorization));
+        _presentationAuthorization = presentationAuthorization;
         _contentBackedUiDefinitions = CopyUiDefinitions(
             contentBackedUiDefinitions, nameof(contentBackedUiDefinitions));
         _standardUiDefinitions = CopyUiDefinitions(
@@ -226,7 +234,8 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
             peer, _realm, new ParticipantId(checked((ulong)value)), CreateEpoch(),
             _contentAuthorization, _contentBackedUiDefinitions, _clientProfile,
             _standardUiDefinitions, serverPerformanceProfile: _serverPerformanceProfile,
-            publicationPolicy: _publicationPolicy);
+            publicationPolicy: _publicationPolicy,
+            presentationAuthorization: _presentationAuthorization);
     }
 
     private static ulong CreateEpoch()
@@ -291,6 +300,7 @@ public sealed class RemoteGuestPlayableApplication :
         OwnerCapture> _captureOwnerStateOperation;
     private readonly ApplicationRealmId _realm;
     private readonly RemoteContentAuthorization? _contentAuthorization;
+    private readonly RemoteContentAuthorization? _presentationAuthorization;
     private readonly UiDefinitionIdentity[] _contentBackedUiDefinitions;
     private readonly UiDefinitionIdentity[] _standardUiDefinitions;
     private readonly RemoteClientProfileAdvertisement? _clientProfile;
@@ -319,6 +329,7 @@ public sealed class RemoteGuestPlayableApplication :
     private bool _contentApplied;
     private long _lastContentRequirementQueue;
     private ulong _contentRequirementsQueued;
+    private bool _presentationAdvertisementQueued;
     private ulong _duplicateContentProofs;
     private ulong _rejectedContentProofs;
     private ulong _rejectedPreContentMessages;
@@ -480,7 +491,8 @@ public sealed class RemoteGuestPlayableApplication :
         IEnumerable<UiDefinitionIdentity>? standardUiDefinitions = null,
         SharedPlayableAuthority? sharedAuthority = null,
         RemoteServerPerformanceProfile? serverPerformanceProfile = null,
-        RemoteChunkPublicationPolicy publicationPolicy = default)
+        RemoteChunkPublicationPolicy publicationPolicy = default,
+        RemoteContentAuthorization? presentationAuthorization = null)
     {
         _peer = peer ?? throw new ArgumentNullException(nameof(peer));
         _capturePublicWorldDriveOperation = CapturePublicWorldDrive;
@@ -497,6 +509,12 @@ public sealed class RemoteGuestPlayableApplication :
             throw new ArgumentException("The required content authorization is invalid.",
                 nameof(contentAuthorization));
         _contentAuthorization = contentAuthorization;
+        if (presentationAuthorization is not null &&
+            (presentationAuthorization.RealmHigh != realm.High ||
+             presentationAuthorization.RealmLow != realm.Low))
+            throw new ArgumentException("Presentation authorization must belong to this realm.",
+                nameof(presentationAuthorization));
+        _presentationAuthorization = presentationAuthorization;
         _sharedAuthority = sharedAuthority;
         if (sharedAuthority is not null)
         {
@@ -661,6 +679,9 @@ public sealed class RemoteGuestPlayableApplication :
             complete &= QueueContentRequirement(force: false);
             return complete;
         }
+        // Presentation authorization is independent of the required-content proof and guest
+        // admission. A temporarily unavailable art package cannot prevent world entry.
+        complete &= QueuePresentationAdvertisement();
         if (_admissionAttempt != 0 && !_admissionResultApplied)
             complete &= QueueAdmissionResult(force: false);
         if (!_guestAdmitted || !_admissionResultApplied || _applicationFaulted)
@@ -962,6 +983,21 @@ public sealed class RemoteGuestPlayableApplication :
             return false;
         _lastContentRequirementQueue = now;
         SaturatingIncrement(ref _contentRequirementsQueued);
+        return true;
+    }
+
+    private bool QueuePresentationAdvertisement()
+    {
+        if (_presentationAdvertisementQueued || _presentationAuthorization is null) return true;
+        var advertisement = new RemotePresentationAdvertisement(
+            _applicationSessionEpoch, 1, _presentationAuthorization);
+        if (!UltraSimGameProtocol.TryWritePresentationAdvertisement(
+                _messageScratch, in advertisement, out int written))
+            throw new InvalidOperationException("The retained presentation advertisement became invalid.");
+        if (_peer.TryQueue(RemotePresentationAdvertisementHeaderCodec.Descriptor.Id,
+                _messageScratch.AsSpan(0, written)) != NetworkQueueStatus.Accepted)
+            return false;
+        _presentationAdvertisementQueued = true;
         return true;
     }
 

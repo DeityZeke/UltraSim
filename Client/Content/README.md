@@ -48,6 +48,23 @@ acquisition outside the protocol/UI owner while still joining the operation befo
 shared source/cache lifetime. Catalog publication remains immutable and application proof remains
 an owner/session concern above this component.
 
+## F1.2 semantic activation and presentation generations
+
+`AuthorizedSemanticActivation` identifies exact scope, activation, plan, resolved semantic
+fingerprint, and application epoch. It does not contain actor-art packages. Concept Demo requires
+the WorldPack and compiled Inventory/Server Monitor UI from its bootstrap package; absence still
+fails the application proof. Its actor Add/Replace packages instead form a distinct Realm
+presentation plan. Authenticated Game message 149 advertises that plan and its exact expected
+resolved fingerprint, but never enters the required-content proof or guest-admission gate.
+
+`PresentationGeneration` resolves the two current humanoid logical IDs once per publication with
+Realm → `world.local` → Primitive precedence. It validates selected GLBs against the same passive
+and skeleton/Idle-Walk-Jump rules, holds the selected catalog/blob leases, and gives native
+consumers reference-counted leases. The monotonic generation ID fences live asynchronous/native
+work; the effective-selection SHA-256 fingerprint is stable across process runs and excludes that
+counter. Primitive is still renderer code, not an authorized package. This is deliberately the
+narrow F1.2 actor substrate, not F1.3's general fallback model or F1.4's productized Local art.
+
 ## A0.0 formats and operations
 
 The current passive manifest permits only:

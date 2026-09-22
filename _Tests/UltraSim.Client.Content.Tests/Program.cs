@@ -41,6 +41,7 @@ var tests = new (string Name, Action Body)[]
     ("UiDefinitionArtifactResolvesOnlyThroughAppliedRealmCatalog", UiDefinitionArtifactResolvesOnlyThroughAppliedRealmCatalog),
     ("WorldPackResolvesThroughAppliedCatalogAndWorldBinding", WorldPackResolvesThroughAppliedCatalogAndWorldBinding),
     ("ActorPresentationGlbIsBoundedPassiveAndCatalogResolved", ActorPresentationGlbIsBoundedPassiveAndCatalogResolved),
+    ("PresentationGenerationSelectsRealmLocalPrimitiveAndRetainsOldLeases", PresentationGenerationSelectsRealmLocalPrimitiveAndRetainsOldLeases),
 };
 
 foreach ((string name, Action body) in tests)
@@ -477,6 +478,138 @@ static void ActorPresentationGlbIsBoundedPassiveAndCatalogResolved()
     {
         if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
     }
+}
+
+static void PresentationGenerationSelectsRealmLocalPrimitiveAndRetainsOldLeases()
+{
+    byte[] x = Embedded("UltraSim.TestAssets.ActorX.glb");
+    byte[] y = Embedded("UltraSim.TestAssets.ActorY.glb");
+    PackageFixture localX = ActorPackage(
+        "local.actor.x", "actors", ContentTrustClass.ServerAuthorizedPassive,
+        ConceptDemoActorPresentationProfile.HumanXDefinitionId,
+        ContentDefinitionOperation.Add, "actors/local-x.glb", x);
+    PackageFixture localY = ActorPackage(
+        "local.actor.y", "actors", ContentTrustClass.ServerAuthorizedPassive,
+        ConceptDemoActorPresentationProfile.HumanYDefinitionId,
+        ContentDefinitionOperation.Add, "actors/local-y.glb", y);
+    PackageFixture realmX = ActorPackage(
+        "realm.actor.x", "actors", ContentTrustClass.ServerAuthorizedPassive,
+        ConceptDemoActorPresentationProfile.HumanXDefinitionId,
+        ContentDefinitionOperation.Add, "actors/realm-x.glb", x);
+    PackageFixture incompatibleRealmX = CreateSingleTexturePackage(
+        "realm.fake-actor-x", "actors", ConceptDemoActorPresentationProfile.HumanXDefinitionId,
+        ContentDefinitionOperation.Add, "textures/fake-x.png", 0x7A);
+    ApplicationRealmId realm = new(0xF12, 1);
+    ContentActivationPlan localPlan = ScopePlan(
+        ContentScopeKey.Local, new ContentActivationId(0xF12, 2),
+        ContentBaseCatalog.Empty.Fingerprint,
+        [Required(localX.Manifest), Required(localY.Manifest)]);
+    ContentActivationPlan realmPlan = ScopePlan(
+        ContentScopeKey.ForRealm(realm), new ContentActivationId(0xF12, 3),
+        ContentBaseCatalog.Empty.Fingerprint, [Required(realmX.Manifest)]);
+    ContentActivationPlan incompatiblePlan = ScopePlan(
+        ContentScopeKey.ForRealm(realm), new ContentActivationId(0xF12, 5),
+        ContentBaseCatalog.Empty.Fingerprint, [Required(incompatibleRealmX.Manifest)]);
+    LogicalContentId xId = Logical(ConceptDemoActorPresentationProfile.HumanXDefinitionId);
+    LogicalContentId yId = Logical(ConceptDemoActorPresentationProfile.HumanYDefinitionId);
+    ContentHash stableLocalFingerprint = default;
+    PresentationGenerationId originalLocalGeneration = default;
+
+    WithCacheRoot(root =>
+    {
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out var openError), openError.ToString());
+        using (cache)
+        {
+            foreach (PackageFixture package in new[] { localX, localY })
+                True(cache!.TryInstallPackage(ContentScopeKey.Local,
+                    package.Manifest, package.Payloads, out _, out var error), error.ToString());
+            True(cache!.TryInstallPackage(ContentScopeKey.ForRealm(realm),
+                realmX.Manifest, realmX.Payloads, out _, out var realmError), realmError.ToString());
+            True(cache.TryInstallPackage(ContentScopeKey.ForRealm(realm),
+                incompatibleRealmX.Manifest, incompatibleRealmX.Payloads,
+                out _, out var incompatibleInstall), incompatibleInstall.ToString());
+            True(cache.TryPublishCatalog(ContentBaseCatalog.Empty, localPlan, false,
+                out ContentCatalogLease? localCatalog, out var localError), localError.ToString());
+            True(cache.TryPublishCatalog(ContentBaseCatalog.Empty, realmPlan, false,
+                out ContentCatalogLease? realmCatalog, out var publishError), publishError.ToString());
+
+            using PresentationGeneration primitive = PresentationGeneration.Create(null, null);
+            Equal(PresentationSourceKind.Primitive, primitive.GetSource(xId));
+            Equal(2, primitive.Snapshot.PrimitiveSelections);
+            using PresentationGeneration local = PresentationGeneration.Create(null, localCatalog);
+            stableLocalFingerprint = local.StableFingerprint;
+            originalLocalGeneration = local.Generation;
+            Equal(PresentationSourceKind.Local, local.GetSource(xId));
+            Equal(PresentationSourceKind.Local, local.GetSource(yId));
+            True(cache.TryOpenCatalog(ContentBaseCatalog.Empty,
+                new ContentScopeActivationKey(localPlan.ScopeActivation, localPlan.PlanHash),
+                out ContentCatalogLease? sameLocal, out var sameLocalOpen), sameLocalOpen.ToString());
+            using PresentationGeneration localAgain = PresentationGeneration.Create(null, sameLocal);
+            Equal(local.StableFingerprint, localAgain.StableFingerprint);
+            NotEqual(local.Generation, localAgain.Generation);
+            using PresentationGeneration mixed = PresentationGeneration.Create(realmCatalog, null);
+            Equal(PresentationSourceKind.Realm, mixed.GetSource(xId));
+            Equal(PresentationSourceKind.Primitive, mixed.GetSource(yId));
+
+            True(cache.TryPublishCatalog(ContentBaseCatalog.Empty, incompatiblePlan, false,
+                out ContentCatalogLease? incompatibleCatalog,
+                out var incompatiblePublish), incompatiblePublish.ToString());
+            True(cache.TryOpenCatalog(ContentBaseCatalog.Empty,
+                new ContentScopeActivationKey(localPlan.ScopeActivation, localPlan.PlanHash),
+                out ContentCatalogLease? fallbackLocal, out var fallbackOpen), fallbackOpen.ToString());
+            using PresentationGeneration incompatible = PresentationGeneration.Create(
+                incompatibleCatalog, fallbackLocal);
+            Equal(PresentationSourceKind.Local, incompatible.GetSource(xId));
+
+            var localKey = new ContentScopeActivationKey(localPlan.ScopeActivation, localPlan.PlanHash);
+            True(cache.TryOpenCatalog(ContentBaseCatalog.Empty, localKey,
+                out ContentCatalogLease? secondLocal, out var reopenError), reopenError.ToString());
+            PresentationGeneration layered = PresentationGeneration.Create(
+                OpenRealmAgain(cache, realmPlan), secondLocal);
+            Equal(PresentationSourceKind.Realm, layered.GetSource(xId));
+            Equal(PresentationSourceKind.Local, layered.GetSource(yId));
+            NotEqual(local.StableFingerprint, layered.StableFingerprint);
+            NotEqual(local.Generation, layered.Generation);
+            True(layered.TryResolveActorPresentation(
+                xId, ConceptDemoActorPresentationProfile.Requirements,
+                out ActorPresentationContentLease? retained, out var resolution),
+                resolution.ToString());
+            Equal(PresentationSourceKind.Realm, retained!.PresentationSource);
+            Equal(layered.Generation, retained.PresentationGeneration);
+            True(retained.Bytes.Span.SequenceEqual(x));
+            layered.Dispose();
+            True(cache.GetSnapshot().LiveBlobPins > 0);
+            retained.Dispose();
+            local.Dispose();
+            localAgain.Dispose();
+            mixed.Dispose();
+            incompatible.Dispose();
+            primitive.Dispose();
+            Equal(0, cache.GetSnapshot().LiveBlobPins);
+            Equal(0, cache.GetSnapshot().LiveCatalogPins);
+        }
+        True(ContentCache.TryOpen(root, out ContentCache? reopened,
+            out var reopenCacheError), reopenCacheError.ToString());
+        using (reopened)
+        {
+            True(reopened!.TryOpenCatalog(ContentBaseCatalog.Empty,
+                new ContentScopeActivationKey(localPlan.ScopeActivation, localPlan.PlanHash),
+                out ContentCatalogLease? persistedLocal,
+                out var persistedOpenError), persistedOpenError.ToString());
+            using PresentationGeneration persisted = PresentationGeneration.Create(
+                null, persistedLocal);
+            Equal(stableLocalFingerprint, persisted.StableFingerprint);
+            NotEqual(originalLocalGeneration, persisted.Generation);
+        }
+    });
+}
+
+static ContentCatalogLease OpenRealmAgain(ContentCache cache, ContentActivationPlan plan)
+{
+    var key = new ContentScopeActivationKey(plan.ScopeActivation, plan.PlanHash);
+    True(cache.TryOpenCatalog(ContentBaseCatalog.Empty, key,
+        out ContentCatalogLease? catalog, out var error), error.ToString());
+    return catalog!;
 }
 
 static void ActivationIdentityPreservesAuthorityOrderNotByteSource()

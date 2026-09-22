@@ -125,6 +125,7 @@ internal static class Program
             $"{F03bRemotePlayableTests.A07TestCount} A0.7 content/World plus " +
             $"{F03bRemotePlayableTests.F04TestCount} F0.4 actor-presentation plus " +
             $"{F03bRemotePlayableTests.F05TestCount} F0.5 compiled-UI convergence plus " +
+            $"{F03bRemotePlayableTests.F12TestCount} F1.2 semantic/presentation separation plus " +
             $"{F03cClientProfileTests.TestCount} F0.3c client-profile and " +
             $"{M00SharedAuthorityTests.TestCount} M0.0 shared-authority tests passed.");
         if (args.Contains("--benchmark-n09", StringComparer.Ordinal))
@@ -180,7 +181,7 @@ static void GameTrafficClassificationCoversEveryProductionMessage()
     True(seen.All(static value => value));
     False(GameProtocolTrafficClassification.TryClassify(
         new NetworkMessageId(ushort.MaxValue), out _));
-    Equal(49, UltraSimGameProtocol.Manifest.Count);
+    Equal(50, UltraSimGameProtocol.Manifest.Count);
 }
 
 static void RemoteWorkflowMatchesOfflineDirect()

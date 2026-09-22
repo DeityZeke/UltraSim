@@ -194,7 +194,7 @@ public partial class T010PlayableWorldAcceptance : Node3D
                     $"The actor-content native catalog could not publish: {publishError}.");
                 using (catalogLease)
                 {
-                    var source = new SwitchableActorContentSource(catalogLease!);
+                    using var source = new SwitchableActorContentSource(catalogLease!);
                     using var visuals = new GodotContentActorVisualResolver(source);
                     ClientActorDefinitionCatalog definitions = ClientActorDefinitionCatalog.ConceptDemo;
                     Expect(definitions.TryGet(
@@ -233,7 +233,7 @@ public partial class T010PlayableWorldAcceptance : Node3D
                         "The primitive actor's retained presentation state was not established.");
                     presenter.UpdateOriginAndLifetimes(position, 1_200);
 
-                    source.Enabled = true;
+                    source.PublishRealm();
                     int replacements = presenter.RefreshResolvedVisuals();
                     GodotContentActorVisualResolverSnapshot resourceSnapshot = visuals.GetSnapshot();
                     Expect(replacements == 1,
@@ -267,6 +267,8 @@ public partial class T010PlayableWorldAcceptance : Node3D
                             out GodotContentActorResourceDiagnostics resource) &&
                         resource.OwnerPackage == fixture.Manifest.PackageId &&
                         resource.CatalogGeneration == catalogLease!.Catalog.Generation &&
+                        resource.PresentationGeneration == source.CurrentPresentationGeneration &&
+                        resource.Source == PresentationSourceKind.Realm &&
                         resource.Artifact.Bones == 65 &&
                         resource.Artifact.SemanticClips.HasFlag(
                             ActorPresentationSemanticClips.RequiredV1),
@@ -1278,14 +1280,23 @@ public partial class T010PlayableWorldAcceptance : Node3D
             };
     }
 
-    private sealed class SwitchableActorContentSource : IActorPresentationContentSource
+    private sealed class SwitchableActorContentSource : IActorPresentationGenerationSource, IDisposable
     {
         private readonly ContentCatalogLease _catalog;
+        private PresentationGeneration _generation = PresentationGeneration.Create(null, null);
 
         internal SwitchableActorContentSource(ContentCatalogLease catalog) =>
             _catalog = catalog;
 
-        internal bool Enabled { get; set; }
+        public PresentationGenerationId CurrentPresentationGeneration =>
+            _generation.CurrentPresentationGeneration;
+
+        internal void PublishRealm()
+        {
+            PresentationGeneration previous = _generation;
+            _generation = PresentationGeneration.Create(_catalog, null);
+            previous.Dispose();
+        }
 
         public bool TryResolveActorPresentation(
             LogicalContentId definitionId,
@@ -1294,13 +1305,11 @@ public partial class T010PlayableWorldAcceptance : Node3D
             out ContentActorPresentationResolutionError error,
             ActorPresentationArtifactLimits limits = default)
         {
-            if (Enabled)
-                return ContentActorPresentationResolver.TryResolve(
-                    _catalog, definitionId, requirements, out lease, out error, limits);
-            lease = null;
-            error = ContentActorPresentationResolutionError.DefinitionNotFound;
-            return false;
+            return _generation.TryResolveActorPresentation(
+                definitionId, requirements, out lease, out error, limits);
         }
+
+        public void Dispose() => _generation.Dispose();
     }
 
     private sealed record ActorContentFixture(
