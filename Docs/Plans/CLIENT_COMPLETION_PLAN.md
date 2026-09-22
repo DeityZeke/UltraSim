@@ -1,6 +1,6 @@
 # UltraSim Client Completion Plan
 
-**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0 and F1.1 are CLOSED; F1.2 is NEXT / PLANNED.**
+**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0, F1.1, and F1.2 are CLOSED; F1.3 is NEXT / PLANNED.**
 
 **Parent architecture:** [CLIENT_PRESENTATION_ARCHITECTURE.md](CLIENT_PRESENTATION_ARCHITECTURE.md)
 
@@ -82,8 +82,8 @@ This campaign continues the completed F0 reconstruction/proof line as **F1 Clien
 ~~~text
 F1.0  Baseline and guardrails
 F1.1  Unified content scopes and stores (CLOSED)
-F1.2  Semantic activation vs presentation resolution (NEXT / PLANNED)
-F1.3  Primitive substrate and fallback contract
+F1.2  Semantic activation vs presentation resolution (CLOSED)
+F1.3  Primitive substrate and fallback contract (NEXT / PLANNED)
 F1.4  Official Local content productization
 F1.5  User presentation overrides and content generations
 F1.6  Derived resources / atlas pipeline
@@ -431,6 +431,23 @@ Missing animation remains presentation-only and never determines authoritative a
 - removing required WorldPack/structural data prevents entry;
 - user visual override changes presentation generation/derived resources without changing semantic activation identity;
 - primitive fallback never causes an invalid package to be treated as successfully applied.
+
+## F1.2 closure evidence
+
+F1.2 closed on implementation commits `682b5f7b` and `d61fea95`, with the immutable
+2026-09-22 baseline under `_Benchmarks/Baselines/`. The accepted remote semantic activation
+contains only the required WorldPack and compiled Inventory/Server Monitor UI bootstrap.
+Authenticated Game message 149 advertises the separate, non-gating Realm actor presentation
+plan. The latter retains the existing Add-Y/Replace-X order internally; its GLBs do not enter
+the semantic plan hash or application proof.
+
+The bounded engine-neutral generation resolves the current X/Y logical actor IDs through
+Realm, then `world.local`, then Primitive. Local and Realm content still use the F1.1 store;
+Primitive remains outside it. Native visual replacement preserves the actor root and retained
+semantic presentation state. The full Release/export and F0.7 mixed lifecycle gates passed on
+the tested implementation. Shipped Local X/Y art remains packaged as before: Official Local
+asset productization, user packs, and broad primitive contracts are F1.4/F1.5/F1.3 work,
+respectively, not F1.2 closure claims.
 
 ---
 
