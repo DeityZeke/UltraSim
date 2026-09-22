@@ -1,0 +1,190 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "F1.5",
+  "capturedUtcDate": "2026-09-22",
+  "status": "accepted",
+  "lineage": {
+    "startingHead": "ff2f2cbfae1e721926de4b1eba0e7834b48402fb",
+    "implementationCommits": [
+      "ac8d3601e010bc44d5775c84e72cd2b4f79ca60f"
+    ],
+    "testedImplementationCommit": "ac8d3601e010bc44d5775c84e72cd2b4f79ca60f",
+    "finalHeadDisposition": "the evidence-owning closure commit; reported by the final handoff because a Git commit cannot self-embed its own hash",
+    "gameAuthoritySemanticsChanged": false,
+    "remoteApplicationProofChanged": false,
+    "remoteUserPackProtocolAdded": false,
+    "gameManifestVersion": 31,
+    "networkTransportRevision": 2,
+    "f1_6OrLaterImplemented": false
+  },
+  "environment": {
+    "configuration": "Release; maintained Godot editor-host gates also build matching Debug assemblies",
+    "os": "CachyOS Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "physicalCores": 8,
+    "logicalProcessors": 16,
+    "dotnetSdk": "8.0.131",
+    "dotnetRuntime": "8.0.31",
+    "godot": "4.7.1.stable.mono.official.a13da4feb"
+  },
+  "identityAndStorage": {
+    "identity": "UserResourcePackIdentity(ContentPackageId, ManifestHash)",
+    "isContentScope": false,
+    "isApplicationRealm": false,
+    "manifestLayout": "resource-packs/manifests/<manifest-hash>.manifest",
+    "selectionLayout": "resource-packs/selection/enabled.selection",
+    "payloadStore": "global blobs/sha256 CAS",
+    "selectionMaximum": 16,
+    "selectionOrder": "low-to-high priority; last compatible replacement wins",
+    "implicitDiscoveryOrEnable": false,
+    "installSource": "explicit rooted local archive only",
+    "serverCanInstallOrEnable": false,
+    "warmReopen": "pass",
+    "corruptSelectionFailsClosed": true,
+    "missingSelectedManifestFailsClosed": true,
+    "missingSelectedBlobFailsClosed": true
+  },
+  "policy": {
+    "trustClass": "UserResourcePack",
+    "canonicalNumericValue": 3,
+    "minimumFiles": 1,
+    "maximumFiles": 16,
+    "minimumDefinitions": 1,
+    "maximumDefinitions": 16,
+    "allowedDefinitionKinds": ["ActorPresentation"],
+    "allowedOperations": ["Replace"],
+    "allowedFileKinds": ["ActorGltfBinary"],
+    "maximumActorArtifactBytes": 33554432,
+    "maximumPackBytes": 134217728,
+    "actorCompatibility": "passive GLB inspection, exact 65-bone skeleton compatibility, required Idle/Walk/Jump clips",
+    "allFilesMustBeReferenced": true,
+    "forbidden": [
+      "Add",
+      "Texture",
+      "Icon",
+      "WorldPack",
+      "UiDefinition/schema/actions",
+      "executable content",
+      "external GLB dependencies",
+      "oversized artifacts",
+      "incompatible actor skeletons or clips"
+    ]
+  },
+  "exactPackIdentities": {
+    "packA_v1": "user.overlay@e985d8f39deca7392259031b86324ba6cfcc8ebc14d0bd7e646197a9573e35fd",
+    "packB": "user.overlay.second@f2abe020bed3de0b4729ae5dbcb2cf115672c3a41ff27043ef83deee2c387130",
+    "packA_v2": "user.overlay@974961bfaea04df6e7e177c9040d77c14434f26aa54eb0eb4516ced362636025",
+    "remoteProofPack": "user.remote-proof-x@a7e621133486decb76148352732e1d1c9e22dd55f3eeb64230926c5b65729cc4"
+  },
+  "presentationGeneration": {
+    "precedence": ["User", "Realm", "world.local", "Primitive"],
+    "overlayMutatesLowerCatalog": false,
+    "stableFingerprintUsesEffectiveLogicalSelection": true,
+    "fingerprintExcludesPathsGenerationAndIneffectivePacks": true,
+    "missingTarget": "no-op",
+    "incompatiblePresentTarget": "reject complete candidate and retain current generation",
+    "enableDisableReorderPublishImmutableCandidate": true,
+    "oldGenerationRetainsCatalogPackAndBlobLeases": true,
+    "asyncRealmCompletionUsesCurrentUserSelection": true,
+    "existingEpochAndRevisionFencesPreserved": true
+  },
+  "acceptanceMatrix": {
+    "A_localNoUser": "pass: accepted F1.4 behavior",
+    "B_localUserX": "pass: User X plus world.local Y",
+    "C_localOfficialAbsent": "pass: User X plus Primitive Y; semantic world identical",
+    "D_remoteRealmPresent": "pass: User X plus Realm Y",
+    "E_disable": "pass: Realm/Local returns without semantic reset",
+    "F_orderedConflict": "pass: highest pack wins and reorder is deterministic",
+    "G_incompatible": "pass: candidate rejected and current generation retained",
+    "H_immutableUpdate": "pass: v1 and v2 have distinct manifests/hashes; old lease remains valid",
+    "I_liveUninstall": "pass: busy while selected/live; retires after disable and release",
+    "J_restart": "pass: exact stack reopens from CAS",
+    "K_casReuse": "pass: same X hash across User, Local and Realm stored once",
+    "L_forbidden": "pass: WorldPack/UI/Texture/Add/unsafe input rejected",
+    "M_texture": "deferred: no existing common PresentationGeneration consumer owns a standalone logical texture/material leaf"
+  },
+  "nativeActorOverride": {
+    "artifact": "objectively distinct red-tinted compatible X GLB",
+    "userOverRealm": "pass",
+    "actorRootInstancePreserved": true,
+    "actorLocalAnimatedEquipmentAndOverheadStatePreserved": true,
+    "exactUserProvenanceReported": true,
+    "disableRestoredExactRealmFile": true,
+    "evidence": "user_hot_replace=true user_disable_restore=true"
+  },
+  "lifecycle": {
+    "enabledPackRetirement": "CacheBusy",
+    "liveLeasedPackRetirement": "CacheBusy",
+    "retireAfterDisableAndLeaseRelease": "pass",
+    "metadataRetirementDeletesSharedBlobImmediately": false,
+    "cacheEvictionRemainsReachabilityAndLeaseAware": true,
+    "f0_7MixedLifecycle": "pass",
+    "transientSessionResidue": "none",
+    "persistentPackMetadataDistinguishedFromLiveLeases": true
+  },
+  "casDedup": {
+    "scopesAndOwnerClasses": ["User", "world.local", "Realm"],
+    "sameXPayloadPhysicallyStoredOnce": true,
+    "authorizationMetadataSeparate": true,
+    "blobPossessionGrantsScopeOrUserAuthorization": false
+  },
+  "semanticInvariance": {
+    "remoteSemanticPlan": "e20924faa9e12645f713db43544eccd15adf00a5f77afe729046bdb90e612fa1",
+    "remoteSemanticCatalog": "82781a0fed8a1d3ac43f4aeac3ce4c44d0ebb2de44d56295dccc7fd1b790ed69",
+    "applicationEpochUnchanged": true,
+    "authoritativeWorldUnchanged": true,
+    "participantUnchanged": true,
+    "inventoryChatUiAuthorityUnchanged": true,
+    "networkManifestUnchanged": true,
+    "transportRevisionUnchanged": true
+  },
+  "f1_4Comparison": {
+    "baseline": "_Benchmarks/Baselines/client-f1.4-official-local-content-2026-09-22.json",
+    "expectedChanges": [
+      "resource-pack manifests and explicit persisted selection",
+      "selection validity/revision and User diagnostics",
+      "pack/blob leases",
+      "effective presentation fingerprint and native actor resource identity while enabled"
+    ],
+    "semanticActivationAndProofEquivalent": true,
+    "gameOutcomesEquivalent": true,
+    "worldAndPrimitiveSubstrateEquivalent": true,
+    "editionCapabilityClosureEquivalent": true,
+    "contentlessOnlineRemainsContentless": true,
+    "f0_7RetirementEquivalent": true
+  },
+  "textureDisposition": {
+    "implemented": false,
+    "supportClaimed": false,
+    "reason": "current Cabin material/texture leaves are renderer-constructed rather than common PresentationGeneration logical consumers",
+    "nextSeam": "F1.6 world-renderer/derived-resource identity; no atlas or derived cache was started"
+  },
+  "verification": {
+    "architectureOnly": "pass",
+    "clientContent": "35/35 pass",
+    "networkApplication": "full suite pass including F1.5 semantic-invariance control",
+    "nativeT010": "pass: hot User-over-Realm replacement and exact disable restore",
+    "canonicalRelease": "one uninterrupted final run passed at testedImplementationCommit with PASS repository verification",
+    "physicalExports": "SinglePlayer/Online/Complete pass",
+    "officialInstalledAbsentRestored": "pass",
+    "contentlessOnlineColdWarmProfile": "pass",
+    "nativeAndBotImpairment": "pass",
+    "f0_7MixedLifecycle": "pass",
+    "gitDiffCheck": "pass",
+    "nonAuthoritativePriorAttempts": [
+      "one development Network Application run hit unrelated timing-sensitive shared-authority convergence; isolated three-test and later full-suite runs passed",
+      "Godot 4.7.0 canonical attempt stopped because matching export templates were absent",
+      "one 4.7.1 canonical attempt hit the unrelated HTTP shutdown stress race; exact hosting suite immediately passed 23/23",
+      "one 4.7.1 canonical attempt hit a transient editor shutdown abort; exact editor command immediately passed"
+    ]
+  },
+  "deferred": [
+    "F1.6 logical texture/material presentation leaves and renderer-derived resource identity/cache",
+    "atlases and texture arrays",
+    "package-manager UI and automatic directory scanning",
+    "server-controlled user packs",
+    "Gameplay Frame and UI/window work",
+    "camera and prediction/reconciliation work",
+    "RenderingServer rewrite, actor batching and vegetation"
+  ]
+}
