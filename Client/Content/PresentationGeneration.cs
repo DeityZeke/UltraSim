@@ -160,6 +160,18 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
                 error = ContentActorPresentationResolutionError.SkeletonProfileMismatch;
                 return false;
             }
+            // Publication used the normal bounded profile. A consumer may request a stricter
+            // profile; the cached inspection cannot certify every per-string bound, so validate
+            // that uncommon request against the same exact bytes before lending the generation.
+            ActorPresentationArtifactLimits resolvedLimits =
+                ActorPresentationArtifactLimits.Resolve(limits);
+            if (resolvedLimits != ActorPresentationArtifactLimits.Default &&
+                !ActorPresentationArtifact.TryInspect(
+                    actor.Lease.Bytes.Span, out _, out _, resolvedLimits))
+            {
+                error = ContentActorPresentationResolutionError.InvalidArtifact;
+                return false;
+            }
             Interlocked.Increment(ref _references);
             lease = actor.Lease.WithLifetime(new GenerationReference(this), Generation, actor.Source);
             error = ContentActorPresentationResolutionError.None;

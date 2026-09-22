@@ -577,6 +577,12 @@ static void PresentationGenerationSelectsRealmLocalPrimitiveAndRetainsOldLeases(
             Equal(PresentationSourceKind.Realm, retained!.PresentationSource);
             Equal(layered.Generation, retained.PresentationGeneration);
             True(retained.Bytes.Span.SequenceEqual(x));
+            False(layered.TryResolveActorPresentation(
+                xId, ConceptDemoActorPresentationProfile.Requirements,
+                out ActorPresentationContentLease? tooLarge, out var limitError,
+                ActorPresentationArtifactLimits.Default with { MaximumArtifactBytes = x.Length - 1 }));
+            True(tooLarge is null);
+            Equal(ContentActorPresentationResolutionError.InvalidArtifact, limitError);
             layered.Dispose();
             True(cache.GetSnapshot().LiveBlobPins > 0);
             retained.Dispose();
