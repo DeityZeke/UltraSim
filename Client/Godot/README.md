@@ -266,6 +266,16 @@ Complete export that package beside the executable; Online remains contentless. 
 binary accepts `--official-content-absent`/`--official-content-root=...`; the maintained
 `--f1-4-official-smoke=installed|absent` proves both native realization paths and clean retirement.
 
+F1.5 adds a programmatic user-pack selection seam to both Local and Remote product clients. The
+client content store detects exact enabled-order revisions, prepares an immutable candidate
+generation, and asks `GodotActorPresenter` to replace only the actor visual child after successful
+validation. The native acceptance keeps the same actor root, identity, selected/controlled state,
+nameplate, overhead label, equipment, and action state while switching Realm/Local art to a visibly
+distinct User GLB and back. Invalid candidates retain the current generation. User pack state and
+CAS bytes may persist across sessions; native resources and generation/blob leases retire at the
+existing session boundary. There is no pack browser/UI or texture/material override yet, and no
+F1.6 derived-resource/atlas work is present.
+
 `--d0-5-smoke` crosses the real Single Player button and Admission form. It proves rejected input
 does not start authority, then enters with a trimmed Unicode name and the Y body and checks the
 authoritative guest identity, selected public character prefab, controlled nameplate, and spatial

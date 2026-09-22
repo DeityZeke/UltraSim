@@ -20,6 +20,10 @@ public sealed class ContentCache : IDisposable
     private readonly string _scopesRoot;
     private readonly string _localScopeRoot;
     private readonly string _realmsRoot;
+    private readonly string _resourcePacksRoot;
+    private readonly string _resourcePackManifestsRoot;
+    private readonly string _resourcePackSelectionRoot;
+    private readonly string _resourcePackSelectionPath;
     private readonly string _accessRoot;
     private readonly string _stagingRoot;
     private readonly FileStream _writerLock;
@@ -27,7 +31,11 @@ public sealed class ContentCache : IDisposable
     private readonly ContentLimits _contentLimits;
     private readonly Dictionary<ContentHash, int> _liveBlobPins = [];
     private readonly Dictionary<ContentCacheManifestKey, int> _liveManifestPins = [];
+    private readonly Dictionary<UserResourcePackIdentity, int> _liveUserResourcePackPins = [];
     private int _liveCatalogLeases;
+    private int _liveUserResourcePackLeases;
+    private ulong _userResourcePackSelectionRevision = 1;
+    private bool _userResourcePackSelectionValid = true;
     private bool _disposed;
     private long _lastAccessTicks;
     private ulong _installs;
@@ -52,6 +60,10 @@ public sealed class ContentCache : IDisposable
         _scopesRoot = Path.Combine(root, "scopes");
         _localScopeRoot = Path.Combine(_scopesRoot, "local");
         _realmsRoot = Path.Combine(root, "realms");
+        _resourcePacksRoot = Path.Combine(root, "resource-packs");
+        _resourcePackManifestsRoot = Path.Combine(_resourcePacksRoot, "manifests");
+        _resourcePackSelectionRoot = Path.Combine(_resourcePacksRoot, "selection");
+        _resourcePackSelectionPath = Path.Combine(_resourcePackSelectionRoot, "enabled.selection");
         _accessRoot = Path.Combine(root, "metadata", "access");
         _stagingRoot = Path.Combine(root, "staging");
     }
@@ -84,9 +96,16 @@ public sealed class ContentCache : IDisposable
             string scopes = Path.Combine(root, "scopes");
             string local = Path.Combine(scopes, "local");
             string realms = Path.Combine(root, "realms");
+            string resourcePacks = Path.Combine(root, "resource-packs");
+            string resourcePackManifests = Path.Combine(resourcePacks, "manifests");
+            string resourcePackSelection = Path.Combine(resourcePacks, "selection");
             string access = Path.Combine(root, "metadata", "access");
             string staging = Path.Combine(root, "staging");
-            foreach (string directory in new[] { blobs, scopes, local, realms, access, staging })
+            foreach (string directory in new[]
+                     {
+                         blobs, scopes, local, realms, resourcePacks, resourcePackManifests,
+                         resourcePackSelection, access, staging,
+                     })
             {
                 Directory.CreateDirectory(directory);
                 if (IsReparsePoint(directory))
@@ -356,6 +375,160 @@ public sealed class ContentCache : IDisposable
             return TryOpenPackageCore(scope, packageId, manifestHash, out package, out error);
     }
 
+    /// <summary>
+    /// Explicitly installs one strict user-owned presentation overlay. The manifest is authorized
+    /// only in the resource-pack namespace; its immutable blobs are shared with the global CAS.
+    /// </summary>
+    public bool TryInstallUserResourcePack(
+        ContentPackageManifest manifest,
+        IEnumerable<ContentFilePayload>? payloads,
+        out InstalledUserResourcePack installed,
+        out ContentCacheError error)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+        installed = default;
+        if (!TryCopyPayloads(payloads, manifest.Files.Count, out ContentFilePayload[] copy) ||
+            !ContentPackageValidator.TryValidatePayloads(manifest, copy, out _, out _))
+            return Fail(ContentCacheError.PayloadValidationFailed, out error);
+        lock (_sync)
+        {
+            if (_disposed) return Fail(ContentCacheError.InvalidRequest, out error);
+            if (manifest.TrustClass != ContentTrustClass.UserResourcePack)
+                return Fail(ContentCacheError.UnsupportedTrustClass, out error);
+            var identity = new UserResourcePackIdentity(manifest.PackageId, manifest.ManifestHash);
+            string path = GetUserResourcePackManifestPath(manifest.ManifestHash);
+            if (!TryInstallManifestCore(
+                    manifest, copy, path, _liveUserResourcePackPins.ContainsKey(identity),
+                    out int blobs, out long bytes, out error))
+                return false;
+            installed = new InstalledUserResourcePack(identity, blobs, bytes);
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Persists the exact low-to-high priority user selection. Only already installed exact
+    /// package/manifest identities are accepted; discovery never enables a pack implicitly.
+    /// </summary>
+    public bool TrySetEnabledUserResourcePacks(
+        IEnumerable<UserResourcePackIdentity>? identities,
+        out ContentCacheError error)
+    {
+        if (!ContentBoundedCopy.TryCopy(identities, 16, out UserResourcePackIdentity[] copy) ||
+            copy.Any(static value => !value.IsValid) || copy.Distinct().Count() != copy.Length ||
+            copy.Select(static value => value.PackageId).Distinct().Count() != copy.Length)
+            return Fail(ContentCacheError.InvalidRequest, out error);
+        lock (_sync)
+        {
+            if (_disposed) return Fail(ContentCacheError.InvalidRequest, out error);
+            foreach (UserResourcePackIdentity identity in copy)
+                if (!TryReadUserResourcePackManifest(identity, out _, out error)) return false;
+            try
+            {
+                byte[] encoded = UserResourcePackSelectionCodec.Encode(copy);
+                if (File.Exists(_resourcePackSelectionPath) &&
+                    TryReadUserResourcePackSelection(out UserResourcePackIdentity[] existing) &&
+                    existing.AsSpan().SequenceEqual(copy))
+                {
+                    _userResourcePackSelectionValid = true;
+                    error = ContentCacheError.None;
+                    return true;
+                }
+                if (!TryWriteAtomic(
+                        _resourcePackSelectionPath, encoded, overwrite: true, out error))
+                    return false;
+                _userResourcePackSelectionValid = true;
+                if (_userResourcePackSelectionRevision != ulong.MaxValue)
+                    _userResourcePackSelectionRevision++;
+                return true;
+            }
+            catch (Exception exception) when (IsStorageException(exception))
+            {
+                return Fail(ContentCacheError.IoFailure, out error);
+            }
+        }
+    }
+
+    /// <summary>Opens and pins the exact persisted user selection without mutating it.</summary>
+    public bool TryOpenEnabledUserResourcePacks(
+        out UserResourcePackStackLease? lease,
+        out ContentCacheError error)
+    {
+        lock (_sync)
+        {
+            lease = null;
+            if (_disposed) return Fail(ContentCacheError.InvalidRequest, out error);
+            if (!_userResourcePackSelectionValid ||
+                !TryReadUserResourcePackSelection(out UserResourcePackIdentity[] identities))
+            {
+                _userResourcePackSelectionValid = false;
+                return Fail(ContentCacheError.CorruptResourcePackSelection, out error);
+            }
+            if (identities.Length == 0)
+            {
+                error = ContentCacheError.None;
+                return true;
+            }
+            var manifests = new ContentPackageManifest[identities.Length];
+            var blobs = new HashSet<ContentHash>();
+            for (int index = 0; index < identities.Length; index++)
+            {
+                if (!TryReadUserResourcePackManifest(identities[index], out manifests[index], out error))
+                    return false;
+                foreach (ContentFileDescriptor file in manifests[index].Files)
+                {
+                    if (!TryValidateBlob(GetBlobPath(file.Sha256), file))
+                        return Corrupt(ContentCacheError.CorruptBlob, out error);
+                    blobs.Add(file.Sha256);
+                }
+            }
+            foreach (UserResourcePackIdentity identity in identities)
+                AddPin(_liveUserResourcePackPins, identity);
+            foreach (ContentHash blob in blobs) AddPin(_liveBlobPins, blob);
+            _liveUserResourcePackLeases++;
+            lease = new UserResourcePackStackLease(
+                this, identities, manifests, blobs.ToArray(),
+                UserResourcePackSelectionCodec.Fingerprint(identities));
+            error = ContentCacheError.None;
+            return true;
+        }
+    }
+
+    public bool TryRetireUserResourcePack(
+        UserResourcePackIdentity identity,
+        out ContentCacheError error)
+    {
+        lock (_sync)
+        {
+            if (_disposed || !identity.IsValid)
+                return Fail(ContentCacheError.InvalidRequest, out error);
+            if (_liveUserResourcePackPins.ContainsKey(identity))
+                return Fail(ContentCacheError.CacheBusy, out error);
+            if (!TryReadUserResourcePackSelection(out UserResourcePackIdentity[] enabled))
+                return Fail(ContentCacheError.CorruptResourcePackSelection, out error);
+            if (enabled.Contains(identity))
+                return Fail(ContentCacheError.CacheBusy, out error);
+            try
+            {
+                string path = GetUserResourcePackManifestPath(identity.ManifestHash);
+                if (!File.Exists(path)) return Fail(ContentCacheError.MissingResourcePack, out error);
+                if (!TryReadUserResourcePackManifest(identity, out _, out error)) return false;
+                File.Delete(path);
+                error = ContentCacheError.None;
+                return true;
+            }
+            catch (Exception exception) when (IsStorageException(exception))
+            {
+                return Fail(ContentCacheError.IoFailure, out error);
+            }
+        }
+    }
+
+    public ulong UserResourcePackSelectionRevision
+    {
+        get { lock (_sync) { ObjectDisposedException.ThrowIf(_disposed, this); return _userResourcePackSelectionRevision; } }
+    }
+
     private bool TryInstallPackageCore(
         ContentScopeKey scope,
         ContentPackageManifest manifest,
@@ -364,12 +537,42 @@ public sealed class ContentCache : IDisposable
         out ContentCacheError error)
     {
         installed = default;
-        error = ContentCacheError.None;
         if (_disposed || !scope.IsValid)
             return Fail(ContentCacheError.InvalidRequest, out error);
         if (manifest.TrustClass != ContentTrustClass.ScopeAuthorizedPassive)
             return Fail(ContentCacheError.UnsupportedTrustClass, out error);
+        try
+        {
+            if (!TryEnsureScopeDirectories(scope, out error)) return false;
+            string manifestPath = GetManifestPath(scope, manifest.ManifestHash);
+            var manifestKey = new ContentCacheManifestKey(scope, manifest.ManifestHash);
+            if (!TryInstallManifestCore(
+                    manifest, payloads, manifestPath,
+                    _liveManifestPins.ContainsKey(manifestKey),
+                    out int blobCount, out long packageBytes, out error))
+                return false;
+            installed = new InstalledContentPackage(
+                scope, manifest.PackageId, manifest.ManifestHash, blobCount, packageBytes);
+            return true;
+        }
+        catch (Exception exception) when (IsStorageException(exception))
+        {
+            return Fail(ContentCacheError.IoFailure, out error);
+        }
+    }
 
+    private bool TryInstallManifestCore(
+        ContentPackageManifest manifest,
+        ContentFilePayload[] payloads,
+        string manifestPath,
+        bool manifestPinned,
+        out int blobCount,
+        out long packageBytes,
+        out ContentCacheError error)
+    {
+        blobCount = 0;
+        packageBytes = 0;
+        error = ContentCacheError.None;
         var descriptorsByPath = manifest.Files.ToDictionary(static value => value.Path);
         var payloadsByHash = new Dictionary<ContentHash, ReadOnlyMemory<byte>>();
         var payloadPaths = new HashSet<ContentFilePath>();
@@ -392,8 +595,6 @@ public sealed class ContentCache : IDisposable
 
         try
         {
-            if (!TryEnsureScopeDirectories(scope, out error)) return false;
-            string manifestPath = GetManifestPath(scope, manifest.ManifestHash);
             byte[] metadata = ContentCacheMetadata.EncodeManifest(manifest);
             if (metadata.Length > _cacheLimits.MaximumMetadataFileBytes)
                 return Fail(ContentCacheError.CapacityExceeded, out error);
@@ -403,8 +604,7 @@ public sealed class ContentCache : IDisposable
                 (!TryReadCanonicalManifest(manifestPath, manifest.ManifestHash,
                     out ContentPackageManifest? existing) || existing!.PackageId != manifest.PackageId))
             {
-                var manifestKey = new ContentCacheManifestKey(scope, manifest.ManifestHash);
-                if (_liveManifestPins.ContainsKey(manifestKey))
+                if (manifestPinned)
                     return Fail(ContentCacheError.CacheBusy, out error);
                 manifestCorrupt = true;
                 SaturatingIncrement(ref _corruptionsDetected);
@@ -412,7 +612,7 @@ public sealed class ContentCache : IDisposable
 
             var writes = new Dictionary<ContentHash, BlobWrite>();
             var visited = new HashSet<ContentHash>();
-            long packageBytes = 0;
+            packageBytes = 0;
             int reused = 0, newBlobCount = 0;
             long incomingGrowth = 0;
             foreach (ContentFileDescriptor descriptor in manifest.Files)
@@ -475,8 +675,7 @@ public sealed class ContentCache : IDisposable
             }
             _reusedBlobs = checked(_reusedBlobs + (ulong)reused);
             SaturatingIncrement(ref _installs);
-            installed = new InstalledContentPackage(
-                scope, manifest.PackageId, manifest.ManifestHash, visited.Count, packageBytes);
+            blobCount = visited.Count;
             return true;
         }
         catch (Exception exception) when (IsStorageException(exception))
@@ -740,11 +939,18 @@ public sealed class ContentCache : IDisposable
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             StoreCensus census = ScanStore();
+            bool selectionValid = TryReadUserResourcePackSelection(
+                out UserResourcePackIdentity[] enabled);
+            _userResourcePackSelectionValid = selectionValid;
+            int enabledPacks = selectionValid ? enabled.Length : 0;
             return new ContentCacheSnapshot(
                 census.BlobCount, census.BlobBytes, census.ScopeCount,
                 census.LocalManifestCount, census.RealmManifestCount,
                 census.LocalActivationCount, census.RealmActivationCount,
+                census.UserResourcePackManifestCount, enabledPacks,
                 _liveBlobPins.Values.Sum(), _liveCatalogLeases,
+                _liveUserResourcePackLeases, selectionValid,
+                _userResourcePackSelectionRevision,
                 _cacheLimits.QuotaBytes, _cacheLimits.HighWaterBytes,
                 _installs, _reusedBlobs, _corruptionsDetected, _blobsRepaired,
                 _manifestsRepaired, _blobsEvicted, _bytesEvicted);
@@ -759,7 +965,9 @@ public sealed class ContentCache : IDisposable
             _disposed = true;
             _liveBlobPins.Clear();
             _liveManifestPins.Clear();
+            _liveUserResourcePackPins.Clear();
             _liveCatalogLeases = 0;
+            _liveUserResourcePackLeases = 0;
             _writerLock.Dispose();
         }
     }
@@ -778,6 +986,20 @@ public sealed class ContentCache : IDisposable
             foreach (ContentCacheManifestKey manifest in manifests) RemovePin(_liveManifestPins, manifest);
             foreach (ContentHash blob in blobs) RemovePin(_liveBlobPins, blob);
             if (_liveCatalogLeases > 0) _liveCatalogLeases--;
+        }
+    }
+
+    internal void ReleaseUserResourcePacks(
+        UserResourcePackIdentity[] identities,
+        ContentHash[] blobs)
+    {
+        lock (_sync)
+        {
+            if (_disposed) return;
+            foreach (UserResourcePackIdentity identity in identities)
+                RemovePin(_liveUserResourcePackPins, identity);
+            foreach (ContentHash blob in blobs) RemovePin(_liveBlobPins, blob);
+            if (_liveUserResourcePackLeases > 0) _liveUserResourcePackLeases--;
         }
     }
 
@@ -943,6 +1165,9 @@ public sealed class ContentCache : IDisposable
             if (protectedManifests.Contains(manifest.Key))
                 foreach (ContentFileDescriptor file in manifest.Manifest.Files)
                     protectedBlobs.Add(file.Sha256);
+        foreach (ContentPackageManifest pack in ScanUserResourcePackManifests())
+            foreach (ContentFileDescriptor file in pack.Files)
+                protectedBlobs.Add(file.Sha256);
 
         List<BlobRecord> blobs = ScanBlobs();
         BlobRecord[] candidates = blobs.Where(value => !protectedBlobs.Contains(value.Hash))
@@ -1073,8 +1298,9 @@ public sealed class ContentCache : IDisposable
             if (manifests != 0 || activations != 0) realmScopes++;
         }
         int scopeCount = realmScopes + (localManifests != 0 || localActivations != 0 ? 1 : 0);
+        int resourcePacks = Directory.EnumerateFiles(_resourcePackManifestsRoot).Count();
         return new StoreCensus(blobs.Count, blobs.Sum(static value => value.Bytes), scopeCount,
-            localManifests, realmManifests, localActivations, realmActivations);
+            localManifests, realmManifests, localActivations, realmActivations, resourcePacks);
     }
 
     private static (int Manifests, int Activations) CountScopeMetadata(string scopeRoot)
@@ -1125,6 +1351,25 @@ public sealed class ContentCache : IDisposable
                 if (!Directory.Exists(path) || IsReparsePoint(path) ||
                     !string.Equals(Path.GetFileName(path), "local", StringComparison.Ordinal))
                     return Fail(ContentCacheError.UnsafePath, out error);
+            if (IsReparsePoint(_resourcePacksRoot) ||
+                IsReparsePoint(_resourcePackManifestsRoot) ||
+                IsReparsePoint(_resourcePackSelectionRoot))
+                return Fail(ContentCacheError.UnsafePath, out error);
+            foreach (string path in Directory.EnumerateFileSystemEntries(_resourcePacksRoot))
+                if (!Directory.Exists(path) || IsReparsePoint(path) ||
+                    Path.GetFileName(path) is not ("manifests" or "selection"))
+                    return Fail(ContentCacheError.UnsafePath, out error);
+            foreach (string path in Directory.EnumerateFiles(_resourcePackManifestsRoot))
+                if (IsReparsePoint(path) ||
+                    !TryHashFileName(path, ManifestExtension, out ContentHash hash) ||
+                    !TryReadCanonicalManifest(path, hash, out ContentPackageManifest? manifest) ||
+                    manifest!.TrustClass != ContentTrustClass.UserResourcePack)
+                    return Corrupt(ContentCacheError.CorruptManifest, out error);
+            foreach (string path in Directory.EnumerateFiles(_resourcePackSelectionRoot))
+                if (IsReparsePoint(path) ||
+                    !string.Equals(path, _resourcePackSelectionPath, StringComparison.Ordinal))
+                    return Fail(ContentCacheError.UnsafePath, out error);
+            _userResourcePackSelectionValid = TryReadUserResourcePackSelection(out _);
             if (!TryScanMetadata(out _, out _, out error)) return false;
             StoreCensus census = ScanStore();
             if (census.BlobCount > _cacheLimits.MaximumBlobs ||
@@ -1152,6 +1397,56 @@ public sealed class ContentCache : IDisposable
         return ContentCacheMetadata.TryDecodeManifest(bytes, expected, _contentLimits, out manifest);
     }
 
+    private bool TryReadUserResourcePackManifest(
+        UserResourcePackIdentity identity,
+        out ContentPackageManifest manifest,
+        out ContentCacheError error)
+    {
+        manifest = null!;
+        if (!identity.IsValid) return Fail(ContentCacheError.InvalidRequest, out error);
+        string path = GetUserResourcePackManifestPath(identity.ManifestHash);
+        if (!File.Exists(path)) return Fail(ContentCacheError.MissingResourcePack, out error);
+        if (!TryReadCanonicalManifest(path, identity.ManifestHash, out ContentPackageManifest? decoded) ||
+            decoded!.TrustClass != ContentTrustClass.UserResourcePack ||
+            decoded.PackageId != identity.PackageId)
+            return Corrupt(ContentCacheError.CorruptManifest, out error);
+        manifest = decoded;
+        error = ContentCacheError.None;
+        return true;
+    }
+
+    private bool TryReadUserResourcePackSelection(
+        out UserResourcePackIdentity[] identities)
+    {
+        identities = [];
+        if (!File.Exists(_resourcePackSelectionPath)) return true;
+        try
+        {
+            FileInfo info = new(_resourcePackSelectionPath);
+            if (info.Length < 1 || info.Length > _cacheLimits.MaximumMetadataFileBytes) return false;
+            byte[] bytes = File.ReadAllBytes(_resourcePackSelectionPath);
+            return UserResourcePackSelectionCodec.TryDecode(bytes, out identities);
+        }
+        catch (Exception exception) when (IsStorageException(exception))
+        {
+            return false;
+        }
+    }
+
+    private ContentPackageManifest[] ScanUserResourcePackManifests()
+    {
+        var result = new List<ContentPackageManifest>();
+        foreach (string path in Directory.EnumerateFiles(_resourcePackManifestsRoot))
+        {
+            if (IsReparsePoint(path) || !TryHashFileName(path, ManifestExtension, out ContentHash hash) ||
+                !TryReadCanonicalManifest(path, hash, out ContentPackageManifest? manifest) ||
+                manifest!.TrustClass != ContentTrustClass.UserResourcePack)
+                throw new IOException("The resource-pack manifest store is corrupt.");
+            result.Add(manifest);
+        }
+        return result.ToArray();
+    }
+
     private bool TryReadActivation(
         string path,
         ContentScopeActivationId expected,
@@ -1168,10 +1463,22 @@ public sealed class ContentCache : IDisposable
 
     private bool TryValidateBlob(string path, in ContentFileDescriptor descriptor)
     {
-        FileInfo info = new(path);
-        if (info.Length != descriptor.SizeBytes || info.Length > _contentLimits.MaximumFileBytes) return false;
-        byte[] bytes = File.ReadAllBytes(path);
-        return ContentPackageValidator.TryValidatePayload(descriptor, bytes);
+        try
+        {
+            FileInfo info = new(path);
+            if (!info.Exists || info.Length != descriptor.SizeBytes ||
+                info.Length > _contentLimits.MaximumFileBytes)
+                return false;
+            byte[] bytes = File.ReadAllBytes(path);
+            return ContentPackageValidator.TryValidatePayload(descriptor, bytes);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or
+                                           DirectoryNotFoundException)
+        {
+            // Missing immutable bytes are ordinary cache corruption/unavailability. Callers
+            // classify the failed validation without letting an optional presentation escape.
+            return false;
+        }
     }
 
     private bool TryEnsureScopeDirectories(ContentScopeKey scope, out ContentCacheError error)
@@ -1259,6 +1566,9 @@ public sealed class ContentCache : IDisposable
 
     private string GetManifestPath(ContentScopeKey scope, ContentHash hash) =>
         Path.Combine(GetScopeRoot(scope), "manifests", hash + ManifestExtension);
+
+    private string GetUserResourcePackManifestPath(ContentHash hash) =>
+        Path.Combine(_resourcePackManifestsRoot, hash + ManifestExtension);
 
     private string GetActivationPath(ContentScopeKey scope, ContentActivationId activation) =>
         Path.Combine(GetScopeRoot(scope), "activations", activation + ActivationExtension);
@@ -1353,9 +1663,11 @@ public sealed class ContentCache : IDisposable
         int LocalManifestCount,
         int RealmManifestCount,
         int LocalActivationCount,
-        int RealmActivationCount)
+        int RealmActivationCount,
+        int UserResourcePackManifestCount)
     {
-        internal int ManifestCount => LocalManifestCount + RealmManifestCount;
+        internal int ManifestCount =>
+            LocalManifestCount + RealmManifestCount + UserResourcePackManifestCount;
         internal int ActivationCount => LocalActivationCount + RealmActivationCount;
     }
 

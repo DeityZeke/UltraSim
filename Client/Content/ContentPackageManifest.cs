@@ -60,6 +60,47 @@ public sealed class ContentPackageManifest
         out ContentPackageManifest? manifest,
         out string? error,
         ContentLimits limits = default)
+        => TryCreateCore(
+            minimumPipelineFormat, maximumPipelineFormat, packageId, contentNamespace,
+            name, version, trustClass, files, definitions, userResourcePack: false,
+            out manifest, out error, limits);
+
+    /// <summary>
+    /// Creates one explicit client-local passive presentation overlay. This is deliberately a
+    /// separate admission path from scope-authorized packages: F1.5 packs may only replace
+    /// bounded actor-presentation leaves and never participate in semantic catalog activation.
+    /// </summary>
+    public static bool TryCreateUserResourcePack(
+        int minimumPipelineFormat,
+        int maximumPipelineFormat,
+        ContentPackageId packageId,
+        ContentNamespaceId contentNamespace,
+        string? name,
+        string? version,
+        IEnumerable<ContentFileDescriptor>? files,
+        IEnumerable<ContentDefinitionDescriptor>? definitions,
+        out ContentPackageManifest? manifest,
+        out string? error,
+        ContentLimits limits = default)
+        => TryCreateCore(
+            minimumPipelineFormat, maximumPipelineFormat, packageId, contentNamespace,
+            name, version, ContentTrustClass.UserResourcePack, files, definitions,
+            userResourcePack: true, out manifest, out error, limits);
+
+    private static bool TryCreateCore(
+        int minimumPipelineFormat,
+        int maximumPipelineFormat,
+        ContentPackageId packageId,
+        ContentNamespaceId contentNamespace,
+        string? name,
+        string? version,
+        ContentTrustClass trustClass,
+        IEnumerable<ContentFileDescriptor>? files,
+        IEnumerable<ContentDefinitionDescriptor>? definitions,
+        bool userResourcePack,
+        out ContentPackageManifest? manifest,
+        out string? error,
+        ContentLimits limits)
     {
         manifest = null;
         error = null;
@@ -72,8 +113,11 @@ public sealed class ContentPackageManifest
             return Fail("The package or namespace identity is invalid.", out error);
         if (!ValidDisplay(name, 128) || !ValidDisplay(version, 48))
             return Fail("The package name or version is invalid.", out error);
-        if (trustClass is not (ContentTrustClass.BuiltIn or ContentTrustClass.ScopeAuthorizedPassive))
+        if (!userResourcePack &&
+            trustClass is not (ContentTrustClass.BuiltIn or ContentTrustClass.ScopeAuthorizedPassive))
             return Fail("Only built-in and scope-authorized passive packages use this manifest.", out error);
+        if (userResourcePack && trustClass != ContentTrustClass.UserResourcePack)
+            return Fail("The user resource-pack path requires its dedicated trust class.", out error);
 
         if (!ContentBoundedCopy.TryCopy(files, limits.MaximumFilesPerPackage,
                 out ContentFileDescriptor[] orderedFiles) ||
@@ -83,6 +127,10 @@ public sealed class ContentPackageManifest
             return Fail("The package exceeds its bounded manifest capacity.", out error);
         Array.Sort(orderedFiles, static (left, right) => left.Path.CompareTo(right.Path));
         Array.Sort(orderedDefinitions, static (left, right) => left.Id.CompareTo(right.Id));
+
+        if (userResourcePack &&
+            (orderedFiles.Length is < 1 or > 16 || orderedDefinitions.Length is < 1 or > 16))
+            return Fail("A user resource pack must contain between one and sixteen bounded overrides.", out error);
 
         long totalBytes = 0;
         for (int index = 0; index < orderedFiles.Length; index++)
@@ -95,6 +143,11 @@ public sealed class ContentPackageManifest
             catch (OverflowException) { return Fail("The package byte total overflowed.", out error); }
             if (totalBytes > limits.MaximumPackageBytes)
                 return Fail("The package exceeds its byte limit.", out error);
+            if (userResourcePack &&
+                (file.Kind != ContentFileKind.ActorGltfBinary ||
+                 file.SizeBytes > ActorPresentationArtifactLimits.Default.MaximumArtifactBytes ||
+                 totalBytes > 128L * 1024 * 1024))
+                return Fail("A user resource pack contains an unsupported or oversized file.", out error);
         }
 
         for (int index = 0; index < orderedDefinitions.Length; index++)
@@ -103,6 +156,11 @@ public sealed class ContentPackageManifest
             if (definition is null || !definition.Id.IsValid || !definition.DefinitionHash.IsValid ||
                 index != 0 && orderedDefinitions[index - 1].Id == definition.Id)
                 return Fail("The package contains an invalid or duplicate definition.", out error);
+            if (userResourcePack &&
+                (definition.Kind != ContentDefinitionKind.ActorPresentation ||
+                 definition.Operation != ContentDefinitionOperation.Replace ||
+                 !definition.PrimaryFile.IsValid))
+                return Fail("F1.5 user resource packs support ActorPresentation Replace entries only.", out error);
             if (definition.Operation == ContentDefinitionOperation.Add &&
                 definition.Id.Namespace != contentNamespace)
                 return Fail("An Add definition must use the package's authorized namespace.", out error);
@@ -122,6 +180,15 @@ public sealed class ContentPackageManifest
                 if (!kindMatches)
                     return Fail("A file-backed definition does not match its declared passive file kind.", out error);
             }
+        }
+
+        if (userResourcePack)
+        {
+            var referenced = new HashSet<ContentFilePath>(
+                orderedDefinitions.Select(static definition => definition.PrimaryFile));
+            if (referenced.Count != orderedFiles.Length ||
+                orderedFiles.Any(file => !referenced.Contains(file.Path)))
+                return Fail("Every user resource-pack file must be an exact declared override leaf.", out error);
         }
 
         manifest = new ContentPackageManifest(

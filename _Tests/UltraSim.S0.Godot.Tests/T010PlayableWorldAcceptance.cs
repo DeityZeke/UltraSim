@@ -1,3 +1,6 @@
+using System.Buffers.Binary;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Godot;
 using UltraSim.Client.Content;
 using UltraSim.Client.Core;
@@ -295,12 +298,71 @@ public partial class T010PlayableWorldAcceptance : Node3D
                         completeResources.RetainedArtifactBytes == xBytes.Length + yBytes.Length,
                         "The content-backed X/Y native resource set was not exact and bounded.");
 
+                    byte[] userX = TintActorArtifact(xBytes);
+                    ActorContentFixture userPack = CreateUserActorOverrideFixture(userX);
+                    Expect(cache.TryInstallUserResourcePack(
+                            userPack.Manifest, userPack.Payloads, out InstalledUserResourcePack installed,
+                            out ContentCacheError userInstall),
+                        $"The user actor override could not install: {userInstall}.");
+                    var userIdentity = new UserResourcePackIdentity(
+                        userPack.Manifest.PackageId, userPack.Manifest.ManifestHash);
+                    Expect(cache.TrySetEnabledUserResourcePacks([userIdentity], out var enableError),
+                        $"The user actor override could not be enabled: {enableError}.");
+                    Expect(cache.TryOpenEnabledUserResourcePacks(
+                            out UserResourcePackStackLease? userStack, out var userOpen),
+                        $"The enabled user actor override could not open: {userOpen}.");
+                    var realmKey = new ContentScopeActivationKey(
+                        plan!.ScopeActivation, plan.PlanHash);
+                    Expect(cache.TryOpenCatalog(
+                            ContentBaseCatalog.Empty, realmKey,
+                            out ContentCatalogLease? userRealm, out var userRealmOpen),
+                        $"The Realm layer could not reopen for the user composition: {userRealmOpen}.");
+                    source.Publish(PresentationGeneration.Create(userStack, userRealm, null));
+                    int userReplacements = presenter.RefreshResolvedVisuals();
+                    visuals.ReleaseRetiredResources();
+                    Expect(userReplacements == 1 &&
+                        presenter.TryGetActorRoot(actorId, out Node3D? userRoot) &&
+                        userRoot is not null && userRoot.GetInstanceId() == rootLifetime,
+                        "The user override did not hot-replace the visual under the retained actor root.");
+                    Expect(visuals.TryGetDiagnostics(
+                            ClientActorVisualKind.HumanX,
+                            out GodotContentActorResourceDiagnostics userResource) &&
+                        userResource.Source == PresentationSourceKind.User &&
+                        userResource.OwnerPackage == installed.Identity.PackageId &&
+                        userResource.FileHash != resource.FileHash,
+                        "The native user override did not retain exact User provenance.");
+                    Expect(presenter.GetSnapshot() is
+                        { ActiveActors: 1, AnimatedActors: 1, EquippedMainHands: 1,
+                          VisibleOverheadLabels: 1, VisualReplacements: 2 },
+                        "The User hot replacement discarded actor-local presentation state.");
+
+                    Expect(cache.TrySetEnabledUserResourcePacks([], out var disableError),
+                        $"The user actor override could not be disabled: {disableError}.");
+                    Expect(cache.TryOpenEnabledUserResourcePacks(
+                            out UserResourcePackStackLease? emptyStack, out var emptyOpen),
+                        $"The empty user selection could not open: {emptyOpen}.");
+                    Expect(cache.TryOpenCatalog(
+                            ContentBaseCatalog.Empty, realmKey,
+                            out ContentCatalogLease? restoredRealm, out var restoreOpen),
+                        $"The Realm layer could not reopen after disable: {restoreOpen}.");
+                    source.Publish(PresentationGeneration.Create(emptyStack, restoredRealm, null));
+                    int restoreReplacements = presenter.RefreshResolvedVisuals();
+                    visuals.ReleaseRetiredResources();
+                    Expect(restoreReplacements == 1 &&
+                        visuals.TryGetDiagnostics(
+                            ClientActorVisualKind.HumanX,
+                            out GodotContentActorResourceDiagnostics restoredResource) &&
+                        restoredResource.Source == PresentationSourceKind.Realm &&
+                        restoredResource.FileHash == resource.FileHash,
+                        "Disabling the user override did not restore the exact Realm presentation.");
+
                     GD.Print(
                         $"EVIDENCE D0.7b actor_root_preserved=true primitive_to_content=true " +
                         $"lazy_first={resourceSnapshot.RealizedResources} " +
                         $"xy_resources={completeResources.RealizedResources} " +
                         $"retained_bytes={completeResources.RetainedArtifactBytes} " +
-                        "bones_each=65 clips=Idle,Walk,Jump anchors_retained=true");
+                        "bones_each=65 clips=Idle,Walk,Jump anchors_retained=true " +
+                        "user_hot_replace=true user_disable_restore=true");
                 }
             }
         }
@@ -357,6 +419,73 @@ public partial class T010PlayableWorldAcceptance : Node3D
                 manifest!, payloads, out _, out string? payloadError),
             $"The native actor fixture payload was invalid: {payloadError}.");
         return new ActorContentFixture(manifest!, payloads);
+    }
+
+    private static ActorContentFixture CreateUserActorOverrideFixture(byte[] bytes)
+    {
+        Expect(ContentPackageId.TryCreate(
+                "test.user-actor-red", out ContentPackageId packageId),
+            "The native user actor package ID was invalid.");
+        Expect(ContentNamespaceId.TryCreate("userpack", out ContentNamespaceId contentNamespace),
+            "The native user actor namespace was invalid.");
+        Expect(ContentFilePath.TryCreate("actors/user-red-x.glb", out ContentFilePath path),
+            "The native user actor path was invalid.");
+        Expect(ContentFileDescriptor.TryCreate(
+                path, ContentFileKind.ActorGltfBinary, bytes.Length, ContentHash.Compute(bytes),
+                default, out ContentFileDescriptor file),
+            "The native user actor file was invalid.");
+        Expect(LogicalContentId.TryCreate(
+                ConceptDemoActorPresentationProfile.HumanXDefinitionId,
+                out LogicalContentId logicalId),
+            "The native user actor target was invalid.");
+        Expect(ContentDefinitionDescriptor.TryCreateFileDefinition(
+                logicalId, ContentDefinitionKind.ActorPresentation,
+                ContentDefinitionOperation.Replace, path,
+                out ContentDefinitionDescriptor? definition),
+            "The native user actor definition was invalid.");
+        Expect(ContentPackageManifest.TryCreateUserResourcePack(
+                1, 1, packageId, contentNamespace, "Red user X", "1",
+                [file], [definition!], out ContentPackageManifest? manifest, out _),
+            "The native user actor fixture was invalid.");
+        return new ActorContentFixture(
+            manifest!, [new ContentFilePayload(path, bytes)]);
+    }
+
+    private static byte[] TintActorArtifact(byte[] source)
+    {
+        const uint jsonChunk = 0x4E4F_534A;
+        const uint binaryChunk = 0x004E_4942;
+        int jsonLength = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(source.AsSpan(12)));
+        int jsonStart = 20;
+        int binaryHeader = checked(jsonStart + jsonLength);
+        int binaryLength = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+            source.AsSpan(binaryHeader)));
+        JsonObject root = JsonNode.Parse(source.AsSpan(jsonStart, jsonLength))!.AsObject();
+        foreach (JsonNode? materialNode in root["materials"]!.AsArray())
+        {
+            JsonObject material = materialNode!.AsObject();
+            JsonObject pbr = material["pbrMetallicRoughness"]?.AsObject() ?? new JsonObject();
+            pbr["baseColorFactor"] = new JsonArray(0.95, 0.04, 0.04, 1.0);
+            material["pbrMetallicRoughness"] = pbr;
+        }
+        byte[] json = JsonSerializer.SerializeToUtf8Bytes(root);
+        int paddedJsonLength = checked((json.Length + 3) & ~3);
+        var result = new byte[checked(12 + 8 + paddedJsonLength + 8 + binaryLength)];
+        BinaryPrimitives.WriteUInt32LittleEndian(result, 0x4654_6C67);
+        BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(4), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(8), checked((uint)result.Length));
+        BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(12), checked((uint)paddedJsonLength));
+        BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(16), jsonChunk);
+        json.CopyTo(result.AsSpan(20));
+        result.AsSpan(20 + json.Length, paddedJsonLength - json.Length).Fill(0x20);
+        int outputBinaryHeader = 20 + paddedJsonLength;
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            result.AsSpan(outputBinaryHeader), checked((uint)binaryLength));
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            result.AsSpan(outputBinaryHeader + 4), binaryChunk);
+        source.AsSpan(binaryHeader + 8, binaryLength).CopyTo(
+            result.AsSpan(outputBinaryHeader + 8));
+        return result;
     }
 
     private static bool HasAnimation(AnimationPlayer player, string expected)
@@ -1334,6 +1463,14 @@ public partial class T010PlayableWorldAcceptance : Node3D
         {
             PresentationGeneration previous = _generation;
             _generation = PresentationGeneration.Create(_catalog, null);
+            previous.Dispose();
+        }
+
+        internal void Publish(PresentationGeneration generation)
+        {
+            ArgumentNullException.ThrowIfNull(generation);
+            PresentationGeneration previous = _generation;
+            _generation = generation;
             previous.Dispose();
         }
 

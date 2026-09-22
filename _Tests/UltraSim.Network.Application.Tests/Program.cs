@@ -126,6 +126,7 @@ internal static class Program
             $"{F03bRemotePlayableTests.F04TestCount} F0.4 actor-presentation plus " +
             $"{F03bRemotePlayableTests.F05TestCount} F0.5 compiled-UI convergence plus " +
             $"{F03bRemotePlayableTests.F12TestCount} F1.2 semantic/presentation separation plus " +
+            $"{F03bRemotePlayableTests.F15TestCount} F1.5 user-presentation isolation plus " +
             $"{F03cClientProfileTests.TestCount} F0.3c client-profile and " +
             $"{M00SharedAuthorityTests.TestCount} M0.0 shared-authority tests passed.");
         if (args.Contains("--benchmark-n09", StringComparer.Ordinal))

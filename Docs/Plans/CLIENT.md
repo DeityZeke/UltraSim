@@ -10,14 +10,16 @@ Complete-hosted deployment shapes. I0.12 human-play hardening prevents visible e
 remaining a pointer-nominated world pickup, and I0.13 replaces its temporary cold property text
 with bounded typed Inspection Properties plus content-sized world-hover/Inventory presentation.
 
-F1.0-F1.4 are closed; F1.5 is next. F1.2 separates the required remote WorldPack/UI activation and its exact application proof
+F1.0-F1.5 are closed; F1.6 is next. F1.2 separates the required remote WorldPack/UI activation and its exact application proof
 from optional Realm-authorized actor-art presentation. Game manifest v31 advertises the latter
 on message 149 without changing transport revision 2. The client publishes a separate immutable
 presentation generation with Realm → `world.local` → Primitive actor selection; late art replaces
 only the native visual child. F1.3 adds permanent bounded primitive descriptors and native
 actor/item/public/static/Multi fallback with a primitive-only Concept Demo canary. F1.4 now
 productizes exact Official X/Y art as a removable external `world.local` package and removes the
-old Godot asset mount/managed embedding. User packs and F1.5+ remain unstarted.
+old Godot asset mount/managed embedding. F1.5 now adds explicitly installed, bounded passive User
+ActorPresentation replacements above Realm/Local/Primitive without changing semantic proof;
+derived resources and F1.6+ remain unstarted.
 C0.2 now closes the first routed Global Chat mode plus explicit authority-originated System
 broadcast/feed/banner convergence. D0.6 now closes direct ping indication plus the first sanitized,
 read-only, content-backed Server Monitor and trusted test-marker producer. D0.7a now closes shared
@@ -1280,7 +1282,11 @@ The byte host does not become semantic authority.
 
 ## Local resource packs
 
-User-local visual remaps. No protocol/Game authority.
+User-local visual remaps. No protocol/Game authority. F1.5 supports exact immutable
+ActorPresentation Replace packages installed from an explicitly rooted local archive, a persisted
+low-to-high enabled order bounded to sixteen, and transactional presentation-generation
+publication. User metadata is separate from Local/Realm scopes while blobs share the CAS. The
+current implementation intentionally does not support texture/UI/World/script overrides.
 
 ## Executable client extensions — future
 
@@ -2781,8 +2787,8 @@ F1.1 unified content scopes/stores                                             C
 F1.2 semantic activation vs presentation resolution                           CLOSED
 F1.3 primitive substrate/fallback contract                                    CLOSED
 F1.4 Official Local content productization                                    CLOSED
-F1.5 user presentation overrides/content generations                          NEXT
-F1.6 derived resources/atlas pipeline                                         PLANNED
+F1.5 user presentation overrides/content generations                          CLOSED
+F1.6 derived resources/atlas pipeline                                         NEXT
 F1.7 application workspace/Gameplay Frame/shared UI/gump manager             PLANNED
 F1.8 declarative camera/control rig + canonical gameplay-view crop            PLANNED
 F1.8A remote motion prediction/reconciliation/interpolation                   PLANNED
@@ -2805,7 +2811,10 @@ scope-owned. The existing Realm disk layout and remote application proof remain 
 Local metadata is rooted under `scopes/local`. Semantic versus presentation activation closed in
 F1.2. F1.4 now builds the exact Official actor package beside Local-capable products; the same
 binary runs with that install present or absent, and Online remains contentless while accepting an
-explicit Local fallback below Realm presentation.
+explicit Local fallback below Realm presentation. F1.5 adds a separate exact client-local pack
+store and User -> Realm -> Local -> Primitive selection. Enable/disable/reorder/update changes only
+the immutable presentation generation; remote semantic activation/proof and protocol identity are
+unchanged. Actor replacement is the earned leaf; texture/material routing remains F1.6 work.
 
 The future Gameplay Frame distinguishes physical Application Window, render-target Gameplay
 Output Resolution, aspect-preserving application-space frame, canonical 16:9 maximum stock view,

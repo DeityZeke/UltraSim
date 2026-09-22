@@ -35,8 +35,8 @@ process-local catalog-generation handles do not enter resolved fingerprints.
 The catalog is above the renderer-owned primitive/bootstrap emergency substrate. Local/default
 content is optional ordinary verified content and may be absent without changing Game semantics;
 primitive fallback is not a package and never satisfies a missing required activation or
-application proof. Server-authorized Add/Replace content and future user presentation-leaf
-overrides resolve above local/default content while preserving independent model/material fallback.
+application proof. Server-authorized Add/Replace content and explicitly enabled user presentation
+overlays resolve above local/default content while preserving independent model/material fallback.
 
 Payload validation produces a `VerifiedContentPackage` capability. Base-catalog construction and
 activation resolution accept that capability, not a bare manifest, so parsed metadata or
@@ -58,7 +58,7 @@ presentation plan. Authenticated Game message 149 advertises that plan and its e
 resolved fingerprint, but never enters the required-content proof or guest-admission gate.
 
 `PresentationGeneration` resolves the two current humanoid logical IDs once per publication with
-Realm → `world.local` → Primitive precedence. It validates selected GLBs against the same passive
+User → Realm → `world.local` → Primitive precedence. It validates selected GLBs against the same passive
 and skeleton/Idle-Walk-Jump rules, holds the selected catalog/blob leases, and gives native
 consumers reference-counted leases. The monotonic generation ID fences live asynchronous/native
 work; the effective-selection SHA-256 fingerprint is stable across process runs and excludes that
@@ -83,6 +83,32 @@ user cache. Removing the source archive does not revoke an activation already pe
 scope retirement removes authorization metadata, and ordinary reachability-aware eviction may
 later reclaim an unreferenced blob after all catalog/blob/native leases retire. F1.4 adds no live
 uninstall or general pack manager.
+
+## F1.5 user presentation overlays
+
+`UserResourcePackIdentity` is exact `ContentPackageId + ManifestHash`; a filesystem path is only a
+rooted local source locator. `TryCreateUserResourcePack` admits one to sixteen bounded,
+self-contained actor GLBs and the same number of unique ActorPresentation `Replace` definitions.
+Every file must be referenced exactly as an override leaf. Add, WorldPack, UI definitions,
+textures, arbitrary resources, external GLB references, scripts/shaders/executables, and every
+other current kind fail admission. Texture/material overrides remain deferred because current
+Cabin materials do not yet resolve through the common presentation generation.
+
+`TryInstallUserResourcePack` validates and installs exact immutable bytes without creating Local
+or Realm authorization. `TrySetEnabledUserResourcePacks` persists at most sixteen installed exact
+identities in deterministic low-to-high priority order; corrupt metadata fails closed to no User
+layer. `TryOpenEnabledUserResourcePacks` validates and pins all manifests/blobs before returning an
+immutable stack lease. Highest compatible pack wins. Missing logical IDs are inactive; a selected
+known actor with corrupt/incompatible art rejects the complete candidate generation, leaving the
+published generation usable.
+
+The stable presentation fingerprint covers the effective logical-ID/file-hash result, not enabled
+packs that have no effect, source paths, source layer, timestamps, or process-local generation ID.
+Exact identical effective bytes therefore share identity across User/Realm/Local. Enable, disable,
+reorder, and immutable update publish new generations only when the effective result changes.
+Old native actor leases retain old generation/blob ownership. Remote semantic activation and proof
+remain unchanged, and the existing remote acquisition revision/session fences continue to reject
+stale asynchronous Realm work; user pack selection introduces no remote protocol or async loader.
 
 ## A0.0 formats and operations
 
@@ -112,7 +138,9 @@ Patch, dependencies/version solving, and executable extensions remain unsupporte
 GLB family rejects URI/external resources, images/textures, cameras, and unsupported extensions; it
 is not permission to pass downloaded scenes or arbitrary resources to `ResourceLoader`. User
 resource packs and executable extensions have vocabulary values so they cannot be confused with
-normal server-passive trust, but the normal manifest factory still rejects both trust classes.
+normal server-passive trust. The normal manifest factory still rejects both; F1.5 exposes a
+separate strict factory for user ActorPresentation Replace packages only. Executable content
+remains rejected.
 
 ## A0.2 persistent cache / F1.1 unified scopes
 
@@ -127,6 +155,9 @@ root/
     realms/<32-lowercase-hex ApplicationRealmId>/
         manifests/<ManifestHash>.manifest
         activations/<ContentActivationId>.activation
+    resource-packs/
+        manifests/<ManifestHash>.manifest
+        selection/enabled.selection
     metadata/access/<BlobHash>.access
     staging/<opaque temporary name>.tmp
     writer.lock
@@ -146,7 +177,11 @@ Realm scopes. `ScopeAuthorizedPassive` is the scope-neutral source name;
 selects who authorizes/mounts the package; it does not bypass passive validation.
 Primitive fallback remains below Content and is never a package. `BuiltIn` packages may still form
 the verified base catalog but are not silently admitted as ordinary cached activation packages.
-User resource packs and executable content remain unsupported.
+F1.5 resource packs are not activation scopes. Their exact manifests and bounded ordered enabled
+selection occupy the separate `resource-packs/` namespace while their blobs reuse the same global
+CAS. Installed resource-pack blobs remain reachable; explicit retirement refuses enabled or live
+leased identities, removes only pack metadata after release, and leaves later CAS reclamation
+separate. Executable content remains unsupported.
 
 Install validates supplied payloads through the A0.0 passive allowlist. A full-package call
 requires the complete payload set; A0.5's delta call requires every missing/corrupt unique hash and

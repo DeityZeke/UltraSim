@@ -158,11 +158,15 @@ internal static class ContentCacheMetadata
             }
         }
 
-        if (!reader.IsComplete ||
-            !ContentPackageManifest.TryCreate(
+        ContentTrustClass trust = (ContentTrustClass)trustValue;
+        bool created = trust == ContentTrustClass.UserResourcePack
+            ? ContentPackageManifest.TryCreateUserResourcePack(
                 minimumPipeline, maximumPipeline, packageId, contentNamespace, name,
-                packageVersion, (ContentTrustClass)trustValue, files, definitions,
-                out manifest, out _, limits) ||
+                packageVersion, files, definitions, out manifest, out _, limits)
+            : ContentPackageManifest.TryCreate(
+                minimumPipeline, maximumPipeline, packageId, contentNamespace, name,
+                packageVersion, trust, files, definitions, out manifest, out _, limits);
+        if (!reader.IsComplete || !created ||
             manifest!.ManifestHash != expectedHash ||
             !bytes.SequenceEqual(EncodeManifest(manifest)))
         {

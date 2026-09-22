@@ -280,6 +280,16 @@ These are permitted local presentation-leaf substitutions after the authoritativ
 resolves. They are not packages in that plan and cannot replace UI actions/schemas, control
 profiles, structural World content, or disclosure semantics.
 
+F1.5 implements only the earned actor-presentation subset. A dedicated trust-class-3 manifest
+factory admits one to sixteen self-contained bounded GLBs, each referenced by exactly one
+ActorPresentation `Replace`; every other current file/definition kind and `Add` is rejected.
+Explicit rooted local archives install exact `PackageId + ManifestHash` identities into separate
+resource-pack metadata while sharing immutable blob storage with Local/Realm scopes. A strict
+persisted list enables at most sixteen packs in deterministic low-to-high priority order.
+Presentation generations apply User -> Realm -> Local -> Primitive without altering the lower
+catalogs or application proof. Texture/material support remains deferred until those renderer
+leaves participate in the common presentation-resolution seam.
+
 ### Executable client extensions — future/deferred
 
 Potential future explicit executable extension packages.
@@ -1466,6 +1476,11 @@ independent. The primitive-only Concept Demo smoke suppresses optional art witho
 required activation or proof. F1.4 now ships the exact Official X/Y actor archive outside the PCK,
 installs/reopens it as ordinary `world.local` content through the shared CAS, and preserves
 Realm → Local → Primitive selection without weakening Realm proof.
+F1.5 adds the client-local User layer above that chain. Exact enabled pack state is independent of
+scope authorization; compatible actor replacements publish as new immutable presentation
+generations, while missing targets are no-ops and invalid/incompatible candidates preserve the
+current generation. Enable/disable/reorder does not change semantic activation, WorldPack, or
+remote proof.
 
 The local Concept Demo D0.4 canary now proves that the maintained Godot renderer can distinguish
 model absence from texture absence and degrade only presentation while immutable World identity and

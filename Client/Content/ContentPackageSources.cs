@@ -147,6 +147,48 @@ public sealed class LocalContentPackageSource : IContentPackageSource
         }
     }
 
+    /// <summary>
+    /// Reads one explicitly selected local user-pack archive through the same rooted/reparse-safe
+    /// source boundary, but applies the dedicated resource-pack manifest policy.
+    /// </summary>
+    public bool TryFetchUserResourcePack(
+        in UserResourcePackFetchRequest request,
+        out FetchedContentPackage? package,
+        out ContentSourceFetchError error)
+    {
+        SaturatingIncrement(ref _requests);
+        package = null;
+        if (!request.IsValid)
+            return Reject(ContentSourceFetchError.InvalidRequest, out error);
+        try
+        {
+            string relative = request.Locator.Value!.Replace('/', Path.DirectorySeparatorChar);
+            string path = Path.GetFullPath(Path.Combine(_root, relative));
+            string prefix = _root.EndsWith(Path.DirectorySeparatorChar)
+                ? _root
+                : _root + Path.DirectorySeparatorChar;
+            if (!path.StartsWith(prefix, PathComparison) || !PathIsSafe(path) || !File.Exists(path))
+                return Reject(ContentSourceFetchError.Unavailable, out error);
+            var info = new FileInfo(path);
+            if (info.Length < 1 || info.Length > _limits.MaximumArchiveBytes || info.Length > int.MaxValue)
+                return Reject(ContentSourceFetchError.CapacityExceeded, out error);
+            byte[] bytes = File.ReadAllBytes(path);
+            _archiveBytesRead = checked(_archiveBytesRead + bytes.LongLength);
+            if (!ContentPackageArchive.TryDecodeUserResourcePackCanonical(
+                    bytes, request.Identity.PackageId, request.Identity.ManifestHash,
+                    out package, _contentLimits))
+                return Reject(ContentSourceFetchError.SourceFailure, out error);
+            SaturatingIncrement(ref _completed);
+            error = ContentSourceFetchError.None;
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           ArgumentException or NotSupportedException or OverflowException)
+        {
+            return Reject(ContentSourceFetchError.Unavailable, out error);
+        }
+    }
+
     private bool PathIsSafe(string path)
     {
         string? current = path;

@@ -29,10 +29,11 @@ internal static class F03bRemotePlayableTests
     internal const int A06TestCount = 2;
     internal const int A07TestCount = 2;
     internal const int F12TestCount = 1;
+    internal const int F15TestCount = 1;
     internal const int F04TestCount = 2;
     internal const int F05TestCount = 1;
     internal const int TestCount = F03bTestCount + A03TestCount + A04TestCount + A05TestCount +
-        A06TestCount + A07TestCount + F04TestCount + F05TestCount + F12TestCount;
+        A06TestCount + A07TestCount + F04TestCount + F05TestCount + F12TestCount + F15TestCount;
 
     internal static void RunAll()
     {
@@ -50,6 +51,8 @@ internal static class F03bRemotePlayableTests
             RequiredContentProtocolIsCanonicalAndBounded);
         Run("F12SemanticEntryPrecedesOptionalActorPresentation",
             F12SemanticEntryPrecedesOptionalActorPresentation);
+        Run("F15UserPresentationChangesNeverChangeSemanticActivation",
+            F15UserPresentationChangesNeverChangeSemanticActivation);
         Run("ColdCacheContentProofGatesAdmissionAndMatchesCabinOracle",
             ColdCacheContentProofGatesAdmissionAndMatchesCabinOracle);
         Run("ContentAcquisitionRunsOutsideProtocolPumpAndCancelsWithSession",
@@ -731,6 +734,75 @@ internal static class F03bRemotePlayableTests
             $"actor_source_bytes={deployment.Snapshot.ActorPresentationBytes} " +
             "unavailable_art_semantic_entry=pass corrupt_art_fallback=pass " +
             "local_fallback=pass stale_cancel=pass");
+    }
+
+    private static void F15UserPresentationChangesNeverChangeSemanticActivation()
+    {
+        ApplicationRealmId realm = new(0xF15, 0x500);
+        using ConceptDemoContentDeployment deployment = ConceptDemoContentDeployment.Create(
+            realm, new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()));
+        using var source = new HttpContentPackageSource(
+            FixtureHttpLimits(deployment.Snapshot.ArchiveBytes, allowInsecureHttp: true));
+        using var fixture = RemotePlayableFixture.CreateWithConceptDeployment(
+            realm, deployment, source, installLocalPresentation: true);
+        fixture.DriveUntil(() => fixture.Content!.Applied &&
+            fixture.SessionSnapshot.StructuralWorld.State == RemoteStructuralWorldState.Ready);
+        fixture.Admit("User Pack Proof", GameGuestBody.HumanFemale);
+        fixture.DriveUntil(() =>
+            fixture.SessionSnapshot.Presentation.Generation.RealmSelections == 2);
+
+        AuthorizedSemanticActivation semantic = fixture.Content!.SemanticActivation;
+        WorldPackFingerprint world = fixture.SessionSnapshot.StructuralWorld.WorldPackFingerprint;
+        var participant = fixture.Playable.GetSnapshot().Participant;
+        (ContentPackageManifest manifest, ContentFilePayload[] payloads) =
+            CreateF15UserActorPack();
+        (ContentPackageManifest noOpManifest, ContentFilePayload[] noOpPayloads) =
+            CreateF15UserActorPack("user.remote-proof-unused", "otherworld:human/x");
+        True(fixture.ContentStore!.TryInstallUserResourcePack(
+            manifest, payloads, out InstalledUserResourcePack installed,
+            out ContentCacheError installError));
+        Equal(ContentCacheError.None, installError);
+        True(fixture.ContentStore.TrySetEnabledUserResourcePacks(
+            [installed.Identity], out ContentCacheError enableError));
+        Equal(ContentCacheError.None, enableError);
+        fixture.DriveUntil(() =>
+            fixture.SessionSnapshot.Presentation.Generation.UserSelections == 1);
+        PresentationGenerationSnapshot enabled =
+            fixture.SessionSnapshot.Presentation.Generation;
+        Equal(semantic, fixture.Content.SemanticActivation);
+        Equal(world, fixture.SessionSnapshot.StructuralWorld.WorldPackFingerprint);
+        Equal(participant, fixture.Playable.GetSnapshot().Participant);
+
+        True(fixture.ContentStore.TryInstallUserResourcePack(
+            noOpManifest, noOpPayloads, out InstalledUserResourcePack noOp,
+            out ContentCacheError noOpInstallError));
+        Equal(ContentCacheError.None, noOpInstallError);
+        True(fixture.ContentStore.TrySetEnabledUserResourcePacks(
+            [installed.Identity, noOp.Identity], out ContentCacheError noOpEnableError));
+        Equal(ContentCacheError.None, noOpEnableError);
+        fixture.DriveSteps(4);
+        Equal(enabled.Generation,
+            fixture.SessionSnapshot.Presentation.Generation.Generation);
+
+        True(fixture.ContentStore.TrySetEnabledUserResourcePacks(
+            [], out ContentCacheError disableError));
+        Equal(ContentCacheError.None, disableError);
+        fixture.DriveUntil(() =>
+            fixture.SessionSnapshot.Presentation.Generation.UserSelections == 0 &&
+            fixture.SessionSnapshot.Presentation.Generation.RealmSelections == 2);
+        PresentationGenerationSnapshot disabled =
+            fixture.SessionSnapshot.Presentation.Generation;
+        True(enabled.Generation != disabled.Generation);
+        Equal(semantic, fixture.Content.SemanticActivation);
+        Equal(world, fixture.SessionSnapshot.StructuralWorld.WorldPackFingerprint);
+        Equal(participant, fixture.Playable.GetSnapshot().Participant);
+        Console.WriteLine(
+            $"EVIDENCE F1.5 remote_semantic_plan={semantic.PlanHash} " +
+            $"remote_semantic_catalog={semantic.ResolvedFingerprint} " +
+            $"user_pack={installed.Identity.PackageId}@{installed.Identity.ManifestHash} " +
+            $"enabled_generation={enabled.Generation.Value} " +
+            $"disabled_generation={disabled.Generation.Value} " +
+            "application_epoch_unchanged=true world_unchanged=true participant_unchanged=true");
     }
 
     private static void ColdCacheContentProofGatesAdmissionAndMatchesCabinOracle()
@@ -1598,6 +1670,42 @@ internal static class F03bRemotePlayableTests
         fixture.DriveUntil(() => fixture.UiClient.OpenViewCount == 1);
         True(fixture.Chat.TrySubmit("content parity", ClientChatSpeechMode.Say));
         fixture.DriveUntil(() => fixture.ChatState.GetSnapshot().Applied == 1);
+    }
+
+    private static (ContentPackageManifest Manifest, ContentFilePayload[] Payloads)
+        CreateF15UserActorPack(
+            string packageValue = "user.remote-proof-x",
+            string logicalValue = ConceptDemoActorPresentationProfile.HumanXDefinitionId)
+    {
+        string? repository = Directory.GetCurrentDirectory();
+        while (repository is not null &&
+               !File.Exists(Path.Combine(repository, "verify.sh")))
+            repository = Directory.GetParent(repository)?.FullName;
+        if (repository is null)
+            throw new InvalidOperationException("The repository root was not found.");
+        byte[] archive = File.ReadAllBytes(Path.Combine(
+            repository, "Client", "OfficialContent", OfficialLocalPresentation.ArchiveFileName));
+        True(OfficialLocalPresentation.TryDecodeArchive(
+            archive, out FetchedContentPackage? official));
+        byte[] actor = official!.Payloads.Single(payload => string.Equals(
+            payload.Path.Value, OfficialLocalPresentation.HumanXPath,
+            StringComparison.Ordinal)).Bytes.ToArray();
+        True(ContentPackageId.TryCreate(packageValue, out ContentPackageId packageId));
+        True(ContentNamespaceId.TryCreate("userpack", out ContentNamespaceId contentNamespace));
+        True(ContentFilePath.TryCreate("actors/remote-proof-x.glb", out ContentFilePath path));
+        True(ContentFileDescriptor.TryCreate(
+            path, ContentFileKind.ActorGltfBinary, actor.Length, ContentHash.Compute(actor),
+            default, out ContentFileDescriptor file));
+        True(LogicalContentId.TryCreate(logicalValue, out LogicalContentId logicalId));
+        True(ContentDefinitionDescriptor.TryCreateFileDefinition(
+            logicalId, ContentDefinitionKind.ActorPresentation,
+            ContentDefinitionOperation.Replace, path,
+            out ContentDefinitionDescriptor? definition));
+        True(ContentPackageManifest.TryCreateUserResourcePack(
+            1, 1, packageId, contentNamespace,
+            "Remote semantic-invariance user presentation", "1",
+            [file], [definition!], out ContentPackageManifest? manifest, out _));
+        return (manifest!, [new ContentFilePayload(path, actor)]);
     }
 
     private static int ReserveLoopbackPort()

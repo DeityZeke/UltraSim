@@ -32,6 +32,8 @@ public sealed class RemotePresentationClient : IRemoteGameProtocolHandler,
     private readonly ContentScopeActivationKey? _localKey;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private PresentationGeneration _generation;
+    private ContentScopeActivationKey? _realmPresentationKey;
+    private ulong _userSelectionRevision;
     private ContentActivationPlan? _pendingPlan;
     private ContentPackageAcquisition[]? _pendingSources;
     private CancellationTokenSource? _cancellation;
@@ -66,7 +68,8 @@ public sealed class RemotePresentationClient : IRemoteGameProtocolHandler,
         _source = source ?? throw new ArgumentNullException(nameof(source));
         _semantic = semantic ?? throw new ArgumentNullException(nameof(semantic));
         _localKey = localPresentationKey;
-        _generation = PresentationGeneration.Create(null, OpenLocal());
+        _generation = CreateInitialGeneration();
+        _userSelectionRevision = _cache.UserResourcePackSelectionRevision;
     }
 
     public PresentationGenerationId CurrentPresentationGeneration
@@ -132,6 +135,7 @@ public sealed class RemotePresentationClient : IRemoteGameProtocolHandler,
     {
         EnsureOperational();
         CompleteAcquisition();
+        RefreshUserSelectionIfChanged();
         if (_task is null && _pendingPlan is not null && _semantic.Applied)
         {
             ContentActivationPlan plan = _pendingPlan;
@@ -161,6 +165,7 @@ public sealed class RemotePresentationClient : IRemoteGameProtocolHandler,
         EnsureOperational();
         _publicationRevision++;
         _cancellation?.Cancel();
+        _realmPresentationKey = null;
         Publish(null);
     }
 
@@ -199,10 +204,39 @@ public sealed class RemotePresentationClient : IRemoteGameProtocolHandler,
             out _) ? lease : null;
     }
 
+    private ContentCatalogLease? OpenRealm()
+    {
+        if (_realmPresentationKey is not { } key) return null;
+        return _cache.TryOpenCatalog(
+            ContentBaseCatalog.Empty, key, out ContentCatalogLease? lease, out _) ? lease : null;
+    }
+
+    private UserResourcePackStackLease? OpenUser() =>
+        _cache.TryOpenEnabledUserResourcePacks(
+            out UserResourcePackStackLease? lease, out _) ? lease : null;
+
+    private PresentationGeneration CreateInitialGeneration()
+    {
+        UserResourcePackStackLease? user = OpenUser();
+        ContentCatalogLease? local = OpenLocal();
+        try { return PresentationGeneration.Create(user, null, local); }
+        catch (InvalidDataException)
+        {
+            // A corrupt/incompatible selected presentation must not make semantic entry fail.
+            return PresentationGeneration.Create(null, null, OpenLocal());
+        }
+    }
+
     private void Publish(ContentCatalogLease? realm)
     {
         PresentationGeneration next;
-        try { next = PresentationGeneration.Create(realm, OpenLocal()); }
+        try { next = PresentationGeneration.Create(OpenUser(), realm, OpenLocal()); }
+        catch (InvalidDataException)
+        {
+            // The candidate is atomic. Reopen the lower layers after the failed constructor
+            // retired their leases, and publish the valid authenticated fallback composition.
+            next = PresentationGeneration.Create(null, OpenRealm(), OpenLocal());
+        }
         catch
         {
             realm?.Dispose();
@@ -212,6 +246,36 @@ public sealed class RemotePresentationClient : IRemoteGameProtocolHandler,
         _generation = next;
         _realmPublished = realm is not null;
         previous.Dispose();
+        _userSelectionRevision = _cache.UserResourcePackSelectionRevision;
+    }
+
+    private void RefreshUserSelectionIfChanged()
+    {
+        ulong revision = _cache.UserResourcePackSelectionRevision;
+        if (revision == _userSelectionRevision) return;
+        _userSelectionRevision = revision;
+        PresentationGeneration? candidate = null;
+        try
+        {
+            candidate = PresentationGeneration.Create(OpenUser(), OpenRealm(), OpenLocal());
+            if (candidate.StableFingerprint == _generation.StableFingerprint)
+            {
+                candidate.Dispose();
+                return;
+            }
+            PresentationGeneration previous = _generation;
+            _generation = candidate;
+            candidate = null;
+            previous.Dispose();
+        }
+        catch (InvalidDataException)
+        {
+            // Keep the previously published generation intact.
+        }
+        finally
+        {
+            candidate?.Dispose();
+        }
     }
 
     private void CompleteAcquisition()
@@ -246,6 +310,10 @@ public sealed class RemotePresentationClient : IRemoteGameProtocolHandler,
             _detail = "Optional Realm actor presentation was unavailable or incompatible.";
             return;
         }
+        _realmPresentationKey = new ContentScopeActivationKey(
+            new ContentScopeActivationId(
+                completion.Catalog.Catalog.Scope, completion.Catalog.Catalog.Activation),
+            completion.Catalog.Catalog.PlanHash);
         Publish(completion.Catalog);
         _detail = null;
     }

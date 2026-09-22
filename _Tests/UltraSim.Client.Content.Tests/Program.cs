@@ -42,6 +42,9 @@ var tests = new (string Name, Action Body)[]
     ("WorldPackResolvesThroughAppliedCatalogAndWorldBinding", WorldPackResolvesThroughAppliedCatalogAndWorldBinding),
     ("ActorPresentationGlbIsBoundedPassiveAndCatalogResolved", ActorPresentationGlbIsBoundedPassiveAndCatalogResolved),
     ("PresentationGenerationSelectsRealmLocalPrimitiveAndRetainsOldLeases", PresentationGenerationSelectsRealmLocalPrimitiveAndRetainsOldLeases),
+    ("UserResourcePackPolicyIsStrictAndSeparate", UserResourcePackPolicyIsStrictAndSeparate),
+    ("UserResourcePackStorePersistsOrderSharesCasAndFailsClosed", UserResourcePackStorePersistsOrderSharesCasAndFailsClosed),
+    ("UserPresentationOverlayIsTransactionalOrderedAndLeaseSafe", UserPresentationOverlayIsTransactionalOrderedAndLeaseSafe),
 };
 
 foreach ((string name, Action body) in tests)
@@ -676,7 +679,7 @@ static void PresentationGenerationSelectsRealmLocalPrimitiveAndRetainsOldLeases(
                 OpenRealmAgain(cache, realmPlan), secondLocal);
             Equal(PresentationSourceKind.Realm, layered.GetSource(xId));
             Equal(PresentationSourceKind.Local, layered.GetSource(yId));
-            NotEqual(local.StableFingerprint, layered.StableFingerprint);
+            Equal(local.StableFingerprint, layered.StableFingerprint);
             NotEqual(local.Generation, layered.Generation);
             True(layered.TryResolveActorPresentation(
                 xId, ConceptDemoActorPresentationProfile.Requirements,
@@ -724,6 +727,395 @@ static ContentCatalogLease OpenRealmAgain(ContentCache cache, ContentActivationP
     True(cache.TryOpenCatalog(ContentBaseCatalog.Empty, key,
         out ContentCatalogLease? catalog, out var error), error.ToString());
     return catalog!;
+}
+
+static void UserResourcePackPolicyIsStrictAndSeparate()
+{
+    byte[] actor = OfficialActor(OfficialLocalPresentation.HumanXPath);
+    ContentFilePath actorPath = FilePath("actors/user-x.glb");
+    ContentFileDescriptor actorFile = File(actorPath, ContentFileKind.ActorGltfBinary, actor);
+    ContentDefinitionDescriptor replace = FileDefinition(
+        ConceptDemoActorPresentationProfile.HumanXDefinitionId,
+        ContentDefinitionKind.ActorPresentation, ContentDefinitionOperation.Replace,
+        actorPath.Value!);
+    ContentPackageId package = Package("user.actor.strict");
+    ContentNamespaceId contentNamespace = Namespace("userpack");
+
+    False(ContentPackageManifest.TryCreate(
+        1, 1, package, contentNamespace, "User", "1",
+        ContentTrustClass.UserResourcePack, [actorFile], [replace], out _, out _));
+    True(ContentPackageManifest.TryCreateUserResourcePack(
+        1, 1, package, contentNamespace, "User", "1", [actorFile], [replace],
+        out ContentPackageManifest? accepted, out string? acceptedError), acceptedError);
+    Equal(ContentTrustClass.UserResourcePack, accepted!.TrustClass);
+
+    ContentDefinitionDescriptor add = FileDefinition(
+        "userpack:new-actor", ContentDefinitionKind.ActorPresentation,
+        ContentDefinitionOperation.Add, actorPath.Value!);
+    False(ContentPackageManifest.TryCreateUserResourcePack(
+        1, 1, package, contentNamespace, "Bad Add", "1", [actorFile], [add],
+        out _, out _));
+
+    byte[] texture = Png(0x55);
+    ContentFilePath texturePath = FilePath("textures/user.png");
+    ContentFileDescriptor textureFile = File(texturePath, ContentFileKind.PngTexture, texture);
+    ContentDefinitionDescriptor textureReplace = TextureDefinition(
+        "cabin:wall", ContentDefinitionOperation.Replace, texturePath.Value!);
+    False(ContentPackageManifest.TryCreateUserResourcePack(
+        1, 1, package, contentNamespace, "Bad texture", "1",
+        [textureFile], [textureReplace], out _, out _));
+
+    byte[] world = WorldPackBytes();
+    ContentFilePath worldPath = FilePath("worlds/forbidden.usworldpack");
+    ContentFileDescriptor worldFile = File(worldPath, ContentFileKind.WorldPack, world);
+    ContentDefinitionDescriptor worldReplace = FileDefinition(
+        "cabin:world", ContentDefinitionKind.WorldPack,
+        ContentDefinitionOperation.Replace, worldPath.Value!);
+    False(ContentPackageManifest.TryCreateUserResourcePack(
+        1, 1, package, contentNamespace, "Bad world", "1",
+        [worldFile], [worldReplace], out _, out _));
+
+    ContentFilePath uiPath = FilePath("ui/forbidden.usui");
+    ContentFileDescriptor.TryCreate(
+        uiPath, ContentFileKind.UiDefinition, 1, ContentHash.Compute([1]), default,
+        out ContentFileDescriptor uiFile);
+    ContentDefinitionDescriptor uiDefinition = FileDefinition(
+        "cabin:ui", ContentDefinitionKind.Icon,
+        ContentDefinitionOperation.Replace, uiPath.Value!);
+    False(ContentPackageManifest.TryCreateUserResourcePack(
+        1, 1, package, contentNamespace, "Bad UI", "1",
+        [uiFile], [uiDefinition], out _, out _));
+
+    ContentFileDescriptor.TryCreate(
+        actorPath, ContentFileKind.ActorGltfBinary,
+        ActorPresentationArtifactLimits.Default.MaximumArtifactBytes + 1L,
+        ContentHash.Compute("oversized"u8), default, out ContentFileDescriptor oversized);
+    False(ContentPackageManifest.TryCreateUserResourcePack(
+        1, 1, package, contentNamespace, "Oversized", "1",
+        [oversized], [replace], out _, out _));
+
+    byte[] external = RewriteActorJson(actor, static root =>
+        root["buffers"]![0]!["uri"] = "https://example.invalid/evil.bin");
+    PackageFixture externalPack = UserActorPackage(
+        "user.actor.external", ConceptDemoActorPresentationProfile.HumanXDefinitionId,
+        "actors/external.glb", external);
+    False(ContentPackageValidator.TryValidatePayloads(
+        externalPack.Manifest, externalPack.Payloads, out _, out _));
+}
+
+static void UserResourcePackStorePersistsOrderSharesCasAndFailsClosed()
+{
+    byte[] x = OfficialActor(OfficialLocalPresentation.HumanXPath);
+    byte[] tinted = TintActor(x, 0.92, 0.08, 0.18);
+    PackageFixture localX = ActorPackage(
+        "local.shared-x", "actors", ContentTrustClass.ScopeAuthorizedPassive,
+        ConceptDemoActorPresentationProfile.HumanXDefinitionId,
+        ContentDefinitionOperation.Add, "actors/shared-x.glb", x);
+    PackageFixture packA = UserActorPackage(
+        "user.pack.a", ConceptDemoActorPresentationProfile.HumanXDefinitionId,
+        "actors/a.glb", x);
+    PackageFixture packB = UserActorPackage(
+        "user.pack.b", ConceptDemoActorPresentationProfile.HumanXDefinitionId,
+        "actors/b.glb", tinted);
+    UserResourcePackIdentity a = UserIdentity(packA);
+    UserResourcePackIdentity b = UserIdentity(packB);
+    ApplicationRealmId realm = new(0xF15, 0xCA5);
+    string root = NewCacheRoot();
+    string sourceRoot = Path.Combine(Path.GetTempPath(),
+        "ultrasim-user-pack-source", Guid.NewGuid().ToString("N"));
+    try
+    {
+        Directory.CreateDirectory(sourceRoot);
+        True(ContentPackageArchive.TryEncodeCanonical(
+            packA.Manifest, packA.Payloads, out byte[] archive));
+        System.IO.File.WriteAllBytes(Path.Combine(sourceRoot, "pack-a.uspkg"), archive);
+        var source = new LocalContentPackageSource(sourceRoot);
+        var fetch = new UserResourcePackFetchRequest(a, FilePath("pack-a.uspkg"));
+        True(source.TryFetchUserResourcePack(
+            in fetch, out FetchedContentPackage? fetched, out var fetchError),
+            fetchError.ToString());
+        Equal(a.ManifestHash, fetched!.Manifest.ManifestHash);
+        False(ContentPackageArchive.TryDecodeCanonical(
+            archive, a.PackageId, a.ManifestHash, out _));
+
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out var open), open.ToString());
+        using (cache)
+        {
+            True(cache!.TryInstallPackage(ContentScopeKey.Local, localX.Manifest,
+                localX.Payloads, out _, out var localInstall), localInstall.ToString());
+            Equal(1, cache.GetSnapshot().BlobCount);
+            True(cache.TryInstallUserResourcePack(
+                packA.Manifest, packA.Payloads, out InstalledUserResourcePack installedA,
+                out var installA), installA.ToString());
+            True(cache.TryInstallUserResourcePack(
+                packB.Manifest, packB.Payloads, out InstalledUserResourcePack installedB,
+                out var installB), installB.ToString());
+            True(cache.TryInstallPackage(ContentScopeKey.ForRealm(realm), localX.Manifest,
+                localX.Payloads, out var realmInstall, out var realmInstallError),
+                realmInstallError.ToString());
+            Equal(a, installedA.Identity);
+            Equal(b, installedB.Identity);
+            True(cache.GetSnapshot().ReusedBlobs >= 2);
+            Equal(2, cache.GetSnapshot().BlobCount);
+            Equal(2, cache.GetSnapshot().InstalledResourcePackCount);
+            False(cache.TryOpenPackage(ContentScopeKey.Local, packA.Manifest.PackageId,
+                packA.Manifest.ManifestHash, out _, out _));
+            False(cache.TryOpenPackage(ContentScopeKey.ForRealm(realm),
+                packA.Manifest.PackageId, packA.Manifest.ManifestHash, out _, out _));
+            True(cache.TrySetEnabledUserResourcePacks([a, b], out var selection), selection.ToString());
+            True(cache.TryOpenEnabledUserResourcePacks(
+                out UserResourcePackStackLease? stack, out var stackError), stackError.ToString());
+            using (stack)
+            {
+                Equal(2, stack!.Identities.Count);
+                Equal(a, stack.Identities[0]);
+                Equal(b, stack.Identities[1]);
+            }
+            Equal(0, cache.GetSnapshot().LiveResourcePackLeases);
+        }
+
+        True(ContentCache.TryOpen(root, out ContentCache? reopened, out var reopen), reopen.ToString());
+        using (reopened)
+        {
+            ContentCacheSnapshot snapshot = reopened!.GetSnapshot();
+            Equal(2, snapshot.InstalledResourcePackCount);
+            Equal(2, snapshot.EnabledResourcePackCount);
+            True(snapshot.ResourcePackSelectionValid);
+            True(reopened.TryOpenEnabledUserResourcePacks(
+                out UserResourcePackStackLease? warm, out var warmError), warmError.ToString());
+            using (warm) Equal(b, warm!.Identities[1]);
+        }
+
+        System.IO.File.WriteAllBytes(
+            Path.Combine(root, "resource-packs", "selection", "enabled.selection"),
+            "corrupt selection"u8.ToArray());
+        True(ContentCache.TryOpen(root, out ContentCache? corrupt, out var corruptOpen),
+            corruptOpen.ToString());
+        using (corrupt)
+        {
+            ContentCacheSnapshot failedClosed = corrupt!.GetSnapshot();
+            False(failedClosed.ResourcePackSelectionValid);
+            Equal(0, failedClosed.EnabledResourcePackCount);
+            False(corrupt.TryOpenEnabledUserResourcePacks(out _, out var corruptSelection));
+            Equal(ContentCacheError.CorruptResourcePackSelection, corruptSelection);
+            True(corrupt.TrySetEnabledUserResourcePacks([], out var repair), repair.ToString());
+            True(corrupt.GetSnapshot().ResourcePackSelectionValid);
+            True(corrupt.TrySetEnabledUserResourcePacks([a], out var missingSelection),
+                missingSelection.ToString());
+        }
+
+        System.IO.File.Delete(Path.Combine(
+            root, "resource-packs", "manifests", a.ManifestHash + ".manifest"));
+        True(ContentCache.TryOpen(root, out ContentCache? missing, out var missingOpen),
+            missingOpen.ToString());
+        using (missing)
+        {
+            True(missing!.GetSnapshot().ResourcePackSelectionValid);
+            False(missing.TryOpenEnabledUserResourcePacks(out _, out var missingPack));
+            Equal(ContentCacheError.MissingResourcePack, missingPack);
+            True(missing.TrySetEnabledUserResourcePacks([b], out var selectBlobFailure),
+                selectBlobFailure.ToString());
+        }
+        ContentHash missingBlobHash = packB.Manifest.Files[0].Sha256;
+        string missingBlobText = missingBlobHash.ToString();
+        System.IO.File.Delete(Path.Combine(
+            root, "blobs", "sha256", missingBlobText[..2], missingBlobText + ".blob"));
+        True(ContentCache.TryOpen(root, out ContentCache? corruptBlob, out var corruptBlobOpen),
+            corruptBlobOpen.ToString());
+        using (corruptBlob)
+        {
+            False(corruptBlob!.TryOpenEnabledUserResourcePacks(out _, out var missingBlob));
+            Equal(ContentCacheError.CorruptBlob, missingBlob);
+            True(corruptBlob.TrySetEnabledUserResourcePacks([], out var disableMissing),
+                disableMissing.ToString());
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        if (Directory.Exists(sourceRoot)) Directory.Delete(sourceRoot, recursive: true);
+    }
+}
+
+static void UserPresentationOverlayIsTransactionalOrderedAndLeaseSafe()
+{
+    byte[] x = OfficialActor(OfficialLocalPresentation.HumanXPath);
+    byte[] y = OfficialActor(OfficialLocalPresentation.HumanYPath);
+    byte[] red = TintActor(x, 0.95, 0.04, 0.04);
+    byte[] blue = TintActor(x, 0.04, 0.10, 0.95);
+    byte[] incompatible = RewriteActorJson(x, static root =>
+    {
+        JsonArray joints = root["skins"]![0]!["joints"]!.AsArray();
+        int node = joints[0]!.GetValue<int>();
+        root["nodes"]![node]!["name"] = "user-incompatible-root";
+    });
+    PackageFixture realmX = ActorPackage(
+        "realm.x", "actors", ContentTrustClass.ScopeAuthorizedPassive,
+        ConceptDemoActorPresentationProfile.HumanXDefinitionId,
+        ContentDefinitionOperation.Add, "actors/realm-x.glb", x);
+    PackageFixture realmY = ActorPackage(
+        "realm.y", "actors", ContentTrustClass.ScopeAuthorizedPassive,
+        ConceptDemoActorPresentationProfile.HumanYDefinitionId,
+        ContentDefinitionOperation.Add, "actors/realm-y.glb", y);
+    PackageFixture packA = UserActorPackage(
+        "user.overlay", ConceptDemoActorPresentationProfile.HumanXDefinitionId,
+        "actors/red.glb", red, "1");
+    PackageFixture packB = UserActorPackage(
+        "user.overlay.second", ConceptDemoActorPresentationProfile.HumanXDefinitionId,
+        "actors/blue.glb", blue, "1");
+    PackageFixture update = UserActorPackage(
+        "user.overlay", ConceptDemoActorPresentationProfile.HumanXDefinitionId,
+        "actors/blue-update.glb", blue, "2");
+    PackageFixture bad = UserActorPackage(
+        "user.bad-skeleton", ConceptDemoActorPresentationProfile.HumanXDefinitionId,
+        "actors/bad.glb", incompatible);
+    PackageFixture unused = UserActorPackage(
+        "user.other-world", "otherworld:human/x", "actors/unused.glb", red);
+    UserResourcePackIdentity a = UserIdentity(packA);
+    UserResourcePackIdentity b = UserIdentity(packB);
+    UserResourcePackIdentity v2 = UserIdentity(update);
+    UserResourcePackIdentity invalid = UserIdentity(bad);
+    UserResourcePackIdentity noOp = UserIdentity(unused);
+    ApplicationRealmId realm = new(0xF15, 1);
+    ContentActivationPlan realmPlan = ScopePlan(
+        ContentScopeKey.ForRealm(realm), new ContentActivationId(0xF15, 2),
+        ContentBaseCatalog.Empty.Fingerprint,
+        [Required(realmX.Manifest), Required(realmY.Manifest)]);
+    ContentActivationPlan localPlan = ScopePlan(
+        ContentScopeKey.Local, new ContentActivationId(0xF15, 3),
+        ContentBaseCatalog.Empty.Fingerprint,
+        [Required(realmX.Manifest), Required(realmY.Manifest)]);
+    LogicalContentId xId = Logical(ConceptDemoActorPresentationProfile.HumanXDefinitionId);
+    LogicalContentId yId = Logical(ConceptDemoActorPresentationProfile.HumanYDefinitionId);
+
+    WithCacheRoot(root =>
+    {
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out var open), open.ToString());
+        using (cache)
+        {
+            foreach (PackageFixture package in new[] { realmX, realmY })
+            {
+                True(cache!.TryInstallPackage(ContentScopeKey.ForRealm(realm), package.Manifest,
+                    package.Payloads, out _, out var install), install.ToString());
+                True(cache.TryInstallPackage(ContentScopeKey.Local, package.Manifest,
+                    package.Payloads, out _, out var localInstall), localInstall.ToString());
+            }
+            foreach (PackageFixture package in new[] { packA, packB, update, bad, unused })
+                True(cache!.TryInstallUserResourcePack(
+                    package.Manifest, package.Payloads, out _, out var install), install.ToString());
+
+            True(cache!.TryPublishCatalog(ContentBaseCatalog.Empty, realmPlan, false,
+                out ContentCatalogLease? realmCatalog, out var publish), publish.ToString());
+            var semanticActivation = new AuthorizedSemanticActivation(
+                realmPlan.Scope, realmPlan.Activation, realmPlan.PlanHash,
+                realmCatalog!.Catalog.Fingerprint, 0xF150UL);
+            True(semanticActivation.IsValid);
+            using PresentationGeneration lower = PresentationGeneration.Create(realmCatalog, null);
+            Equal(PresentationSourceKind.Realm, lower.GetSource(xId));
+            Equal(PresentationSourceKind.Realm, lower.GetSource(yId));
+            True(cache.TryPublishCatalog(ContentBaseCatalog.Empty, localPlan, false,
+                out ContentCatalogLease? localCatalog, out var localPublish),
+                localPublish.ToString());
+
+            True(cache.TrySetEnabledUserResourcePacks([a, b], out var select), select.ToString());
+            True(cache.TryOpenEnabledUserResourcePacks(out UserResourcePackStackLease? stack,
+                out var stackError), stackError.ToString());
+            PresentationGeneration current = PresentationGeneration.Create(
+                stack, OpenRealmAgain(cache, realmPlan), null);
+            Equal(PresentationSourceKind.User, current.GetSource(xId));
+            Equal(PresentationSourceKind.Realm, current.GetSource(yId));
+            Equal(1, current.Snapshot.UserSelections);
+            Equal(2, current.Snapshot.EnabledUserPacks);
+            True(current.TryGetUserResourcePack(xId, out UserResourcePackIdentity winner));
+            Equal(b, winner);
+            True(current.TryResolveActorPresentation(
+                xId, ConceptDemoActorPresentationProfile.Requirements,
+                out ActorPresentationContentLease? retained, out var resolved), resolved.ToString());
+            Equal(packB.Manifest.ManifestHash, retained!.OwnerManifest);
+
+            True(cache.TryOpenEnabledUserResourcePacks(out UserResourcePackStackLease? localStack,
+                out var localStackError), localStackError.ToString());
+            using (PresentationGeneration userOverLocal = PresentationGeneration.Create(
+                localStack, null, localCatalog))
+            {
+                Equal(PresentationSourceKind.User, userOverLocal.GetSource(xId));
+                Equal(PresentationSourceKind.Local, userOverLocal.GetSource(yId));
+            }
+
+            True(cache.TrySetEnabledUserResourcePacks([b, a], out var reorder), reorder.ToString());
+            True(cache.TryOpenEnabledUserResourcePacks(out UserResourcePackStackLease? reordered,
+                out var reorderOpen), reorderOpen.ToString());
+            PresentationGeneration reorderedGeneration = PresentationGeneration.Create(
+                reordered, OpenRealmAgain(cache, realmPlan), null);
+            True(reorderedGeneration.TryGetUserResourcePack(xId, out winner));
+            Equal(a, winner);
+            NotEqual(current.StableFingerprint, reorderedGeneration.StableFingerprint);
+
+            True(cache.TrySetEnabledUserResourcePacks([a, noOp], out var noOpSelect),
+                noOpSelect.ToString());
+            True(cache.TryOpenEnabledUserResourcePacks(out UserResourcePackStackLease? noOpStack,
+                out var noOpOpen), noOpOpen.ToString());
+            PresentationGeneration noOpGeneration = PresentationGeneration.Create(
+                noOpStack, OpenRealmAgain(cache, realmPlan), null);
+            Equal(reorderedGeneration.StableFingerprint, noOpGeneration.StableFingerprint);
+
+            True(cache.TrySetEnabledUserResourcePacks([a], out var userOnlySelection),
+                userOnlySelection.ToString());
+            True(cache.TryOpenEnabledUserResourcePacks(out UserResourcePackStackLease? userOnlyStack,
+                out var userOnlyOpen), userOnlyOpen.ToString());
+            using (PresentationGeneration userOnly = PresentationGeneration.Create(
+                userOnlyStack, null, null))
+            {
+                Equal(PresentationSourceKind.User, userOnly.GetSource(xId));
+                Equal(PresentationSourceKind.Primitive, userOnly.GetSource(yId));
+            }
+
+            True(cache.TrySetEnabledUserResourcePacks([invalid], out var badSelection),
+                badSelection.ToString());
+            True(cache.TryOpenEnabledUserResourcePacks(out UserResourcePackStackLease? badStack,
+                out var badOpen), badOpen.ToString());
+            bool rejected = false;
+            try
+            {
+                _ = PresentationGeneration.Create(badStack, OpenRealmAgain(cache, realmPlan), null);
+            }
+            catch (InvalidDataException) { rejected = true; }
+            True(rejected, "An incompatible selected user artifact must reject the candidate.");
+            Equal(packB.Manifest.ManifestHash, retained.OwnerManifest);
+
+            True(cache.TrySetEnabledUserResourcePacks([v2], out var updateSelection),
+                updateSelection.ToString());
+            True(cache.TryOpenEnabledUserResourcePacks(out UserResourcePackStackLease? updateStack,
+                out var updateOpen), updateOpen.ToString());
+            using PresentationGeneration updated = PresentationGeneration.Create(
+                updateStack, OpenRealmAgain(cache, realmPlan), null);
+            Equal(PresentationSourceKind.User, updated.GetSource(xId));
+            True(updated.TryGetUserResourcePack(xId, out winner));
+            Equal(v2, winner);
+            False(cache.TryRetireUserResourcePack(a, out var liveBusy));
+            Equal(ContentCacheError.CacheBusy, liveBusy);
+            reorderedGeneration.Dispose();
+            noOpGeneration.Dispose();
+            current.Dispose();
+            False(cache.TryRetireUserResourcePack(b, out var nativeBusy));
+            Equal(ContentCacheError.CacheBusy, nativeBusy);
+            retained.Dispose();
+            True(cache.TryRetireUserResourcePack(b, out var retired), retired.ToString());
+            True(cache.TryRetireUserResourcePack(a, out var retiredA), retiredA.ToString());
+            Equal(semanticActivation, new AuthorizedSemanticActivation(
+                realmPlan.Scope, realmPlan.Activation, realmPlan.PlanHash,
+                semanticActivation.ResolvedFingerprint,
+                semanticActivation.ApplicationSessionEpoch));
+            Console.WriteLine(
+                $"EVIDENCE F1.5 pack_a={a.PackageId}@{a.ManifestHash} " +
+                $"pack_b={b.PackageId}@{b.ManifestHash} " +
+                $"pack_v2={v2.PackageId}@{v2.ManifestHash} " +
+                $"semantic_plan={semanticActivation.PlanHash} " +
+                $"semantic_catalog={semanticActivation.ResolvedFingerprint} " +
+                "precedence=user>realm>local>primitive local_absent=user+primitive " +
+                "reorder=pass invalid_atomic=pass immutable_update=pass live_retire=pass");
+        }
+    });
 }
 
 static void ActivationIdentityPreservesAuthorityOrderNotByteSource()
@@ -1933,6 +2325,40 @@ static PackageFixture ActorPackage(
         Manifest(package, contentNamespace, trust, [file], [definition]),
         [new ContentFilePayload(path, bytes)]);
 }
+
+static PackageFixture UserActorPackage(
+    string package,
+    string logicalId,
+    string filePath,
+    byte[] bytes,
+    string version = "1")
+{
+    ContentFilePath path = FilePath(filePath);
+    ContentFileDescriptor file = File(path, ContentFileKind.ActorGltfBinary, bytes);
+    ContentDefinitionDescriptor definition = FileDefinition(
+        logicalId, ContentDefinitionKind.ActorPresentation,
+        ContentDefinitionOperation.Replace, filePath);
+    True(ContentPackageManifest.TryCreateUserResourcePack(
+        1, 1, Package(package), Namespace("userpack"), package, version,
+        [file], [definition], out ContentPackageManifest? manifest, out string? error), error);
+    return new PackageFixture(manifest!, [new ContentFilePayload(path, bytes)]);
+}
+
+static UserResourcePackIdentity UserIdentity(PackageFixture fixture) => new(
+    fixture.Manifest.PackageId, fixture.Manifest.ManifestHash);
+
+static byte[] TintActor(byte[] source, double red, double green, double blue) =>
+    RewriteActorJson(source, root =>
+    {
+        JsonArray materials = root["materials"]!.AsArray();
+        foreach (JsonNode? materialNode in materials)
+        {
+            JsonObject material = materialNode!.AsObject();
+            JsonObject pbr = material["pbrMetallicRoughness"]?.AsObject() ?? new JsonObject();
+            pbr["baseColorFactor"] = new JsonArray(red, green, blue, 1.0);
+            material["pbrMetallicRoughness"] = pbr;
+        }
+    });
 
 static byte[] OfficialActor(string path)
 {

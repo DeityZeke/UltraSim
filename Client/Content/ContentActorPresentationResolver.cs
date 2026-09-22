@@ -120,6 +120,61 @@ public sealed class ActorPresentationContentLease : IDisposable
 /// </summary>
 public static class ContentActorPresentationResolver
 {
+    public static bool TryResolveUserResourcePack(
+        UserResourcePackStackLease packs,
+        LogicalContentId definitionId,
+        ActorPresentationResolutionRequirements requirements,
+        out ActorPresentationContentLease? lease,
+        out ContentActorPresentationResolutionError error,
+        ActorPresentationArtifactLimits limits = default)
+    {
+        ArgumentNullException.ThrowIfNull(packs);
+        lease = null;
+        error = ContentActorPresentationResolutionError.None;
+        ContentCache? cache = packs.Owner;
+        if (cache is null || !definitionId.IsValid || !requirements.IsValid)
+            return Fail(ContentActorPresentationResolutionError.InvalidRequest, out error);
+        if (!packs.TryFindHighest(
+                definitionId, out _, out ContentPackageManifest? manifest,
+                out ContentDefinitionDescriptor? definition))
+            return Fail(ContentActorPresentationResolutionError.DefinitionNotFound, out error);
+        if (manifest is null || definition is null ||
+            manifest.TrustClass != ContentTrustClass.UserResourcePack ||
+            definition.Kind != ContentDefinitionKind.ActorPresentation ||
+            definition.Operation != ContentDefinitionOperation.Replace ||
+            !manifest.TryGetFile(definition.PrimaryFile, out ContentFileDescriptor file) ||
+            file.Kind != ContentFileKind.ActorGltfBinary || file.SizeBytes > int.MaxValue)
+            return Fail(ContentActorPresentationResolutionError.DefinitionKindMismatch, out error);
+        if (!cache.TryOpenBlob(file, out ContentBlobLease? blob, out _))
+            return Fail(ContentActorPresentationResolutionError.CacheFailure, out error);
+        try
+        {
+            byte[] bytes = new byte[checked((int)file.SizeBytes)];
+            if (!TryReadExact(blob!.Stream, bytes) || blob.Stream.ReadByte() != -1 ||
+                !ActorPresentationArtifact.TryInspect(bytes, out ActorPresentationArtifactInfo info,
+                    out _, limits))
+                return Fail(ContentActorPresentationResolutionError.InvalidArtifact, out error);
+            if (info.Bones != requirements.ExactBoneCount ||
+                info.OrderedSkeletonFingerprint != requirements.OrderedSkeletonFingerprint ||
+                (info.SemanticClips & requirements.RequiredClips) != requirements.RequiredClips)
+                return Fail(ContentActorPresentationResolutionError.SkeletonProfileMismatch, out error);
+            lease = new ActorPresentationContentLease(
+                blob, bytes, info, default, definitionId,
+                manifest.PackageId, manifest.ManifestHash, file.Sha256);
+            blob = null;
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or ArgumentException or
+            OverflowException)
+        {
+            return Fail(ContentActorPresentationResolutionError.CacheFailure, out error);
+        }
+        finally
+        {
+            blob?.Dispose();
+        }
+    }
+
     public static bool TryResolve(
         ContentCatalogLease catalog,
         LogicalContentId definitionId,

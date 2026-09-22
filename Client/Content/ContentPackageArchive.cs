@@ -63,6 +63,28 @@ public static class ContentPackageArchive
         ContentHash expectedManifestHash,
         out FetchedContentPackage? package,
         ContentLimits limits = default)
+        => TryDecodeCanonicalCore(
+            archive, expectedPackage, expectedManifestHash,
+            userResourcePack: false, out package, limits);
+
+    /// <summary>Decodes an explicitly selected local user-pack archive under its strict policy.</summary>
+    public static bool TryDecodeUserResourcePackCanonical(
+        ReadOnlyMemory<byte> archive,
+        ContentPackageId expectedPackage,
+        ContentHash expectedManifestHash,
+        out FetchedContentPackage? package,
+        ContentLimits limits = default)
+        => TryDecodeCanonicalCore(
+            archive, expectedPackage, expectedManifestHash,
+            userResourcePack: true, out package, limits);
+
+    private static bool TryDecodeCanonicalCore(
+        ReadOnlyMemory<byte> archive,
+        ContentPackageId expectedPackage,
+        ContentHash expectedManifestHash,
+        bool userResourcePack,
+        out FetchedContentPackage? package,
+        ContentLimits limits)
     {
         package = null;
         limits = ContentLimits.Resolve(limits);
@@ -78,7 +100,12 @@ public static class ContentPackageArchive
             !reader.TryTake(manifestLength, out ReadOnlyMemory<byte> manifestBytes) ||
             !ContentCacheMetadata.TryDecodeManifest(
                 manifestBytes.Span, expectedManifestHash, limits, out ContentPackageManifest? manifest) ||
-            manifest!.PackageId != expectedPackage || payloadCount != manifest.Files.Count)
+            manifest!.PackageId != expectedPackage ||
+            (userResourcePack
+                ? manifest.TrustClass != ContentTrustClass.UserResourcePack
+                : manifest.TrustClass is not (ContentTrustClass.BuiltIn or
+                    ContentTrustClass.ScopeAuthorizedPassive)) ||
+            payloadCount != manifest.Files.Count)
             return false;
 
         var payloads = new ContentFilePayload[payloadCount];

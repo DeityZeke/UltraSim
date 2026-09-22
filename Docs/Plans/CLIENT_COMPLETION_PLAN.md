@@ -1,6 +1,6 @@
 # UltraSim Client Completion Plan
 
-**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.4 are CLOSED; F1.5 is NEXT.**
+**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.5 are CLOSED; F1.6 is NEXT.**
 
 **Parent architecture:** [CLIENT_PRESENTATION_ARCHITECTURE.md](CLIENT_PRESENTATION_ARCHITECTURE.md)
 
@@ -85,8 +85,8 @@ F1.1  Unified content scopes and stores (CLOSED)
 F1.2  Semantic activation vs presentation resolution (CLOSED)
 F1.3  Primitive substrate and fallback contract (CLOSED)
 F1.4  Official Local content productization (CLOSED)
-F1.5  User presentation overrides and content generations (NEXT)
-F1.6  Derived resources / atlas pipeline
+F1.5  User presentation overrides and content generations (CLOSED)
+F1.6  Derived resources / atlas pipeline (NEXT)
 F1.7  Application workspace, Gameplay Frame, shared UI/gump composition
 F1.8  Declarative camera/control rig and canonical gameplay-view crop
 F1.8A Remote motion prediction/reconciliation/interpolation
@@ -382,7 +382,7 @@ PresentationGeneration N
 
 A presentation generation owns resolved compatible presentation selections and native-resource publication lineage. New presentation work publishes only if its generation is still current; old resources/blobs remain leased until no active presentation uses them.
 
-F1.5 later generalizes this substrate for user-pack enable/disable/update. It does not retroactively make user presentation changes semantic activation changes.
+F1.5 generalizes this substrate for user-pack enable/disable/update. It does not retroactively make user presentation changes semantic activation changes.
 
 ## Presentation resolution
 
@@ -652,6 +652,29 @@ Uninstalling a package must not invalidate a live renderer resource underneath a
 - deleting package metadata while an old generation has a live lease remains safe;
 - old blobs/native resources become collectible only after final release;
 - malformed/incompatible user packs fail locally without poisoning server application state.
+
+## Closure
+
+F1.5 activates numeric trust class 3 only through a dedicated ActorPresentation/Replace/GLB
+policy. Exact `PackageId + ManifestHash` identities install from an explicitly rooted local archive
+source into a separate `resource-packs/` metadata namespace while reusing the global immutable CAS.
+The strict persisted enabled list is bounded to sixteen entries and ordered low-to-high priority;
+invalid selection metadata enables nothing.
+
+`PresentationGeneration` now composes User -> Realm -> `world.local` -> Primitive. Candidate
+generations open and pin exact pack metadata/blobs, validate the existing humanoid profile, and
+publish only after complete resolution. Invalid candidates leave the current generation active;
+old generations and native actor resources retain their leases. Enable, disable, reorder, exact
+immutable update, warm reopen, live-retirement refusal, missing-target no-op, Official-absent
+User/Primitive fallback, remote semantic-proof invariance, and native actor-root-preserving hot
+replacement are permanent tests. Existing remote acquisition revision/session fences still reject
+late work; user selection itself introduces no asynchronous loader.
+
+Texture override remains deliberately deferred. Current Cabin materials are constructed directly
+by the world renderer and are not resolved through the common presentation generation; routing
+them now would begin F1.6 derived-resource/world-renderer work. F1.5 does not claim texture-pack
+support and does not change protocol, Game manifest, transport revision, semantic activation, or
+application proof.
 
 ---
 

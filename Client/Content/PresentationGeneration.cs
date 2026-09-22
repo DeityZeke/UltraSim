@@ -8,6 +8,7 @@ public enum PresentationSourceKind : byte
     Primitive = 0,
     Local = 1,
     Realm = 2,
+    User = 3,
 }
 
 /// <summary>Process-local fence for one published effective presentation composition.</summary>
@@ -28,11 +29,17 @@ public readonly record struct PresentationGenerationId(ulong Value)
 public readonly record struct PresentationGenerationSnapshot(
     PresentationGenerationId Generation,
     ContentHash StableFingerprint,
+    bool UserLayerPresent,
     bool RealmLayerPresent,
     bool LocalLayerPresent,
+    int EnabledUserPacks,
+    int UserSelections,
     int RealmSelections,
     int LocalSelections,
-    int PrimitiveSelections);
+    int PrimitiveSelections)
+{
+    public bool EffectiveUserLayerPresent => UserSelections != 0;
+}
 
 /// <summary>Cold/event-driven, bounded actor presentation composition for F1.2.</summary>
 /// <remarks>
@@ -50,12 +57,16 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
 
     private readonly ContentCatalogLease? _realm;
     private readonly ContentCatalogLease? _local;
+    private readonly UserResourcePackStackLease? _user;
     private readonly SelectedActor[] _actors = new SelectedActor[2];
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private int _references = 1;
     private int _ownerRetired;
 
-    private PresentationGeneration(ContentCatalogLease? realm, ContentCatalogLease? local)
+    private PresentationGeneration(
+        UserResourcePackStackLease? user,
+        ContentCatalogLease? realm,
+        ContentCatalogLease? local)
     {
         if (realm is not null && !realm.Catalog.Scope.IsRealm)
             throw new ArgumentException("The Realm layer must be Realm-authorized.", nameof(realm));
@@ -63,10 +74,12 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
             throw new ArgumentException("The Local layer must be world.local-authorized.", nameof(local));
         _realm = realm;
         _local = local;
+        _user = user;
         Generation = PresentationGenerationId.Next();
 
         try
         {
+            int userSelections = 0;
             int realmSelections = 0;
             int localSelections = 0;
             for (int index = 0; index < s_actorIds.Length; index++)
@@ -75,7 +88,19 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
                     throw new InvalidOperationException("The stock actor logical identity is invalid.");
                 ActorPresentationContentLease? selected = null;
                 PresentationSourceKind source = PresentationSourceKind.Primitive;
-                if (realm is not null && ContentActorPresentationResolver.TryResolve(
+                UserResourcePackIdentity userIdentity = default;
+                if (user is not null && user.TryFindHighest(
+                        id, out userIdentity, out _, out _))
+                {
+                    if (!ContentActorPresentationResolver.TryResolveUserResourcePack(
+                            user, id, ConceptDemoActorPresentationProfile.Requirements,
+                            out selected, out ContentActorPresentationResolutionError userError))
+                        throw new InvalidDataException(
+                            $"The selected user presentation for {id} is incompatible: {userError}.");
+                    source = PresentationSourceKind.User;
+                    userSelections++;
+                }
+                else if (realm is not null && ContentActorPresentationResolver.TryResolve(
                         realm, id, ConceptDemoActorPresentationProfile.Requirements,
                         out selected, out _))
                 {
@@ -89,29 +114,33 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
                     source = PresentationSourceKind.Local;
                     localSelections++;
                 }
-                _actors[index] = new SelectedActor(id, source, selected);
+                _actors[index] = new SelectedActor(id, source, selected, userIdentity);
             }
             using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            hash.AppendData("UltraSim.Presentation.F1.2.v1"u8);
+            hash.AppendData("UltraSim.Presentation.F1.5.v1"u8);
             Span<byte> digest = stackalloc byte[ContentHash.ByteLength];
             foreach (SelectedActor actor in _actors)
             {
                 hash.AppendData(Encoding.ASCII.GetBytes(actor.Id.Value!));
-                hash.AppendData([(byte)actor.Source]);
                 if (actor.Lease is not null)
                 {
                     actor.Lease.FileHash.WriteDigest(digest);
                     hash.AppendData(digest);
                 }
+                else hash.AppendData([0]);
             }
             StableFingerprint = ContentHash.FromDigest(hash.GetHashAndReset());
             Snapshot = new PresentationGenerationSnapshot(
-                Generation, StableFingerprint, realm is not null, local is not null,
-                realmSelections, localSelections, s_actorIds.Length - realmSelections - localSelections);
+                Generation, StableFingerprint, user is { Identities.Count: > 0 },
+                realm is not null, local is not null,
+                user?.Identities.Count ?? 0, userSelections,
+                realmSelections, localSelections,
+                s_actorIds.Length - userSelections - realmSelections - localSelections);
         }
         catch
         {
             foreach (SelectedActor actor in _actors) actor.Lease?.Dispose();
+            user?.Dispose();
             realm?.Dispose();
             local?.Dispose();
             throw;
@@ -124,13 +153,32 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
     public PresentationGenerationSnapshot Snapshot { get; }
 
     public static PresentationGeneration Create(
-        ContentCatalogLease? realm, ContentCatalogLease? local) => new(realm, local);
+        ContentCatalogLease? realm, ContentCatalogLease? local) => new(null, realm, local);
+
+    public static PresentationGeneration Create(
+        UserResourcePackStackLease? user,
+        ContentCatalogLease? realm,
+        ContentCatalogLease? local) => new(user, realm, local);
 
     public PresentationSourceKind GetSource(LogicalContentId id)
     {
         foreach (SelectedActor actor in _actors)
             if (actor.Id == id) return actor.Source;
         return PresentationSourceKind.Primitive;
+    }
+
+    public bool TryGetUserResourcePack(
+        LogicalContentId id,
+        out UserResourcePackIdentity identity)
+    {
+        foreach (SelectedActor actor in _actors)
+        {
+            if (actor.Id != id || actor.Source != PresentationSourceKind.User) continue;
+            identity = actor.UserResourcePack;
+            return identity.IsValid;
+        }
+        identity = default;
+        return false;
     }
 
     public bool TryResolveActorPresentation(
@@ -197,12 +245,16 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
     {
         if (Interlocked.Decrement(ref _references) != 0) return;
         foreach (SelectedActor actor in _actors) actor.Lease?.Dispose();
+        _user?.Dispose();
         _realm?.Dispose();
         _local?.Dispose();
     }
 
     private readonly record struct SelectedActor(
-        LogicalContentId Id, PresentationSourceKind Source, ActorPresentationContentLease? Lease);
+        LogicalContentId Id,
+        PresentationSourceKind Source,
+        ActorPresentationContentLease? Lease,
+        UserResourcePackIdentity UserResourcePack);
 
     private sealed class GenerationReference(PresentationGeneration owner) : IDisposable
     {

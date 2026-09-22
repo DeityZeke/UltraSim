@@ -248,6 +248,15 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         ApplyCameraProfile();
     }
 
+    /// <summary>Programmatic F1.5 seam for a future settings UI; publication occurs on Pump.</summary>
+    public bool TrySetEnabledUserResourcePacks(
+        IEnumerable<UserResourcePackIdentity> identities,
+        out ContentCacheError error)
+    {
+        EnsureOperational();
+        return _cache!.TrySetEnabledUserResourcePacks(identities, out error);
+    }
+
     public bool TrySubmitGuest(in GameGuestAdmissionRequest request)
     {
         EnsureOperational();

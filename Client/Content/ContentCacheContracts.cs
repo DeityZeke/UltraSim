@@ -64,6 +64,8 @@ public enum ContentCacheError : byte
     ActivationConflict,
     CorruptActivation,
     CatalogResolutionFailed,
+    MissingResourcePack,
+    CorruptResourcePackSelection,
     IoFailure,
 }
 
@@ -87,8 +89,13 @@ public readonly record struct ContentCacheSnapshot(
     int RealmManifestCount,
     int LocalActivationCount,
     int RealmActivationCount,
+    int InstalledResourcePackCount,
+    int EnabledResourcePackCount,
     int LiveBlobPins,
     int LiveCatalogPins,
+    int LiveResourcePackLeases,
+    bool ResourcePackSelectionValid,
+    ulong ResourcePackSelectionRevision,
     long QuotaBytes,
     long HighWaterBytes,
     ulong Installs,

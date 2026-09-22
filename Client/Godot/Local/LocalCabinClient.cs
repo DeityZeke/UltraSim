@@ -144,6 +144,7 @@ public partial class LocalCabinClient : Node3D
     private string? _officialContentRoot;
     private ContentCache? _presentationCache;
     private PresentationGeneration? _presentationGeneration;
+    private ulong _presentationSelectionRevision;
     private GodotContentActorVisualResolver? _actorVisuals;
     private OfficialLocalPresentationResult _officialPresentation;
     private ResolvedClientSettings? _settings;
@@ -301,6 +302,19 @@ public partial class LocalCabinClient : Node3D
                 $"({residency.SemanticResidentChunks} resident / {render.ActiveRenderChunks} rendered)";
             UpdateHud();
         }
+    }
+
+    /// <summary>Programmatic F1.5 seam for a future settings UI; publication occurs next frame.</summary>
+    public bool TrySetEnabledUserResourcePacks(
+        IEnumerable<UserResourcePackIdentity> identities,
+        out ContentCacheError error)
+    {
+        if (_presentationCache is null)
+        {
+            error = ContentCacheError.InvalidRequest;
+            return false;
+        }
+        return _presentationCache.TrySetEnabledUserResourcePacks(identities, out error);
     }
 
     public LocalPlayableServerExtensionSnapshot GetHostingSnapshot()
@@ -655,6 +669,7 @@ public partial class LocalCabinClient : Node3D
             return;
         try
         {
+            RefreshUserPresentationIfChanged();
             if (_localSession.TryGetLatestView(out LocalPlayableAuthorityView priorView))
                 _inputScheduler.ObserveCompleted(priorView.LastCommandSequence);
             _ = _inputScheduler.TryPump(
@@ -3936,12 +3951,65 @@ public partial class LocalCabinClient : Node3D
                 OfficialLocalPresentationStatus.CacheFailure, cacheError, default, default);
             return;
         }
-        if (!OfficialLocalPresentation.TryOpenOrAcquire(
+        _ = OfficialLocalPresentation.TryOpenOrAcquire(
                 _presentationCache!, _officialContentRoot,
-                out ContentCatalogLease? localCatalog, out _officialPresentation))
-            return;
-        _presentationGeneration = PresentationGeneration.Create(null, localCatalog);
+                out ContentCatalogLease? localCatalog, out _officialPresentation);
+        UserResourcePackStackLease? user = OpenUserResourcePacks();
+        try
+        {
+            _presentationGeneration = PresentationGeneration.Create(user, null, localCatalog);
+        }
+        catch (InvalidDataException)
+        {
+            _presentationGeneration = PresentationGeneration.Create(
+                null, null, OpenLocalPresentationCatalog());
+        }
+        _presentationSelectionRevision = _presentationCache!.UserResourcePackSelectionRevision;
         _actorVisuals = new GodotContentActorVisualResolver(_presentationGeneration);
+    }
+
+    private UserResourcePackStackLease? OpenUserResourcePacks() =>
+        _presentationCache is not null && _presentationCache.TryOpenEnabledUserResourcePacks(
+            out UserResourcePackStackLease? lease, out _) ? lease : null;
+
+    private ContentCatalogLease? OpenLocalPresentationCatalog() =>
+        _presentationCache is not null && _presentationCache.TryOpenCatalog(
+            ContentBaseCatalog.Empty, OfficialLocalPresentation.ActivationKey,
+            out ContentCatalogLease? lease, out _) ? lease : null;
+
+    private void RefreshUserPresentationIfChanged()
+    {
+        if (_presentationCache is null || _presentationGeneration is null ||
+            _actorVisuals is null || _actorPresenter is null)
+            return;
+        ulong revision = _presentationCache.UserResourcePackSelectionRevision;
+        if (revision == _presentationSelectionRevision) return;
+        _presentationSelectionRevision = revision;
+        PresentationGeneration? candidate = null;
+        try
+        {
+            candidate = PresentationGeneration.Create(
+                OpenUserResourcePacks(), null, OpenLocalPresentationCatalog());
+            if (candidate.StableFingerprint == _presentationGeneration.StableFingerprint)
+            {
+                candidate.Dispose();
+                return;
+            }
+            PresentationGeneration previous = _presentationGeneration;
+            _presentationGeneration = candidate;
+            candidate = null;
+            previous.Dispose();
+            _ = _actorPresenter.RefreshResolvedVisuals();
+            _actorVisuals.ReleaseRetiredResources();
+        }
+        catch (InvalidDataException)
+        {
+            // Candidate publication is atomic; retain the current native presentation.
+        }
+        finally
+        {
+            candidate?.Dispose();
+        }
     }
 
     private sealed class CabinCatalogAssetResolver : IGodotWorldAssetResolver

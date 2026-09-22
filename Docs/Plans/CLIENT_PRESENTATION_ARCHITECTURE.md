@@ -9,10 +9,11 @@
 **F1.2 implementation boundary:** the current Concept Demo now proves WorldPack and compiled
 Inventory/Server Monitor UI through one exact Realm semantic activation, while an independent
 authenticated message-149 plan authorizes X/Y actor art. Actor-art acquisition is non-gating.
-An engine-neutral, immutable `PresentationGeneration` selects compatible Realm art, then
-`world.local`, then renderer Primitive per logical actor ID. Its process-local generation fences
-late native work; its effective-selection fingerprint is stable content identity. User packs and
-derived caches remain later F1 checkpoints. F1.3 supplies
+An engine-neutral, immutable `PresentationGeneration` selects compatible explicitly enabled User
+art, then Realm art, `world.local`, and renderer Primitive per logical actor ID. Its process-local
+generation fences late native work; its effective-selection fingerprint is stable content identity.
+F1.5 persists a bounded exact user-pack order in a separate policy namespace and shares only
+immutable CAS blobs with authorization scopes. Derived caches remain a later F1 checkpoint. F1.3 supplies
 finite `ClientPrimitivePresentation` descriptors and a permanent Godot primitive substrate for
 already-disclosed actor, item, public, frozen-static, and Multi-fragment facts. Model absence and
 texture absence remain independent; neutral fallback is distinct from diagnostic missing texture.
@@ -338,6 +339,16 @@ A resource pack does not:
 
 Executable client extensions, if ever supported, remain a separate trust/install/runtime boundary and are not resource packs.
 
+F1.5 implements the first intentionally narrow member of this family: up to sixteen explicitly
+installed/enabled packages, ordered low-to-high priority, containing only bounded inert
+ActorPresentation GLBs declared as Replace. Exact package/manifest identities and enabled order
+persist under `resource-packs/`; they do not enter Realm or `world.local` activation. Missing
+logical targets are inactive, while corrupt or skeleton-incompatible selected actor replacements
+reject the complete candidate generation and preserve the current one. WorldPack, UI definition,
+texture, script/shader/executable, Add, and all other domains remain rejected. Texture/material
+overrides await the F1.6 presentation/derived-resource seam because current Cabin materials are
+renderer-constructed rather than common-generation leaves.
+
 ---
 
 # 6. Presentation precedence versus graceful fallback order
@@ -575,7 +586,9 @@ The campaign identified these transitional shortcuts:
 
 Those were useful proof stages. They are not the desired final product boundary.
 
-The persistent cache currently centers the server-authorized passive path. The pre-PF6 client pass should choose the smallest safe generalization that makes Local/Official and later UserResourcePack first-class without weakening realm authorization.
+The persistent cache now shares immutable bytes across Local, Realm, and explicitly installed User
+packs while retaining separate authorization/policy metadata. User packs are not scopes and cannot
+satisfy either Local or Realm activation merely by possessing the same blob.
 
 ---
 
@@ -1502,7 +1515,10 @@ Local authorization, CAS publication, catalog leasing, and presentation-generati
 
 ## Content-cache trust/product generalization
 
-The persistent cache primarily implements the server-authorized passive installation path. The four-layer architecture needs the smallest safe extension for Local/Official and later UserResourcePack ownership without weakening realm authorization.
+The persistent cache now implements Local and Realm authorization scopes plus a deliberately
+separate user-pack policy namespace. All three reuse one global immutable blob CAS; possession in
+one does not authorize another. User pack selection is strict client-local state, never a Realm
+plan, semantic activation, or application proof.
 
 ## Atlas
 
