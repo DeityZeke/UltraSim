@@ -12,8 +12,12 @@ authenticated message-149 plan authorizes X/Y actor art. Actor-art acquisition i
 An engine-neutral, immutable `PresentationGeneration` selects compatible Realm art, then
 `world.local`, then renderer Primitive per logical actor ID. Its process-local generation fences
 late native work; its effective-selection fingerprint is stable content identity. User packs,
-general fallback descriptors, productized Official Local art, and derived caches remain later F1
-checkpoints.
+productized Official Local art and derived caches remain later F1 checkpoints. F1.3 now supplies
+finite `ClientPrimitivePresentation` descriptors and a permanent Godot primitive substrate for
+already-disclosed actor, item, public, frozen-static, and Multi-fragment facts. Model absence and
+texture absence remain independent; neutral fallback is distinct from diagnostic missing texture.
+Primitive-only acceptance suppresses optional native art without changing the F1.2 semantic
+activation or its proof. This does not physically remove Official art from Local exports (F1.4).
 
 **Current sequencing:** PF0-PF5/PF5-R11 established the server, Network, content, and semantic-client foundations strongly enough that PF6 external human validation is ready. Before PF6, the client needs one architecture-completion/productization pass. The goal is not final art polish. The goal is a coherent dumb terminal whose content, UI, camera/control, fallback, and renderer boundaries match the architecture already proven underneath.
 

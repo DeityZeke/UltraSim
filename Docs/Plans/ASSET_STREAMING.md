@@ -1459,6 +1459,12 @@ Important:
 - a required package may still block entry when fallback is declared insufficient;
 - optional/missing content fails visibly/diagnosably.
 
+F1.3 now implements the finite engine-neutral fallback descriptor and Godot primitive
+realization for already-disclosed actors, items, public objects, frozen statics, and Multi
+fragments. Structural fallback uses each disclosed exact AABB; model and texture failure remain
+independent. The primitive-only Concept Demo smoke suppresses optional art without changing
+required activation or proof. Physically removable Official Local art remains F1.4.
+
 The local Concept Demo D0.4 canary now proves that the maintained Godot renderer can distinguish
 model absence from texture absence and degrade only presentation while immutable World identity and
 physical bounds remain unchanged. Its four fixture outcomes are local/preinstalled test resolution,

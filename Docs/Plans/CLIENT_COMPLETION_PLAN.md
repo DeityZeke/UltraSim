@@ -1,6 +1,6 @@
 # UltraSim Client Completion Plan
 
-**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0, F1.1, and F1.2 are CLOSED; F1.3 is ACTIVE.**
+**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.3 are CLOSED; F1.4 is NEXT.**
 
 **Parent architecture:** [CLIENT_PRESENTATION_ARCHITECTURE.md](CLIENT_PRESENTATION_ARCHITECTURE.md)
 
@@ -83,8 +83,8 @@ This campaign continues the completed F0 reconstruction/proof line as **F1 Clien
 F1.0  Baseline and guardrails
 F1.1  Unified content scopes and stores (CLOSED)
 F1.2  Semantic activation vs presentation resolution (CLOSED)
-F1.3  Primitive substrate and fallback contract (ACTIVE)
-F1.4  Official Local content productization
+F1.3  Primitive substrate and fallback contract (CLOSED)
+F1.4  Official Local content productization (NEXT)
 F1.5  User presentation overrides and content generations
 F1.6  Derived resources / atlas pipeline
 F1.7  Application workspace, Gameplay Frame, shared UI/gump composition
@@ -458,6 +458,14 @@ respectively, not F1.2 closure claims.
 
 Turn emergency fallback from scattered canaries into an intentional permanent renderer capability.
 
+**Implemented boundary:** `ClientPrimitivePresentation` provides finite engine-neutral
+kind/shape/local-mm bounds for already-disclosed actor, ground-item, public-object, frozen-static,
+Multi-fragment, and marker facts. Godot realizes these through `GodotPrimitiveSubstrate`; the
+same stock public bounds drive pointer nomination while Game retains final interaction/range
+authority. Frozen/Multi fallback uses each exact disclosed structural AABB. Neutral primitive
+material and conspicuous missing-texture material remain separate. The substrate is renderer
+code, never an activation package or application proof.
+
 ## Required primitive families
 
 At minimum:
@@ -492,7 +500,8 @@ Fallback should be upgradable in place when real content becomes available witho
 
 ## Exit gate
 
-Run the Concept Demo/local world after removing all removable Official Presentation content.
+Run the Concept Demo/local world with optional presentation resolvers deliberately suppressed.
+Physical removal from the shipped Local product is F1.4, not an F1.3 condition.
 
 Require:
 
@@ -501,8 +510,14 @@ Require:
 - other actors/items/statics/Multis remain representable;
 - Inventory/Chat/interactions continue;
 - missing visuals are obvious;
-- reinstalling/re-enabling presentation upgrades realization without semantic reset;
+- the existing actor primitive→content hot-upgrade retains root/semantic identity; current
+  static/Multi content replacement may rebuild native batches without changing world truth;
 - no missing presentation path throws merely because an optional model/texture is absent.
+
+The maintained `--f1-3-primitive-smoke` covers terrain, actor/item/public/static/Multi fallback,
+selection, pickup/equip/drop/re-pickup, door/chest/telepad, Inventory, Server Monitor, Chat,
+nameplates, overhead speech, Primary cue, and clean retirement. F1.2's exact semantic
+activation/proof is unchanged. See the immutable F1.3 baseline for the tested tree and counts.
 
 ---
 

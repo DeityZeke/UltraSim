@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "F1.3",
+  "capturedUtcDate": "2026-09-22",
+  "status": "accepted",
+  "lineage": {
+    "startingHead": "b2386059924cae37b86c2d71172fbb70e85bfeeb",
+    "roadmapOnlyCommit": "70ffc348",
+    "testedProductionCommit": "e868140d0f75a0c8d441985a8cb05a8df710ac63",
+    "gameAuthoritySemanticsChanged": false,
+    "remoteSemanticActivationOrApplicationProofChanged": false,
+    "networkOrTransportProtocolChanged": false,
+    "f1_4OrLaterImplemented": false
+  },
+  "environment": {
+    "configuration": "Release; Godot editor-host native scenes use matching Debug assemblies",
+    "os": "CachyOS Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D",
+    "logicalProcessors": 16,
+    "dotnetSdk": "8.0.131",
+    "dotnetRuntime": "8.0.31",
+    "godot": "4.7.1.stable.mono.official.a13da4feb",
+    "canonicalRunCheckout": "/tmp/ultrasim-f13-verify.3koEII/tree",
+    "canonicalRunCommit": "e868140d0f75a0c8d441985a8cb05a8df710ac63"
+  },
+  "contract": {
+    "descriptor": "ClientPrimitivePresentation: finite kind, shape, local millimetre AABB, interaction-visibility hint",
+    "maximumDescriptorExtentMillimetres": 64000,
+    "families": ["humanoid/animal actor", "ground item", "public interactive", "frozen static", "Multi fragment", "interactive marker", "missing icon", "missing animation cue"],
+    "primitiveIsContentPackage": false,
+    "primitiveCanSatisfyRequiredContentOrProof": false,
+    "knownPublicPointerBoundsShareDescriptor": true,
+    "frozenAndMultiUseDisclosedStructuralAabb": true,
+    "unknownPublicPrefabIsAutomaticallyPickable": false,
+    "normalMaterial": "neutral grey",
+    "diagnosticMissingTextureMaterial": "high-contrast magenta/yellow checker",
+    "modelAndTextureFailuresRemainIndependent": true
+  },
+  "primitiveOnlyConceptDemo": {
+    "mode": "acceptance-only optional native actor/static/public resolver suppression; required semantic activation unchanged",
+    "semanticCatalogFingerprint": "633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503",
+    "authoredChunks": 162,
+    "residentChunks": 49,
+    "renderedChunks": 25,
+    "actorsActive": 2,
+    "actorsPrimitive": 2,
+    "actorsAnimated": 0,
+    "staticBatchGroups": 64,
+    "publicBatchGroups": 7,
+    "fallbackGroups": 71,
+    "frozenStaticRecordsAtEntry": 28,
+    "multiFragmentRecordsAtEntry": 17,
+    "publicRecordsAtEntry": 10,
+    "publicRecordsAfterJourney": 9,
+    "activeRendererNodes": 177,
+    "activeRendererResources": 99,
+    "selectionAndSwordPickupEquipDropRepickup": "pass",
+    "doorChestTelepadAndJumpFall": "pass",
+    "inventoryServerMonitorChatNameplatesOverheadAndPrimaryCue": "pass",
+    "cleanSessionRetirement": "pass"
+  },
+  "f1_0Comparison": {
+    "semanticCatalogFingerprintChanged": false,
+    "residentChunks": "49 -> 49",
+    "renderedChunks": "25 -> 25",
+    "rendererNodes": "177 -> 177",
+    "rendererResources": "99 -> 99",
+    "staticBatchGroups": "64 -> 64",
+    "publicBatchGroups": "7 -> 7",
+    "primitiveActors": "1 -> 2 (deliberate optional-art suppression)",
+    "fallbackGroups": "3 -> 71 (deliberate optional-art suppression)",
+    "normalContentBackedCanaryStillPasses": true
+  },
+  "f1_2SemanticControl": {
+    "remoteSemanticPlanHash": "deb29568cef3649324da640af997a2b97e856eb56ba65869ff8bfc3824e4c294",
+    "remoteSemanticResolvedFingerprint": "7bac23dafe36a2fa6a2fa9e7a899daad8cefb02e7e248fca641d527bd6aa1b22",
+    "actorPresentationArtPartOfRequiredSemanticProof": false,
+    "existingExactRemoteProofTestsPassed": true,
+    "actorPrimitiveToContentRootAndStateContinuityPassed": true,
+    "staticAndMultiLiveNativeReplacement": "not newly generalized in F1.3; native batch rebuild seam only"
+  },
+  "verification": {
+    "architectureOnly": "pass",
+    "clientCore": "31/31 pass",
+    "nativeT010": "pass",
+    "fallbackLab": "pass",
+    "primitiveOnlySinglePlayer": "pass",
+    "canonicalRelease": "pass on clean temporary worktree at testedProductionCommit",
+    "physicalExports": ["SinglePlayer pass", "Online Contentless pass", "Complete pass"],
+    "productControls": ["PF1 mixed exported/headless pass", "PF2 mixed exported/headless pass", "F0.7 mixed lifecycle pass"],
+    "priorAttempts": [
+      "first temporary-worktree attempt stopped before native scenes because the fresh Godot test project lacked its editor-host Debug assembly; import and Debug build repaired test setup",
+      "second attempt stopped at the previously documented intermittent M00SharedAuthorityTests post-drop convergence wait; no F1.3 server-path change",
+      "third uninterrupted canonical Release attempt passed"
+    ]
+  },
+  "deferred": [
+    "F1.4 physical Official Local asset removal/productization",
+    "F1.5 user presentation packs",
+    "F1.7 Gameplay Frame/workspace implementation",
+    "F1.8A remote prediction/reconciliation/interpolation implementation",
+    "general static/Multi live content-generation upgrade beyond existing renderer rebuild seam"
+  ]
+}

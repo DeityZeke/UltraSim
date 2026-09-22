@@ -251,6 +251,16 @@ sign explains the cases through the same authoritative informational-UI path. Th
 change the immutable objects' collision or support geometry. `--d0-4-smoke` permanently verifies
 the three fallback classes, model/material independence, native bounds, and sign UI.
 
+F1.3 makes the primitive substrate permanent and bounded. Engine-neutral
+`ClientPrimitivePresentation` descriptors supply stock actor/item/public volumes and exact
+disclosed frozen-static/Multi-fragment bounds; known public pointer nominations use the same
+stock bounds. `GodotPrimitiveSubstrate` owns the actor primitives, neutral and high-contrast
+missing-texture materials, and one generic missing icon. `--f1-3-primitive-smoke` deliberately
+suppresses optional local actor/static/public art while retaining the normal semantic world and
+required activation. It covers interaction, sword pickup/equip/drop/re-pickup, Inventory, Server
+Monitor, Chat, nameplates/overhead speech, action cues, and clean session retirement. This is
+an acceptance composition, not F1.4's removable Official Local asset packaging.
+
 `--d0-5-smoke` crosses the real Single Player button and Admission form. It proves rejected input
 does not start authority, then enters with a trimmed Unicode name and the Y body and checks the
 authoritative guest identity, selected public character prefab, controlled nameplate, and spatial

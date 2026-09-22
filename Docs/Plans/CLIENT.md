@@ -10,12 +10,13 @@ Complete-hosted deployment shapes. I0.12 human-play hardening prevents visible e
 remaining a pointer-nominated world pickup, and I0.13 replaces its temporary cold property text
 with bounded typed Inspection Properties plus content-sized world-hover/Inventory presentation.
 
-F1.0-F1.2 are closed; F1.3 is active. F1.2 separates the required remote WorldPack/UI activation and its exact application proof
+F1.0-F1.3 are closed; F1.4 is next. F1.2 separates the required remote WorldPack/UI activation and its exact application proof
 from optional Realm-authorized actor-art presentation. Game manifest v31 advertises the latter
 on message 149 without changing transport revision 2. The client publishes a separate immutable
 presentation generation with Realm → `world.local` → Primitive actor selection; late art replaces
-only the native visual child. This does not productize Official Local art, add user packs, or close
-F1.3+.
+only the native visual child. F1.3 adds permanent bounded primitive descriptors and native
+actor/item/public/static/Multi fallback with a primitive-only Concept Demo canary. This does not
+productize Official Local art, add user packs, or begin F1.4+.
 C0.2 now closes the first routed Global Chat mode plus explicit authority-originated System
 broadcast/feed/banner convergence. D0.6 now closes direct ping indication plus the first sanitized,
 read-only, content-backed Server Monitor and trusted test-marker producer. D0.7a now closes shared
@@ -2777,8 +2778,8 @@ PF5-R8 required fanout / avoidable-processing assurance                      CLO
 F1.0 baseline and guardrails                                                  CLOSED
 F1.1 unified content scopes/stores                                             CLOSED
 F1.2 semantic activation vs presentation resolution                           CLOSED
-F1.3 primitive substrate/fallback contract                                    ACTIVE
-F1.4 Official Local content productization                                    PLANNED
+F1.3 primitive substrate/fallback contract                                    CLOSED
+F1.4 Official Local content productization                                    NEXT
 F1.5 user presentation overrides/content generations                          PLANNED
 F1.6 derived resources/atlas pipeline                                         PLANNED
 F1.7 application workspace/Gameplay Frame/shared UI/gump manager             PLANNED

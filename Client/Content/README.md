@@ -62,8 +62,10 @@ Realm → `world.local` → Primitive precedence. It validates selected GLBs aga
 and skeleton/Idle-Walk-Jump rules, holds the selected catalog/blob leases, and gives native
 consumers reference-counted leases. The monotonic generation ID fences live asynchronous/native
 work; the effective-selection SHA-256 fingerprint is stable across process runs and excludes that
-counter. Primitive is still renderer code, not an authorized package. This is deliberately the
-narrow F1.2 actor substrate, not F1.3's general fallback model or F1.4's productized Local art.
+counter. Primitive is still renderer code, not an authorized package. F1.3 adds the finite
+`ClientPrimitivePresentation` contract below Content for already-disclosed actors, items,
+public objects, frozen statics, and Multi fragments. It cannot satisfy required activation or
+application proof. Official Local art packaging remains F1.4.
 
 ## A0.0 formats and operations
 
