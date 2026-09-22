@@ -51,3 +51,12 @@ trap cleanup_export_state EXIT
 export UltraSimEdition="$edition"
 export UltraSimNetworkFlavor="$network_flavor"
 "$godot" --headless --path "$script_dir" --export-release "$preset" "$output"
+
+official_root="$(dirname -- "$output")/Content/Official"
+if [[ "$edition" == "Online" ]]; then
+  rm -f -- "$official_root/ultrasim-official-actors-v1.uspkg"
+else
+  dotnet run \
+    --project "$script_dir/../../_Tools/OfficialContentBuilder/UltraSim.OfficialContentBuilder.csproj" \
+    -c Release -- "$official_root" "$script_dir/../PresentationAssets"
+fi

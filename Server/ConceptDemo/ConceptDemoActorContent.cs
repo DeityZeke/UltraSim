@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using UltraSim.Client.Content;
@@ -11,8 +10,27 @@ internal static class ConceptDemoActorContent
     private const uint JsonChunk = 0x4E4F_534A;
     private const uint BinaryChunk = 0x004E_4942;
 
-    internal static byte[] LoadX() => Load("UltraSim.ConceptDemo.ActorX.glb");
-    internal static byte[] LoadY() => Load("UltraSim.ConceptDemo.ActorY.glb");
+    internal static (byte[] X, byte[] Y) LoadOfficialActors(string? officialContentRoot)
+    {
+        string root = ResolveOfficialContentRoot(officialContentRoot);
+        string archivePath = Path.Combine(root, OfficialLocalPresentation.ArchiveFileName);
+        byte[] archive = File.ReadAllBytes(archivePath);
+        if (!OfficialLocalPresentation.TryDecodeArchive(
+                archive, out FetchedContentPackage? package))
+            throw new InvalidOperationException(
+                $"The Official actor package is absent or does not match the compiled identity: {archivePath}.");
+        ContentFilePayload x = package!.Payloads.Single(payload =>
+            string.Equals(payload.Path.Value, OfficialLocalPresentation.HumanXPath,
+                StringComparison.Ordinal));
+        ContentFilePayload y = package.Payloads.Single(payload =>
+            string.Equals(payload.Path.Value, OfficialLocalPresentation.HumanYPath,
+                StringComparison.Ordinal));
+        byte[] xBytes = x.Bytes.ToArray();
+        byte[] yBytes = y.Bytes.ToArray();
+        _ = RequireConceptDemoProfile(xBytes);
+        _ = RequireConceptDemoProfile(yBytes);
+        return (xBytes, yBytes);
+    }
 
     internal static ActorPresentationArtifactInfo RequireConceptDemoProfile(
         ReadOnlySpan<byte> bytes)
@@ -88,14 +106,17 @@ internal static class ConceptDemoActorContent
         return result;
     }
 
-    private static byte[] Load(string name)
+    private static string ResolveOfficialContentRoot(string? configured)
     {
-        using Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(name) ??
-            throw new InvalidOperationException($"The Concept Demo content resource '{name}' is absent.");
-        if (stream.Length is < 20 or > 32 * 1024 * 1024)
-            throw new InvalidOperationException($"The Concept Demo content resource '{name}' is out of bounds.");
-        var bytes = new byte[checked((int)stream.Length)];
-        stream.ReadExactly(bytes);
-        return bytes;
+        if (!string.IsNullOrWhiteSpace(configured)) return Path.GetFullPath(configured);
+        string? environment = Environment.GetEnvironmentVariable(
+            "ULTRASIM_OFFICIAL_CONTENT_ROOT");
+        if (!string.IsNullOrWhiteSpace(environment)) return Path.GetFullPath(environment);
+        string installed = Path.Combine(AppContext.BaseDirectory, "Content", "Official");
+        if (Directory.Exists(installed)) return installed;
+        string development = Path.GetFullPath(Path.Combine(
+            Environment.CurrentDirectory, "Client", "OfficialContent"));
+        if (Directory.Exists(development)) return development;
+        return installed;
     }
 }

@@ -57,7 +57,11 @@ public readonly record struct LocalCabinPresentationSnapshot(
     ClientStructuralResidencySnapshot Residency,
     GodotWorldRendererSnapshot Renderer,
     GodotActorPresenterSnapshot Actors,
-    LocalCabinUiOwnershipSnapshot Ui);
+    LocalCabinUiOwnershipSnapshot Ui,
+    OfficialLocalPresentationResult OfficialPresentation,
+    ContentCacheSnapshot PresentationCache,
+    PresentationGenerationSnapshot PresentationGeneration,
+    GodotContentActorVisualResolverSnapshot ActorResources);
 
 /// <summary>
 /// Cold, engine-thread-only observation of the UI nodes owned by one local gameplay lifetime.
@@ -136,6 +140,12 @@ public partial class LocalCabinClient : Node3D
     // normal Single Player composition selects the Concept Demo explicitly.
     private bool _useConceptDemoWorld;
     private bool _primitiveOnlyPresentation;
+    private string? _presentationCacheRoot;
+    private string? _officialContentRoot;
+    private ContentCache? _presentationCache;
+    private PresentationGeneration? _presentationGeneration;
+    private GodotContentActorVisualResolver? _actorVisuals;
+    private OfficialLocalPresentationResult _officialPresentation;
     private ResolvedClientSettings? _settings;
     private CabinCatalogAssetResolver? _assetResolver;
     private LocalPlayableSession? _localSession;
@@ -234,7 +244,9 @@ public partial class LocalCabinClient : Node3D
         bool useConceptDemoWorld = false,
         string? guestDisplayName = null,
         ILocalPlayableServerExtensionFactory? serverExtensionFactory = null,
-        bool primitiveOnlyPresentation = false)
+        bool primitiveOnlyPresentation = false,
+        string? presentationCacheRoot = null,
+        string? officialContentRoot = null)
     {
         ArgumentNullException.ThrowIfNull(contentOracle);
         ArgumentNullException.ThrowIfNull(resolvedContent);
@@ -258,6 +270,8 @@ public partial class LocalCabinClient : Node3D
                 : "Human Male"));
         _useConceptDemoWorld = useConceptDemoWorld;
         _primitiveOnlyPresentation = primitiveOnlyPresentation;
+        _presentationCacheRoot = presentationCacheRoot;
+        _officialContentRoot = officialContentRoot;
         _serverExtensionFactory = serverExtensionFactory;
         _settings = settings ?? ClientSettingsResolver.Resolve(ClientSettingsDocument.Empty);
     }
@@ -355,7 +369,11 @@ public partial class LocalCabinClient : Node3D
             residency,
             render,
             actors,
-            ui);
+            ui,
+            _officialPresentation,
+            _presentationCache?.GetSnapshot() ?? default,
+            _presentationGeneration?.Snapshot ?? default,
+            _actorVisuals?.GetSnapshot() ?? default);
     }
 
     private LocalCabinUiOwnershipSnapshot GetUiOwnershipSnapshot() => new(
@@ -810,6 +828,12 @@ public partial class LocalCabinClient : Node3D
         _uiClient = null;
         _actorPresenter?.Dispose();
         _actorPresenter = null;
+        _actorVisuals?.Dispose();
+        _actorVisuals = null;
+        _presentationGeneration?.Dispose();
+        _presentationGeneration = null;
+        _presentationCache?.Dispose();
+        _presentationCache = null;
         _systemChatBanner?.Dispose();
         _systemChatBanner = null;
         _actorState = null;
@@ -865,11 +889,12 @@ public partial class LocalCabinClient : Node3D
         SynchronizeColdPublicPresentationMetadata();
         _actorState = new ClientActorPresentationState(
             ClientActorDefinitionCatalog.ConceptDemo, 64);
+        PrepareOptionalActorPresentation();
         _actorPresenter = new GodotActorPresenter(
             this,
             ClientActorDefinitionCatalog.ConceptDemo,
             64,
-            _primitiveOnlyPresentation ? null : new BundledActorVisualResolver());
+            _actorVisuals);
         _actorPresenter.SetControlledActorPose(
             view.PublicActor, view.PlayerPosition, view.PlayerOrientation, Time.GetTicksMsec());
         RebuildClientProjection(view);
@@ -3898,29 +3923,25 @@ public partial class LocalCabinClient : Node3D
         return dx * dx + dz * dz <= (Int128)radius * radius;
     }
 
-    private sealed class BundledActorVisualResolver : IGodotActorVisualResolver
+    private void PrepareOptionalActorPresentation()
     {
-        public Node3D? Instantiate(in ClientActorDefinition definition)
+        _officialPresentation = default;
+        if (_primitiveOnlyPresentation || string.IsNullOrWhiteSpace(_presentationCacheRoot))
+            return;
+        if (!ContentCache.TryOpen(
+                _presentationCacheRoot, out _presentationCache,
+                out ContentCacheError cacheError))
         {
-            string? resource = definition.VisualKind switch
-            {
-                ClientActorVisualKind.HumanX =>
-                    "res://Assets/Avatars/x_bot/x_bot_visual.tscn",
-                ClientActorVisualKind.HumanY =>
-                    "res://Assets/Avatars/y_bot/y_bot_visual.tscn",
-                _ => null,
-            };
-            if (resource is null) return null;
-            PackedScene? scene = ResourceLoader.Load<PackedScene>(resource);
-            if (scene is null)
-                throw new InvalidOperationException(
-                    $"The bundled actor presentation is missing: {resource}.");
-            Node instantiated = scene.Instantiate();
-            if (instantiated is Node3D visual) return visual;
-            instantiated.Free();
-            throw new InvalidOperationException(
-                $"The bundled actor presentation is not a Node3D scene: {resource}.");
+            _officialPresentation = new OfficialLocalPresentationResult(
+                OfficialLocalPresentationStatus.CacheFailure, cacheError, default, default);
+            return;
         }
+        if (!OfficialLocalPresentation.TryOpenOrAcquire(
+                _presentationCache!, _officialContentRoot,
+                out ContentCatalogLease? localCatalog, out _officialPresentation))
+            return;
+        _presentationGeneration = PresentationGeneration.Create(null, localCatalog);
+        _actorVisuals = new GodotContentActorVisualResolver(_presentationGeneration);
     }
 
     private sealed class CabinCatalogAssetResolver : IGodotWorldAssetResolver

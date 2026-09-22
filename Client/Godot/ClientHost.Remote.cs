@@ -169,7 +169,10 @@ public partial class ClientHost
                         $"{playable.ActorResources.RetainedArtifactBytes} nameplates=" +
                         $"{playable.Actors.VisibleNameplates} overhead=" +
                         $"{playable.Actors.VisibleOverheadLabels} publicMetadataProofs=" +
-                        $"{playable.Session.PublicPresentation.ProofsQueued} telemetry=" +
+                        $"{playable.Session.PublicPresentation.ProofsQueued} official=" +
+                        $"{playable.OfficialPresentation.Status} realmSelections=" +
+                        $"{playable.Session.Presentation.Generation.RealmSelections} localSelections=" +
+                        $"{playable.Session.Presentation.Generation.LocalSelections} telemetry=" +
                         $"{playable.NativeTelemetry.Level} frames={playable.NativeTelemetry.RenderFrames} " +
                         $"frameP95us={playable.NativeTelemetry.FrameDurations.P95Microseconds}");
                     RetireCurrentSession();
@@ -647,6 +650,7 @@ public partial class ClientHost
         NetworkProtocolPeer peer = _remoteSession?.Peer ??
             throw new InvalidOperationException("The authenticated remote peer is absent.");
         string cacheRoot = ReadArgument("--a0-8-cache=") ??
+            ReadArgument("--content-cache=") ??
             ProjectSettings.GlobalizePath("user://content-cache");
         var playable = new RemoteConceptDemoClient { Name = "RemoteConceptDemoSession" };
         playable.Configure(
@@ -660,7 +664,8 @@ public partial class ClientHost
             IsAutomatedRemoteSmoke(),
             RemoteTelemetryLevel(),
             OS.GetCmdlineUserArgs().Contains(
-                "--pf3-native-sustained-input", StringComparer.Ordinal));
+                "--pf3-native-sustained-input", StringComparer.Ordinal),
+            ResolveOfficialContentRoot());
         WorldRoot.AddChild(playable);
         _remotePlayable = playable;
     }
@@ -777,10 +782,10 @@ public partial class ClientHost
         string expected = ReadArgument("--a0-8-expect=") ?? "cold";
         bool cold = string.Equals(expected, "cold", StringComparison.OrdinalIgnoreCase);
         bool warm = string.Equals(expected, "warm", StringComparison.OrdinalIgnoreCase);
-        bool bundledActorContent =
-            ResourceLoader.Exists("res://Assets/Avatars/x_bot/x_bot_animated.glb") ||
-            ResourceLoader.Exists("res://Assets/Avatars/y_bot/y_bot_animated.glb");
-        if (!cold && !warm || bundledActorContent ||
+        bool expectOfficialFallback = OS.GetCmdlineUserArgs().Contains(
+            "--f1-4-expect-local-fallback", StringComparer.Ordinal);
+        var presentation = snapshot.Session.Presentation.Generation;
+        if (!cold && !warm ||
             snapshot.RenderedChunks != 9 || snapshot.TerrainTriangles <= 0 ||
             snapshot.OpenUiViews != 1 || snapshot.Session.Chat.OccurrencesApplied == 0 ||
             snapshot.Actors.ActiveActors < 2 || snapshot.Actors.PrimitiveFallbackActors < 1 ||
@@ -794,9 +799,29 @@ public partial class ClientHost
             snapshot.Session.StructuralWorld.State != RemoteStructuralWorldState.Ready ||
             snapshot.Session.World.AppliedSnapshots == 0 ||
             cold && snapshot.Session.Content.Acquisition.BytesFetched == 0 ||
-            warm && snapshot.Session.Content.Acquisition.BytesFetched != 0)
+            warm && snapshot.Session.Content.Acquisition.BytesFetched != 0 ||
+            expectOfficialFallback &&
+            (!snapshot.OfficialPresentation.Available || !presentation.LocalLayerPresent ||
+             !presentation.RealmLayerPresent || presentation.RealmSelections != 2 ||
+             presentation.LocalSelections != 0 || presentation.PrimitiveSelections != 0))
             throw new InvalidOperationException(
                 $"The A0.8 {expected} native acceptance did not converge: {snapshot}.");
+    }
+
+    private static string? ResolveOfficialContentRoot()
+    {
+        if (OS.GetCmdlineUserArgs().Contains(
+                "--official-content-absent", StringComparer.Ordinal))
+            return null;
+        string? configured = ReadArgument("--official-content-root=");
+        if (!string.IsNullOrWhiteSpace(configured)) return Path.GetFullPath(configured);
+        string executable = OS.GetExecutablePath();
+        string installed = Path.Combine(
+            Path.GetDirectoryName(executable)!, "Content", "Official");
+        if (Directory.Exists(installed)) return installed;
+        string development = Path.GetFullPath(Path.Combine(
+            ProjectSettings.GlobalizePath("res://"), "..", "OfficialContent"));
+        return Directory.Exists(development) ? development : installed;
     }
 
     private static bool IsRemoteSmoke() => OS.GetCmdlineUserArgs().Contains(

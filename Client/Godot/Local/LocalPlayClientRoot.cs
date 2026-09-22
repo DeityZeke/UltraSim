@@ -1,5 +1,6 @@
 using Godot;
 using UltraSim.Client.BuiltInTestWorlds;
+using UltraSim.Client.Content;
 using UltraSim.Client.Core;
 using UltraSim.Client.Local;
 using UltraSim.Game.Admission;
@@ -35,6 +36,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         bool signSmoke = arguments.Contains("--d0-3-smoke", StringComparer.Ordinal);
         bool fallbackLabSmoke = arguments.Contains("--d0-4-smoke", StringComparer.Ordinal);
         bool primitiveOnlySmoke = arguments.Contains("--f1-3-primitive-smoke", StringComparer.Ordinal);
+        string? f14Mode = ReadLocalArgument("--f1-4-official-smoke=");
         bool guestAdmissionSmoke = arguments.Contains("--d0-5-smoke", StringComparer.Ordinal);
         bool f02Smoke = arguments.Contains("--f0-2-smoke", StringComparer.Ordinal);
 #if ULTRASIM_COMPLETE
@@ -45,7 +47,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         if (arguments.Contains("--composition-smoke", StringComparer.Ordinal) ||
             !conceptDemoSmoke && !residencySmoke && !farIslandSmoke && !signSmoke &&
             !fallbackLabSmoke && !primitiveOnlySmoke && !guestAdmissionSmoke &&
-            !f02Smoke && !sharedHostSmoke)
+            f14Mode is null && !f02Smoke && !sharedHostSmoke)
             return;
         try
         {
@@ -74,6 +76,52 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
                 StartLocalCabin(CabinContentVariant.Default, CabinHumanBody.XBot,
                     useConceptDemoWorld: true, primitiveOnlyPresentation: true);
                 RunF13PrimitiveSmokeAfterNativeFrames();
+                return;
+            }
+            if (f14Mode is not null)
+            {
+                bool expectOfficial = f14Mode switch
+                {
+                    "installed" => true,
+                    "absent" => false,
+                    _ => throw new InvalidOperationException(
+                        "--f1-4-official-smoke must be installed or absent."),
+                };
+                StartLocalCabin(
+                    CabinContentVariant.Default, CabinHumanBody.XBot,
+                    useConceptDemoWorld: true);
+                _cabin!.RunD00Acceptance();
+                LocalCabinPresentationSnapshot evidence = _cabin.GetPresentationSnapshot();
+                if (expectOfficial)
+                {
+                    if (!evidence.OfficialPresentation.Available ||
+                        !evidence.PresentationGeneration.LocalLayerPresent ||
+                        evidence.PresentationGeneration.LocalSelections != 2 ||
+                        evidence.Actors.AnimatedActors == 0 ||
+                        evidence.ActorResources.RealizedResources == 0)
+                        throw new InvalidOperationException(
+                            $"Official Local presentation did not realize: {evidence}.");
+                }
+                else if (evidence.OfficialPresentation.Available ||
+                    evidence.PresentationGeneration.LocalLayerPresent ||
+                    evidence.Actors.AnimatedActors != 0 ||
+                    evidence.Actors.PrimitiveFallbackActors != evidence.Actors.ActiveActors)
+                    throw new InvalidOperationException(
+                        $"The physically absent Official source did not use Primitive: {evidence}.");
+                GD.Print(
+                    $"F1.4 OFFICIAL LOCAL PASS mode={f14Mode} " +
+                    $"manifest={OfficialLocalPresentation.Manifest.ManifestHash} " +
+                    $"plan={OfficialLocalPresentation.Plan.PlanHash} " +
+                    $"actors={evidence.Actors.ActiveActors} " +
+                    $"animated={evidence.Actors.AnimatedActors} " +
+                    $"primitive={evidence.Actors.PrimitiveFallbackActors} " +
+                    $"localSelections={evidence.PresentationGeneration.LocalSelections} " +
+                    $"blobs={evidence.PresentationCache.BlobCount} " +
+                    $"livePins={evidence.PresentationCache.LiveBlobPins}/" +
+                    $"{evidence.PresentationCache.LiveCatalogPins}");
+                RetireCurrentSession();
+                ReturnToMainMenu($"F1.4 Official Local {f14Mode} smoke passed.");
+                GetTree().Quit(0);
                 return;
             }
             if (conceptDemoSmoke || residencySmoke || farIslandSmoke)
@@ -245,7 +293,8 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             var options = new ConceptDemoHostedServerOptions(
                 new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, gameplayPort),
                 new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, contentPort),
-                MaximumParticipants: 8);
+                MaximumParticipants: 8,
+                OfficialContentRoot: OfficialContentRoot());
             StartLocalCabin(
                 CabinContentVariant.Default,
                 CabinHumanBody.XBot,
@@ -532,7 +581,11 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         var cabin = new LocalCabinClient { Name = "LocalCabinSession" };
 #if ULTRASIM_COMPLETE
         ILocalPlayableServerExtensionFactory? extensionFactory = serverExtensionFactory ??
-            (useConceptDemoWorld ? new ConceptDemoHostedServerExtensionFactory() : null);
+            (useConceptDemoWorld ? new ConceptDemoHostedServerExtensionFactory(
+                ConceptDemoHostedServerOptions.LocalMachineDefault with
+                {
+                    OfficialContentRoot = OfficialContentRoot(),
+                }) : null);
 #else
         ILocalPlayableServerExtensionFactory? extensionFactory = serverExtensionFactory;
 #endif
@@ -549,7 +602,9 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             useConceptDemoWorld,
             guestDisplayName,
             extensionFactory,
-            primitiveOnlyPresentation);
+            primitiveOnlyPresentation,
+            PresentationCacheRoot(),
+            OfficialContentRoot());
         _cabin = cabin;
         WorldRoot.AddChild(cabin);
         LocalCabinPresentationSnapshot snapshot = cabin.GetPresentationSnapshot();
@@ -747,6 +802,31 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         }
         return CabinHumanBody.XBot;
     }
+
+    private static string PresentationCacheRoot() =>
+        ReadLocalArgument("--content-cache=") ??
+        ReadLocalArgument("--a0-8-cache=") ??
+        ProjectSettings.GlobalizePath("user://content-cache");
+
+    private static string? OfficialContentRoot()
+    {
+        if (OS.GetCmdlineUserArgs().Contains(
+                "--official-content-absent", StringComparer.Ordinal))
+            return null;
+        string? configured = ReadLocalArgument("--official-content-root=");
+        if (!string.IsNullOrWhiteSpace(configured)) return Path.GetFullPath(configured);
+        string executable = OS.GetExecutablePath();
+        string installed = Path.Combine(
+            Path.GetDirectoryName(executable)!, "Content", "Official");
+        if (Directory.Exists(installed)) return installed;
+        string development = Path.GetFullPath(Path.Combine(
+            ProjectSettings.GlobalizePath("res://"), "..", "OfficialContent"));
+        return Directory.Exists(development) ? development : installed;
+    }
+
+    private static string? ReadLocalArgument(string prefix) => OS.GetCmdlineUserArgs()
+        .FirstOrDefault(argument => argument.StartsWith(prefix, StringComparison.Ordinal))?
+        [prefix.Length..];
 
     private void ValidateEffectiveSettings(in LocalCabinPresentationSnapshot snapshot)
     {

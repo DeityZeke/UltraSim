@@ -17,7 +17,8 @@ public readonly record struct ConceptDemoHostedServerOptions(
     IPEndPoint GameplayEndPoint,
     IPEndPoint ContentEndPoint,
     int MaximumParticipants = 8,
-    string ClientProfile = "third-person")
+    string ClientProfile = "third-person",
+    string? OfficialContentRoot = null)
 {
     public static ConceptDemoHostedServerOptions LocalMachineDefault => new(
         new IPEndPoint(IPAddress.Loopback, 7777),
@@ -160,7 +161,8 @@ public sealed class ConceptDemoHostedServerExtension : ILocalPlayableServerExten
             Directory.CreateDirectory(_context.IdentityRoot);
             identity = HostedIdentityStore.LoadOrCreateIdentity(_context.IdentityRoot);
             ApplicationRealmId realm = HostedIdentityStore.LoadOrCreateRealm(_context.IdentityRoot);
-            content = ConceptDemoContentDeployment.Create(realm, _options.ContentEndPoint);
+            content = ConceptDemoContentDeployment.Create(
+                realm, _options.ContentEndPoint, _options.OfficialContentRoot);
             RemoteClientProfileAdvertisement profile =
                 ConceptDemoClientProfiles.Create(_options.ClientProfile);
             RemoteServerPerformanceProfile performance =

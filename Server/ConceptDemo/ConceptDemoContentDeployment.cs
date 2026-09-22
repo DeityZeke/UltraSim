@@ -41,7 +41,8 @@ public sealed class ConceptDemoContentDeployment : IDisposable
 
     public static ConceptDemoContentDeployment Create(
         ApplicationRealmId realm,
-        IPEndPoint endpoint)
+        IPEndPoint endpoint,
+        string? officialContentRoot = null)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
         WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
@@ -103,9 +104,8 @@ public sealed class ConceptDemoContentDeployment : IDisposable
             new ContentFilePayload(monitorUiPath, monitorUiBytes),
         ];
         VerifiedContentPackage bootstrap = ValidatePackage(manifest!, payloads);
-        byte[] actorX = ConceptDemoActorContent.LoadX();
-        byte[] actorY = ConceptDemoActorContent.LoadY();
-        _ = ConceptDemoActorContent.RequireConceptDemoProfile(actorY);
+        (byte[] actorX, byte[] actorY) =
+            ConceptDemoActorContent.LoadOfficialActors(officialContentRoot);
         byte[] actorXReplacement = ConceptDemoActorContent.CreateXReplacement(actorX);
         ContentPackageFixture actors = CreateActorPackage(
             "server.concept-demo.actors", "actors",

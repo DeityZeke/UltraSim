@@ -16,10 +16,4 @@
     <ProjectReference Include="../../Kernels/UI/UltraSim.UI.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <EmbeddedResource Include="../../Client/PresentationAssets/Avatars/x_bot/x_bot_animated.glb"
-                      LogicalName="UltraSim.TestAssets.ActorX.glb" />
-    <EmbeddedResource Include="../../Client/PresentationAssets/Avatars/y_bot/y_bot_animated.glb"
-                      LogicalName="UltraSim.TestAssets.ActorY.glb" />
-  </ItemGroup>
 </Project>

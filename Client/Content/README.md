@@ -65,7 +65,24 @@ work; the effective-selection SHA-256 fingerprint is stable across process runs 
 counter. Primitive is still renderer code, not an authorized package. F1.3 adds the finite
 `ClientPrimitivePresentation` contract below Content for already-disclosed actors, items,
 public objects, frozen statics, and Multi fragments. It cannot satisfy required activation or
-application proof. Official Local art packaging remains F1.4.
+application proof.
+
+F1.4 productizes the finite compiled `OfficialLocalPresentation` identity as
+`ultrasim-official-actors-v1.uspkg`. Single Player and Complete place that deterministic archive
+beside the product under `Content/Official`; it is never part of the PCK or a managed embedded
+resource. Local reads the install root through `LocalContentPackageSource`, installs into the
+writable global CAS under `ContentScopeKey.Local`, reopens the persistently pinned activation on
+warm starts, and publishes an ordinary local presentation catalog. Absent, corrupt, or mismatched
+Official bytes fail only that optional layer and leave Primitive available. Online ships without
+the archive, while an explicitly installed Local package may participate below authenticated Realm
+art without satisfying Realm authorization or application proof.
+
+The distribution source and installed authorization are deliberately different lifetimes. The
+read-only archive is used to install or repair the exact product-owned activation in the writable
+user cache. Removing the source archive does not revoke an activation already persisted there;
+scope retirement removes authorization metadata, and ordinary reachability-aware eviction may
+later reclaim an unreferenced blob after all catalog/blob/native leases retire. F1.4 adds no live
+uninstall or general pack manager.
 
 ## A0.0 formats and operations
 

@@ -37,13 +37,7 @@ public partial class T010PlayableWorldAcceptance : Node3D
 
     private void RunBakedBodyAnimationAcceptance()
     {
-        PackedScene? xScene = ResourceLoader.Load<PackedScene>(
-            "res://Assets/Avatars/x_bot/x_bot_visual.tscn");
-        PackedScene? yScene = ResourceLoader.Load<PackedScene>(
-            "res://Assets/Avatars/y_bot/y_bot_visual.tscn");
-        Expect(xScene is not null && yScene is not null,
-            "The baked X/Y body scenes were not available to the native acceptance project.");
-        var resolver = new BodySceneResolver(xScene!, yScene!);
+        using OfficialVisualFixture official = CreateOfficialVisualFixture();
         ClientActorDefinitionCatalog catalog = ClientActorDefinitionCatalog.ConceptDemo;
         bool hasX = catalog.TryGet(
             GameWorldPublicPrefabIds.Character, out ClientActorDefinition xDefinition);
@@ -72,7 +66,7 @@ public partial class T010PlayableWorldAcceptance : Node3D
                     yDefinition, "Y", true)),
         ];
 
-        using var presenter = new GodotActorPresenter(this, catalog, 2, resolver);
+        using var presenter = new GodotActorPresenter(this, catalog, 2, official.Visuals);
         presenter.Apply(additions, xPosition, 1_000);
         Expect(presenter.GetSnapshot() is
             { ActiveActors: 2, PrimitiveFallbackActors: 0, AnimatedActors: 2,
@@ -160,10 +154,16 @@ public partial class T010PlayableWorldAcceptance : Node3D
 
     private void RunContentBackedBodyRealizationAcceptance()
     {
-        byte[] xBytes = File.ReadAllBytes(ProjectSettings.GlobalizePath(
-            "res://Assets/Avatars/x_bot/x_bot_animated.glb"));
-        byte[] yBytes = File.ReadAllBytes(ProjectSettings.GlobalizePath(
-            "res://Assets/Avatars/y_bot/y_bot_animated.glb"));
+        byte[] archive = File.ReadAllBytes(OfficialArchivePath());
+        Expect(OfficialLocalPresentation.TryDecodeArchive(
+                archive, out FetchedContentPackage? official),
+            "The canonical Official actor package could not be decoded.");
+        byte[] xBytes = official!.Payloads.Single(payload => string.Equals(
+            payload.Path.Value, OfficialLocalPresentation.HumanXPath,
+            StringComparison.Ordinal)).Bytes.ToArray();
+        byte[] yBytes = official.Payloads.Single(payload => string.Equals(
+            payload.Path.Value, OfficialLocalPresentation.HumanYPath,
+            StringComparison.Ordinal)).Bytes.ToArray();
         ActorContentFixture fixture = CreateActorContentFixture(xBytes, yBytes);
         var realm = new ApplicationRealmId(0xD07B, 1);
         string cacheRoot = Path.Combine(Path.GetTempPath(),
@@ -1269,24 +1269,54 @@ public partial class T010PlayableWorldAcceptance : Node3D
         }
     }
 
-    private sealed class BodySceneResolver : IGodotActorVisualResolver
+    private static OfficialVisualFixture CreateOfficialVisualFixture()
     {
-        private readonly PackedScene _x;
-        private readonly PackedScene _y;
-
-        internal BodySceneResolver(PackedScene x, PackedScene y)
+        string cacheRoot = Path.Combine(Path.GetTempPath(),
+            $"ultrasim-official-native-{System.Environment.ProcessId}-{Guid.NewGuid():N}");
+        if (!ContentCache.TryOpen(
+                cacheRoot, out ContentCache? cache, out ContentCacheError openError))
+            throw new InvalidOperationException(
+                $"The Official native cache could not open: {openError}.");
+        try
         {
-            _x = x;
-            _y = y;
+            string sourceRoot = Path.GetDirectoryName(OfficialArchivePath())!;
+            if (!OfficialLocalPresentation.TryOpenOrAcquire(
+                    cache!, sourceRoot, out ContentCatalogLease? local,
+                    out OfficialLocalPresentationResult result))
+                throw new InvalidOperationException(
+                    $"The Official native package could not apply: {result}.");
+            var generation = PresentationGeneration.Create(null, local);
+            return new OfficialVisualFixture(
+                cacheRoot, cache!, generation,
+                new GodotContentActorVisualResolver(generation));
         }
+        catch
+        {
+            cache?.Dispose();
+            if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+            throw;
+        }
+    }
 
-        public Node3D? Instantiate(in ClientActorDefinition definition) =>
-            definition.VisualKind switch
-            {
-                ClientActorVisualKind.HumanX => _x.Instantiate<Node3D>(),
-                ClientActorVisualKind.HumanY => _y.Instantiate<Node3D>(),
-                _ => null,
-            };
+    private static string OfficialArchivePath() => Path.Combine(
+        Path.GetFullPath(Path.Combine(ProjectSettings.GlobalizePath("res://"), "..", "..")),
+        "Client", "OfficialContent", OfficialLocalPresentation.ArchiveFileName);
+
+    private sealed class OfficialVisualFixture(
+        string cacheRoot,
+        ContentCache cache,
+        PresentationGeneration generation,
+        GodotContentActorVisualResolver visuals) : IDisposable
+    {
+        internal GodotContentActorVisualResolver Visuals { get; } = visuals;
+
+        public void Dispose()
+        {
+            Visuals.Dispose();
+            generation.Dispose();
+            cache.Dispose();
+            if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+        }
     }
 
     private sealed class SwitchableActorContentSource : IActorPresentationGenerationSource, IDisposable

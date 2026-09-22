@@ -259,7 +259,12 @@ missing-texture materials, and one generic missing icon. `--f1-3-primitive-smoke
 suppresses optional local actor/static/public art while retaining the normal semantic world and
 required activation. It covers interaction, sword pickup/equip/drop/re-pickup, Inventory, Server
 Monitor, Chat, nameplates/overhead speech, action cues, and clean session retirement. This is
-an acceptance composition, not F1.4's removable Official Local asset packaging.
+an acceptance composition. F1.4 now removes Official X/Y art from every PCK and consumes the exact
+external `Content/Official/ultrasim-official-actors-v1.uspkg` archive through `world.local`, the CAS,
+an immutable presentation generation, and `GodotContentActorVisualResolver`. Single Player and
+Complete export that package beside the executable; Online remains contentless. The unchanged Local
+binary accepts `--official-content-absent`/`--official-content-root=...`; the maintained
+`--f1-4-official-smoke=installed|absent` proves both native realization paths and clean retirement.
 
 `--d0-5-smoke` crosses the real Single Player button and Admission form. It proves rejected input
 does not start authority, then enters with a trimmed Unicode name and the Y body and checks the

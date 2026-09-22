@@ -11,13 +11,14 @@ Inventory/Server Monitor UI through one exact Realm semantic activation, while a
 authenticated message-149 plan authorizes X/Y actor art. Actor-art acquisition is non-gating.
 An engine-neutral, immutable `PresentationGeneration` selects compatible Realm art, then
 `world.local`, then renderer Primitive per logical actor ID. Its process-local generation fences
-late native work; its effective-selection fingerprint is stable content identity. User packs,
-productized Official Local art and derived caches remain later F1 checkpoints. F1.3 now supplies
+late native work; its effective-selection fingerprint is stable content identity. User packs and
+derived caches remain later F1 checkpoints. F1.3 supplies
 finite `ClientPrimitivePresentation` descriptors and a permanent Godot primitive substrate for
 already-disclosed actor, item, public, frozen-static, and Multi-fragment facts. Model absence and
 texture absence remain independent; neutral fallback is distinct from diagnostic missing texture.
 Primitive-only acceptance suppresses optional native art without changing the F1.2 semantic
-activation or its proof. This does not physically remove Official art from Local exports (F1.4).
+activation or its proof. F1.4 physically removes Official actor art from every PCK and productizes
+it as a separately removable deterministic `world.local` package consumed through the common CAS.
 
 **Current sequencing:** PF0-PF5/PF5-R11 established the server, Network, content, and semantic-client foundations strongly enough that PF6 external human validation is ready. Before PF6, the client needs one architecture-completion/productization pass. The goal is not final art polish. The goal is a coherent dumb terminal whose content, UI, camera/control, fallback, and renderer boundaries match the architecture already proven underneath.
 
@@ -567,9 +568,9 @@ Below that boundary, reuse:
 - native realization;
 - atlas construction.
 
-Current transitional shortcuts to remove in this pass include:
+The campaign identified these transitional shortcuts:
 
-1. bundled local X/Y high-quality presentation assets exposed through Godot res://Assets and baked into local exports while Online receives equivalent assets through packages/CAS;
+1. bundled local X/Y high-quality presentation assets exposed through Godot res://Assets and baked into local exports while Online receives equivalent assets through packages/CAS (removed by F1.4);
 2. the Cabin Default/Replace/Add local set existing primarily as an in-code acceptance oracle rather than the final separately installed Local content product.
 
 Those were useful proof stages. They are not the desired final product boundary.
@@ -1493,9 +1494,11 @@ ContextMenu is currently also used as OrbitCommand stop/cancel input and has no 
 
 ## Local content packaging
 
-Local X/Y high-quality assets are still exposed through Godot res://Assets and included in local products, while Online proves the package/CAS route.
-
-Local/Official content still needs to become an external deletable installation.
+F1.4 closes the actor-art product boundary. Canonical X/Y GLBs remain build inputs outside Godot;
+the deterministic Official archive is an external deletable installation for Single Player and
+Complete, and Online remains physically contentless. Removing that directory does not change the
+binary and selects Primitive. Installed content reaches Godot only after exact package validation,
+Local authorization, CAS publication, catalog leasing, and presentation-generation selection.
 
 ## Content-cache trust/product generalization
 

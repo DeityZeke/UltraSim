@@ -3074,6 +3074,8 @@ static FinalClientProductExports VerifyFinalClientProductExports(
     ];
     RequireExactExportAssemblies(
         singlePlayerDirectory, singlePlayerAssemblies, "Single Player");
+    RequireExternalOfficialPresentation(singlePlayerDirectory, singlePlayerExecutable,
+        "Single Player");
     if (File.Exists(Path.Combine(ExportDataDirectory(singlePlayerDirectory), "UltraSim.Network.dll")))
         throw new InvalidOperationException(
             "The actual Single Player export physically contains the Network kernel.");
@@ -3085,6 +3087,35 @@ static FinalClientProductExports VerifyFinalClientProductExports(
     [
         "--headless", "--", "--f0-2-smoke", "--expect-edition=SinglePlayer",
         "--cabin-content=default", "--human=x",
+    ]);
+    string singleInstalledCache = Path.Combine(exportScope, "single-player-official-cache");
+    Run(root, singlePlayerExecutable,
+    [
+        "--headless", "--", "--f1-4-official-smoke=installed",
+        "--expect-edition=SinglePlayer", $"--content-cache={singleInstalledCache}",
+    ]);
+    Run(root, singlePlayerExecutable,
+    [
+        "--headless", "--", "--f1-4-official-smoke=installed",
+        "--expect-edition=SinglePlayer", $"--content-cache={singleInstalledCache}",
+    ]);
+    string singleAbsentDirectory = Path.Combine(exportScope, "single-player-absent");
+    CopyProductWithoutOfficialContent(singlePlayerDirectory, singleAbsentDirectory);
+    string singleAbsentExecutable = Path.Combine(
+        singleAbsentDirectory, Path.GetFileName(singlePlayerExecutable));
+    RequireSameFileHash(singlePlayerExecutable, singleAbsentExecutable,
+        "Single Player installed/absent executable");
+    Run(root, singleAbsentExecutable,
+    [
+        "--headless", "--", "--f1-4-official-smoke=absent",
+        "--expect-edition=SinglePlayer",
+        $"--content-cache={Path.Combine(exportScope, "single-player-absent-cache")}",
+    ]);
+    Run(root, singlePlayerExecutable,
+    [
+        "--headless", "--", "--f1-4-official-smoke=installed",
+        "--expect-edition=SinglePlayer",
+        $"--content-cache={Path.Combine(exportScope, "single-player-restored-cache")}",
     ]);
 
     ExportClient(root, godot, "Complete", completeExecutable);
@@ -3121,6 +3152,7 @@ static FinalClientProductExports VerifyFinalClientProductExports(
         "UltraSim.UI",
     ];
     RequireExactExportAssemblies(completeDirectory, completeAssemblies, "Complete");
+    RequireExternalOfficialPresentation(completeDirectory, completeExecutable, "Complete");
     HashSet<string> completeNetworkTypes = ReadDefinedTypeNames(
         Path.Combine(ExportDataDirectory(completeDirectory), "UltraSim.Network.dll"));
     RequireType(
@@ -3138,14 +3170,106 @@ static FinalClientProductExports VerifyFinalClientProductExports(
         "--headless", "--", "--f0-2-smoke", "--expect-edition=Complete",
         "--cabin-content=default", "--human=x",
     ]);
+    Run(root, completeExecutable,
+    [
+        "--headless", "--", "--f1-4-official-smoke=installed",
+        "--expect-edition=Complete",
+        $"--content-cache={Path.Combine(exportScope, "complete-official-cache")}",
+    ]);
+    string completeAbsentDirectory = Path.Combine(exportScope, "complete-absent");
+    CopyProductWithoutOfficialContent(completeDirectory, completeAbsentDirectory);
+    string completeAbsentExecutable = Path.Combine(
+        completeAbsentDirectory, Path.GetFileName(completeExecutable));
+    RequireSameFileHash(completeExecutable, completeAbsentExecutable,
+        "Complete installed/absent executable");
+    Run(root, completeAbsentExecutable,
+    [
+        "--headless", "--", "--f1-4-official-smoke=absent",
+        "--expect-edition=Complete",
+        $"--content-cache={Path.Combine(exportScope, "complete-absent-cache")}",
+    ]);
 
     Console.WriteLine(
         $"PASS F0.8_PhysicalClientExports " +
         $"singlePlayerAssemblies={singlePlayerAssemblies.Length} singlePlayerNetwork=absent " +
         $"onlineAssemblies=13 onlineNetwork=ClientOnly onlineAuthority=absent " +
         $"completeAssemblies={completeAssemblies.Length} completeNetwork=Full " +
-        "singlePlayerNative=pass completeLocalNative=pass");
+        "singlePlayerNative=pass completeLocalNative=pass " +
+        "officialExternal=true installedAbsentRestored=true binaryIdentity=true");
     return new FinalClientProductExports(singlePlayerExecutable, completeExecutable);
+}
+
+static void RequireExternalOfficialPresentation(
+    string productDirectory,
+    string executable,
+    string product)
+{
+    string archive = Path.Combine(productDirectory, "Content", "Official",
+        "ultrasim-official-actors-v1.uspkg");
+    const string expectedArchiveHash =
+        "03f77dd361bdf7c9edf564fc92c95ced31aa71378a5d14555cc670b1cda6c554";
+    if (!File.Exists(archive) || new FileInfo(archive).Length != 4_723_829 ||
+        !string.Equals(
+            Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(archive))).ToLowerInvariant(),
+            expectedArchiveHash, StringComparison.Ordinal))
+        throw new InvalidOperationException(
+            $"The {product} product omitted its external Official package.");
+    byte[] executableBytes = File.ReadAllBytes(executable);
+    foreach (byte[] forbidden in new[]
+        {
+            "x_bot_animated.glb"u8.ToArray(),
+            "y_bot_animated.glb"u8.ToArray(),
+            "x_bot_visual.tscn"u8.ToArray(),
+            "y_bot_visual.tscn"u8.ToArray(),
+        })
+        if (executableBytes.AsSpan().IndexOf(forbidden) >= 0)
+            throw new InvalidOperationException(
+                $"The {product} executable/PCK still names bundled high-quality actor art.");
+    foreach (string assembly in Directory.EnumerateFiles(
+        ExportDataDirectory(productDirectory), "*.dll", SearchOption.TopDirectoryOnly))
+    {
+        byte[] bytes = File.ReadAllBytes(assembly);
+        if (bytes.AsSpan().IndexOf("UltraSim.ConceptDemo.ActorX.glb"u8) >= 0 ||
+            bytes.AsSpan().IndexOf("UltraSim.ConceptDemo.ActorY.glb"u8) >= 0)
+            throw new InvalidOperationException(
+                $"The {product} managed closure embeds the retired actor byte source: {assembly}.");
+    }
+}
+
+static void CopyProductWithoutOfficialContent(string source, string destination)
+{
+    if (Directory.Exists(destination)) Directory.Delete(destination, recursive: true);
+    Directory.CreateDirectory(destination);
+    foreach (string directory in Directory.EnumerateDirectories(
+                 source, "*", SearchOption.AllDirectories))
+    {
+        string relative = Relative(source, directory);
+        if (relative.Equals("Content", StringComparison.Ordinal) ||
+            relative.StartsWith("Content/", StringComparison.Ordinal))
+            continue;
+        Directory.CreateDirectory(Path.Combine(destination,
+            relative.Replace('/', Path.DirectorySeparatorChar)));
+    }
+    foreach (string file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+    {
+        string relative = Relative(source, file);
+        if (relative.Equals("Content", StringComparison.Ordinal) ||
+            relative.StartsWith("Content/", StringComparison.Ordinal))
+            continue;
+        string output = Path.Combine(destination, relative.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+        File.Copy(file, output, overwrite: true);
+        if (!OperatingSystem.IsWindows())
+            File.SetUnixFileMode(output, File.GetUnixFileMode(file));
+    }
+}
+
+static void RequireSameFileHash(string first, string second, string label)
+{
+    byte[] firstHash = SHA256.HashData(File.ReadAllBytes(first));
+    byte[] secondHash = SHA256.HashData(File.ReadAllBytes(second));
+    if (!firstHash.AsSpan().SequenceEqual(secondHash))
+        throw new InvalidOperationException($"{label} changed across content layouts.");
 }
 
 static void ExportClient(
@@ -3262,6 +3386,8 @@ static void VerifyContentlessOnlineNative(
                 $"--a0-8-cache={cache}",
                 $"--a0-8-trust={trust}",
                 $"--f0-3c-profile-decisions={profileDecisions}",
+                $"--official-content-root={Path.Combine(root, "Client", "OfficialContent")}",
+                "--f1-4-expect-local-fallback",
                 "--a0-8-allow-private-content",
                 "--a0-8-expect=warm",
                 "--expect-edition=Online",
@@ -5244,23 +5370,36 @@ static void VerifyClientPresentationAssets(string root)
             "*.fbx", SearchOption.AllDirectories).Any())
         throw new InvalidOperationException(
             "Animated body authoring inputs must remain reproducible and outside the Godot runtime tree.");
-    foreach ((string body, string asset) in new[]
-        {
-            ("x_bot", "x_bot_animated.glb"),
-            ("y_bot", "y_bot_animated.glb"),
-        })
-    {
-        string scene = File.ReadAllText(Path.Combine(
-            root, "Client", "PresentationAssets", "Avatars", body, $"{body}_visual.tscn"));
-        if (!scene.Contains($"res://Assets/Avatars/{body}/{asset}", StringComparison.Ordinal))
-            throw new InvalidOperationException(
-                $"The {body} runtime scene does not consume its consolidated animated body.");
-    }
-    string link = Path.Combine(root, "Client", "Godot", "Assets");
-    if (!Directory.Exists(link) ||
-        !string.Equals(new DirectoryInfo(link).LinkTarget, "../PresentationAssets", StringComparison.Ordinal))
+    string archive = Path.Combine(root, "Client", "OfficialContent",
+        "ultrasim-official-actors-v1.uspkg");
+    const string expectedArchiveHash =
+        "03f77dd361bdf7c9edf564fc92c95ced31aa71378a5d14555cc670b1cda6c554";
+    if (!File.Exists(archive) || new FileInfo(archive).Length != 4_723_829 ||
+        !string.Equals(
+            Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(archive))).ToLowerInvariant(),
+            expectedArchiveHash, StringComparison.Ordinal))
         throw new InvalidOperationException(
-            "The maintained Godot client does not expose the shared build-time presentation assets.");
+            "The deterministic Official world.local actor package is absent or changed.");
+    string godotAssets = Path.Combine(root, "Client", "Godot", "Assets");
+    string testAssets = Path.Combine(root, "_Tests", "UltraSim.S0.Godot.Tests", "Assets");
+    if (Directory.Exists(godotAssets) || File.Exists(godotAssets) ||
+        Directory.Exists(testAssets) || File.Exists(testAssets) ||
+        Directory.EnumerateFiles(
+            Path.Combine(root, "Client", "PresentationAssets"), "*.tscn",
+            SearchOption.AllDirectories).Any() ||
+        Directory.EnumerateFiles(
+            Path.Combine(root, "Client", "PresentationAssets"), "*.import",
+            SearchOption.AllDirectories).Any())
+        throw new InvalidOperationException(
+            "Official actor GLBs must not be exposed as Godot res://Assets or wrapped as bundled scenes.");
+    string[] directReferences = Directory.EnumerateFiles(
+            Path.Combine(root, "Client", "Godot"), "*.cs", SearchOption.AllDirectories)
+        .Where(path => File.ReadAllText(path).Contains("res://Assets", StringComparison.Ordinal))
+        .Select(path => Relative(root, path)).ToArray();
+    if (directReferences.Length != 0)
+        throw new InvalidOperationException(
+            "The maintained Godot client retains a direct actor-asset shortcut: " +
+            string.Join(", ", directReferences));
 }
 
 static void VerifyClientExportComposition(string root)
@@ -5356,13 +5495,17 @@ static void VerifyClientExportComposition(string root)
             throw new InvalidOperationException(
                 $"The shared Godot project is missing export product '{name}' / '{feature}'.");
     }
-    Match onlinePreset = Regex.Match(
-        presets,
-        "name=\"UltraSim Online Linux\"(?<body>[\\s\\S]*?)(?=\\[preset\\.1\\.options\\])",
-        RegexOptions.CultureInvariant);
-    if (!onlinePreset.Success ||
-        !onlinePreset.Groups["body"].Value.Contains("exclude_filter=\"Assets/**\"", StringComparison.Ordinal))
-        throw new InvalidOperationException("The Online export does not exclude local presentation assets.");
+    if (Regex.Matches(
+            presets, "exclude_filter=\"Assets/\\*\\*\"",
+            RegexOptions.CultureInvariant).Count != 3)
+        throw new InvalidOperationException(
+            "Every client export must physically exclude the retired res://Assets presentation tree.");
+    string exportScript = File.ReadAllText(Path.Combine(
+        root, "Client", "Godot", "export-client.sh"));
+    if (!exportScript.Contains("OfficialContentBuilder", StringComparison.Ordinal) ||
+        !exportScript.Contains("Content/Official", StringComparison.Ordinal))
+        throw new InvalidOperationException(
+            "Local-capable exports do not publish the deterministic external Official package.");
 
     foreach (string retired in new[]
     {

@@ -1,6 +1,5 @@
 using System.Buffers.Binary;
 using System.Net;
-using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using UltraSim.Client.Content;
@@ -19,6 +18,7 @@ var tests = new (string Name, Action Body)[]
     ("PassivePayloadsRequireExactBytesAndAllowedEnvelopes", PassivePayloadsRequireExactBytesAndAllowedEnvelopes),
     ("CanonicalPackageArchiveRoundTripsAndRejectsDamage", CanonicalPackageArchiveRoundTripsAndRejectsDamage),
     ("LocalPackageSourceIsRootedBoundedAndExact", LocalPackageSourceIsRootedBoundedAndExact),
+    ("OfficialLocalPresentationIsExactPersistentAndScopeIsolated", OfficialLocalPresentationIsExactPersistentAndScopeIsolated),
     ("ActivationIdentityPreservesAuthorityOrderNotByteSource", ActivationIdentityPreservesAuthorityOrderNotByteSource),
     ("DefaultReplaceAddResolveDeterministically", DefaultReplaceAddResolveDeterministically),
     ("ResolutionFailuresAreTransactionalAndDiagnosable", ResolutionFailuresAreTransactionalAndDiagnosable),
@@ -181,6 +181,114 @@ static void LocalPackageSourceIsRootedBoundedAndExact()
     }
 }
 
+static void OfficialLocalPresentationIsExactPersistentAndScopeIsolated()
+{
+    string repositoryRoot = FindRepositoryRoot();
+    string sourceRoot = Path.Combine(repositoryRoot, "Client", "OfficialContent");
+    string archivePath = Path.Combine(sourceRoot, OfficialLocalPresentation.ArchiveFileName);
+    byte[] archive = System.IO.File.ReadAllBytes(archivePath);
+    True(OfficialLocalPresentation.TryDecodeArchive(
+        archive, out FetchedContentPackage? official));
+    Equal(OfficialLocalPresentation.Manifest.ManifestHash, official!.Manifest.ManifestHash);
+    Equal(2, official.Payloads.Count);
+    var realm = new ApplicationRealmId(0xF14, 0xA);
+    string cacheRoot = NewCacheRoot();
+    string readOnlySourceRoot = cacheRoot + "-official-source";
+    Directory.CreateDirectory(readOnlySourceRoot);
+    string readOnlyArchive = Path.Combine(
+        readOnlySourceRoot, OfficialLocalPresentation.ArchiveFileName);
+    System.IO.File.Copy(archivePath, readOnlyArchive);
+    if (!OperatingSystem.IsWindows())
+    {
+        System.IO.File.SetUnixFileMode(readOnlyArchive,
+            UnixFileMode.UserRead | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+        System.IO.File.SetUnixFileMode(readOnlySourceRoot,
+            UnixFileMode.UserRead | UnixFileMode.UserExecute |
+            UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+            UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+    }
+    try
+    {
+        True(ContentCache.TryOpen(cacheRoot, out ContentCache? cache,
+            out ContentCacheError openError), openError.ToString());
+        using (cache)
+        {
+            True(OfficialLocalPresentation.TryOpenOrAcquire(
+                cache!, readOnlySourceRoot, out ContentCatalogLease? local,
+                out OfficialLocalPresentationResult installed), installed.ToString());
+            using (local)
+            {
+                Equal(OfficialLocalPresentationStatus.Installed, installed.Status);
+                True(local!.Catalog.Scope.IsLocal);
+                Equal(2, local.Catalog.Entries.Count);
+                False(cache!.TryOpenPackage(
+                    realm, official.Manifest.PackageId, official.Manifest.ManifestHash,
+                    out _, out ContentCacheError isolated));
+                Equal(ContentCacheError.MissingManifest, isolated);
+
+                ulong reusedBefore = cache.GetSnapshot().ReusedBlobs;
+                True(cache.TryInstallPackage(
+                    realm, official.Manifest, official.Payloads,
+                    out _, out ContentCacheError realmInstall), realmInstall.ToString());
+                ContentCacheSnapshot shared = cache.GetSnapshot();
+                Equal(2, shared.BlobCount);
+                Equal(reusedBefore + 2, shared.ReusedBlobs);
+                Equal(1, shared.LocalManifestCount);
+                Equal(1, shared.RealmManifestCount);
+            }
+        }
+
+        True(ContentCache.TryOpen(cacheRoot, out ContentCache? reopened,
+            out ContentCacheError reopenError), reopenError.ToString());
+        using (reopened)
+        {
+            True(OfficialLocalPresentation.TryOpenOrAcquire(
+                reopened!, officialSourceRoot: null, out ContentCatalogLease? warm,
+                out OfficialLocalPresentationResult warmResult), warmResult.ToString());
+            using (warm)
+            {
+                Equal(OfficialLocalPresentationStatus.Reopened, warmResult.Status);
+                Equal(2, warm!.Catalog.Entries.Count);
+            }
+        }
+
+        string untrustedRoot = Path.Combine(cacheRoot, "untrusted-source");
+        Directory.CreateDirectory(untrustedRoot);
+        byte[] changed = archive.ToArray();
+        changed[^1] ^= 0x20;
+        System.IO.File.WriteAllBytes(
+            Path.Combine(untrustedRoot, OfficialLocalPresentation.ArchiveFileName), changed);
+        string cleanCacheRoot = cacheRoot + "-clean";
+        try
+        {
+            True(ContentCache.TryOpen(cleanCacheRoot, out ContentCache? clean,
+                out ContentCacheError cleanError), cleanError.ToString());
+            using (clean)
+            {
+                False(OfficialLocalPresentation.TryOpenOrAcquire(
+                    clean!, untrustedRoot, out _, out OfficialLocalPresentationResult rejected));
+                Equal(OfficialLocalPresentationStatus.AcquisitionFailure, rejected.Status);
+                Equal(0, clean!.GetSnapshot().LocalManifestCount);
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(cleanCacheRoot)) Directory.Delete(cleanCacheRoot, recursive: true);
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+        if (Directory.Exists(readOnlySourceRoot))
+        {
+            if (!OperatingSystem.IsWindows())
+                System.IO.File.SetUnixFileMode(readOnlySourceRoot,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            Directory.Delete(readOnlySourceRoot, recursive: true);
+        }
+    }
+}
+
 static void IdentityGrammarAndDefaultsFailClosed()
 {
     False(default(ContentHash).IsValid);
@@ -320,8 +428,8 @@ static void PassivePayloadsRequireExactBytesAndAllowedEnvelopes()
 
 static void ActorPresentationGlbIsBoundedPassiveAndCatalogResolved()
 {
-    byte[] x = Embedded("UltraSim.TestAssets.ActorX.glb");
-    byte[] y = Embedded("UltraSim.TestAssets.ActorY.glb");
+    byte[] x = OfficialActor(OfficialLocalPresentation.HumanXPath);
+    byte[] y = OfficialActor(OfficialLocalPresentation.HumanYPath);
     True(ActorPresentationArtifact.TryInspect(
         x, out ActorPresentationArtifactInfo xInfo, out ActorPresentationArtifactError xError),
         xError.ToString());
@@ -482,8 +590,8 @@ static void ActorPresentationGlbIsBoundedPassiveAndCatalogResolved()
 
 static void PresentationGenerationSelectsRealmLocalPrimitiveAndRetainsOldLeases()
 {
-    byte[] x = Embedded("UltraSim.TestAssets.ActorX.glb");
-    byte[] y = Embedded("UltraSim.TestAssets.ActorY.glb");
+    byte[] x = OfficialActor(OfficialLocalPresentation.HumanXPath);
+    byte[] y = OfficialActor(OfficialLocalPresentation.HumanYPath);
     PackageFixture localX = ActorPackage(
         "local.actor.x", "actors", ContentTrustClass.ServerAuthorizedPassive,
         ConceptDemoActorPresentationProfile.HumanXDefinitionId,
@@ -1826,13 +1934,25 @@ static PackageFixture ActorPackage(
         [new ContentFilePayload(path, bytes)]);
 }
 
-static byte[] Embedded(string name)
+static byte[] OfficialActor(string path)
 {
-    using Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(name) ??
-        throw new InvalidOperationException($"Missing embedded test resource '{name}'.");
-    var bytes = new byte[checked((int)stream.Length)];
-    stream.ReadExactly(bytes);
-    return bytes;
+    string root = FindRepositoryRoot();
+    byte[] archive = System.IO.File.ReadAllBytes(Path.Combine(
+        root, "Client", "OfficialContent", OfficialLocalPresentation.ArchiveFileName));
+    True(OfficialLocalPresentation.TryDecodeArchive(archive, out FetchedContentPackage? package));
+    return package!.Payloads.Single(payload =>
+        string.Equals(payload.Path.Value, path, StringComparison.Ordinal)).Bytes.ToArray();
+}
+
+static string FindRepositoryRoot()
+{
+    string? current = Directory.GetCurrentDirectory();
+    while (current is not null)
+    {
+        if (System.IO.File.Exists(Path.Combine(current, "verify.sh"))) return current;
+        current = Directory.GetParent(current)?.FullName;
+    }
+    throw new InvalidOperationException("The UltraSim repository root was not found.");
 }
 
 static byte[] RewriteActorJson(byte[] source, Action<JsonObject> mutate)

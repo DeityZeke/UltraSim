@@ -39,7 +39,8 @@ public readonly record struct RemoteConceptDemoClientSnapshot(
     GodotNativeTelemetrySnapshot NativeTelemetry,
     ContentCacheSnapshot ContentCacheAtOpen,
     ContentCacheSnapshot ContentCacheCurrent,
-    RemoteConceptDemoUiOwnershipSnapshot UiOwnership);
+    RemoteConceptDemoUiOwnershipSnapshot UiOwnership,
+    OfficialLocalPresentationResult OfficialPresentation);
 
 /// <summary>
 /// Cold, engine-thread-only observation of the pre-F1 remote HUD ownership tree. This preserves
@@ -73,8 +74,9 @@ public readonly record struct RemoteConceptDemoLifecycleResidueSnapshot(
 
 /// <summary>
 /// Native A0.8 consumer over one authenticated remote application session. The Online product
-/// starts with an empty local content catalog; authenticated content supplies World/UI bytes while
-/// Godot's tiny primitive substrate remains available for every unresolved visual leaf.
+/// ships with no Official package, but may open an explicitly installed world.local presentation
+/// layer; authenticated content supplies World/UI bytes and wins for matching visual leaves while
+/// Godot's primitive substrate remains available for every unresolved visual leaf.
 /// </summary>
 public sealed partial class RemoteConceptDemoClient : Node3D
 {
@@ -95,6 +97,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private ContentCache? _cache;
     private ContentCacheSnapshot _contentCacheAtOpen;
     private ContentCacheSnapshot _contentCacheObserved;
+    private OfficialLocalPresentationResult _officialPresentation;
     private HttpContentPackageSource? _source;
     private RemotePlayableSession? _session;
     private NetworkProtocolPeer? _networkPeer;
@@ -161,7 +164,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         bool allowInsecurePrivateContent,
         bool smoke,
         NetworkTelemetryLevel telemetryLevel = NetworkTelemetryLevel.Off,
-        bool pf3SustainedInput = false)
+        bool pf3SustainedInput = false,
+        string? officialContentRoot = null)
     {
         ArgumentNullException.ThrowIfNull(peer);
         ArgumentOutOfRangeException.ThrowIfZero(applicationSessionEpoch);
@@ -178,6 +182,15 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         _contentCacheObserved = _contentCacheAtOpen;
         try
         {
+            ContentScopeActivationKey? localPresentationKey = null;
+            if (OfficialLocalPresentation.TryOpenOrAcquire(
+                    _cache!, officialContentRoot,
+                    out ContentCatalogLease? localCatalog,
+                    out _officialPresentation))
+            {
+                localCatalog!.Dispose();
+                localPresentationKey = OfficialLocalPresentation.ActivationKey;
+            }
             _source = new HttpContentPackageSource(new ContentPackageSourceLimits(
                 maximumArchiveBytes: 768L * 1024 * 1024,
                 requestTimeoutMilliseconds: 30_000,
@@ -193,7 +206,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 peer,
                 applicationSessionEpoch,
                 new RemoteRequiredContentBinding(
-                    realm, _cache!, ContentBaseCatalog.Empty, _source),
+                    realm, _cache!, ContentBaseCatalog.Empty, _source,
+                    localPresentationKey),
                 RemoteConceptDemoWorldProfile.CreateRequiredBinding(),
                 _uiRenderer,
                 new ClientChatLimits(64, 256, 128),
@@ -357,7 +371,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             _nativeTelemetry.Capture(in actors, in renderer),
             _contentCacheAtOpen,
             _contentCacheObserved,
-            GetUiOwnershipSnapshot());
+            GetUiOwnershipSnapshot(),
+            _officialPresentation);
     }
 
     /// <summary>

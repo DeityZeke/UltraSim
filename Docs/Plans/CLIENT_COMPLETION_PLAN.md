@@ -1,6 +1,6 @@
 # UltraSim Client Completion Plan
 
-**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.3 are CLOSED; F1.4 is NEXT.**
+**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.4 are CLOSED; F1.5 is NEXT.**
 
 **Parent architecture:** [CLIENT_PRESENTATION_ARCHITECTURE.md](CLIENT_PRESENTATION_ARCHITECTURE.md)
 
@@ -84,8 +84,8 @@ F1.0  Baseline and guardrails
 F1.1  Unified content scopes and stores (CLOSED)
 F1.2  Semantic activation vs presentation resolution (CLOSED)
 F1.3  Primitive substrate and fallback contract (CLOSED)
-F1.4  Official Local content productization (NEXT)
-F1.5  User presentation overrides and content generations
+F1.4  Official Local content productization (CLOSED)
+F1.5  User presentation overrides and content generations (NEXT)
 F1.6  Derived resources / atlas pipeline
 F1.7  Application workspace, Gameplay Frame, shared UI/gump composition
 F1.8  Declarative camera/control rig and canonical gameplay-view crop
@@ -560,6 +560,17 @@ Online may start with no Official high-quality presentation, or may optionally d
 - world.local uses the common scope/package/CAS pipeline;
 - Online can reuse identical Official bytes already present in CAS where authorization permits;
 - current remote package/content proof behavior remains intact.
+
+## Closure
+
+F1.4 packages the exact X/Y GLBs into one deterministic, compiled-identity Official archive. The
+Single Player and Complete exporters place it beside the executable under `Content/Official`; all
+Godot presets exclude the former `Assets/**` mount, and server/client managed assemblies no longer
+embed the actor bytes. Local and optionally Online acquire the archive through
+`LocalContentPackageSource` into the shared CAS and publish the exact `world.local` activation.
+Installed, absent, warm-reopen, corrupt/mismatched, read-only-source, Realm-precedence, CAS reuse,
+binary-identity, and clean-retirement controls are permanent verification gates. Online continues
+to ship with no package, and authenticated Realm selection/proof remains independent and dominant.
 
 ---
 

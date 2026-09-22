@@ -45,7 +45,7 @@ using SharedPlayableAuthority authority = SharedPlayableAuthority.CreateConceptD
     new SharedPlayableAuthorityLimits(options.MaximumParticipants),
     options.SimulationFrequencyHz);
 using ConceptDemoContentDeployment content = ConceptDemoContentDeployment.Create(
-    realm, options.ContentEndPoint);
+    realm, options.ContentEndPoint, options.OfficialContentRoot);
 RemoteClientProfileAdvertisement clientProfile =
     ConceptDemoClientProfiles.Create(options.ClientProfile);
 RemoteServerPerformanceProfile performanceProfile =
@@ -412,6 +412,7 @@ internal readonly record struct DirectConnectOptions(
     IPEndPoint BindEndPoint,
     IPEndPoint ContentEndPoint,
     string IdentityDirectory,
+    string? OfficialContentRoot,
     string? ReadyFile,
     string? StopFile,
     string? SummaryFile,
@@ -442,6 +443,7 @@ internal readonly record struct DirectConnectOptions(
         string identity = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "UltraSim", "Server", "DirectConnect");
+        string? officialContentRoot = null;
         bool smoke = false;
         string? readyFile = null;
         string? stopFile = null;
@@ -496,6 +498,14 @@ internal readonly record struct DirectConnectOptions(
                 if (string.IsNullOrWhiteSpace(value))
                     throw new ArgumentException("--identity-dir cannot be empty.");
                 identity = Path.GetFullPath(value);
+                continue;
+            }
+            if (argument.StartsWith("--official-content-root=", StringComparison.Ordinal))
+            {
+                string value = argument["--official-content-root=".Length..];
+                if (string.IsNullOrWhiteSpace(value))
+                    throw new ArgumentException("--official-content-root cannot be empty.");
+                officialContentRoot = Path.GetFullPath(value);
                 continue;
             }
             if (argument.StartsWith("--content-bind=", StringComparison.Ordinal))
@@ -727,7 +737,8 @@ internal readonly record struct DirectConnectOptions(
             publicationCadence, publicationRepresentation, compressionPolicy);
         publicationPolicy.Validate();
         return new DirectConnectOptions(
-            endpoint, contentEndpoint, identity, readyFile, stopFile, summaryFile,
+            endpoint, contentEndpoint, identity, officialContentRoot,
+            readyFile, stopFile, summaryFile,
             accountingStartFile, accountingReadyFile, accountingStopFile,
             accountingSummaryFile, accountingTestMarker, clientProfile,
             simulationFrequencyHz, maximumInputHz, recommendedInputHz,

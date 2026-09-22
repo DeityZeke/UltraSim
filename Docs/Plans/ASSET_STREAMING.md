@@ -1463,7 +1463,9 @@ F1.3 now implements the finite engine-neutral fallback descriptor and Godot prim
 realization for already-disclosed actors, items, public objects, frozen statics, and Multi
 fragments. Structural fallback uses each disclosed exact AABB; model and texture failure remain
 independent. The primitive-only Concept Demo smoke suppresses optional art without changing
-required activation or proof. Physically removable Official Local art remains F1.4.
+required activation or proof. F1.4 now ships the exact Official X/Y actor archive outside the PCK,
+installs/reopens it as ordinary `world.local` content through the shared CAS, and preserves
+Realm → Local → Primitive selection without weakening Realm proof.
 
 The local Concept Demo D0.4 canary now proves that the maintained Godot renderer can distinguish
 model absence from texture absence and degrade only presentation while immutable World identity and
