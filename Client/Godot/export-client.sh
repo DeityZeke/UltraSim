@@ -50,6 +50,16 @@ trap cleanup_export_state EXIT
 
 export UltraSimEdition="$edition"
 export UltraSimNetworkFlavor="$network_flavor"
+
+# Godot publishes with a runtime identifier and may otherwise reuse the root project's
+# project.assets.json from the previously exported edition. Because edition selection changes the
+# root project graph, force an exact restore before Godot invokes its no-restore publish step.
+dotnet restore "$script_dir/UltraSim.Client.Application.Godot.csproj" \
+  -r linux-x64 \
+  --force \
+  -p:UltraSimEdition="$edition" \
+  -p:UltraSimNetworkFlavor="$network_flavor"
+
 "$godot" --headless --path "$script_dir" --export-release "$preset" "$output"
 
 official_root="$(dirname -- "$output")/Content/Official"

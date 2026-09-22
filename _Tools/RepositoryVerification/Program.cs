@@ -5506,6 +5506,13 @@ static void VerifyClientExportComposition(string root)
         !exportScript.Contains("Content/Official", StringComparison.Ordinal))
         throw new InvalidOperationException(
             "Local-capable exports do not publish the deterministic external Official package.");
+    if (!exportScript.Contains("dotnet restore", StringComparison.Ordinal) ||
+        !exportScript.Contains("-r linux-x64", StringComparison.Ordinal) ||
+        !exportScript.Contains("--force", StringComparison.Ordinal) ||
+        !exportScript.Contains("-p:UltraSimEdition=\"$edition\"", StringComparison.Ordinal) ||
+        !exportScript.Contains("-p:UltraSimNetworkFlavor=\"$network_flavor\"", StringComparison.Ordinal))
+        throw new InvalidOperationException(
+            "Edition-switched Godot exports must force an exact RID restore before publish.");
 
     foreach (string retired in new[]
     {
