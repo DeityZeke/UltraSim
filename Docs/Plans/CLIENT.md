@@ -10,7 +10,7 @@ Complete-hosted deployment shapes. I0.12 human-play hardening prevents visible e
 remaining a pointer-nominated world pickup, and I0.13 replaces its temporary cold property text
 with bounded typed Inspection Properties plus content-sized world-hover/Inventory presentation.
 
-F1.2 now separates the required remote WorldPack/UI activation and its exact application proof
+F1.0-F1.2 are closed; F1.3 is active. F1.2 separates the required remote WorldPack/UI activation and its exact application proof
 from optional Realm-authorized actor-art presentation. Game manifest v31 advertises the latter
 on message 149 without changing transport revision 2. The client publishes a separate immutable
 presentation generation with Realm → `world.local` → Primitive actor selection; late art replaces
@@ -2776,15 +2776,16 @@ PF5-R8 required fanout / avoidable-processing assurance                      CLO
         v
 F1.0 baseline and guardrails                                                  CLOSED
 F1.1 unified content scopes/stores                                             CLOSED
-F1.2 semantic activation vs presentation resolution                           NEXT / PLANNED
-F1.3 primitive substrate/fallback contract                                    PLANNED
+F1.2 semantic activation vs presentation resolution                           CLOSED
+F1.3 primitive substrate/fallback contract                                    ACTIVE
 F1.4 Official Local content productization                                    PLANNED
 F1.5 user presentation overrides/content generations                          PLANNED
 F1.6 derived resources/atlas pipeline                                         PLANNED
-F1.7 shared UI composition/window manager                                     PLANNED
-F1.8 declarative camera/control rig profiles                                  PLANNED
-F1.9 scalable Godot presentation backend                                      PLANNED
-F1.10 actor representation tiers/interpolation seam                           PLANNED
+F1.7 application workspace/Gameplay Frame/shared UI/gump manager             PLANNED
+F1.8 declarative camera/control rig + canonical gameplay-view crop            PLANNED
+F1.8A remote motion prediction/reconciliation/interpolation                   PLANNED
+F1.9 scalable Godot backend targeting the Gameplay Frame                      PLANNED
+F1.10 actor representation tiers/realization interpolation seam               PLANNED
 F1.11 renderer stress consumers/vegetation prototype                          PLANNED
 F1.12 product dogfooding/PF6 readiness                                        PLANNED
         |
@@ -2799,7 +2800,15 @@ F1.1's closed store boundary is `ContentScopeKey.Local` or
 `ContentScopeKey.ForRealm(authenticated ApplicationRealmId)`. Both kinds use one persistent
 ContentCache implementation and global CAS; only manifests, activations, and authorization are
 scope-owned. The existing Realm disk layout and remote application proof remain compatible, while
-Local metadata is rooted under `scopes/local`. Official actor-art productization and semantic vs
-presentation activation remain F1.2/F1.4 work and were not pulled into F1.1.
+Local metadata is rooted under `scopes/local`. Semantic versus presentation activation closed in
+F1.2; removable Official actor-art packaging remains F1.4 work.
+
+The future Gameplay Frame distinguishes physical Application Window, render-target Gameplay
+Output Resolution, aspect-preserving application-space frame, canonical 16:9 maximum stock view,
+and independent world render/residency distance. F1.7 owns frame/workspace UI composition; F1.8
+owns centered aspect crop without disclosing more world; F1.9 targets the frame/SubViewport.
+F1.8A separately owns controlled-remote prediction/reconciliation and non-controlled-remote
+interpolation. It selects a pose, while F1.10 may optimize its realization. These are future
+contracts, not F1.3 implementation or client-side authority.
 
 **Hard stop:** do not silently turn this roadmap into discovery, matchmaking, executable mod loading, account redesign, or unrelated gameplay campaigns. Review each checkpoint before advancing.

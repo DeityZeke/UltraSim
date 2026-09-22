@@ -1,6 +1,6 @@
 # UltraSim Client Completion Plan
 
-**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0, F1.1, and F1.2 are CLOSED; F1.3 is NEXT / PLANNED.**
+**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0, F1.1, and F1.2 are CLOSED; F1.3 is ACTIVE.**
 
 **Parent architecture:** [CLIENT_PRESENTATION_ARCHITECTURE.md](CLIENT_PRESENTATION_ARCHITECTURE.md)
 
@@ -83,13 +83,14 @@ This campaign continues the completed F0 reconstruction/proof line as **F1 Clien
 F1.0  Baseline and guardrails
 F1.1  Unified content scopes and stores (CLOSED)
 F1.2  Semantic activation vs presentation resolution (CLOSED)
-F1.3  Primitive substrate and fallback contract (NEXT / PLANNED)
+F1.3  Primitive substrate and fallback contract (ACTIVE)
 F1.4  Official Local content productization
 F1.5  User presentation overrides and content generations
 F1.6  Derived resources / atlas pipeline
-F1.7  Shared UI composition and window/gump manager
-F1.8  Declarative camera/control rig profiles
-F1.9  Godot scalable presentation backend
+F1.7  Application workspace, Gameplay Frame, shared UI/gump composition
+F1.8  Declarative camera/control rig and canonical gameplay-view crop
+F1.8A Remote motion prediction/reconciliation/interpolation
+F1.9  Godot scalable presentation backend targeting the Gameplay Frame
 F1.10 Actor representation tiers and GPU-friendly interpolation seam
 F1.11 Renderer stress consumers / vegetation prototype
 F1.12 Product dogfooding and PF6 readiness
@@ -727,7 +728,9 @@ Select at least one representative world/clutter case and measure:
 
 ## Goal
 
-Make the intended presentation categories real end to end and remove Local/Remote UI ownership drift.
+Make the intended presentation categories real end to end and remove Local/Remote UI ownership drift. Own an application workspace with a Gameplay Frame below normal UI; the 3D output no longer implicitly owns the OS window.
+
+The Application Window is the physical OS/Godot window. Gameplay Output Resolution selects the render-target pixels and aspect ratio, while the Gameplay Frame is the application-space rectangle displaying that output. The frame defaults to the maximum aspect-preserving fit, may later snap to bounded sizes, cannot exceed the window, and leaves unused space as dark UI workspace. Scaling the same output into a larger frame changes fidelity/size, not world-space visibility. The frame has no internal letterbox merely to preserve 16:9. World-relative overlays remain associated with it; ordinary gumps may occupy the frame or surrounding workspace. F1.7 owns the host and composition, not the later projection or renderer-target implementation.
 
 ## Category roots
 
@@ -797,6 +800,8 @@ Right-click ContextMenu must no longer be merely an overloaded OrbitCommand canc
 
 Expand the narrow F0.3c profile into the intended bounded data-driven client rig without server scripts.
 
+Define 16:9 as the maximum stock-client gameplay-view envelope. At any selected Gameplay Output Resolution/aspect ratio, show the largest centered rectangle of that aspect inside the canonical 16:9 view: 16:9 receives the full envelope; 4:3 and 5:4 crop horizontally with the same vertical extent; wider aspects retain canonical width and crop vertically. Pixel resolution alone never expands visibility. This stock-client consistency rule is not a security boundary; server AOI/disclosure cannot trust camera crop. F1.8 owns frame-aware projection and crop, distinct from world render/residency distance.
+
 ## Camera rig vocabulary
 
 Earn a finite schema covering the Concept Demo and intended stock families:
@@ -806,7 +811,7 @@ Earn a finite schema covering the Concept Demo and intended stock families:
 - follow mode;
 - follow distance/default/min/max;
 - follow speed/smoothing;
-- reconciliation/correction smoothing;
+- camera follow smoothing; remote motion reconciliation/correction belongs to F1.8A;
 - yaw locked/free/range/snap/speed;
 - pitch locked/free/default/range/speed;
 - zoom enabled/default/range/step/speed;
@@ -869,11 +874,21 @@ Reserved application/accessibility controls remain user-owned.
 
 ---
 
+# 12A. F1.8A - Remote motion presentation
+
+This dedicated checkpoint occurs after F1.8 and before F1.9. It does not move authority into the client. For the controlled remote actor, correlate bounded local command/prediction history with authoritative owner state, detect error, reconcile with bounded smoothing below a discontinuity threshold, and snap/reset on teleport, relocation, or session/generation change. Prediction is presentation only, never Game truth. Record correction magnitude and error diagnostics.
+
+For non-controlled remote actors, retain a bounded authoritative snapshot buffer and interpolate at a presentation timestamp/delay. Define gap, stale-buffer, teleport, entity replacement, and generation-reset behavior before considering extrapolation. Local packet-free play need not manufacture network prediction or reconciliation debt, though it may reuse presentation smoothing primitives.
+
+F1.8A answers which pose should be presented now. F1.10 answers how that pose is efficiently realized, including any GPU actor interpolation. PF6 may not claim prediction/reconciliation/interpolation quality until F1.8A is implemented and tested under real latency/impairment.
+
+---
+
 # 13. F1.9 - Godot scalable presentation backend
 
 ## Goal
 
-Make "semantic entity does not require a Godot node" an explicit implemented renderer capability.
+Make "semantic entity does not require a Godot node" an explicit implemented renderer capability. Godot rendering targets the F1.7 Gameplay Frame/SubViewport rather than implicitly owning the OS window.
 
 ## Presentation tiers
 
@@ -1204,6 +1219,7 @@ PF6 begins only when:
 - common content scopes/CAS behavior is proven;
 - UI/gump category/lifetime/focus behavior is coherent;
 - declarative camera/control profiles are stable enough for the intended playtest;
+- F1.8A remote prediction/reconciliation/interpolation has impairment-backed quality evidence;
 - current renderer has an intentional high-cardinality strategy rather than accidental node mirroring;
 - selected native batching path has measured evidence;
 - reconnect/session retirement is clean;

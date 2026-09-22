@@ -4,7 +4,7 @@
 
 **Relationship to existing plans:** this document is the durable client/presentation/content companion to [CLIENT.md](CLIENT.md), [ASSET_STREAMING.md](ASSET_STREAMING.md), [TERRAIN.md](TERRAIN.md), and [CONCEPT_DEMO.md](CONCEPT_DEMO.md). CLIENT.md remains the checkpoint/status roadmap. This document owns details that are easy to lose when a vertical slice proves only that something can be rendered.
 
-**Implementation campaign:** [CLIENT_COMPLETION_PLAN.md](CLIENT_COMPLETION_PLAN.md) turns this architecture into the ordered F1.0-F1.12 pre-PF6 execution plan.
+**Implementation campaign:** [CLIENT_COMPLETION_PLAN.md](CLIENT_COMPLETION_PLAN.md) turns this architecture into the ordered F1.0-F1.12 pre-PF6 execution plan, with a dedicated F1.8A remote-motion checkpoint between F1.8 and F1.9.
 
 **F1.2 implementation boundary:** the current Concept Demo now proves WorldPack and compiled
 Inventory/Server Monitor UI through one exact Realm semantic activation, while an independent
@@ -789,6 +789,14 @@ Higher-quality presentation realization may be lazy where semantic safety permit
 
 # 16. UI scene-tree categories and z-order
 
+## Future application workspace and Gameplay Frame (F1.7-F1.9)
+
+The physical Application Window is not the gameplay viewport. A selected Gameplay Output Resolution (default 1920×1080, with bounded lower/higher/custom choices) determines render-target pixels and aspect. The Gameplay Frame is the application-space rectangle displaying that output: it defaults to maximum aspect-preserving fit inside the OS window, may later snap to bounded sizes, cannot exceed the window, and has no internal letterbox merely to retain 16:9. Unused window area is a dark application/UI workspace. A 480×270 output scaled into a 1920×1080 frame is still the same 16:9 view at lower fidelity; changing pixel count alone never expands world visibility.
+
+The frame is below normal UI. The intended order is workspace/background, Gameplay Frame, frame-associated World overlays, HUD, Menus/Gumps, Debug, then Context/Tooltip. Nameplates, health bars, overhead Chat, and markers track world positions in the frame; ordinary gumps can cover the frame or occupy unused workspace, supporting desktop-style layout. Frame host/shared UI composition belongs to F1.7; F1.8 owns frame-aware camera projection; F1.9 makes Godot render to the frame/SubViewport rather than implicitly to the OS window. None is implemented by F1.3.
+
+The maximum stock-client world-space view is a canonical 16:9 envelope. The selected output aspect sees the largest centered rectangle of that aspect contained in the envelope: 16:9 sees all of it, 4:3 or 5:4 crops horizontally with the same vertical extent, and an aspect wider than 16:9 retains canonical width while cropping vertically. Scaling or increasing resolution never expands that envelope. This is presentation consistency, not security: a modified client can ignore crop, and Game AOI/disclosure remains authoritative. World render/residency distance is separate from window size, frame size, output pixels, and this view envelope.
+
 The intended client UI hierarchy is a native presentation category/z-order policy.
 
 Canonical ordering:
@@ -1068,6 +1076,12 @@ Ignore Recommendation
 ~~~
 
 Server recommendations remain transient/cacheable realm data rather than destructively rewriting global user settings.
+
+## Future remote motion presentation (F1.8A)
+
+Remote motion needs a dedicated presentation checkpoint after F1.8 and before F1.9. The controlled actor may predict its locally submitted command for responsive display, then correlate bounded command/prediction history with authoritative owner state, reconcile error, smooth bounded corrections, and snap/reset on discontinuity, teleport, relocation, or session/generation replacement. Prediction never becomes Game truth. Non-controlled remote actors instead begin with a bounded authoritative-snapshot interpolation buffer, a presentation timestamp/delay, and explicit gap, stale, teleport, and entity-replacement behavior; extrapolation needs separate evidence. Diagnostics must expose correction magnitude and buffer age/health. Packet-free Local authority does not manufacture network latency or prediction debt merely for symmetry.
+
+F1.8A selects the pose to present now. F1.10 may later realize that pose through cheaper actor tiers or GPU interpolation. PF6 must not claim remote prediction/reconciliation/interpolation quality before F1.8A passes real latency/impairment evidence. F1.3 documents this only.
 
 ---
 
