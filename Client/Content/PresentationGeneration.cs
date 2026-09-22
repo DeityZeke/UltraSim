@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 
 namespace UltraSim.Client.Content;
 
@@ -36,17 +35,23 @@ public readonly record struct PresentationGenerationSnapshot(
     int UserSelections,
     int RealmSelections,
     int LocalSelections,
-    int PrimitiveSelections)
+    int PrimitiveSelections,
+    int ActorSelections = 0,
+    int TextureSelections = 0,
+    int MaterialSelections = 0,
+    int UserResourceSelections = 0,
+    int RealmResourceSelections = 0,
+    int LocalResourceSelections = 0,
+    bool RealmResourceLayerPresent = false,
+    bool LocalResourceLayerPresent = false)
 {
-    public bool EffectiveUserLayerPresent => UserSelections != 0;
+    public bool EffectiveUserLayerPresent => UserSelections != 0 || UserResourceSelections != 0;
 }
 
-/// <summary>Cold/event-driven, bounded actor presentation composition for F1.2.</summary>
-/// <remarks>
-/// The current Concept Demo has two compatible actor IDs. The generation owns catalog and blob
-/// leases; native users obtain a reference-counted lease, so retiring the current generation cannot
-/// release old catalog/blob ownership underneath an existing native resource.
-/// </remarks>
+/// <summary>
+/// Cold/event-driven, bounded actor/texture/material presentation composition. Content truth is
+/// immutable and engine-neutral; renderer-native derived objects remain outside this type.
+/// </summary>
 public sealed class PresentationGeneration : IActorPresentationGenerationSource, IDisposable
 {
     private static readonly string[] s_actorIds =
@@ -57,8 +62,12 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
 
     private readonly ContentCatalogLease? _realm;
     private readonly ContentCatalogLease? _local;
+    private readonly ContentCatalogLease? _realmResources;
+    private readonly ContentCatalogLease? _localResources;
     private readonly UserResourcePackStackLease? _user;
     private readonly SelectedActor[] _actors = new SelectedActor[2];
+    private readonly SelectedTexture[] _textures = [];
+    private readonly SelectedMaterial[] _materials = [];
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private int _references = 1;
     private int _ownerRetired;
@@ -66,16 +75,21 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
     private PresentationGeneration(
         UserResourcePackStackLease? user,
         ContentCatalogLease? realm,
-        ContentCatalogLease? local)
+        ContentCatalogLease? local,
+        ContentCatalogLease? realmResources,
+        ContentCatalogLease? localResources)
     {
-        if (realm is not null && !realm.Catalog.Scope.IsRealm)
-            throw new ArgumentException("The Realm layer must be Realm-authorized.", nameof(realm));
-        if (local is not null && !local.Catalog.Scope.IsLocal)
-            throw new ArgumentException("The Local layer must be world.local-authorized.", nameof(local));
+        ValidateLayer(realm, local: false, nameof(realm));
+        ValidateLayer(local, local: true, nameof(local));
+        ValidateLayer(realmResources, local: false, nameof(realmResources));
+        ValidateLayer(localResources, local: true, nameof(localResources));
         _realm = realm;
         _local = local;
+        _realmResources = realmResources;
+        _localResources = localResources;
         _user = user;
         Generation = PresentationGenerationId.Next();
+        List<SelectedTexture>? pendingTextures = null;
 
         try
         {
@@ -90,7 +104,8 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
                 PresentationSourceKind source = PresentationSourceKind.Primitive;
                 UserResourcePackIdentity userIdentity = default;
                 if (user is not null && user.TryFindHighest(
-                        id, out userIdentity, out _, out _))
+                        id, out userIdentity, out _, out ContentDefinitionDescriptor? userDefinition) &&
+                    userDefinition?.Kind == ContentDefinitionKind.ActorPresentation)
                 {
                     if (!ContentActorPresentationResolver.TryResolveUserResourcePack(
                             user, id, ConceptDemoActorPresentationProfile.Requirements,
@@ -116,12 +131,75 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
                 }
                 _actors[index] = new SelectedActor(id, source, selected, userIdentity);
             }
+
+            var lowerTextures = new SortedDictionary<LogicalContentId, CatalogSelection>();
+            var lowerMaterials = new SortedDictionary<LogicalContentId, CatalogSelection>();
+            int userResourceSelections = 0;
+            int realmResourceSelections = 0;
+            int localResourceSelections = 0;
+            AddCatalogResources(localResources, PresentationSourceKind.Local,
+                lowerTextures, lowerMaterials, replace: false);
+            AddCatalogResources(realmResources, PresentationSourceKind.Realm,
+                lowerTextures, lowerMaterials, replace: true);
+
+            var textures = new List<SelectedTexture>(lowerTextures.Count);
+            pendingTextures = textures;
+            foreach ((LogicalContentId id, CatalogSelection lower) in lowerTextures)
+            {
+                ResolvedTexturePresentation texture;
+                if (user is not null && user.TryFindHighest(
+                        id, out UserResourcePackIdentity identity,
+                        out ContentPackageManifest? manifest,
+                        out ContentDefinitionDescriptor? definition) &&
+                    definition?.Kind == ContentDefinitionKind.Texture)
+                {
+                    if (!TryOpenUserTexture(user, identity, manifest!, definition,
+                            out texture))
+                        throw new InvalidDataException(
+                            $"The selected user texture for {id} is invalid or unavailable.");
+                    userResourceSelections++;
+                }
+                else
+                {
+                    if (!TryOpenCatalogTexture(lower.Catalog, lower.Entry, lower.Source,
+                            out texture))
+                        throw new InvalidDataException(
+                            $"The selected {lower.Source} texture for {id} is invalid or unavailable.");
+                    if (lower.Source == PresentationSourceKind.Realm) realmResourceSelections++;
+                    else localResourceSelections++;
+                }
+                textures.Add(new SelectedTexture(texture));
+            }
+            _textures = textures.ToArray();
+            pendingTextures = null;
+
+            var materials = new List<SelectedMaterial>(lowerMaterials.Count);
+            foreach ((LogicalContentId id, CatalogSelection selected) in lowerMaterials)
+            {
+                ContentDefinitionDescriptor definition = selected.Entry.Definition;
+                ResolvedTexturePresentation? texture = FindTexture(definition.Material.AlbedoTexture);
+                if (definition.Material.AlbedoTexture.IsValid && texture is null)
+                    throw new InvalidDataException(
+                        $"Material {id} has no effective texture {definition.Material.AlbedoTexture}.");
+                ContentHash resourceFingerprint = PresentationResourceFingerprint.Material(
+                    id, definition.DefinitionHash,
+                    texture?.StableResourceFingerprint ?? default);
+                materials.Add(new SelectedMaterial(
+                    id, selected.Source, definition.Material,
+                    definition.DefinitionHash, resourceFingerprint,
+                    definition.Material.AlbedoTexture));
+                if (selected.Source == PresentationSourceKind.Realm) realmResourceSelections++;
+                else localResourceSelections++;
+            }
+            _materials = materials.ToArray();
+
             using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            hash.AppendData("UltraSim.Presentation.F1.5.v1"u8);
+            hash.AppendData("UltraSim.Presentation.F1.6.v1"u8);
             Span<byte> digest = stackalloc byte[ContentHash.ByteLength];
             foreach (SelectedActor actor in _actors)
             {
-                hash.AppendData(Encoding.ASCII.GetBytes(actor.Id.Value!));
+                hash.AppendData([1]);
+                PresentationResourceFingerprint.AppendText(hash, actor.Id.Value!);
                 if (actor.Lease is not null)
                 {
                     actor.Lease.FileHash.WriteDigest(digest);
@@ -129,20 +207,41 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
                 }
                 else hash.AppendData([0]);
             }
+            foreach (SelectedTexture texture in _textures)
+            {
+                hash.AppendData([2]);
+                texture.Lease.StableResourceFingerprint.WriteDigest(digest);
+                hash.AppendData(digest);
+            }
+            foreach (SelectedMaterial material in _materials)
+            {
+                hash.AppendData([3]);
+                material.StableResourceFingerprint.WriteDigest(digest);
+                hash.AppendData(digest);
+            }
             StableFingerprint = ContentHash.FromDigest(hash.GetHashAndReset());
             Snapshot = new PresentationGenerationSnapshot(
                 Generation, StableFingerprint, user is { Identities.Count: > 0 },
-                realm is not null, local is not null,
+                realm is not null,
+                local is not null,
                 user?.Identities.Count ?? 0, userSelections,
                 realmSelections, localSelections,
-                s_actorIds.Length - userSelections - realmSelections - localSelections);
+                s_actorIds.Length - _actors.Count(static value => value.Lease is not null),
+                _actors.Length, _textures.Length, _materials.Length,
+                userResourceSelections, realmResourceSelections, localResourceSelections,
+                realmResources is not null, localResources is not null);
         }
         catch
         {
+            if (pendingTextures is not null)
+                foreach (SelectedTexture texture in pendingTextures) texture.Lease.Dispose();
             foreach (SelectedActor actor in _actors) actor.Lease?.Dispose();
+            foreach (SelectedTexture texture in _textures) texture.Lease.Dispose();
             user?.Dispose();
             realm?.Dispose();
             local?.Dispose();
+            realmResources?.Dispose();
+            localResources?.Dispose();
             throw;
         }
     }
@@ -153,17 +252,31 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
     public PresentationGenerationSnapshot Snapshot { get; }
 
     public static PresentationGeneration Create(
-        ContentCatalogLease? realm, ContentCatalogLease? local) => new(null, realm, local);
+        ContentCatalogLease? realm, ContentCatalogLease? local) =>
+        new(null, realm, local, null, null);
 
     public static PresentationGeneration Create(
         UserResourcePackStackLease? user,
         ContentCatalogLease? realm,
-        ContentCatalogLease? local) => new(user, realm, local);
+        ContentCatalogLease? local) =>
+        new(user, realm, local, null, null);
+
+    public static PresentationGeneration CreateWithResources(
+        UserResourcePackStackLease? user,
+        ContentCatalogLease? realmActors,
+        ContentCatalogLease? localActors,
+        ContentCatalogLease? realmResources,
+        ContentCatalogLease? localResources) =>
+        new(user, realmActors, localActors, realmResources, localResources);
 
     public PresentationSourceKind GetSource(LogicalContentId id)
     {
         foreach (SelectedActor actor in _actors)
             if (actor.Id == id) return actor.Source;
+        foreach (SelectedTexture texture in _textures)
+            if (texture.Lease.LogicalId == id) return texture.Lease.Source;
+        foreach (SelectedMaterial material in _materials)
+            if (material.Id == id) return material.Source;
         return PresentationSourceKind.Primitive;
     }
 
@@ -177,8 +290,62 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
             identity = actor.UserResourcePack;
             return identity.IsValid;
         }
+        foreach (SelectedTexture texture in _textures)
+        {
+            if (texture.Lease.LogicalId != id ||
+                texture.Lease.Source != PresentationSourceKind.User) continue;
+            identity = texture.Lease.UserResourcePack;
+            return identity.IsValid;
+        }
         identity = default;
         return false;
+    }
+
+    public bool TryResolveTexturePresentation(
+        LogicalContentId definitionId,
+        out ResolvedTexturePresentation? presentation,
+        out PresentationResourceResolutionError error)
+    {
+        EnsureOwner();
+        presentation = null;
+        if (!definitionId.IsValid)
+            return Fail(PresentationResourceResolutionError.InvalidRequest, out error);
+        if (Volatile.Read(ref _ownerRetired) != 0)
+            return Fail(PresentationResourceResolutionError.GenerationRetired, out error);
+        ResolvedTexturePresentation? selected = FindTexture(definitionId);
+        if (selected is null)
+            return Fail(PresentationResourceResolutionError.DefinitionNotFound, out error);
+        Interlocked.Increment(ref _references);
+        presentation = selected.WithLifetime(new GenerationReference(this), Generation);
+        error = PresentationResourceResolutionError.None;
+        return true;
+    }
+
+    public bool TryResolveMaterialPresentation(
+        LogicalContentId definitionId,
+        out ResolvedMaterialPresentation? presentation,
+        out PresentationResourceResolutionError error)
+    {
+        EnsureOwner();
+        presentation = null;
+        if (!definitionId.IsValid)
+            return Fail(PresentationResourceResolutionError.InvalidRequest, out error);
+        if (Volatile.Read(ref _ownerRetired) != 0)
+            return Fail(PresentationResourceResolutionError.GenerationRetired, out error);
+        foreach (SelectedMaterial material in _materials)
+        {
+            if (material.Id != definitionId) continue;
+            ResolvedTexturePresentation? texture = FindTexture(material.AlbedoTexture);
+            Interlocked.Increment(ref _references);
+            presentation = new ResolvedMaterialPresentation(
+                new GenerationReference(this), material.Id, material.Source,
+                material.Definition, material.DefinitionHash,
+                material.StableResourceFingerprint, Generation,
+                texture?.WithLifetime(NoopLifetime.Instance, Generation));
+            error = PresentationResourceResolutionError.None;
+            return true;
+        }
+        return Fail(PresentationResourceResolutionError.DefinitionNotFound, out error);
     }
 
     public bool TryResolveActorPresentation(
@@ -235,6 +402,125 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
         Release();
     }
 
+    private static void ValidateLayer(ContentCatalogLease? layer, bool local, string parameter)
+    {
+        if (layer is null) return;
+        if (local ? !layer.Catalog.Scope.IsLocal : !layer.Catalog.Scope.IsRealm)
+            throw new ArgumentException(
+                local ? "The Local layer must be world.local-authorized." :
+                    "The Realm layer must be Realm-authorized.", parameter);
+    }
+
+    private static void AddCatalogResources(
+        ContentCatalogLease? catalog,
+        PresentationSourceKind source,
+        SortedDictionary<LogicalContentId, CatalogSelection> textures,
+        SortedDictionary<LogicalContentId, CatalogSelection> materials,
+        bool replace)
+    {
+        if (catalog is null) return;
+        foreach (ResolvedContentEntry entry in catalog.Catalog.Entries)
+        {
+            SortedDictionary<LogicalContentId, CatalogSelection>? target = entry.Kind switch
+            {
+                ContentDefinitionKind.Texture => textures,
+                ContentDefinitionKind.Material => materials,
+                _ => null,
+            };
+            if (target is null) continue;
+            var selection = new CatalogSelection(catalog, entry, source);
+            if (replace) target[entry.Id] = selection;
+            else target.TryAdd(entry.Id, selection);
+        }
+    }
+
+    private static bool TryOpenUserTexture(
+        UserResourcePackStackLease user,
+        UserResourcePackIdentity identity,
+        ContentPackageManifest manifest,
+        ContentDefinitionDescriptor definition,
+        out ResolvedTexturePresentation texture)
+    {
+        texture = null!;
+        ContentCache? cache = user.Owner;
+        if (cache is null || manifest.TrustClass != ContentTrustClass.UserResourcePack ||
+            definition.Kind != ContentDefinitionKind.Texture ||
+            definition.Operation != ContentDefinitionOperation.Replace ||
+            !manifest.TryGetFile(definition.PrimaryFile, out ContentFileDescriptor file)) return false;
+        return TryOpenTexture(cache, definition.Id, PresentationSourceKind.User,
+            identity, file, out texture);
+    }
+
+    private static bool TryOpenCatalogTexture(
+        ContentCatalogLease catalog,
+        ResolvedContentEntry entry,
+        PresentationSourceKind source,
+        out ResolvedTexturePresentation texture)
+    {
+        texture = null!;
+        ContentCache? cache = catalog.Owner;
+        if (cache is null || entry.Kind != ContentDefinitionKind.Texture ||
+            entry.ReferencedFiles.Count != 1 ||
+            !cache.TryOpenPackage(catalog.Catalog.Scope, entry.OwnerPackageId,
+                entry.OwnerManifestHash, out VerifiedContentPackage? package, out _) ||
+            !package!.Manifest.TryGetFile(entry.Definition.PrimaryFile,
+                out ContentFileDescriptor file) || file.Sha256 != entry.ReferencedFiles[0])
+            return false;
+        return TryOpenTexture(cache, entry.Id, source, default, file, out texture);
+    }
+
+    private static bool TryOpenTexture(
+        ContentCache cache,
+        LogicalContentId id,
+        PresentationSourceKind source,
+        UserResourcePackIdentity userIdentity,
+        in ContentFileDescriptor file,
+        out ResolvedTexturePresentation texture)
+    {
+        texture = null!;
+        if (file.Kind is not (ContentFileKind.PngTexture or ContentFileKind.WebpTexture) ||
+            file.SizeBytes > int.MaxValue ||
+            !cache.TryOpenBlob(file, out ContentBlobLease? blob, out _)) return false;
+        try
+        {
+            byte[] bytes = new byte[checked((int)file.SizeBytes)];
+            if (!TryReadExact(blob!.Stream, bytes) || blob.Stream.ReadByte() != -1 ||
+                !ContentRasterArtifact.TryInspect(file.Kind, bytes, out ContentRasterArtifactInfo info))
+                return false;
+            texture = new ResolvedTexturePresentation(
+                blob, id, source, userIdentity, file, info, bytes, default,
+                PresentationResourceFingerprint.Texture(id, file));
+            blob = null;
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or ArgumentException or
+            OverflowException)
+        {
+            return false;
+        }
+        finally { blob?.Dispose(); }
+    }
+
+    private ResolvedTexturePresentation? FindTexture(LogicalContentId id)
+    {
+        if (!id.IsValid) return null;
+        foreach (SelectedTexture texture in _textures)
+            if (texture.Lease.LogicalId == id) return texture.Lease;
+        return null;
+    }
+
+    private static bool TryReadExact(Stream stream, Span<byte> destination)
+    {
+        int offset = 0;
+        while (offset < destination.Length)
+        {
+            int read = stream.Read(destination[offset..]);
+            if (read <= 0) return false;
+            offset += read;
+        }
+        return true;
+    }
+
     private void EnsureOwner()
     {
         if (Environment.CurrentManagedThreadId != _ownerThreadId)
@@ -245,10 +531,26 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
     {
         if (Interlocked.Decrement(ref _references) != 0) return;
         foreach (SelectedActor actor in _actors) actor.Lease?.Dispose();
+        foreach (SelectedTexture texture in _textures) texture.Lease.Dispose();
         _user?.Dispose();
         _realm?.Dispose();
         _local?.Dispose();
+        _realmResources?.Dispose();
+        _localResources?.Dispose();
     }
+
+    private static bool Fail(
+        PresentationResourceResolutionError value,
+        out PresentationResourceResolutionError error)
+    {
+        error = value;
+        return false;
+    }
+
+    private readonly record struct CatalogSelection(
+        ContentCatalogLease Catalog,
+        ResolvedContentEntry Entry,
+        PresentationSourceKind Source);
 
     private readonly record struct SelectedActor(
         LogicalContentId Id,
@@ -256,10 +558,26 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
         ActorPresentationContentLease? Lease,
         UserResourcePackIdentity UserResourcePack);
 
+    private readonly record struct SelectedTexture(ResolvedTexturePresentation Lease);
+
+    private readonly record struct SelectedMaterial(
+        LogicalContentId Id,
+        PresentationSourceKind Source,
+        ContentMaterialDefinition Definition,
+        ContentHash DefinitionHash,
+        ContentHash StableResourceFingerprint,
+        LogicalContentId AlbedoTexture);
+
     private sealed class GenerationReference(PresentationGeneration owner) : IDisposable
     {
         private PresentationGeneration? _owner = owner;
         public void Dispose() => Interlocked.Exchange(ref _owner, null)?.Release();
+    }
+
+    private sealed class NoopLifetime : IDisposable
+    {
+        internal static NoopLifetime Instance { get; } = new();
+        public void Dispose() { }
     }
 }
 

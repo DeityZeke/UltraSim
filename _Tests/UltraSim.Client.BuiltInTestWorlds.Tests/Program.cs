@@ -11,6 +11,7 @@ var tests = new (string Name, Action Body)[]
     ("MissingRequiredVariantIsDiagnosableAndTransactional", MissingRequiredVariantIsDiagnosableAndTransactional),
     ("VerifiedPayloadsResolveByContentIdentity", VerifiedPayloadsResolveByContentIdentity),
     ("CabinVariantsInstallReopenThroughWorldLocalStore", CabinVariantsInstallReopenThroughWorldLocalStore),
+    ("CabinPresentationGenerationUsesPersistentLocalAndUserTextureLeaf", CabinPresentationGenerationUsesPersistentLocalAndUserTextureLeaf),
 };
 
 foreach ((string name, Action body) in tests)
@@ -19,6 +20,81 @@ foreach ((string name, Action body) in tests)
     Console.WriteLine($"PASS {name}");
 }
 Console.WriteLine($"All {tests.Length} built-in Test World content tests passed.");
+
+static void CabinPresentationGenerationUsesPersistentLocalAndUserTextureLeaf()
+{
+    CabinContentOracle oracle = CabinContentOracle.Create();
+    CabinLocalPresentationContent local =
+        oracle.CreateLocalPresentation(CabinContentVariant.Default);
+    CabinLocalContentPackage userPack = oracle.CreateUserWallTexturePack();
+    var userIdentity = new UserResourcePackIdentity(
+        userPack.Manifest.PackageId, userPack.Manifest.ManifestHash);
+    string root = Path.Combine(Path.GetTempPath(),
+        $"ultrasim-cabin-f16-{Environment.ProcessId}-{Guid.NewGuid():N}");
+    try
+    {
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out ContentCacheError openError),
+            openError.ToString());
+        using (cache)
+        {
+            foreach (CabinLocalContentPackage package in local.Packages)
+                True(cache!.TryInstallPackage(
+                    ContentScopeKey.Local, package.Manifest, package.Payloads,
+                    out _, out ContentCacheError installError), installError.ToString());
+            True(cache!.TryInstallUserResourcePack(
+                userPack.Manifest, userPack.Payloads,
+                out _, out ContentCacheError userInstall), userInstall.ToString());
+            True(cache.TryPublishCatalog(
+                ContentBaseCatalog.Empty, local.Plan, true,
+                out ContentCatalogLease? lowerCatalog, out ContentCacheError publishError),
+                publishError.ToString());
+            using PresentationGeneration lower = PresentationGeneration.CreateWithResources(
+                null, null, null, null, lowerCatalog);
+            Equal(PresentationSourceKind.Local, lower.GetSource(CabinContentIds.WallTexture));
+            True(lower.TryResolveMaterialPresentation(
+                CabinContentIds.WallMaterial,
+                out ResolvedMaterialPresentation? lowerMaterial,
+                out PresentationResourceResolutionError lowerError), lowerError.ToString());
+            ContentHash lowerTexture = lowerMaterial!.AlbedoTexture!.File.Sha256;
+            ContentHash lowerFingerprint = lower.StableFingerprint;
+            float roughness = lowerMaterial.Definition.Roughness;
+            lowerMaterial.Dispose();
+
+            True(cache.TrySetEnabledUserResourcePacks(
+                [userIdentity], out ContentCacheError selectionError), selectionError.ToString());
+            True(cache.TryOpenEnabledUserResourcePacks(
+                out UserResourcePackStackLease? stack, out ContentCacheError stackError),
+                stackError.ToString());
+            True(cache.TryOpenCatalog(
+                ContentBaseCatalog.Empty, local.ActivationKey,
+                out ContentCatalogLease? effectiveCatalog, out ContentCacheError catalogError),
+                catalogError.ToString());
+            using PresentationGeneration effective = PresentationGeneration.CreateWithResources(
+                stack, null, null, null, effectiveCatalog);
+            True(effective.TryResolveMaterialPresentation(
+                CabinContentIds.WallMaterial,
+                out ResolvedMaterialPresentation? effectiveMaterial,
+                out PresentationResourceResolutionError effectiveError), effectiveError.ToString());
+            Equal(CabinContentIds.WallMaterial, effectiveMaterial!.LogicalId);
+            Equal(roughness, effectiveMaterial.Definition.Roughness);
+            Equal(PresentationSourceKind.Local, effectiveMaterial.Source);
+            Equal(PresentationSourceKind.User, effectiveMaterial.AlbedoTexture!.Source);
+            NotEqual(lowerTexture, effectiveMaterial.AlbedoTexture.File.Sha256);
+            NotEqual(lowerFingerprint, effective.StableFingerprint);
+            effectiveMaterial.Dispose();
+
+            Console.WriteLine(
+                $"EVIDENCE F1.6 cabin_local={local.ActivationKey} " +
+                $"user_wall={userIdentity.ManifestHash} lower={lowerFingerprint} " +
+                $"effective={effective.StableFingerprint} material={CabinContentIds.WallMaterial} " +
+                "material_scalars=unchanged texture_source=User");
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+}
 
 static void CabinVariantsInstallReopenThroughWorldLocalStore()
 {

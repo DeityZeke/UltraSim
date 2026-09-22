@@ -13,7 +13,8 @@ An engine-neutral, immutable `PresentationGeneration` selects compatible explici
 art, then Realm art, `world.local`, and renderer Primitive per logical actor ID. Its process-local
 generation fences late native work; its effective-selection fingerprint is stable content identity.
 F1.5 persists a bounded exact user-pack order in a separate policy namespace and shares only
-immutable CAS blobs with authorization scopes. Derived caches remain a later F1 checkpoint. F1.3 supplies
+immutable CAS blobs with authorization scopes. F1.6 adds Texture/Material effective leaves and a
+restart-stable Godot derived cache without putting native identity into semantic content. F1.3 supplies
 finite `ClientPrimitivePresentation` descriptors and a permanent Godot primitive substrate for
 already-disclosed actor, item, public, frozen-static, and Multi-fragment facts. Model absence and
 texture absence remain independent; neutral fallback is distinct from diagnostic missing texture.
@@ -339,15 +340,15 @@ A resource pack does not:
 
 Executable client extensions, if ever supported, remain a separate trust/install/runtime boundary and are not resource packs.
 
-F1.5 implements the first intentionally narrow member of this family: up to sixteen explicitly
-installed/enabled packages, ordered low-to-high priority, containing only bounded inert
-ActorPresentation GLBs declared as Replace. Exact package/manifest identities and enabled order
+F1.5 implemented the first intentionally narrow member of this family; F1.6 extends the same
+bounded explicitly installed/enabled packages with passive PNG/WebP Texture Replace while retaining
+ActorPresentation GLB Replace. Exact package/manifest identities and enabled order
 persist under `resource-packs/`; they do not enter Realm or `world.local` activation. Missing
 logical targets are inactive, while corrupt or skeleton-incompatible selected actor replacements
 reject the complete candidate generation and preserve the current one. WorldPack, UI definition,
-texture, script/shader/executable, Add, and all other domains remain rejected. Texture/material
-overrides await the F1.6 presentation/derived-resource seam because current Cabin materials are
-renderer-constructed rather than common-generation leaves.
+Material Replace, Icon, script/shader/executable, Add, and all other domains remain rejected.
+Logical Material definitions retain their lower-authorized scalar truth while their texture
+references select the effective User/Realm/Local texture leaf.
 
 ---
 
@@ -1522,9 +1523,11 @@ plan, semantic activation, or application proof.
 
 ## Atlas
 
-No V3 atlas implementation currently exists.
-
-Atlas identity/layout/native realization is a real pre-PF6 client architecture task, or must be deliberately bounded enough that the client is not knowingly freezing the wrong one-texture/material-per-object presentation architecture.
+F1.6 implements a bounded diagnostic `WorldOpaque` two-texture candidate after logical resolution.
+It proves deterministic keying, opaque compatibility, one-page pixel equality, and ownership, but
+is rejected as the production Cabin policy because it did not reduce the fixture's materials or
+demonstrate a draw-call reduction. Standalone derived Texture/Material resources remain selected.
+The atlas remains a renderer strategy and never enters logical content identity.
 
 ## Local/Remote presentation duplication
 

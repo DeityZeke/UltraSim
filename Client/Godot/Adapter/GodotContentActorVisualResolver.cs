@@ -44,7 +44,7 @@ public readonly record struct GodotContentActorResourceDiagnostics(
 /// </summary>
 public sealed class GodotContentActorVisualResolver : IGodotActorVisualResolver, IDisposable
 {
-    private readonly IActorPresentationContentSource _source;
+    private IActorPresentationContentSource _source;
     private readonly ResourceEntry?[] _entries = new ResourceEntry?[4];
     private readonly List<ResourceEntry> _retired = new(4);
     private readonly ActorPresentationResolutionRequirements _requirements;
@@ -59,6 +59,16 @@ public sealed class GodotContentActorVisualResolver : IGodotActorVisualResolver,
     {
         _source = source ?? throw new ArgumentNullException(nameof(source));
         _requirements = ConceptDemoActorPresentationProfile.Requirements;
+    }
+
+    /// <summary>
+    /// Publishes a fully prepared immutable presentation source. Existing native templates remain
+    /// leased until actors have replaced their visual children and retired resources are released.
+    /// </summary>
+    public void UpdateSource(IActorPresentationContentSource source)
+    {
+        EnsureOperational();
+        _source = source ?? throw new ArgumentNullException(nameof(source));
     }
 
     public Node3D? Instantiate(in ClientActorDefinition definition)

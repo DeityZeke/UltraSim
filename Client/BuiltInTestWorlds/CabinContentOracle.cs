@@ -95,6 +95,32 @@ public sealed class CabinResolvedContent
     public ResolvedContentCatalog Catalog { get; }
 }
 
+/// <summary>
+/// Exact scope-authorized presentation-only form of the Cabin texture/material fixture. This is
+/// consumed through the persistent Local store so Godot no longer reaches around the common
+/// presentation generation to read oracle bytes directly.
+/// </summary>
+public sealed class CabinLocalPresentationContent
+{
+    private readonly ReadOnlyCollection<CabinLocalContentPackage> _packages;
+
+    internal CabinLocalPresentationContent(
+        CabinContentVariant variant,
+        ContentActivationPlan plan,
+        CabinLocalContentPackage[] packages)
+    {
+        Variant = variant;
+        Plan = plan;
+        _packages = Array.AsReadOnly(packages);
+    }
+
+    public CabinContentVariant Variant { get; }
+    public ContentActivationPlan Plan { get; }
+    public ReadOnlyCollection<CabinLocalContentPackage> Packages => _packages;
+    public ContentScopeActivationKey ActivationKey =>
+        new(new ContentScopeActivationId(ContentScopeKey.Local, Plan.Activation), Plan.PlanHash);
+}
+
 /// <summary>Frozen A0.1 oracle hashes. Changes require an explicit content-oracle update.</summary>
 public static class CabinContentFingerprints
 {
@@ -206,6 +232,102 @@ public sealed class CabinContentOracle
             basePackage, replacePackage, addPackage, baseCatalog!, defaultContent, replaceContent, addContent);
     }
 
+    /// <summary>
+    /// Builds the ordinary world.local package set for the current logical Cabin presentation.
+    /// The historical built-in oracle remains the semantic comparison; these exact bytes enter
+    /// the same CAS/catalog path used by Realm and User presentation layers.
+    /// </summary>
+    public CabinLocalPresentationContent CreateLocalPresentation(CabinContentVariant variant)
+    {
+        CabinLocalContentPackage localBase = ReauthorizeForLocal(BasePackage);
+        CabinLocalContentPackage[] packages = variant switch
+        {
+            CabinContentVariant.Default => [localBase],
+            CabinContentVariant.Replace => [localBase, ReauthorizeForLocal(ReplacePackage)],
+            CabinContentVariant.Add => [localBase, ReauthorizeForLocal(AddPackage)],
+            _ => throw new ArgumentOutOfRangeException(nameof(variant)),
+        };
+        ContentActivationId activation = variant switch
+        {
+            CabinContentVariant.Default => new(0x4631_362D_4341_4249UL, 0x4E2D_4445_4641_554CUL),
+            CabinContentVariant.Replace => new(0x4631_362D_4341_4249UL, 0x4E2D_5245_504C_4143UL),
+            CabinContentVariant.Add => new(0x4631_362D_4341_4249UL, 0x4E2D_4144_4400_0001UL),
+            _ => default,
+        };
+        ContentActivationPackage[] selected = packages.Select(static package =>
+            new ContentActivationPackage(
+                package.Manifest.PackageId,
+                package.Manifest.ManifestHash,
+                ContentRequirementPolicy.Required)).ToArray();
+        if (!ContentActivationPlan.TryCreate(
+                ContentScopeKey.Local, activation, ContentBaseCatalog.Empty.Fingerprint,
+                selected, out ContentActivationPlan? plan, out string? error))
+            throw new InvalidOperationException(
+                $"The Cabin Local presentation plan is invalid: {error}");
+        return new CabinLocalPresentationContent(variant, plan!, packages);
+    }
+
+    /// <summary>Deterministic F1.6 user presentation leaf for the real Cabin wall consumer.</summary>
+    public CabinLocalContentPackage CreateUserWallTexturePack() =>
+        CreateUserTexturePack(
+            "user.cabin.wall-blue", "Cabin Blue Wall", CabinContentIds.WallTexture,
+            "textures/user-wall.png", BlueGlowPng);
+
+    /// <summary>Valid selected pack that intentionally targets no active Cabin logical leaf.</summary>
+    public CabinLocalContentPackage CreateIneffectiveUserTexturePack()
+    {
+        if (!LogicalContentId.TryCreate("other:texture/wall", out LogicalContentId other))
+            throw new InvalidOperationException("The F1.6 no-op texture identity is invalid.");
+        return CreateUserTexturePack(
+            "user.other.wall-blue", "Other World Blue Wall", other,
+            "textures/other-wall.png", BlueGlowPng);
+    }
+
+    private static CabinLocalContentPackage CreateUserTexturePack(
+        string packageValue,
+        string name,
+        LogicalContentId target,
+        string path,
+        string base64)
+    {
+        ContentFilePayload[] payloads = [Payload(path, base64)];
+        ContentDefinitionDescriptor[] definitions =
+        [
+            FileDefinition(target, ContentDefinitionKind.Texture,
+                ContentDefinitionOperation.Replace, path),
+        ];
+        Array.Sort(payloads, static (left, right) => left.Path.CompareTo(right.Path));
+        ContentFileDescriptor[] files = payloads.Select(static payload =>
+            File(payload.Path, ContentFileKind.PngTexture, payload.Bytes.Span)).ToArray();
+        if (!ContentPackageId.TryCreate(packageValue, out ContentPackageId packageId) ||
+            !ContentNamespaceId.TryCreate("userpack", out ContentNamespaceId contentNamespace))
+            throw new InvalidOperationException("The F1.6 Cabin user identity is invalid.");
+        if (!ContentPackageManifest.TryCreateUserResourcePack(
+                ContentLimits.CurrentPipelineFormat,
+                ContentLimits.CurrentPipelineFormat,
+                packageId,
+                contentNamespace,
+                name,
+                "1.0.0",
+                files,
+                definitions,
+                out ContentPackageManifest? manifest,
+                out string? manifestError))
+            throw new InvalidOperationException(
+                $"The F1.6 Cabin user texture pack is invalid: {manifestError}");
+        if (!ContentPackageValidator.TryValidatePayloads(
+                manifest!, payloads, out VerifiedContentPackage? verified,
+                out string? validationError))
+            throw new InvalidOperationException(
+                $"The F1.6 Cabin user texture payload is invalid: {validationError}");
+        return new CabinLocalContentPackage(
+            verified!, payloads,
+            new ContentPackageAcquisition(
+                packageId, manifest!.ManifestHash,
+                [new ContentSourceDescriptor(
+                    ContentSourceKind.Local, "fixtures/user/cabin-wall-blue.uspkg")]));
+    }
+
     private static CabinResolvedContent Resolve(
         CabinContentVariant variant,
         ContentActivationId activation,
@@ -272,6 +394,31 @@ public sealed class CabinContentOracle
         return Package(
             "ultrasim.cabin.default", "cabin", "Cabin in the Woods Defaults",
             ContentTrustClass.BuiltIn, "builtin/cabin/default.uspkg", payloads, definitions);
+    }
+
+    private static CabinLocalContentPackage ReauthorizeForLocal(CabinLocalContentPackage source)
+    {
+        ContentPackageManifest existing = source.Manifest;
+        if (!ContentPackageManifest.TryCreate(
+                existing.MinimumPipelineFormat,
+                existing.MaximumPipelineFormat,
+                existing.PackageId,
+                existing.Namespace,
+                existing.Name,
+                existing.Version,
+                ContentTrustClass.ScopeAuthorizedPassive,
+                existing.Files,
+                existing.Definitions,
+                out ContentPackageManifest? manifest,
+                out string? manifestError))
+            throw new InvalidOperationException(
+                $"The Cabin world.local manifest is invalid: {manifestError}");
+        if (!ContentPackageValidator.TryValidatePayloads(
+                manifest!, source.Payloads,
+                out VerifiedContentPackage? verified, out string? validationError))
+            throw new InvalidOperationException(
+                $"The Cabin world.local payloads are invalid: {validationError}");
+        return new CabinLocalContentPackage(verified!, source.Payloads.ToArray(), source.Acquisition);
     }
 
     private static CabinLocalContentPackage CreateReplacePackage()

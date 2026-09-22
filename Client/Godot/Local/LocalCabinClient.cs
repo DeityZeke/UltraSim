@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Godot;
 using UltraSim.Client.BuiltInTestWorlds;
 using UltraSim.Client.Content;
@@ -61,7 +62,10 @@ public readonly record struct LocalCabinPresentationSnapshot(
     OfficialLocalPresentationResult OfficialPresentation,
     ContentCacheSnapshot PresentationCache,
     PresentationGenerationSnapshot PresentationGeneration,
-    GodotContentActorVisualResolverSnapshot ActorResources);
+    GodotContentActorVisualResolverSnapshot ActorResources,
+    GodotDerivedResourceStoreSnapshot DerivedResources,
+    PresentationSourceKind WallTextureSource,
+    GodotDerivedResourceKey WallDerivedKey);
 
 /// <summary>
 /// Cold, engine-thread-only observation of the UI nodes owned by one local gameplay lifetime.
@@ -89,6 +93,22 @@ public readonly record struct LocalCabinLifecycleResidueSnapshot(
     int AnimatedActors,
     int EquippedPresentations,
     LocalCabinUiOwnershipSnapshot Ui);
+
+public readonly record struct LocalF16DerivedAcceptanceSnapshot(
+    ClientSemanticHash SemanticHash,
+    ContentHash LowerPresentationFingerprint,
+    ContentHash UserPresentationFingerprint,
+    ContentHash RestoredPresentationFingerprint,
+    ContentHash LowerTextureHash,
+    ContentHash UserTextureHash,
+    ContentHash RestoredTextureHash,
+    GodotDerivedResourceKey LowerDerivedKey,
+    GodotDerivedResourceKey UserDerivedKey,
+    GodotDerivedResourceKey RestoredDerivedKey,
+    GodotDerivedResourceStoreSnapshot Before,
+    GodotDerivedResourceStoreSnapshot AfterUser,
+    GodotDerivedResourceStoreSnapshot AfterRestore,
+    GodotDerivedResourceStoreSnapshot AfterIneffective);
 
 /// <summary>
 /// Permanent Godot consumer for one Network-free local playable application session.
@@ -144,8 +164,10 @@ public partial class LocalCabinClient : Node3D
     private string? _officialContentRoot;
     private ContentCache? _presentationCache;
     private PresentationGeneration? _presentationGeneration;
+    private ContentScopeActivationKey _cabinPresentationKey;
     private ulong _presentationSelectionRevision;
     private GodotContentActorVisualResolver? _actorVisuals;
+    private GodotDerivedResourceStore? _derivedResources;
     private OfficialLocalPresentationResult _officialPresentation;
     private ResolvedClientSettings? _settings;
     private CabinCatalogAssetResolver? _assetResolver;
@@ -317,6 +339,94 @@ public partial class LocalCabinClient : Node3D
         return _presentationCache.TrySetEnabledUserResourcePacks(identities, out error);
     }
 
+    /// <summary>Permanent F1.6 product-path canary for the real Cabin wall consumer.</summary>
+    public LocalF16DerivedAcceptanceSnapshot RunF16DerivedAcceptance()
+    {
+        if (!_initialized || _presentationCache is null || _presentationGeneration is null ||
+            _derivedResources is null || _assetResolver is null || _cache is null ||
+            _contentOracle is null)
+            throw new InvalidOperationException(
+                "F1.6 requires the initialized content-backed Local presentation path.");
+        LocalCabinPresentationSnapshot lower = GetPresentationSnapshot();
+        ClientSemanticHash semanticHash = lower.SemanticWorld.WorldSemanticHash;
+        CabinLocalContentPackage userPack = _contentOracle.CreateUserWallTexturePack();
+        CabinLocalContentPackage ineffectivePack = _contentOracle.CreateIneffectiveUserTexturePack();
+        foreach (CabinLocalContentPackage pack in new[] { userPack, ineffectivePack })
+            if (!_presentationCache.TryInstallUserResourcePack(
+                    pack.Manifest, pack.Payloads, out _, out ContentCacheError installError))
+                throw new InvalidOperationException(
+                    $"The F1.6 Local user pack could not install: {installError}.");
+
+        var userIdentity = new UserResourcePackIdentity(
+            userPack.Manifest.PackageId, userPack.Manifest.ManifestHash);
+        if (!TrySetEnabledUserResourcePacks([userIdentity], out ContentCacheError enableError))
+            throw new InvalidOperationException(
+                $"The F1.6 Local wall pack could not be enabled: {enableError}.");
+        RefreshUserPresentationIfChanged();
+        LocalCabinPresentationSnapshot user = GetPresentationSnapshot();
+        if (user.WallTextureSource != PresentationSourceKind.User ||
+            user.WallTextureHash == lower.WallTextureHash ||
+            user.WallDerivedKey == lower.WallDerivedKey ||
+            user.PresentationGeneration.StableFingerprint ==
+                lower.PresentationGeneration.StableFingerprint ||
+            user.SemanticWorld.WorldSemanticHash != semanticHash ||
+            user.ContentFingerprint != lower.ContentFingerprint)
+            throw new InvalidOperationException(
+                "The F1.6 wall override changed semantic truth or failed to change presentation.");
+
+        if (!TrySetEnabledUserResourcePacks([], out ContentCacheError disableError))
+            throw new InvalidOperationException(
+                $"The F1.6 Local wall pack could not be disabled: {disableError}.");
+        RefreshUserPresentationIfChanged();
+        LocalCabinPresentationSnapshot restored = GetPresentationSnapshot();
+        if (restored.WallTextureSource != PresentationSourceKind.Local ||
+            restored.WallTextureHash != lower.WallTextureHash ||
+            restored.WallDerivedKey != lower.WallDerivedKey ||
+            restored.PresentationGeneration.StableFingerprint !=
+                lower.PresentationGeneration.StableFingerprint ||
+            restored.SemanticWorld.WorldSemanticHash != semanticHash)
+            throw new InvalidOperationException(
+                "Disabling the F1.6 wall override did not restore exact lower presentation.");
+
+        var ineffectiveIdentity = new UserResourcePackIdentity(
+            ineffectivePack.Manifest.PackageId, ineffectivePack.Manifest.ManifestHash);
+        if (!TrySetEnabledUserResourcePacks(
+                [ineffectiveIdentity], out ContentCacheError noOpError))
+            throw new InvalidOperationException(
+                $"The ineffective F1.6 Local pack could not be selected: {noOpError}.");
+        GodotDerivedResourceStoreSnapshot beforeNoOp = _derivedResources.GetSnapshot();
+        RefreshUserPresentationIfChanged();
+        LocalCabinPresentationSnapshot noOp = GetPresentationSnapshot();
+        if (noOp.PresentationGeneration.StableFingerprint !=
+                restored.PresentationGeneration.StableFingerprint ||
+            noOp.WallDerivedKey != restored.WallDerivedKey ||
+            noOp.DerivedResources.TextureBuilds != beforeNoOp.TextureBuilds ||
+            noOp.DerivedResources.MaterialBuilds != beforeNoOp.MaterialBuilds ||
+            noOp.SemanticWorld.WorldSemanticHash != semanticHash)
+            throw new InvalidOperationException(
+                "An ineffective F1.6 Local pack churned native or semantic presentation.");
+        if (!TrySetEnabledUserResourcePacks([], out ContentCacheError clearError))
+            throw new InvalidOperationException(
+                $"The ineffective F1.6 Local pack could not be cleared: {clearError}.");
+        RefreshUserPresentationIfChanged();
+
+        return new LocalF16DerivedAcceptanceSnapshot(
+            semanticHash,
+            lower.PresentationGeneration.StableFingerprint,
+            user.PresentationGeneration.StableFingerprint,
+            restored.PresentationGeneration.StableFingerprint,
+            lower.WallTextureHash,
+            user.WallTextureHash,
+            restored.WallTextureHash,
+            lower.WallDerivedKey,
+            user.WallDerivedKey,
+            restored.WallDerivedKey,
+            lower.DerivedResources,
+            user.DerivedResources,
+            restored.DerivedResources,
+            noOp.DerivedResources);
+    }
+
     public LocalPlayableServerExtensionSnapshot GetHostingSnapshot()
     {
         if (_localSession is null ||
@@ -387,7 +497,10 @@ public partial class LocalCabinClient : Node3D
             _officialPresentation,
             _presentationCache?.GetSnapshot() ?? default,
             _presentationGeneration?.Snapshot ?? default,
-            _actorVisuals?.GetSnapshot() ?? default);
+            _actorVisuals?.GetSnapshot() ?? default,
+            _derivedResources?.GetSnapshot() ?? default,
+            _assetResolver?.WallTextureSource ?? default,
+            _assetResolver?.WallDerivedKey ?? default);
     }
 
     private LocalCabinUiOwnershipSnapshot GetUiOwnershipSnapshot() => new(
@@ -845,16 +958,20 @@ public partial class LocalCabinClient : Node3D
         _actorPresenter = null;
         _actorVisuals?.Dispose();
         _actorVisuals = null;
-        _presentationGeneration?.Dispose();
-        _presentationGeneration = null;
-        _presentationCache?.Dispose();
-        _presentationCache = null;
         _systemChatBanner?.Dispose();
         _systemChatBanner = null;
         _actorState = null;
         _publicPresentationMetadata = null;
         _renderer?.Dispose();
         _renderer = null;
+        _assetResolver?.Dispose();
+        _assetResolver = null;
+        _presentationGeneration?.Dispose();
+        _presentationGeneration = null;
+        _derivedResources?.Dispose();
+        _derivedResources = null;
+        _presentationCache?.Dispose();
+        _presentationCache = null;
         _residency = null;
         _localSession?.Dispose();
         _localSession = null;
@@ -1652,8 +1769,6 @@ public partial class LocalCabinClient : Node3D
         }
         _residency = new ClientStructuralResidency(_cache, renderRadius);
 
-        _assetResolver = _primitiveOnlyPresentation ? null :
-            new CabinCatalogAssetResolver(_contentOracle!, _resolvedContent!);
         _renderer = new GodotWorldRenderer(
             this,
             _cache,
@@ -3954,15 +4069,43 @@ public partial class LocalCabinClient : Node3D
         _ = OfficialLocalPresentation.TryOpenOrAcquire(
                 _presentationCache!, _officialContentRoot,
                 out ContentCatalogLease? localCatalog, out _officialPresentation);
+        CabinLocalPresentationContent local =
+            _contentOracle!.CreateLocalPresentation(_resolvedContent!.Variant);
+        foreach (CabinLocalContentPackage package in local.Packages)
+        {
+            if (!_presentationCache!.TryInstallPackage(
+                    ContentScopeKey.Local, package.Manifest, package.Payloads,
+                    out _, out ContentCacheError installError))
+                throw new InvalidOperationException(
+                    $"The Cabin world.local presentation could not be installed: {installError}.");
+        }
+        if (!_presentationCache!.TryPublishCatalog(
+                ContentBaseCatalog.Empty, local.Plan, persistentlyPinned: true,
+                out ContentCatalogLease? resourceCatalog, out ContentCacheError publishError))
+            throw new InvalidOperationException(
+                $"The Cabin world.local presentation could not be published: {publishError}.");
+        _cabinPresentationKey = local.ActivationKey;
+        _derivedResources = new GodotDerivedResourceStore(
+            _presentationCacheRoot,
+            GodotDerivedResourcePolicy.ProductionStandalone(DerivedPlatformProfile()));
         UserResourcePackStackLease? user = OpenUserResourcePacks();
         try
         {
-            _presentationGeneration = PresentationGeneration.Create(user, null, localCatalog);
+            _presentationGeneration = PresentationGeneration.CreateWithResources(
+                user, null, localCatalog, null, resourceCatalog);
+            _assetResolver = new CabinCatalogAssetResolver(
+                _presentationGeneration, _derivedResources);
         }
         catch (InvalidDataException)
         {
-            _presentationGeneration = PresentationGeneration.Create(
-                null, null, OpenLocalPresentationCatalog());
+            _assetResolver?.Dispose();
+            _assetResolver = null;
+            _presentationGeneration?.Dispose();
+            _presentationGeneration = PresentationGeneration.CreateWithResources(
+                null, null, OpenLocalPresentationCatalog(), null,
+                OpenCabinResourceCatalog());
+            _assetResolver = new CabinCatalogAssetResolver(
+                _presentationGeneration, _derivedResources);
         }
         _presentationSelectionRevision = _presentationCache!.UserResourcePackSelectionRevision;
         _actorVisuals = new GodotContentActorVisualResolver(_presentationGeneration);
@@ -3977,30 +4120,62 @@ public partial class LocalCabinClient : Node3D
             ContentBaseCatalog.Empty, OfficialLocalPresentation.ActivationKey,
             out ContentCatalogLease? lease, out _) ? lease : null;
 
+    private ContentCatalogLease? OpenCabinResourceCatalog() =>
+        _presentationCache is not null && _cabinPresentationKey.IsValid &&
+        _presentationCache.TryOpenCatalog(
+            ContentBaseCatalog.Empty, _cabinPresentationKey,
+            out ContentCatalogLease? lease, out _) ? lease : null;
+
+    private static string DerivedPlatformProfile()
+    {
+        string platform = OS.GetName() switch
+        {
+            "Windows" => "windows",
+            "macOS" => "macos",
+            "Linux" => "linux",
+            "Android" => "android",
+            "iOS" => "ios",
+            "Web" => "web",
+            _ => "unknown",
+        };
+        return $"{platform}-{RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant()}";
+    }
+
     private void RefreshUserPresentationIfChanged()
     {
         if (_presentationCache is null || _presentationGeneration is null ||
-            _actorVisuals is null || _actorPresenter is null)
+            _actorVisuals is null || _actorPresenter is null || _derivedResources is null)
             return;
         ulong revision = _presentationCache.UserResourcePackSelectionRevision;
         if (revision == _presentationSelectionRevision) return;
         _presentationSelectionRevision = revision;
         PresentationGeneration? candidate = null;
+        CabinCatalogAssetResolver? candidateResolver = null;
         try
         {
-            candidate = PresentationGeneration.Create(
-                OpenUserResourcePacks(), null, OpenLocalPresentationCatalog());
+            candidate = PresentationGeneration.CreateWithResources(
+                OpenUserResourcePacks(), null, OpenLocalPresentationCatalog(), null,
+                OpenCabinResourceCatalog());
             if (candidate.StableFingerprint == _presentationGeneration.StableFingerprint)
             {
                 candidate.Dispose();
                 return;
             }
+            candidateResolver = new CabinCatalogAssetResolver(candidate, _derivedResources);
             PresentationGeneration previous = _presentationGeneration;
+            CabinCatalogAssetResolver? previousResolver = _assetResolver;
             _presentationGeneration = candidate;
+            _assetResolver = candidateResolver;
             candidate = null;
-            previous.Dispose();
+            candidateResolver = null;
+            _actorVisuals.UpdateSource(_presentationGeneration);
+            if (_localSession is not null &&
+                _localSession.TryGetLatestView(out LocalPlayableAuthorityView view))
+                RebuildClientProjection(view, preserveSemanticCache: true);
             _ = _actorPresenter.RefreshResolvedVisuals();
             _actorVisuals.ReleaseRetiredResources();
+            previousResolver?.Dispose();
+            previous.Dispose();
         }
         catch (InvalidDataException)
         {
@@ -4008,11 +4183,12 @@ public partial class LocalCabinClient : Node3D
         }
         finally
         {
+            candidateResolver?.Dispose();
             candidate?.Dispose();
         }
     }
 
-    private sealed class CabinCatalogAssetResolver : IGodotWorldAssetResolver
+    private sealed class CabinCatalogAssetResolver : IGodotWorldAssetResolver, IDisposable
     {
         private readonly Dictionary<ushort, StandardMaterial3D> _terrain = new()
         {
@@ -4058,32 +4234,95 @@ public partial class LocalCabinClient : Node3D
             0.72f,
             1.6f,
             Material(new Color(0.18f, 0.78f, 0.36f)));
+        private readonly List<GodotDerivedMaterialLease> _materialLeases = [];
+        private bool _disposed;
 
         public CabinCatalogAssetResolver(
-            CabinContentOracle oracle,
-            CabinResolvedContent resolved)
+            PresentationGeneration generation,
+            GodotDerivedResourceStore derived)
         {
-            StandardMaterial3D wall = ResolveMaterial(
-                oracle, resolved.Catalog, CabinContentIds.WallMaterial, out ContentHash wallHash);
-            StandardMaterial3D wood = ResolveMaterial(
-                oracle, resolved.Catalog, CabinContentIds.WoodMaterial, out _);
-            WallTextureHash = wallHash;
-            _wallEight = GroundedBox(new Vector3(8f, 2.5f, 0.3f), wall);
-            _wallSix = GroundedBox(new Vector3(6f, 2.5f, 0.3f), wall);
-            _wallThree = GroundedBox(new Vector3(3f, 2.5f, 0.3f), wall);
-            _roof = GroundedBox(new Vector3(8.3f, 0.25f, 6.3f), wood, transparent: true);
-            _shelf = GroundedBox(new Vector3(0.9f, 1.8f, 0.35f), wood);
-            _book = GroundedBox(new Vector3(0.24f, 0.18f, 0.18f), wood);
-            _fallbackStructure = GroundedBox(new Vector3(1f, 2f, 0.35f), wall);
-            _door = GroundedBox(new Vector3(1.6f, 2.1f, 0.22f), wood);
-            _chest = GroundedBox(new Vector3(1.2f, 0.8f, 0.8f), wood);
-            if (resolved.Catalog.TryGet(CabinContentIds.BlueGlowMaterial, out _))
-                AddedMaterial = ResolveMaterial(
-                    oracle, resolved.Catalog, CabinContentIds.BlueGlowMaterial, out _);
+            try
+            {
+                GodotDerivedMaterialLease wallLease = AcquireMaterial(
+                    generation, derived, CabinContentIds.WallMaterial,
+                    out ContentHash wallHash, out PresentationSourceKind wallSource);
+                GodotDerivedMaterialLease woodLease = AcquireMaterial(
+                    generation, derived, CabinContentIds.WoodMaterial, out _, out _);
+                StandardMaterial3D wall = wallLease.Material;
+                StandardMaterial3D wood = woodLease.Material;
+                WallTextureHash = wallHash;
+                WallTextureSource = wallSource;
+                WallDerivedKey = wallLease.Key;
+                _wallEight = GroundedBox(new Vector3(8f, 2.5f, 0.3f), wall);
+                _wallSix = GroundedBox(new Vector3(6f, 2.5f, 0.3f), wall);
+                _wallThree = GroundedBox(new Vector3(3f, 2.5f, 0.3f), wall);
+                _roof = GroundedBox(new Vector3(8.3f, 0.25f, 6.3f), wood, transparent: true);
+                _shelf = GroundedBox(new Vector3(0.9f, 1.8f, 0.35f), wood);
+                _book = GroundedBox(new Vector3(0.24f, 0.18f, 0.18f), wood);
+                _fallbackStructure = GroundedBox(new Vector3(1f, 2f, 0.35f), wall);
+                _door = GroundedBox(new Vector3(1.6f, 2.1f, 0.22f), wood);
+                _chest = GroundedBox(new Vector3(1.2f, 0.8f, 0.8f), wood);
+                if (generation.GetSource(CabinContentIds.BlueGlowMaterial) !=
+                    PresentationSourceKind.Primitive)
+                    AddedMaterial = AcquireMaterial(
+                        generation, derived, CabinContentIds.BlueGlowMaterial,
+                        out _, out _).Material;
+            }
+            catch
+            {
+                Dispose();
+                throw;
+            }
         }
 
         public ContentHash WallTextureHash { get; }
+        public PresentationSourceKind WallTextureSource { get; }
+        public GodotDerivedResourceKey WallDerivedKey { get; }
         public StandardMaterial3D? AddedMaterial { get; }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            foreach (Mesh? mesh in new Mesh?[]
+            {
+                _wood, _stone, _wallEight, _wallSix, _wallThree, _roof, _shelf, _book,
+                _fallbackStructure, _character, _door, _chest, _animal, _telepad, _farGate,
+                _informationalSign, _sword, _mountainWallEight, _mountainWallTen,
+                _fallbackLabPedestal, _fallbackLabModel,
+            })
+                mesh?.Dispose();
+            foreach (StandardMaterial3D material in _terrain.Values) material.Dispose();
+            for (int index = _materialLeases.Count - 1; index >= 0; index--)
+                _materialLeases[index].Dispose();
+            _materialLeases.Clear();
+        }
+
+        private GodotDerivedMaterialLease AcquireMaterial(
+            PresentationGeneration generation,
+            GodotDerivedResourceStore derived,
+            LogicalContentId id,
+            out ContentHash textureHash,
+            out PresentationSourceKind textureSource)
+        {
+            textureHash = default;
+            textureSource = PresentationSourceKind.Primitive;
+            if (!generation.TryResolveMaterialPresentation(
+                    id, out ResolvedMaterialPresentation? logical, out var resolutionError))
+                throw new InvalidDataException(
+                    $"Cabin material '{id}' is unavailable: {resolutionError}.");
+            textureHash = logical!.AlbedoTexture?.File.Sha256 ?? default;
+            textureSource = logical.AlbedoTexture?.Source ?? PresentationSourceKind.Primitive;
+            if (!derived.TryAcquireMaterial(logical, out GodotDerivedMaterialLease? native,
+                    out string? error))
+            {
+                logical.Dispose();
+                throw new InvalidDataException(
+                    $"Cabin material '{id}' could not be realized: {error}");
+            }
+            _materialLeases.Add(native!);
+            return native!;
+        }
 
         private GodotWorldMeshResolution ResolveFallbackLabMesh(ushort variant) => variant switch
         {
@@ -4192,38 +4431,6 @@ public partial class LocalCabinClient : Node3D
                 0.42f, 0.42f, 0.68f, 1.8f, material);
         }
 
-        private static StandardMaterial3D ResolveMaterial(
-            CabinContentOracle oracle,
-            ResolvedContentCatalog catalog,
-            LogicalContentId id,
-            out ContentHash textureHash)
-        {
-            if (!catalog.TryGet(id, out ResolvedContentEntry? entry) ||
-                entry!.Kind != ContentDefinitionKind.Material ||
-                entry.ReferencedFiles.Count != 1)
-                throw new InvalidOperationException($"Cabin material '{id}' is unavailable.");
-            textureHash = entry.ReferencedFiles[0];
-            if (!oracle.TryGetPayload(textureHash, out ReadOnlyMemory<byte> bytes))
-                throw new InvalidOperationException($"Cabin texture payload '{textureHash}' is unavailable.");
-            var image = new Image();
-            Error status = image.LoadPngFromBuffer(bytes.ToArray());
-            if (status != Error.Ok)
-                throw new InvalidOperationException($"Cabin texture '{id}' could not be decoded: {status}.");
-            ContentMaterialDefinition definition = entry.Definition.Material;
-            var material = new StandardMaterial3D
-            {
-                AlbedoTexture = ImageTexture.CreateFromImage(image),
-                Roughness = definition.Roughness,
-                Metallic = definition.Metallic,
-            };
-            if (definition.Emission > 0)
-            {
-                material.EmissionEnabled = true;
-                material.Emission = Colors.White;
-                material.EmissionEnergyMultiplier = definition.Emission;
-            }
-            return material;
-        }
     }
 }
 

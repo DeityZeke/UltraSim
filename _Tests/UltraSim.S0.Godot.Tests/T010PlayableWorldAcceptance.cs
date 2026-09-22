@@ -1,7 +1,9 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Godot;
+using UltraSim.Client.BuiltInTestWorlds;
 using UltraSim.Client.Content;
 using UltraSim.Client.Core;
 using UltraSim.Client.Godot;
@@ -26,6 +28,7 @@ public partial class T010PlayableWorldAcceptance : Node3D
             RunControlledActorOwnerPoseAcceptance();
             RunBakedBodyAnimationAcceptance();
             RunContentBackedBodyRealizationAcceptance();
+            RunDerivedTextureMaterialAcceptance();
             RunTallPublicObjectPickingAcceptance();
             RunSystemChatBannerAcceptance();
             GD.Print("T0.10 GODOT PLAYABLE WORLD ACCEPTANCE PASS");
@@ -36,6 +39,414 @@ public partial class T010PlayableWorldAcceptance : Node3D
             GD.PushError($"T0.10 GODOT PLAYABLE WORLD ACCEPTANCE FAIL: {exception}");
             GetTree().Quit(1);
         }
+    }
+
+    private void RunDerivedTextureMaterialAcceptance()
+    {
+        CabinContentOracle oracle = CabinContentOracle.Create();
+        CabinLocalPresentationContent local =
+            oracle.CreateLocalPresentation(CabinContentVariant.Default);
+        CabinLocalContentPackage userPack = oracle.CreateUserWallTexturePack();
+        CabinLocalContentPackage ineffectivePack = oracle.CreateIneffectiveUserTexturePack();
+        var userIdentity = new UserResourcePackIdentity(
+            userPack.Manifest.PackageId, userPack.Manifest.ManifestHash);
+        var ineffectiveIdentity = new UserResourcePackIdentity(
+            ineffectivePack.Manifest.PackageId, ineffectivePack.Manifest.ManifestHash);
+        string root = Path.Combine(Path.GetTempPath(),
+            $"ultrasim-godot-derived-f16-{System.Environment.ProcessId}-{Guid.NewGuid():N}");
+        try
+        {
+            Expect(ContentCache.TryOpen(root, out ContentCache? cache, out ContentCacheError openError),
+                $"The F1.6 content cache could not open: {openError}.");
+            using (cache)
+            {
+                foreach (CabinLocalContentPackage package in local.Packages)
+                    Expect(cache!.TryInstallPackage(
+                            ContentScopeKey.Local, package.Manifest, package.Payloads,
+                            out _, out ContentCacheError installError),
+                        $"The F1.6 Local presentation package could not install: {installError}.");
+                foreach (CabinLocalContentPackage pack in new[] { userPack, ineffectivePack })
+                    Expect(cache!.TryInstallUserResourcePack(
+                            pack.Manifest, pack.Payloads,
+                            out _, out ContentCacheError installError),
+                        $"The F1.6 user texture pack could not install: {installError}.");
+                Expect(cache!.TryPublishCatalog(
+                        ContentBaseCatalog.Empty, local.Plan, true,
+                        out ContentCatalogLease? initialCatalog,
+                        out ContentCacheError publishError),
+                    $"The F1.6 Local presentation catalog could not publish: {publishError}.");
+
+                var standalonePolicy = GodotDerivedResourcePolicy.ProductionStandalone("test-linux-x64");
+                (long legacyTicks, long legacyAllocated) = MeasureFormerCabinMaterialPath(oracle);
+                var coldGeneration = PresentationGeneration.CreateWithResources(
+                    null, null, null, null, initialCatalog);
+                PresentationGenerationId firstGeneration = coldGeneration.Generation;
+                ContentHash stableFingerprint = coldGeneration.StableFingerprint;
+                var coldStore = new GodotDerivedResourceStore(root, standalonePolicy);
+                long coldAllocatedStart = GC.GetAllocatedBytesForCurrentThread();
+                GodotDerivedMaterialLease coldWall = AcquireMaterial(
+                    coldGeneration, coldStore, CabinContentIds.WallMaterial,
+                    out ResolvedMaterialPresentation coldWallLogical);
+                GodotDerivedMaterialLease coldWood = AcquireMaterial(
+                    coldGeneration, coldStore, CabinContentIds.WoodMaterial,
+                    out ResolvedMaterialPresentation coldWoodLogical);
+                long coldAllocated = GC.GetAllocatedBytesForCurrentThread() - coldAllocatedStart;
+                GodotDerivedResourceKey lowerWallKey = coldWall.Key;
+                string lowerWallPath = coldStore.GetTextureArtifactPath(
+                    coldStore.GetTextureKey(coldWallLogical.AlbedoTexture!));
+                float lowerRoughness = coldWallLogical.Definition.Roughness;
+                ContentHash lowerTextureHash = coldWallLogical.AlbedoTexture!.File.Sha256;
+                coldGeneration.Dispose();
+                Expect(coldWall.Material.AlbedoTexture is not null &&
+                    !coldWall.Material.AlbedoTexture.GetImage().IsEmpty(),
+                    "A live native material did not survive retirement of its presentation owner.");
+                bool liveRetirementRejected = false;
+                try { coldStore.Dispose(); }
+                catch (InvalidOperationException) { liveRetirementRejected = true; }
+                Expect(liveRetirementRejected,
+                    "The derived store retired underneath live native presentation leases.");
+                coldWood.Dispose();
+                coldWall.Dispose();
+                GodotDerivedResourceStoreSnapshot cold = coldStore.GetSnapshot();
+                Expect(cold is
+                    { TextureBuilds: 2, DiskTextureHits: 0, MaterialBuilds: 2,
+                      LiveTextures: 0, LiveMaterials: 0 } &&
+                    cold.DerivedBytesWritten > 0,
+                    "The cold derived texture/material build did not create the exact bounded set.");
+                coldStore.Dispose();
+
+                PresentationGeneration warmGeneration = OpenCabinGeneration(cache, local, null);
+                var warmStore = new GodotDerivedResourceStore(root, standalonePolicy);
+                long warmAllocatedStart = GC.GetAllocatedBytesForCurrentThread();
+                GodotDerivedMaterialLease warmWall = AcquireMaterial(
+                    warmGeneration, warmStore, CabinContentIds.WallMaterial, out _);
+                long warmAllocated = GC.GetAllocatedBytesForCurrentThread() - warmAllocatedStart;
+                Expect(warmGeneration.Generation != firstGeneration &&
+                    warmGeneration.StableFingerprint == stableFingerprint &&
+                    warmWall.Key == lowerWallKey,
+                    "Fresh process-local generation identity changed stable derived identity.");
+                warmWall.Dispose();
+                GodotDerivedResourceStoreSnapshot warm = warmStore.GetSnapshot();
+                Expect(warm is { DiskTextureHits: 1, TextureBuilds: 0, LiveTextures: 0,
+                        LiveMaterials: 0 },
+                    "The warm derived reopen decoded source or rebuilt instead of using disk output.");
+                warmGeneration.Dispose();
+                warmStore.Dispose();
+
+                System.IO.File.WriteAllBytes(lowerWallPath, [1, 2, 3]);
+                PresentationGeneration repairedGeneration = OpenCabinGeneration(cache, local, null);
+                var repairedStore = new GodotDerivedResourceStore(root, standalonePolicy);
+                GodotDerivedMaterialLease repairedWall = AcquireMaterial(
+                    repairedGeneration, repairedStore, CabinContentIds.WallMaterial,
+                    out ResolvedMaterialPresentation repairedLogical);
+                Expect(ContentHash.Compute(repairedLogical.AlbedoTexture!.Bytes.Span) == lowerTextureHash,
+                    "Derived corruption affected the verified source presentation bytes.");
+                repairedWall.Dispose();
+                GodotDerivedResourceStoreSnapshot repaired = repairedStore.GetSnapshot();
+                Expect(repaired is { CorruptArtifacts: 1, TextureBuilds: 1 },
+                    "A corrupt derived artifact was not rejected and rebuilt from source.");
+                repairedGeneration.Dispose();
+                repairedStore.Dispose();
+
+                GodotDerivedResourceStoreSnapshot wrongVersion = DamageAndRebuildDerived(
+                    cache, local, root, standalonePolicy, lowerWallPath,
+                    static bytes => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(8, 4), 99));
+                GodotDerivedResourceStoreSnapshot wrongKey = DamageAndRebuildDerived(
+                    cache, local, root, standalonePolicy, lowerWallPath,
+                    static bytes => bytes[12] ^= 0x80);
+                Expect(wrongVersion is { CorruptArtifacts: 1, TextureBuilds: 1 } &&
+                    wrongKey is { CorruptArtifacts: 1, TextureBuilds: 1 },
+                    "Wrong-version/key derived artifacts did not fail closed and rebuild.");
+
+                System.IO.File.Delete(lowerWallPath);
+                PresentationGeneration deletedGeneration = OpenCabinGeneration(cache, local, null);
+                var deletedStore = new GodotDerivedResourceStore(root, standalonePolicy);
+                GodotDerivedMaterialLease deletedWall = AcquireMaterial(
+                    deletedGeneration, deletedStore, CabinContentIds.WallMaterial, out _);
+                deletedWall.Dispose();
+                GodotDerivedResourceStoreSnapshot deleted = deletedStore.GetSnapshot();
+                Expect(deleted is { TextureMisses: 1, TextureBuilds: 1 },
+                    "Deleting disposable derived output did not cause a safe source rebuild.");
+                deletedGeneration.Dispose();
+                deletedStore.Dispose();
+
+                var changedPolicy = standalonePolicy with { PolicyVersion = 2 };
+                PresentationGeneration policyGeneration = OpenCabinGeneration(cache, local, null);
+                var policyStore = new GodotDerivedResourceStore(root, changedPolicy);
+                GodotDerivedMaterialLease policyWall = AcquireMaterial(
+                    policyGeneration, policyStore, CabinContentIds.WallMaterial, out _);
+                Expect(policyWall.Key != lowerWallKey,
+                    "A derived policy change did not invalidate the persistent native key.");
+                policyWall.Dispose();
+                policyGeneration.Dispose();
+                policyStore.Dispose();
+
+                Expect(cache.TrySetEnabledUserResourcePacks(
+                        [userIdentity], out ContentCacheError enableError),
+                    $"The F1.6 wall pack could not be enabled: {enableError}.");
+                PresentationGeneration userGeneration = OpenCabinGeneration(
+                    cache, local, OpenUserStack(cache));
+                var userStore = new GodotDerivedResourceStore(root, standalonePolicy);
+                GodotDerivedMaterialLease userWall = AcquireMaterial(
+                    userGeneration, userStore, CabinContentIds.WallMaterial,
+                    out ResolvedMaterialPresentation userLogical);
+                Expect(userLogical.AlbedoTexture!.Source == PresentationSourceKind.User &&
+                    userLogical.LogicalId == CabinContentIds.WallMaterial &&
+                    userLogical.Definition.Roughness == lowerRoughness &&
+                    userLogical.AlbedoTexture.File.Sha256 != lowerTextureHash &&
+                    userWall.Key != lowerWallKey &&
+                    userGeneration.StableFingerprint != stableFingerprint,
+                    "The user wall leaf did not change only effective texture/native identity.");
+                GodotDerivedResourceKey userWallKey = userWall.Key;
+                userWall.Dispose();
+                userGeneration.Dispose();
+                userStore.Dispose();
+
+                Expect(cache.TrySetEnabledUserResourcePacks(
+                        [ineffectiveIdentity], out ContentCacheError noOpError),
+                    $"The ineffective F1.6 pack could not be selected: {noOpError}.");
+                PresentationGeneration noOpGeneration = OpenCabinGeneration(
+                    cache, local, OpenUserStack(cache));
+                var noOpStore = new GodotDerivedResourceStore(root, standalonePolicy);
+                GodotDerivedMaterialLease noOpWall = AcquireMaterial(
+                    noOpGeneration, noOpStore, CabinContentIds.WallMaterial, out _);
+                Expect(noOpGeneration.StableFingerprint == stableFingerprint &&
+                    noOpWall.Key == lowerWallKey,
+                    "An ineffective user pack churned stable or derived presentation identity.");
+                noOpWall.Dispose();
+                GodotDerivedResourceStoreSnapshot noOp = noOpStore.GetSnapshot();
+                Expect(noOp is { DiskTextureHits: 1, TextureBuilds: 0 },
+                    "An ineffective user pack rebuilt unchanged derived content.");
+                noOpGeneration.Dispose();
+                noOpStore.Dispose();
+
+                Expect(cache.TrySetEnabledUserResourcePacks([], out ContentCacheError disableError),
+                    $"The F1.6 wall pack could not be disabled: {disableError}.");
+                PresentationGeneration restoredGeneration = OpenCabinGeneration(cache, local, null);
+                var restoredStore = new GodotDerivedResourceStore(root, standalonePolicy);
+                GodotDerivedMaterialLease restoredWall = AcquireMaterial(
+                    restoredGeneration, restoredStore, CabinContentIds.WallMaterial, out _);
+                Expect(restoredGeneration.StableFingerprint == stableFingerprint &&
+                    restoredWall.Key == lowerWallKey,
+                    "Disabling the wall pack did not restore the exact lower presentation.");
+                restoredWall.Dispose();
+                GodotDerivedResourceStoreSnapshot restored = restoredStore.GetSnapshot();
+                restoredGeneration.Dispose();
+                restoredStore.Dispose();
+
+                PresentationGeneration atlasGeneration = OpenCabinGeneration(cache, local, null);
+                var atlasPolicy = new GodotDerivedResourcePolicy(
+                    1, "test-linux-x64", "rgba8-srgb-no-mip-v1",
+                    GodotDerivedAtlasFamily.WorldOpaque);
+                var atlasStore = new GodotDerivedResourceStore(root, atlasPolicy);
+                GodotDerivedTextureLease atlasWall = AcquireTexture(
+                    atlasGeneration, atlasStore, CabinContentIds.WallTexture);
+                GodotDerivedTextureLease atlasWood = AcquireTexture(
+                    atlasGeneration, atlasStore, CabinContentIds.WoodTexture);
+                byte[] sourceWallPixels = atlasWall.Texture.GetImage().GetData();
+                byte[] sourceWoodPixels = atlasWood.Texture.GetImage().GetData();
+                Expect(GodotWorldOpaqueAtlasCandidate.TryBuildOwned(
+                        [atlasWall, atlasWood], atlasPolicy,
+                        out GodotWorldOpaqueAtlasCandidate? atlas, out string? atlasError),
+                    $"The measured WorldOpaque atlas candidate failed: {atlasError}.");
+                GodotWorldOpaqueAtlasSnapshot atlasResult;
+                using (atlas)
+                {
+                    atlasResult = atlas!.Snapshot;
+                    Expect(atlasResult is { SourceTextures: 2, Pages: 1 } &&
+                        atlasResult.Occupancy == 1.0 && atlas.Regions.Count == 2,
+                        "The WorldOpaque candidate did not pack the exact two-texture family.");
+                    byte[] pagePixels = atlas.Page.GetImage().GetData();
+                    Expect(AtlasRegionEquals(
+                            pagePixels, atlasResult.Width, atlas.Regions[0], sourceWallPixels) &&
+                        AtlasRegionEquals(
+                            pagePixels, atlasResult.Width, atlas.Regions[1], sourceWoodPixels),
+                        "Atlas regions were not pixel-identical to their standalone sources.");
+                }
+                GodotDerivedResourceStoreSnapshot atlasStoreSnapshot = atlasStore.GetSnapshot();
+                Expect(atlasStoreSnapshot is { LiveTextures: 0, TextureBuilds: 2 },
+                    "Atlas candidate source leases did not retire exactly.");
+                atlasGeneration.Dispose();
+                atlasStore.Dispose();
+
+                VerifyDerivedRootRejectsReparsePoint(root, standalonePolicy);
+
+                GD.Print(
+                    $"EVIDENCE F1.6 stable={stableFingerprint} lower_key={lowerWallKey} " +
+                    $"user_key={userWallKey} cold_build_ms={cold.TextureBuildMilliseconds:F6} " +
+                    $"warm_load_ms={warm.TextureLoadMilliseconds:F6} cold_bytes={cold.DerivedBytesWritten} " +
+                    $"former_build_ms={legacyTicks * 1_000d / Stopwatch.Frequency:F6} " +
+                    $"former_alloc={legacyAllocated} cold_alloc={coldAllocated} warm_alloc={warmAllocated} " +
+                    $"standalone_textures={cold.TextureBuilds} standalone_materials={cold.MaterialBuilds} " +
+                    $"atlas_sources=2 atlas_pages=1 atlas_page_bytes={atlasResult.AtlasPixelBytes} " +
+                    $"atlas_build_ms={atlasResult.BuildMilliseconds:F6} " +
+                    $"atlas_source_artifact_bytes={atlasStoreSnapshot.DerivedBytesWritten} " +
+                    $"restored_disk_hits={restored.DiskTextureHits} corruption_rebuild=pass " +
+                    "version_key_rebuild=pass safe_paths=pass policy_invalidation=pass " +
+                    "ineffective_no_churn=pass atlas=measured-rejected " +
+                    "reason=no-observed-draw-or-material-reduction");
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static PresentationGeneration OpenCabinGeneration(
+        ContentCache cache,
+        CabinLocalPresentationContent local,
+        UserResourcePackStackLease? user)
+    {
+        Expect(cache.TryOpenCatalog(
+                ContentBaseCatalog.Empty, local.ActivationKey,
+                out ContentCatalogLease? catalog, out ContentCacheError error),
+            $"The F1.6 Local resource catalog could not reopen: {error}.");
+        return PresentationGeneration.CreateWithResources(
+            user, null, null, null, catalog);
+    }
+
+    private static UserResourcePackStackLease OpenUserStack(ContentCache cache)
+    {
+        Expect(cache.TryOpenEnabledUserResourcePacks(
+                out UserResourcePackStackLease? stack, out ContentCacheError error),
+            $"The F1.6 user stack could not open: {error}.");
+        return stack!;
+    }
+
+    private static GodotDerivedMaterialLease AcquireMaterial(
+        PresentationGeneration generation,
+        GodotDerivedResourceStore store,
+        LogicalContentId id,
+        out ResolvedMaterialPresentation logical)
+    {
+        Expect(generation.TryResolveMaterialPresentation(
+                id, out ResolvedMaterialPresentation? resolved,
+                out PresentationResourceResolutionError resolutionError),
+            $"The logical material {id} could not resolve: {resolutionError}.");
+        logical = resolved!;
+        Expect(store.TryAcquireMaterial(
+                logical, out GodotDerivedMaterialLease? lease, out string? error),
+            $"The derived material {id} could not realize: {error}.");
+        return lease!;
+    }
+
+    private static GodotDerivedTextureLease AcquireTexture(
+        PresentationGeneration generation,
+        GodotDerivedResourceStore store,
+        LogicalContentId id)
+    {
+        Expect(generation.TryResolveTexturePresentation(
+                id, out ResolvedTexturePresentation? resolved,
+                out PresentationResourceResolutionError resolutionError),
+            $"The logical texture {id} could not resolve: {resolutionError}.");
+        Expect(store.TryAcquireTexture(
+                resolved!, out GodotDerivedTextureLease? lease, out string? error),
+            $"The derived texture {id} could not realize: {error}.");
+        return lease!;
+    }
+
+    private static bool AtlasRegionEquals(
+        ReadOnlySpan<byte> page,
+        int pageWidth,
+        in GodotWorldOpaqueAtlasRegion region,
+        ReadOnlySpan<byte> source)
+    {
+        int sourceRowBytes = checked(region.Pixels.Size.X * 4);
+        if (source.Length != checked(sourceRowBytes * region.Pixels.Size.Y)) return false;
+        for (int row = 0; row < region.Pixels.Size.Y; row++)
+        {
+            ReadOnlySpan<byte> actual = page.Slice(
+                checked(((region.Pixels.Position.Y + row) * pageWidth +
+                    region.Pixels.Position.X) * 4), sourceRowBytes);
+            if (!actual.SequenceEqual(source.Slice(row * sourceRowBytes, sourceRowBytes)))
+                return false;
+        }
+        return true;
+    }
+
+    private static (long Ticks, long Allocated) MeasureFormerCabinMaterialPath(
+        CabinContentOracle oracle)
+    {
+        long allocatedStart = GC.GetAllocatedBytesForCurrentThread();
+        long started = Stopwatch.GetTimestamp();
+        var materials = new List<StandardMaterial3D>(2);
+        var textures = new List<Texture2D>(2);
+        var images = new List<Image>(2);
+        try
+        {
+            foreach (LogicalContentId id in new[]
+                     { CabinContentIds.WallMaterial, CabinContentIds.WoodMaterial })
+            {
+                Expect(oracle.Default.Catalog.TryGet(id, out ResolvedContentEntry? entry) &&
+                    entry!.Kind == ContentDefinitionKind.Material &&
+                    entry.ReferencedFiles.Count == 1,
+                    $"The former Cabin material input {id} was unavailable.");
+                Expect(oracle.TryGetPayload(
+                        entry!.ReferencedFiles[0], out ReadOnlyMemory<byte> bytes),
+                    $"The former Cabin material payload {id} was unavailable.");
+                var image = new Image();
+                Expect(image.LoadPngFromBuffer(bytes.ToArray()) == Error.Ok,
+                    $"The former Cabin material input {id} could not decode.");
+                ImageTexture texture = ImageTexture.CreateFromImage(image);
+                ContentMaterialDefinition definition = entry!.Definition.Material;
+                var material = new StandardMaterial3D
+                {
+                    AlbedoTexture = texture,
+                    Roughness = definition.Roughness,
+                    Metallic = definition.Metallic,
+                };
+                images.Add(image);
+                textures.Add(texture);
+                materials.Add(material);
+            }
+            long ticks = Stopwatch.GetTimestamp() - started;
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedStart;
+            return (ticks, allocated);
+        }
+        finally
+        {
+            foreach (StandardMaterial3D material in materials) material.Dispose();
+            foreach (Texture2D texture in textures) texture.Dispose();
+            foreach (Image image in images) image.Dispose();
+        }
+    }
+
+    private static GodotDerivedResourceStoreSnapshot DamageAndRebuildDerived(
+        ContentCache cache,
+        CabinLocalPresentationContent local,
+        string root,
+        GodotDerivedResourcePolicy policy,
+        string path,
+        Action<byte[]> damage)
+    {
+        byte[] bytes = System.IO.File.ReadAllBytes(path);
+        damage(bytes);
+        System.IO.File.WriteAllBytes(path, bytes);
+        PresentationGeneration generation = OpenCabinGeneration(cache, local, null);
+        var store = new GodotDerivedResourceStore(root, policy);
+        GodotDerivedMaterialLease wall = AcquireMaterial(
+            generation, store, CabinContentIds.WallMaterial, out _);
+        wall.Dispose();
+        GodotDerivedResourceStoreSnapshot snapshot = store.GetSnapshot();
+        generation.Dispose();
+        store.Dispose();
+        return snapshot;
+    }
+
+    private static void VerifyDerivedRootRejectsReparsePoint(
+        string root,
+        GodotDerivedResourcePolicy policy)
+    {
+        string target = Path.Combine(root, "derived-link-target");
+        string link = Path.Combine(root, "derived-link");
+        Directory.CreateDirectory(target);
+        Directory.CreateSymbolicLink(link, target);
+        bool rejected = false;
+        try { _ = new GodotDerivedResourceStore(link, policy); }
+        catch (InvalidOperationException) { rejected = true; }
+        Expect(rejected, "A reparse-point derived root was accepted.");
+        Directory.Delete(link);
     }
 
     private void RunBakedBodyAnimationAcceptance()

@@ -273,8 +273,19 @@ validation. The native acceptance keeps the same actor root, identity, selected/
 nameplate, overhead label, equipment, and action state while switching Realm/Local art to a visibly
 distinct User GLB and back. Invalid candidates retain the current generation. User pack state and
 CAS bytes may persist across sessions; native resources and generation/blob leases retire at the
-existing session boundary. There is no pack browser/UI or texture/material override yet, and no
-F1.6 derived-resource/atlas work is present.
+existing session boundary. There is no pack browser/UI.
+
+F1.6 routes the real Local Cabin wall/wood logical Texture/Material leaves through the common
+presentation generation and `GodotDerivedResourceStore`. Verified source bytes produce strict,
+versioned RGBA artifacts under writable `Derived/Godot/<platform>/format-1/policy-N`; persistent
+keys include effective logical-resource fingerprint, Godot backend/format, policy, platform/import
+profile, and atlas family, never a process-local generation. Native Texture/Material leases retain
+source-generation ownership and candidate realization completes before publication. The
+`--f1-6-derived-smoke` canary proves User wall enable, semantic-hash preservation, exact disable
+restore, prior derived reuse, and ineffective-pack no-churn through the actual Single Player path.
+The pixel-exact two-texture `WorldOpaque` atlas candidate is measured but not selected: it reduces
+two texture objects to one page without demonstrating fewer materials or draws. Standalone derived
+resources remain production policy; F1.7 UI/workspace work is unstarted.
 
 `--d0-5-smoke` crosses the real Single Player button and Admission form. It proves rejected input
 does not start authority, then enters with a trimmed Unicode name and the Y body and checks the

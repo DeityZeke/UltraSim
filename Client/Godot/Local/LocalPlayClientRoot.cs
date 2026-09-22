@@ -36,6 +36,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         bool signSmoke = arguments.Contains("--d0-3-smoke", StringComparer.Ordinal);
         bool fallbackLabSmoke = arguments.Contains("--d0-4-smoke", StringComparer.Ordinal);
         bool primitiveOnlySmoke = arguments.Contains("--f1-3-primitive-smoke", StringComparer.Ordinal);
+        bool f16DerivedSmoke = arguments.Contains("--f1-6-derived-smoke", StringComparer.Ordinal);
         string? f14Mode = ReadLocalArgument("--f1-4-official-smoke=");
         bool guestAdmissionSmoke = arguments.Contains("--d0-5-smoke", StringComparer.Ordinal);
         bool f02Smoke = arguments.Contains("--f0-2-smoke", StringComparer.Ordinal);
@@ -47,7 +48,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         if (arguments.Contains("--composition-smoke", StringComparer.Ordinal) ||
             !conceptDemoSmoke && !residencySmoke && !farIslandSmoke && !signSmoke &&
             !fallbackLabSmoke && !primitiveOnlySmoke && !guestAdmissionSmoke &&
-            f14Mode is null && !f02Smoke && !sharedHostSmoke)
+            !f16DerivedSmoke && f14Mode is null && !f02Smoke && !sharedHostSmoke)
             return;
         try
         {
@@ -76,6 +77,31 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
                 StartLocalCabin(CabinContentVariant.Default, CabinHumanBody.XBot,
                     useConceptDemoWorld: true, primitiveOnlyPresentation: true);
                 RunF13PrimitiveSmokeAfterNativeFrames();
+                return;
+            }
+            if (f16DerivedSmoke)
+            {
+                StartLocalCabin(
+                    CabinContentVariant.Default, CabinHumanBody.XBot,
+                    useConceptDemoWorld: true);
+                _cabin!.RunD00Acceptance();
+                LocalF16DerivedAcceptanceSnapshot evidence =
+                    _cabin.RunF16DerivedAcceptance();
+                GD.Print(
+                    $"F1.6 DERIVED LOCAL PASS semantic={evidence.SemanticHash} " +
+                    $"fingerprints={evidence.LowerPresentationFingerprint}/" +
+                    $"{evidence.UserPresentationFingerprint}/" +
+                    $"{evidence.RestoredPresentationFingerprint} " +
+                    $"keys={evidence.LowerDerivedKey}/{evidence.UserDerivedKey}/" +
+                    $"{evidence.RestoredDerivedKey} " +
+                    $"builds={evidence.Before.TextureBuilds}/" +
+                    $"{evidence.AfterUser.TextureBuilds}/" +
+                    $"{evidence.AfterRestore.TextureBuilds}/" +
+                    $"{evidence.AfterIneffective.TextureBuilds} " +
+                    $"diskHits={evidence.AfterRestore.DiskTextureHits}");
+                RetireCurrentSession();
+                ReturnToMainMenu("F1.6 derived Local smoke passed.");
+                GetTree().Quit(0);
                 return;
             }
             if (f14Mode is not null)

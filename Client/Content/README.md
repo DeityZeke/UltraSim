@@ -57,8 +57,9 @@ fails the application proof. Its actor Add/Replace packages instead form a disti
 presentation plan. Authenticated Game message 149 advertises that plan and its exact expected
 resolved fingerprint, but never enters the required-content proof or guest-admission gate.
 
-`PresentationGeneration` resolves the two current humanoid logical IDs once per publication with
-User → Realm → `world.local` → Primitive precedence. It validates selected GLBs against the same passive
+`PresentationGeneration` resolves the two current humanoid logical IDs plus earned logical
+Texture/Material leaves once per publication with User → Realm → `world.local` → Primitive
+precedence. It validates selected GLBs against the same passive
 and skeleton/Idle-Walk-Jump rules, holds the selected catalog/blob leases, and gives native
 consumers reference-counted leases. The monotonic generation ID fences live asynchronous/native
 work; the effective-selection SHA-256 fingerprint is stable across process runs and excludes that
@@ -88,11 +89,10 @@ uninstall or general pack manager.
 
 `UserResourcePackIdentity` is exact `ContentPackageId + ManifestHash`; a filesystem path is only a
 rooted local source locator. `TryCreateUserResourcePack` admits one to sixteen bounded,
-self-contained actor GLBs and the same number of unique ActorPresentation `Replace` definitions.
-Every file must be referenced exactly as an override leaf. Add, WorldPack, UI definitions,
-textures, arbitrary resources, external GLB references, scripts/shaders/executables, and every
-other current kind fail admission. Texture/material overrides remain deferred because current
-Cabin materials do not yet resolve through the common presentation generation.
+self-contained actor GLBs or PNG/WebP textures and the same number of unique ActorPresentation or
+Texture `Replace` definitions. Every file must be referenced exactly as an override leaf. Add,
+WorldPack, UI definitions, Material/Icon replacement, arbitrary resources, external GLB references,
+scripts/shaders/executables, and every other current kind fail admission.
 
 `TryInstallUserResourcePack` validates and installs exact immutable bytes without creating Local
 or Realm authorization. `TrySetEnabledUserResourcePacks` persists at most sixteen installed exact
@@ -109,6 +109,16 @@ reorder, and immutable update publish new generations only when the effective re
 Old native actor leases retain old generation/blob ownership. Remote semantic activation and proof
 remain unchanged, and the existing remote acquisition revision/session fences continue to reject
 stale asynchronous Realm work; user pack selection introduces no remote protocol or async loader.
+
+## F1.6 logical texture/material presentation
+
+`ResolvedTexturePresentation` retains the exact authorized blob, validated raster dimensions,
+logical ID, selected User/Realm/Local source, and a stable per-resource fingerprint.
+`ResolvedMaterialPresentation` retains the lower-authorized `ContentMaterialDefinition`; its
+logical albedo ID is re-resolved through the effective generation so a User texture changes bytes
+without changing roughness/metallic/emission or semantic truth. The generation fingerprint now
+canonically covers actor, texture, and material results while ignoring ineffective packs and all
+renderer-native choices. Godot-native handles and derived disk files remain outside this assembly.
 
 ## A0.0 formats and operations
 
@@ -138,8 +148,8 @@ Patch, dependencies/version solving, and executable extensions remain unsupporte
 GLB family rejects URI/external resources, images/textures, cameras, and unsupported extensions; it
 is not permission to pass downloaded scenes or arbitrary resources to `ResourceLoader`. User
 resource packs and executable extensions have vocabulary values so they cannot be confused with
-normal server-passive trust. The normal manifest factory still rejects both; F1.5 exposes a
-separate strict factory for user ActorPresentation Replace packages only. Executable content
+normal server-passive trust. The normal manifest factory still rejects both; F1.6's dedicated
+strict factory permits only user ActorPresentation/Texture Replace packages. Executable content
 remains rejected.
 
 ## A0.2 persistent cache / F1.1 unified scopes

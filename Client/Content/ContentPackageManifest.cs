@@ -67,8 +67,9 @@ public sealed class ContentPackageManifest
 
     /// <summary>
     /// Creates one explicit client-local passive presentation overlay. This is deliberately a
-    /// separate admission path from scope-authorized packages: F1.5 packs may only replace
-    /// bounded actor-presentation leaves and never participate in semantic catalog activation.
+    /// separate admission path from scope-authorized packages: packs may only replace the finite
+    /// actor-presentation and texture leaves earned by the current presentation generation, and
+    /// never participate in semantic catalog activation.
     /// </summary>
     public static bool TryCreateUserResourcePack(
         int minimumPipelineFormat,
@@ -144,8 +145,12 @@ public sealed class ContentPackageManifest
             if (totalBytes > limits.MaximumPackageBytes)
                 return Fail("The package exceeds its byte limit.", out error);
             if (userResourcePack &&
-                (file.Kind != ContentFileKind.ActorGltfBinary ||
-                 file.SizeBytes > ActorPresentationArtifactLimits.Default.MaximumArtifactBytes ||
+                (file.Kind is not (ContentFileKind.ActorGltfBinary or
+                     ContentFileKind.PngTexture or ContentFileKind.WebpTexture) ||
+                 file.Kind == ContentFileKind.ActorGltfBinary &&
+                     file.SizeBytes > ActorPresentationArtifactLimits.Default.MaximumArtifactBytes ||
+                 file.Kind is ContentFileKind.PngTexture or ContentFileKind.WebpTexture &&
+                     file.SizeBytes > ContentRasterArtifact.MaximumUserPackFileBytes ||
                  totalBytes > 128L * 1024 * 1024))
                 return Fail("A user resource pack contains an unsupported or oversized file.", out error);
         }
@@ -157,10 +162,11 @@ public sealed class ContentPackageManifest
                 index != 0 && orderedDefinitions[index - 1].Id == definition.Id)
                 return Fail("The package contains an invalid or duplicate definition.", out error);
             if (userResourcePack &&
-                (definition.Kind != ContentDefinitionKind.ActorPresentation ||
+                (definition.Kind is not (ContentDefinitionKind.ActorPresentation or
+                     ContentDefinitionKind.Texture) ||
                  definition.Operation != ContentDefinitionOperation.Replace ||
                  !definition.PrimaryFile.IsValid))
-                return Fail("F1.5 user resource packs support ActorPresentation Replace entries only.", out error);
+                return Fail("User resource packs support ActorPresentation or Texture Replace entries only.", out error);
             if (definition.Operation == ContentDefinitionOperation.Add &&
                 definition.Id.Namespace != contentNamespace)
                 return Fail("An Add definition must use the package's authorized namespace.", out error);
@@ -255,7 +261,6 @@ public sealed class ContentPackageManifest
 
 public static class ContentPackageValidator
 {
-    private static readonly byte[] PngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
 
     public static bool TryValidatePayloads(
         ContentPackageManifest manifest,
@@ -296,13 +301,8 @@ public static class ContentPackageValidator
         in ContentFileDescriptor descriptor,
         ReadOnlySpan<byte> bytes) => descriptor.Kind switch
     {
-        ContentFileKind.PngTexture => bytes.Length >= 24 && bytes[..8].SequenceEqual(PngSignature) &&
-            bytes[12..16].SequenceEqual("IHDR"u8) &&
-            BinaryPrimitives.ReadUInt32BigEndian(bytes[16..]) is > 0 and <= 16_384 &&
-            BinaryPrimitives.ReadUInt32BigEndian(bytes[20..]) is > 0 and <= 16_384,
-        ContentFileKind.WebpTexture => bytes.Length >= 16 && bytes[..4].SequenceEqual("RIFF"u8) &&
-            bytes[8..12].SequenceEqual("WEBP"u8) &&
-            BinaryPrimitives.ReadUInt32LittleEndian(bytes[4..]) + 8UL == (ulong)bytes.Length,
+        ContentFileKind.PngTexture or ContentFileKind.WebpTexture =>
+            ContentRasterArtifact.TryInspect(descriptor.Kind, bytes, out _),
         ContentFileKind.WorldPack => ValidateCompleteWorldPack(bytes),
         ContentFileKind.UiDefinition => ValidateUiDefinition(descriptor.Path, bytes),
         ContentFileKind.ActorGltfBinary =>

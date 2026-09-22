@@ -280,15 +280,16 @@ These are permitted local presentation-leaf substitutions after the authoritativ
 resolves. They are not packages in that plan and cannot replace UI actions/schemas, control
 profiles, structural World content, or disclosure semantics.
 
-F1.5 implements only the earned actor-presentation subset. A dedicated trust-class-3 manifest
-factory admits one to sixteen self-contained bounded GLBs, each referenced by exactly one
-ActorPresentation `Replace`; every other current file/definition kind and `Add` is rejected.
+F1.5 implemented the actor-presentation subset. F1.6 extends the same dedicated trust-class-3
+manifest factory to one-to-sixteen bounded PNG/WebP Texture `Replace` leaves while preserving
+self-contained bounded ActorPresentation GLB `Replace`; Material, Icon, UI, World, executable and
+`Add` remain rejected.
 Explicit rooted local archives install exact `PackageId + ManifestHash` identities into separate
 resource-pack metadata while sharing immutable blob storage with Local/Realm scopes. A strict
 persisted list enables at most sixteen packs in deterministic low-to-high priority order.
 Presentation generations apply User -> Realm -> Local -> Primitive without altering the lower
-catalogs or application proof. Texture/material support remains deferred until those renderer
-leaves participate in the common presentation-resolution seam.
+catalogs or application proof. Texture and lower-authorized Material leaves now participate in that
+common seam; renderer-native Godot resources remain separately keyed disposable derived output.
 
 ### Executable client extensions — future/deferred
 
@@ -1481,6 +1482,14 @@ scope authorization; compatible actor replacements publish as new immutable pres
 generations, while missing targets are no-ops and invalid/incompatible candidates preserve the
 current generation. Enable/disable/reorder does not change semantic activation, WorldPack, or
 remote proof.
+
+F1.6 adds effective Texture/Material leaves to those immutable generations. The Local Cabin wall
+path proves User Texture Replace and exact disable restoration without changing material scalars,
+semantic world hash, collision, or interaction. Godot persists versioned decoded RGBA artifacts
+under writable `Derived/Godot`; matching effective content reopens across process generations,
+while corruption, deletion, content changes, and policy changes rebuild/select distinct output.
+The first `WorldOpaque` atlas candidate remains diagnostic because one page did not reduce the
+current two-material/draw shape.
 
 The local Concept Demo D0.4 canary now proves that the maintained Godot renderer can distinguish
 model absence from texture absence and degrade only presentation while immutable World identity and

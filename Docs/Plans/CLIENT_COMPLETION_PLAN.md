@@ -1,6 +1,6 @@
 # UltraSim Client Completion Plan
 
-**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.5 are CLOSED; F1.6 is NEXT.**
+**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.6 are CLOSED; F1.7 is NEXT.**
 
 **Parent architecture:** [CLIENT_PRESENTATION_ARCHITECTURE.md](CLIENT_PRESENTATION_ARCHITECTURE.md)
 
@@ -86,8 +86,8 @@ F1.2  Semantic activation vs presentation resolution (CLOSED)
 F1.3  Primitive substrate and fallback contract (CLOSED)
 F1.4  Official Local content productization (CLOSED)
 F1.5  User presentation overrides and content generations (CLOSED)
-F1.6  Derived resources / atlas pipeline (NEXT)
-F1.7  Application workspace, Gameplay Frame, shared UI/gump composition
+F1.6  Derived resources / atlas pipeline (CLOSED)
+F1.7  Application workspace, Gameplay Frame, shared UI/gump composition (NEXT)
 F1.8  Declarative camera/control rig and canonical gameplay-view crop
 F1.8A Remote motion prediction/reconciliation/interpolation
 F1.9  Godot scalable presentation backend targeting the Gameplay Frame
@@ -770,6 +770,29 @@ Select at least one representative world/clutter case and measure:
 - measured evidence records where batching helps and where it does not;
 - process restart with identical stable presentation fingerprint reuses matching derived cache;
 - process restart with different content/policy rejects the old derived cache even if runtime generation numbering starts over.
+
+## Closure
+
+F1.6 generalizes the immutable presentation generation only through the earned Texture and
+Material leaves. Logical material scalar truth remains Local/Realm-owned while its logical albedo
+reference resolves independently through User -> Realm -> `world.local`. The dedicated user-pack
+factory now admits bounded PNG/WebP Texture Replace beside the existing ActorPresentation Replace;
+Material, Icon, UI, World, shader, script, executable, and Add entries remain rejected.
+
+The Local Cabin wall/wood consumer now installs its presentation package into ordinary
+`world.local`, resolves logical resources through `PresentationGeneration`, and realizes them
+through a Godot-only derived store. Restart-stable keys cover the exact effective resource result,
+Godot backend/format, policy, platform profile, import policy, and finite atlas family; process-local
+generation IDs never enter disk identity. Versioned bounded RGBA artifacts live under writable
+`Derived/Godot`, reject reparse paths/corruption/wrong key/wrong version, and rebuild from still-
+authorized CAS bytes. Native leases keep generation/blob/resource ownership alive through atomic
+candidate publication.
+
+The measured two-texture `WorldOpaque` candidate produced one pixel-exact page, but the current
+Cabin geometry still needs separate materials/draws and exposes no reliable draw-call reduction.
+Production therefore remains standalone derived Texture/Material resources; the atlas candidate is
+retained only as bounded acceptance evidence, not as semantic architecture. F1.7 owns the next UI
+workspace/gump checkpoint; no F1.7 work is part of this closure.
 
 ---
 

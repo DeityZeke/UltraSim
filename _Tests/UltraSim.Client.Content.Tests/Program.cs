@@ -45,6 +45,7 @@ var tests = new (string Name, Action Body)[]
     ("UserResourcePackPolicyIsStrictAndSeparate", UserResourcePackPolicyIsStrictAndSeparate),
     ("UserResourcePackStorePersistsOrderSharesCasAndFailsClosed", UserResourcePackStorePersistsOrderSharesCasAndFailsClosed),
     ("UserPresentationOverlayIsTransactionalOrderedAndLeaseSafe", UserPresentationOverlayIsTransactionalOrderedAndLeaseSafe),
+    ("TextureMaterialPresentationUsesEffectiveUserLeafAndStableIdentity", TextureMaterialPresentationUsesEffectiveUserLeafAndStableIdentity),
 };
 
 foreach ((string name, Action body) in tests)
@@ -761,9 +762,22 @@ static void UserResourcePackPolicyIsStrictAndSeparate()
     ContentFileDescriptor textureFile = File(texturePath, ContentFileKind.PngTexture, texture);
     ContentDefinitionDescriptor textureReplace = TextureDefinition(
         "cabin:wall", ContentDefinitionOperation.Replace, texturePath.Value!);
+    True(ContentPackageManifest.TryCreateUserResourcePack(
+        1, 1, package, contentNamespace, "Texture", "1",
+        [textureFile], [textureReplace], out ContentPackageManifest? texturePack,
+        out string? textureError), textureError);
+    True(ContentPackageValidator.TryValidatePayloads(
+        texturePack!, [new ContentFilePayload(texturePath, texture)], out _, out _));
+
+    True(ContentMaterialDefinition.TryCreate(
+        ContentMaterialFamily.StandardLit, Logical("cabin:texture/wall"),
+        0.5f, 0f, 0f, out ContentMaterialDefinition material));
+    True(ContentDefinitionDescriptor.TryCreateMaterial(
+        Logical("cabin:material/wall"), ContentDefinitionOperation.Replace,
+        material, out ContentDefinitionDescriptor? materialReplace));
     False(ContentPackageManifest.TryCreateUserResourcePack(
-        1, 1, package, contentNamespace, "Bad texture", "1",
-        [textureFile], [textureReplace], out _, out _));
+        1, 1, package, contentNamespace, "Bad material", "1",
+        [textureFile], [materialReplace!], out _, out _));
 
     byte[] world = WorldPackBytes();
     ContentFilePath worldPath = FilePath("worlds/forbidden.usworldpack");
@@ -935,6 +949,116 @@ static void UserResourcePackStorePersistsOrderSharesCasAndFailsClosed()
         if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         if (Directory.Exists(sourceRoot)) Directory.Delete(sourceRoot, recursive: true);
     }
+}
+
+static void TextureMaterialPresentationUsesEffectiveUserLeafAndStableIdentity()
+{
+    const string textureIdValue = "cabin:texture/wall";
+    const string materialIdValue = "cabin:material/wall";
+    LogicalContentId textureId = Logical(textureIdValue);
+    LogicalContentId materialId = Logical(materialIdValue);
+    PackageFixture lower = CreateTextureMaterialPackage(
+        "cabin.presentation", "cabin", textureIdValue, materialIdValue, 0x21);
+    PackageFixture user = UserTexturePackage(
+        "user.cabin.wall", textureIdValue, "textures/user-wall.png", 0x91);
+    PackageFixture ineffective = UserTexturePackage(
+        "user.other.texture", "other:texture/wall", "textures/other.png", 0x44);
+    UserResourcePackIdentity userIdentity = UserIdentity(user);
+    UserResourcePackIdentity ineffectiveIdentity = UserIdentity(ineffective);
+    ContentActivationPlan plan = ScopePlan(
+        ContentScopeKey.Local,
+        new ContentActivationId(0xF16, 1),
+        ContentBaseCatalog.Empty.Fingerprint,
+        [Required(lower.Manifest)]);
+    ContentScopeActivationKey key = new(plan.ScopeActivation, plan.PlanHash);
+
+    WithCacheRoot(root =>
+    {
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out var open), open.ToString());
+        using (cache)
+        {
+            True(cache!.TryInstallPackage(
+                ContentScopeKey.Local, lower.Manifest, lower.Payloads,
+                out _, out var install), install.ToString());
+            foreach (PackageFixture pack in new[] { user, ineffective })
+                True(cache.TryInstallUserResourcePack(
+                    pack.Manifest, pack.Payloads, out _, out var userInstall),
+                    userInstall.ToString());
+
+            PresentationGeneration lowerGeneration;
+            True(cache.TryPublishCatalog(
+                ContentBaseCatalog.Empty, plan, false,
+                out ContentCatalogLease? lowerCatalog, out var publish), publish.ToString());
+            lowerGeneration = PresentationGeneration.CreateWithResources(
+                null, null, null, null, lowerCatalog);
+            Equal(PresentationSourceKind.Local, lowerGeneration.GetSource(textureId));
+            Equal(PresentationSourceKind.Local, lowerGeneration.GetSource(materialId));
+            Equal(1, lowerGeneration.Snapshot.TextureSelections);
+            Equal(1, lowerGeneration.Snapshot.MaterialSelections);
+            True(lowerGeneration.TryResolveMaterialPresentation(
+                materialId, out ResolvedMaterialPresentation? lowerMaterial,
+                out var lowerError), lowerError.ToString());
+            Equal(PresentationSourceKind.Local, lowerMaterial!.AlbedoTexture!.Source);
+            ContentHash lowerTextureHash = lowerMaterial.AlbedoTexture.File.Sha256;
+            ContentHash lowerFingerprint = lowerGeneration.StableFingerprint;
+            float lowerRoughness = lowerMaterial.Definition.Roughness;
+            lowerMaterial.Dispose();
+
+            True(cache.TrySetEnabledUserResourcePacks(
+                [userIdentity], out var select), select.ToString());
+            True(cache.TryOpenEnabledUserResourcePacks(
+                out UserResourcePackStackLease? userStack, out var openUser), openUser.ToString());
+            True(cache.TryOpenCatalog(
+                ContentBaseCatalog.Empty, key,
+                out ContentCatalogLease? userCatalog, out var openCatalog), openCatalog.ToString());
+            using PresentationGeneration overridden = PresentationGeneration.CreateWithResources(
+                userStack, null, null, null, userCatalog);
+            True(overridden.TryResolveMaterialPresentation(
+                materialId, out ResolvedMaterialPresentation? userMaterial,
+                out var userError), userError.ToString());
+            Equal(materialId, userMaterial!.LogicalId);
+            Equal(materialId, lowerMaterial?.LogicalId ?? materialId);
+            Equal(lowerRoughness, userMaterial.Definition.Roughness);
+            Equal(PresentationSourceKind.Local, userMaterial.Source);
+            Equal(PresentationSourceKind.User, userMaterial.AlbedoTexture!.Source);
+            Equal(0, overridden.Snapshot.UserSelections);
+            Equal(1, overridden.Snapshot.UserResourceSelections);
+            NotEqual(lowerTextureHash, userMaterial.AlbedoTexture.File.Sha256);
+            NotEqual(lowerFingerprint, overridden.StableFingerprint);
+            True(overridden.TryGetUserResourcePack(textureId, out UserResourcePackIdentity winner));
+            Equal(userIdentity, winner);
+            userMaterial.Dispose();
+
+            True(cache.TrySetEnabledUserResourcePacks(
+                [ineffectiveIdentity], out var noOpSelect), noOpSelect.ToString());
+            True(cache.TryOpenEnabledUserResourcePacks(
+                out UserResourcePackStackLease? noOpStack, out var noOpOpen), noOpOpen.ToString());
+            True(cache.TryOpenCatalog(
+                ContentBaseCatalog.Empty, key,
+                out ContentCatalogLease? noOpCatalog, out var noOpCatalogOpen),
+                noOpCatalogOpen.ToString());
+            using PresentationGeneration noOp = PresentationGeneration.CreateWithResources(
+                noOpStack, null, null, null, noOpCatalog);
+            Equal(lowerFingerprint, noOp.StableFingerprint);
+            Equal(0, noOp.Snapshot.UserSelections);
+
+            True(cache.TrySetEnabledUserResourcePacks([], out var disable), disable.ToString());
+            True(cache.TryOpenCatalog(
+                ContentBaseCatalog.Empty, key,
+                out ContentCatalogLease? restoredCatalog, out var restoredOpen),
+                restoredOpen.ToString());
+            using PresentationGeneration restored = PresentationGeneration.CreateWithResources(
+                null, null, null, null, restoredCatalog);
+            Equal(lowerFingerprint, restored.StableFingerprint);
+            NotEqual(lowerGeneration.Generation, restored.Generation);
+            lowerGeneration.Dispose();
+
+            Console.WriteLine(
+                $"EVIDENCE F1.6 logical_texture={textureId} logical_material={materialId} " +
+                $"lower={lowerFingerprint} user={overridden.StableFingerprint} " +
+                "precedence=user>local material_scalars=stable ineffective=no-churn disable=exact");
+        }
+    });
 }
 
 static void UserPresentationOverlayIsTransactionalOrderedAndLeaseSafe()
@@ -2296,6 +2420,47 @@ static PackageFixture CreateSingleTexturePackage(
     return new PackageFixture(manifest, [new ContentFilePayload(path, bytes)]);
 }
 
+static PackageFixture CreateTextureMaterialPackage(
+    string packageId,
+    string contentNamespace,
+    string textureId,
+    string materialId,
+    byte marker)
+{
+    byte[] bytes = Png(marker);
+    ContentFilePath path = FilePath("textures/wall.png");
+    ContentFileDescriptor file = File(path, ContentFileKind.PngTexture, bytes);
+    ContentDefinitionDescriptor texture = TextureDefinition(
+        textureId, ContentDefinitionOperation.Add, path.Value!);
+    True(ContentMaterialDefinition.TryCreate(
+        ContentMaterialFamily.StandardLit, Logical(textureId),
+        0.82f, 0.07f, 0.03f, out ContentMaterialDefinition material));
+    True(ContentDefinitionDescriptor.TryCreateMaterial(
+        Logical(materialId), ContentDefinitionOperation.Add,
+        material, out ContentDefinitionDescriptor? materialDefinition));
+    return new PackageFixture(
+        Manifest(packageId, contentNamespace, ContentTrustClass.ScopeAuthorizedPassive,
+            [file], [texture, materialDefinition!]),
+        [new ContentFilePayload(path, bytes)]);
+}
+
+static PackageFixture UserTexturePackage(
+    string packageId,
+    string logicalId,
+    string filePath,
+    byte marker)
+{
+    byte[] bytes = Png(marker);
+    ContentFilePath path = FilePath(filePath);
+    ContentFileDescriptor file = File(path, ContentFileKind.PngTexture, bytes);
+    ContentDefinitionDescriptor texture = TextureDefinition(
+        logicalId, ContentDefinitionOperation.Replace, filePath);
+    True(ContentPackageManifest.TryCreateUserResourcePack(
+        1, 1, Package(packageId), Namespace("userpack"), packageId, "1.0.0",
+        [file], [texture], out ContentPackageManifest? manifest, out string? error), error);
+    return new PackageFixture(manifest!, [new ContentFilePayload(path, bytes)]);
+}
+
 static ContentPackageManifest Manifest(
     string package,
     string contentNamespace,
@@ -2472,11 +2637,14 @@ static byte[] Png(byte marker)
 
 static byte[] Webp(byte marker)
 {
-    byte[] bytes = new byte[16];
+    byte[] bytes = new byte[30];
     "RIFF"u8.CopyTo(bytes);
-    BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4), 8);
+    BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4), checked((uint)bytes.Length - 8));
     "WEBP"u8.CopyTo(bytes.AsSpan(8));
-    bytes[12] = marker;
+    "VP8X"u8.CopyTo(bytes.AsSpan(12));
+    BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(16), 10);
+    bytes[21] = marker;
+    // VP8X stores width/height minus one as little-endian 24-bit integers. Zero is 1x1.
     return bytes;
 }
 
