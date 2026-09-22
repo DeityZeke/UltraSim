@@ -4991,10 +4991,14 @@ static void VerifyF10ClientBaselineEvidence(string path)
     JsonElement warmSnapshot = warm.GetProperty("Snapshot");
     JsonElement warmAcquisition = warmSnapshot.GetProperty("Session")
         .GetProperty("Content").GetProperty("Acquisition");
-    if (coldCacheAtOpen.GetProperty("BlobCount").GetInt32() != 2 ||
-        coldCacheAtOpen.GetProperty("LocalManifestCount").GetInt32() != 1 ||
+    // The current Local product has two independently authorized world.local packages before the
+    // first Remote session: Official actor presentations and the F1.6 Cabin Texture/Material
+    // presentation package. Their five distinct source blobs are persistent cache state, while all
+    // live pins must still retire before Remote opens.
+    if (coldCacheAtOpen.GetProperty("BlobCount").GetInt32() != 5 ||
+        coldCacheAtOpen.GetProperty("LocalManifestCount").GetInt32() != 2 ||
         coldCacheAtOpen.GetProperty("RealmManifestCount").GetInt32() != 0 ||
-        coldCacheAtOpen.GetProperty("LocalActivationCount").GetInt32() != 1 ||
+        coldCacheAtOpen.GetProperty("LocalActivationCount").GetInt32() != 2 ||
         coldCacheAtOpen.GetProperty("RealmActivationCount").GetInt32() != 0 ||
         coldCacheAtOpen.GetProperty("LiveBlobPins").GetInt32() != 0 ||
         coldCacheAtOpen.GetProperty("LiveCatalogPins").GetInt32() != 0 ||
