@@ -10,7 +10,10 @@ Complete-hosted deployment shapes. I0.12 human-play hardening prevents visible e
 remaining a pointer-nominated world pickup, and I0.13 replaces its temporary cold property text
 with bounded typed Inspection Properties plus content-sized world-hover/Inventory presentation.
 
-F1.0-F1.8A are closed; F1.9 is next. F1.2 separates the required remote WorldPack/UI activation and its exact application proof
+F1.0-F1.8A are closed after the F1.8A-R1 corrective checkpoint; F1.9 is next. The initial F1.8A
+closure evidence remains historical, and the [R1 correction](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md)
+records reproduced defects, the earlier intermittent final-tree verifier failures, and corrected
+verification. F1.2 separates the required remote WorldPack/UI activation and its exact application proof
 from optional Realm-authorized actor-art presentation. Game manifest v31 introduced the latter
 on message 149 without changing transport revision 2. The client publishes a separate immutable
 presentation generation with Realm → `world.local` → Primitive actor selection; late art replaces
@@ -2811,7 +2814,7 @@ F1.5 user presentation overrides/content generations                          CL
 F1.6 derived resources/atlas pipeline                                         CLOSED
 F1.7 application workspace/Gameplay Frame/shared UI/gump manager             CLOSED
 F1.8 declarative camera/control rig + canonical gameplay-view crop            CLOSED
-F1.8A remote motion prediction/reconciliation/interpolation                   CLOSED
+F1.8A remote motion prediction/reconciliation/interpolation                   CLOSED after R1
 F1.9 scalable Godot backend targeting the Gameplay Frame                      NEXT
 F1.10 actor representation tiers/realization interpolation seam               PLANNED
 F1.11 renderer stress consumers/vegetation prototype                          PLANNED

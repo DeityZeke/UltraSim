@@ -309,6 +309,11 @@ overhead Chat. This does not generate fake semantic `Updated` operations per ren
 play stays authority-first with no remote interpolation delay. The headless native T0.10 acceptance
 checks predicted actor/camera/attachments, owner reconciliation, actual replicated actor samples,
 removal, and source-generation replacement. F1.9 still owns the frame-sized SubViewport.
+F1.8A-R1 makes pointer nomination use the actor pose actually assigned to the native root, while
+only disclosed semantic rows supply pickable identities and Game retains final range/interaction
+authority. The resolved profile, not actor metadata, owns the realized camera pivot; orthographic
+stepped zoom adjusts the native lens size. Native acceptance covers displayed-pose picking,
+idle relocation convergence, and those camera settings.
 
 `--d0-5-smoke` crosses the real Single Player button and Admission form. It proves rejected input
 does not start authority, then enters with a trimmed Unicode name and the Y body and checks the

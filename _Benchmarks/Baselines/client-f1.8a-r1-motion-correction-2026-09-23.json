@@ -1,0 +1,53 @@
+{
+  "checkpoint": "F1.8A-R1",
+  "date": "2026-09-23",
+  "startingHead": "78b47d5b9e832c454fbca36fb06a665915a25159",
+  "correctedProductionCommit": "21764ff3f4e6fb5fd9baf846af1e9e6dac9fd92a",
+  "versions": { "gameManifest": 32, "transportRevision": 2 },
+  "reproductions": {
+    "idleAuthorityXMillimeters": 600,
+    "idlePresentedBeforeMillimeters": 0,
+    "idlePresentedAfterSettlingMillimeters": 600,
+    "blockedResumedAuthorityXMillimeters": 600,
+    "blockedResumedPresentedBeforeMillimeters": 0,
+    "blockedResumedPresentedAfterSettlingMillimeters": 600,
+    "verticalRelocationYMillimeters": 10000,
+    "verticalBeforeInterpolatedYMillimeters": 5000,
+    "verticalAfterPresentedYMillimeters": 10000,
+    "verticalAfterProvenance": "DiscontinuitySnap",
+    "presentedPickXMillimeters": 1500,
+    "semanticPickXMillimeters": 1000,
+    "orthographicSteppedZoom": "native size scales with bounded distance ratio",
+    "cameraPivotPrecedence": "accepted resolved profile owns realized pivot"
+  },
+  "udpRepresentativeRows": [
+    { "oneWayDelayMs": 0, "jitterMs": 0, "dropPeriod": 0, "inputToPresentedUs": 4517, "inputToOwnerUs": 26342, "errorAtFirstOwnerMm": 57, "errorAtStopAcknowledgementMm": 47, "stopSettleTo20MmUs": 102785, "maximumCorrectionMm": 48 },
+    { "oneWayDelayMs": 50, "jitterMs": 0, "dropPeriod": 0, "inputToPresentedUs": 4265, "inputToOwnerUs": 125237, "errorAtFirstOwnerMm": 666, "errorAtStopAcknowledgementMm": 1146, "stopSettleTo20MmUs": 178743, "maximumCorrectionMm": 1147 },
+    { "oneWayDelayMs": 50, "jitterMs": 15, "dropPeriod": 0, "inputToPresentedUs": 4275, "inputToOwnerUs": 129480, "errorAtFirstOwnerMm": 692, "errorAtStopAcknowledgementMm": 257, "stopSettleTo20MmUs": 166523, "maximumCorrectionMm": 258 },
+    { "oneWayDelayMs": 50, "jitterMs": 15, "dropPeriod": 53, "inputToPresentedUs": 4246, "inputToOwnerUs": 165410, "errorAtFirstOwnerMm": 800, "errorAtStopAcknowledgementMm": 78, "stopSettleTo20MmUs": 133517, "maximumCorrectionMm": 79, "physicallyDroppedDatagrams": 13 }
+  ],
+  "verification": {
+    "coreRelease": "34/34 pass",
+    "networkApplicationRelease": "pass, including real UDP motion proxy",
+    "nativeS08AndT010": "pass",
+    "architectureOnly": "pass",
+    "canonicalReleaseOnCorrectedProductionCommit": "pass uninterrupted",
+    "physicalExports": "SinglePlayer/Online/Complete pass",
+    "pf1MixedSwarm": "pass",
+    "pf2MixedSwarm": "pass",
+    "f07MixedLifecycle": "pass",
+    "f10Guardrails": "pass",
+    "previousEvidenceOnlyTreeFullRunFailures": [
+      "PF2 mixed-swarm execution, exact child exception not retained",
+      "PF1 all-participants readiness timeout",
+      "PF1 sword-workflow conservation failure"
+    ],
+    "previousEvidenceOnlyTreeFocusedPf1Pf2": "both pass"
+  },
+  "remainingQualityRisks": [
+    "rapid reversal/Stop correction has exceeded one meter under 100 ms RTT and is not human-feel validated",
+    "sparse impaired public samples can produce held frames"
+  ],
+  "deferredIndependentIntegration": "F1.6-R1 Remote catalog-backed world Texture/Material consumer",
+  "f19Started": false
+}

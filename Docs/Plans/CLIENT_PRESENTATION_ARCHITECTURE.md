@@ -1116,7 +1116,7 @@ Ignore Recommendation
 
 Server recommendations remain transient/cacheable realm data rather than destructively rewriting global user settings.
 
-## Remote motion presentation (F1.8A closed)
+## Remote motion presentation (F1.8A closed after R1 correction)
 
 Remote motion needs a dedicated presentation checkpoint after F1.8 and before F1.9. The controlled actor may predict its locally submitted command for responsive display, then correlate bounded command/prediction history with authoritative owner state, reconcile error, smooth bounded corrections, and snap/reset on discontinuity, teleport, relocation, or session/generation replacement. Prediction never becomes Game truth. Non-controlled remote actors instead begin with a bounded authoritative-snapshot interpolation buffer, a presentation timestamp/delay, and explicit gap, stale, teleport, and entity-replacement behavior; extrapolation needs separate evidence. Diagnostics must expose correction magnitude and buffer age/health. Packet-free Local authority does not manufacture network latency or prediction debt merely for symmetry.
 
@@ -1128,6 +1128,14 @@ proof, interaction validation, and structural tracking remain exact authority-de
 The stock lead is capped at 900 mm; remote interpolation delays 100 ms with 12 samples per actor,
 never extrapolates, and holds on missing data. Real authenticated UDP delay/jitter/loss and native
 acceptance are recorded in the [F1.8A baseline](../../_Benchmarks/Baselines/client-f1.8a-remote-motion-presentation-2026-09-23.md).
+The [R1 correction](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md)
+ensures that owner displacement consumes only an existing aligned speculative lead; idle and
+previously blocked presentation instead converges to authority. Three-dimensional displacement
+fences vertical teleports. Pointer nomination intersects the actor's displayed pose while Game
+continues to authorize its disclosed identity/range. The accepted camera profile owns pivot
+height, and orthographic stepped zoom changes lens size rather than only camera distance.
+Rapid reversal/Stop correction tails and sparse impaired public samples remain explicit
+human-feel questions, not claims of imperceptible motion.
 F1.10 may later realize these poses through cheaper actor tiers or GPU interpolation; it must not
 move temporal ownership into Godot nodes.
 

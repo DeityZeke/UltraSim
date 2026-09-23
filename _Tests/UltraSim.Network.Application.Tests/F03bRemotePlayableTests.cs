@@ -149,6 +149,7 @@ internal static class F03bRemotePlayableTests
         True(temporal.ObserveAdmittedCommand(moveSequence, direct.Locomotion, started));
         long firstPresented = -1;
         long firstOwner = -1;
+        long errorAtFirstOwnerMillimeters = -1;
         ulong lastOwnerSequence = initial.StateSequence;
         long lastOwnerArrival = started;
         long lastOwnerX = initialPosition.GlobalXMillimeters;
@@ -190,7 +191,12 @@ internal static class F03bRemotePlayableTests
                 presented.Pose.GlobalXMillimeters - initialPosition.GlobalXMillimeters >= 20)
                 firstPresented = now - started;
             if (owner.Position.GlobalXMillimeters - initialPosition.GlobalXMillimeters >= 20)
+            {
                 firstOwner = now - started;
+                errorAtFirstOwnerMillimeters = ClientMotionPose.HorizontalDistanceMillimeters(
+                    presented.Pose,
+                    ClientMotionPose.FromAuthority(owner.Position, owner.Orientation));
+            }
         }
         True(firstPresented >= 0 && firstOwner >= 0);
         if (oneWayDelayMilliseconds >= 50)
@@ -266,7 +272,31 @@ internal static class F03bRemotePlayableTests
             MonotonicMicroseconds()));
         RemotePlayableClientSnapshot finalOwner = DriveMotionUntilAcknowledged(
             fixture, temporal, ref lastOwnerSequence, stopSequence);
-        Thread.Sleep(ClientControlledMotionPresentation.CorrectionDurationMilliseconds + 2);
+        long stopAcknowledgedAt = MonotonicMicroseconds();
+        long errorAtStopAcknowledgementMillimeters =
+            ClientMotionPose.HorizontalDistanceMillimeters(
+                temporal.Sample(stopAcknowledgedAt).Pose,
+                ClientMotionPose.FromAuthority(finalOwner.Position, finalOwner.Orientation));
+        long settleMicroseconds;
+        while (true)
+        {
+            long now = MonotonicMicroseconds();
+            long error = ClientMotionPose.HorizontalDistanceMillimeters(
+                temporal.Sample(now).Pose,
+                ClientMotionPose.FromAuthority(finalOwner.Position, finalOwner.Orientation));
+            if (error <= ClientControlledMotionPresentation.CorrectionDeadbandMillimeters)
+            {
+                settleMicroseconds = now - stopAcknowledgedAt;
+                break;
+            }
+            True(now - stopAcknowledgedAt <= 500_000);
+            Thread.Sleep(2);
+        }
+        long remainingCorrectionMicroseconds =
+            (ClientControlledMotionPresentation.CorrectionDurationMilliseconds + 2) * 1_000L -
+            (MonotonicMicroseconds() - stopAcknowledgedAt);
+        if (remainingCorrectionMicroseconds > 0)
+            Thread.Sleep((int)Math.Ceiling(remainingCorrectionMicroseconds / 1_000d));
         ClientResolvedMotionPose finalPresented = temporal.Sample(MonotonicMicroseconds());
         Equal(finalOwner.Position.GlobalXMillimeters,
             finalPresented.Pose.GlobalXMillimeters);
@@ -315,6 +345,9 @@ internal static class F03bRemotePlayableTests
         Console.WriteLine($"EVIDENCE F1.8A UDP one_way_ms={oneWayDelayMilliseconds} " +
             $"jitter_ms={jitterMilliseconds} drop_period={dropPeriod} " +
             $"input_to_present_us={firstPresented} input_to_owner_us={firstOwner} " +
+            $"error_at_first_owner_mm={errorAtFirstOwnerMillimeters} " +
+            $"error_at_stop_ack_mm={errorAtStopAcknowledgementMillimeters} " +
+            $"stop_settle_to_20mm_us={settleMicroseconds} " +
             $"lead_max_mm={metrics.MaximumSpeculativeLeadMillimeters} " +
             $"smooth={metrics.SmoothCorrections} snaps={metrics.SnapCorrections} " +
             $"correction_max_mm={metrics.MaximumCorrectionErrorMillimeters} " +

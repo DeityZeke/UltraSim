@@ -1,6 +1,6 @@
 # UltraSim Client Completion Plan
 
-**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.8A are CLOSED; F1.9 is NEXT.**
+**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.8A are CLOSED after the F1.8A-R1 correction; F1.9 is NEXT.** The original F1.8A closure claim is superseded by the [corrective evidence](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md), which records both the reproduced defects and the earlier final-tree verifier failures.
 
 **Parent architecture:** [CLIENT_PRESENTATION_ARCHITECTURE.md](CLIENT_PRESENTATION_ARCHITECTURE.md)
 
@@ -89,7 +89,7 @@ F1.5  User presentation overrides and content generations (CLOSED)
 F1.6  Derived resources / atlas pipeline (CLOSED)
 F1.7  Application workspace, Gameplay Frame, shared UI/gump composition (CLOSED)
 F1.8  Declarative camera/control rig and canonical gameplay-view crop (CLOSED)
-F1.8A Remote motion prediction/reconciliation/interpolation (CLOSED)
+F1.8A Remote motion prediction/reconciliation/interpolation (CLOSED after R1 correction)
 F1.9  Godot scalable presentation backend targeting the Gameplay Frame (NEXT)
 F1.10 Actor representation tiers and GPU-friendly interpolation seam
 F1.11 Renderer stress consumers / vegetation prototype
@@ -793,6 +793,12 @@ Cabin geometry still needs separate materials/draws and exposes no reliable draw
 Production therefore remains standalone derived Texture/Material resources; the atlas candidate is
 retained only as bounded acceptance evidence, not as semantic architecture.
 
+**Separate integration follow-up:** the Local Cabin has a catalog-backed world Texture/Material
+consumer, while Remote still creates its world renderer without that asset resolver and acquires
+presentation resources chiefly for actors. A bounded F1.6-R1 Remote world-resource consumer is
+needed before a Local-versus-Remote material/renderer parity benchmark can claim matched inputs.
+This gap does not change F1.8A motion ownership and was not implemented in its correction.
+
 ---
 
 # 11. F1.7 - Shared UI composition and window/gump manager
@@ -1001,7 +1007,13 @@ delay, no extrapolation, and explicit gap/teleport/identity resets. The 12-sampl
 four samples dropped the bracket needed for a 100 ms delay at near-60 Hz publication. Native
 acceptance, real authenticated UDP delay/jitter/loss controls, full Release verification, and
 the immutable [F1.8A evidence](../../_Benchmarks/Baselines/client-f1.8a-remote-motion-presentation-2026-09-23.md)
-close this checkpoint. Under sparse impaired public samples the policy holds the newest truth;
+established the initial implementation. The [F1.8A-R1 correction](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md)
+reproduced and repaired nonconvergent idle/blocked controlled poses, vertical teleport
+interpolation, stale authoritative picking geometry, and accepted orthographic zoom/profile-pivot
+settings that did not control the realized camera. The corrected production commit passed an
+uninterrupted canonical Release run. Earlier full runs on the original evidence-only tree had
+intermittent PF1/PF2 exported-swarm failures; their root cause was not established and they are
+not erased by the later pass. Under sparse impaired public samples the policy holds the newest truth;
 it does not claim smooth motion without two usable samples.
 
 ---

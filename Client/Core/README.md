@@ -44,6 +44,11 @@ Other actors use 12 authoritative public-version samples each (maximum 64 actor 
 by client monotonic receipt time with 100 ms delay. Receipt time is not server simulation time;
 the interpolator never extrapolates and holds if new truth is absent. This Core state owns no
 Godot nodes or per-actor frame allocations.
+The F1.8A-R1 regression now requires idle and previously blocked presentation to converge when
+owner truth moves: only a real aligned lead may be consumed by authority displacement. A vertical
+public relocation beyond the 3D discontinuity threshold snaps rather than becoming a slow Y lerp.
+The original motion measurements remain historical; the corrective case and lingering rapid-
+reversal quality tail are recorded in the F1.8A-R1 baseline.
 
 `ClientSettingsDocument` is a bounded, versioned, engine-neutral user document. Resolution layers
 built-in defaults, global user choices, an explicitly accepted declarative server recommendation,
