@@ -34,6 +34,7 @@ var tests = new (string Name, Action Body)[]
     ("ClientSettingsAreLayeredReadableAndReserved", ClientApplicationSettingsTests.Run),
     ("ClientSettingsFilePersistenceIsAtomicAndFailClosed", ClientSettingsFileStoreTests.Run),
     ("ClientShellLifecycleAndFocusAreExplicit", ClientShellStateTests.Run),
+    ("GameplayFrameLayoutIsFiniteCenteredAndRendererNeutral", GameplayFrameLayoutTests.Run),
     ("CapabilityMenuMatchesComposition", CapabilityMenuMatchesComposition),
 };
 

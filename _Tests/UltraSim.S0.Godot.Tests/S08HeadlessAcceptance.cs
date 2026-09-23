@@ -23,6 +23,7 @@ public partial class S08HeadlessAcceptance : Control
             RunAcceptance();
             RunNativeAdapterBoundaryAcceptance();
             RunOutsidePointerPolicyAcceptance();
+            RunF17WorkspaceAndGumpAcceptance();
             RunRemoteInventoryAcceptance();
             GD.Print("S0.8 / I0.11 GODOT ACCEPTANCE PASS");
             GetTree().Quit(0);
@@ -31,6 +32,111 @@ public partial class S08HeadlessAcceptance : Control
         {
             GD.PushError($"S0.8 GODOT ACCEPTANCE FAIL: {exception}");
             GetTree().Quit(1);
+        }
+    }
+
+    private void RunF17WorkspaceAndGumpAcceptance()
+    {
+        var owner = new Control { Name = "F17WorkspaceAcceptance" };
+        owner.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        AddChild(owner);
+        var composition = new GodotClientUiComposition(
+            owner, ClientPixelSize.Create(800, 600));
+        GodotClientUiCompositionSnapshot initial = composition.GetSnapshot();
+        Expect(initial.Workspace.SelectedOutputShape == ClientPixelSize.Create(800, 600) &&
+            initial.Workspace.GameplayFrame.Width > 0 &&
+            initial.Workspace.GameplayFrame.X > 0 &&
+            !composition.ContainsWorldPointer(new Vector2(
+                0, initial.Workspace.ApplicationSize.Height / 2f)) &&
+            composition.ContainsWorldPointer(new Vector2(
+                initial.Workspace.ApplicationSize.Width / 2f,
+                initial.Workspace.ApplicationSize.Height / 2f)) &&
+            initial.WorldHostChildren == 0 && initial.HudHostChildren == 0 &&
+            initial.Gumps.OpenWindows == 0,
+            "The F1.7 persistent category/workspace baseline was not clean.");
+
+        using GodotSessionUiLease session = composition.BeginSession("F17Test");
+        session.WorldHost.AddChild(new Label { Name = "WorldCanary" });
+        session.HudHost.AddChild(new Label { Name = "HudCanary" });
+        session.ContextMenu.Show("Disclosed target", new Vector2(12, 12), () => { }, () => { });
+        Expect(session.ContextMenu.Visible,
+            "The F1.7 Context layer could not present a disclosed target menu.");
+        composition.SetShellModalVisible(true);
+        Expect(!session.ContextMenu.Visible && !session.ContextHost.Visible,
+            "A shell modal did not retire/suppress transient Context presentation.");
+        composition.SetShellModalVisible(false);
+
+        CompiledUiDefinition firstDefinition = SmallWindow("f17-first", 250, 160);
+        CompiledUiDefinition secondDefinition = SmallWindow("f17-second", 270, 170);
+        var renderer = new GodotUiRenderer(session.Gumps);
+        using var client = new UiClientRuntime(renderer, new UiClientLimits(4, 4));
+        UiViewInstanceId first = client.OpenView(new UiOpenView(
+            CacheKey(firstDefinition), firstDefinition, new UiModel(firstDefinition)));
+        UiViewInstanceId second = client.OpenView(new UiOpenView(
+            CacheKey(secondDefinition), secondDefinition, new UiModel(secondDefinition)));
+        GodotGumpWindowManagerSnapshot two = session.Gumps.GetSnapshot();
+        GodotUiRenderHandle firstHandle = session.Gumps.HandleForAcceptance(first);
+        GodotUiRenderHandle secondHandle = session.Gumps.HandleForAcceptance(second);
+        Vector2 firstPosition = session.Gumps.GetWindowPosition(firstHandle);
+        Vector2 secondPosition = session.Gumps.GetWindowPosition(secondHandle);
+        Expect(two.OpenWindows == 2 && two.NativeChildren == 2 && firstPosition != secondPosition,
+            "Two modeless gameplay gumps did not coexist with deterministic cascade placement.");
+        session.ContextMenu.Show(
+            "Transient while gameplay is active", new Vector2(16, 16), () => { }, () => { });
+        composition.SetShellModalVisible(true);
+        Expect(session.Gumps.GetSnapshot().OpenWindows == 2 &&
+            !session.ContextMenu.Visible && !session.ContextHost.Visible,
+            "A shell modal destroyed modeless gumps or retained transient Context state.");
+        composition.SetShellModalVisible(false);
+        Expect(session.Gumps.GetSnapshot().OpenWindows == 2 && session.ContextHost.Visible,
+            "Resuming from a shell modal did not preserve gameplay gumps/context ownership.");
+        ulong zBefore = two.FrontSequence;
+        Expect(session.Gumps.BringToFront(firstHandle) &&
+            session.Gumps.GetSnapshot().FrontSequence > zBefore &&
+            ReferenceEquals(session.Gumps.HandleAt(1), firstHandle),
+            "The first gump could not return to front within the Menus category.");
+        Expect(session.Gumps.DragForAcceptance(firstHandle, new Vector2(-2_000, 20_000)) &&
+            session.Gumps.GetWindowPosition(firstHandle).X >= 8 &&
+            session.Gumps.GetWindowPosition(firstHandle).Y >= 8,
+            "Native gump drag did not clamp to the application window.");
+        composition.UpdateApplicationSizeForAcceptance(ClientPixelSize.Create(600, 800));
+        GodotApplicationWorkspaceSnapshot resized = composition.GetSnapshot().Workspace;
+        Expect(resized.GameplayFrame == new ClientPixelRect(0, 175, 600, 450) &&
+            session.Gumps.GetWindowPosition(firstHandle).X >= 8 &&
+            session.WorldHost.Size == new Vector2(600, 450),
+            "Application resize did not recompute the frame/World host and clamp gumps.");
+        client.CloseView(new UiCloseView(first));
+        Expect(client.OpenViewCount == 1 && session.Gumps.GetSnapshot().OpenWindows == 1 &&
+            ReferenceEquals(session.Gumps.HandleAt(0), secondHandle),
+            "Closing one gump disturbed the other modeless view.");
+        client.CloseView(new UiCloseView(second));
+        Expect(client.OpenViewCount == 0 && session.Gumps.GetSnapshot().OpenWindows == 0,
+            "Closed gumps remained in the native manager.");
+
+        composition.CycleDebug(page => page.ToString());
+        composition.CycleDebug(page => page.ToString());
+        composition.CycleDebug(page => page.ToString());
+        composition.CycleDebug(page => page.ToString());
+        Expect(composition.DebugPage == GodotClientDebugPage.Off &&
+            composition.GetSnapshot().DebugHostChildren == 0,
+            "The finite Debug cycle retained hidden pages after Off.");
+        session.Dispose();
+        GodotClientUiCompositionSnapshot retired = composition.GetSnapshot();
+        Expect(!retired.SessionActive && retired.WorldHostChildren == 0 &&
+            retired.HudHostChildren == 0 && retired.ContextHostChildren == 0 &&
+            retired.Gumps.OpenWindows == 0,
+            "F1.7 session retirement did not restore the persistent category baseline.");
+        composition.Dispose();
+        owner.QueueFree();
+
+        static CompiledUiDefinition SmallWindow(string key, float width, float height)
+        {
+            var source = new UiDefinitionBuilder(key);
+            source.AddCanvas(canvas => canvas.AddPanel(
+                "surface",
+                "surface",
+                UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, width, height))));
+            return UiDefinitionCompiler.Compile(source);
         }
     }
 

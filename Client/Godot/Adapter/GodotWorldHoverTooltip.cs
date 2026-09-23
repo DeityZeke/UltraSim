@@ -7,7 +7,7 @@ namespace UltraSim.Client.Godot;
 /// Small always-local hover realization. Typed facts come from bounded semantic presentation state;
 /// this wrapper owns only formatting, native layout, styling, cursor placement, and viewport clamp.
 /// </summary>
-internal sealed class GodotWorldHoverTooltip
+internal sealed class GodotWorldHoverTooltip : IDisposable
 {
     private const float HorizontalPadding = 24f;
     private const float ViewportMargin = 8f;
@@ -22,6 +22,7 @@ internal sealed class GodotWorldHoverTooltip
     private string _details = string.Empty;
     private int _visibleRows;
     private ulong _layoutGeneration;
+    private bool _disposed;
 
     internal GodotWorldHoverTooltip(Control parent)
     {
@@ -70,8 +71,12 @@ internal sealed class GodotWorldHoverTooltip
     internal Vector2 BoundMinimumSize => _panel.GetBoundMinimumSize();
     internal int VisibleRowCount => _visibleRows;
     internal ulong LayoutGeneration => _layoutGeneration;
+    internal Node? NativeParent => _panel.GetParent();
 
-    internal void Hide() => _panel.Visible = false;
+    internal void Hide()
+    {
+        if (!_disposed) _panel.Visible = false;
+    }
 
     internal void Show(
         string title,
@@ -79,6 +84,7 @@ internal sealed class GodotWorldHoverTooltip
         in Vector2 cursor,
         in Vector2 viewportSize)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         if (!string.Equals(_contentTitle, title, StringComparison.Ordinal) ||
             !Equals(_contentProperties, properties) ||
@@ -96,6 +102,17 @@ internal sealed class GodotWorldHoverTooltip
         // leave stale surplus height behind.
         FitPanelToContent(queueSort: false);
         Place(cursor, viewportSize);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        if (GodotObject.IsInstanceValid(_panel))
+        {
+            _panel.GetParent()?.RemoveChild(_panel);
+            _panel.QueueFree();
+        }
     }
 
     private bool Rebuild(string title, InspectionPropertySet? properties, float viewportWidth)

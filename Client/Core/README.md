@@ -25,6 +25,12 @@ F0.1 also places the application-shell state and local settings model here. The 
 adapters. Reserved application controls remain available without allowing ordinary gameplay input
 to leak through a text field or modal surface.
 
+F1.7 adds the renderer-neutral `GameplayFrameLayout`: a finite selected output shape maps to the
+maximum centered aspect-preserving rectangle in application space, with half-open pointer admission
+and frame-local coordinate conversion. Client Core does not create Godot nodes, crop a camera, or
+own a render target. The Godot adapter uses this seam for workspace masks and outside-frame world
+input rejection; F1.8/F1.9 retain ownership of projection and SubViewport realization.
+
 `ClientSettingsDocument` is a bounded, versioned, engine-neutral user document. Resolution layers
 built-in defaults, global user choices, an explicitly accepted declarative server recommendation,
 and a scoped user override. Server recommendations are deliberately absent from persistence, cannot

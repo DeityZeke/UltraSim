@@ -68,8 +68,8 @@ public readonly record struct LocalCabinPresentationSnapshot(
     GodotDerivedResourceKey WallDerivedKey);
 
 /// <summary>
-/// Cold, engine-thread-only observation of the UI nodes owned by one local gameplay lifetime.
-/// It deliberately records the pre-F1 HUD/World placement without defining a future window model.
+/// Cold, engine-thread-only observation of the F1.7 category hosts owned by one local gameplay
+/// lifetime. Semantic view ownership remains independent from its native gump realization.
 /// </summary>
 public readonly record struct LocalCabinUiOwnershipSnapshot(
     int WorldUiHostChildren,
@@ -77,7 +77,12 @@ public readonly record struct LocalCabinUiOwnershipSnapshot(
     int InventoryHostChildren,
     int OpenSemanticViews,
     bool ChatFocused,
-    bool GameplayInputAllowed);
+    bool GameplayInputAllowed,
+    bool HudOwnedBySharedHud,
+    bool WorldOwnedBySharedWorld,
+    bool GumpsOwnedBySharedManager,
+    bool BannerOwnedByHud,
+    bool TooltipOwnedByContext);
 
 public readonly record struct LocalCabinLifecycleResidueSnapshot(
     int OpenUiViews,
@@ -109,6 +114,16 @@ public readonly record struct LocalF16DerivedAcceptanceSnapshot(
     GodotDerivedResourceStoreSnapshot AfterUser,
     GodotDerivedResourceStoreSnapshot AfterRestore,
     GodotDerivedResourceStoreSnapshot AfterIneffective);
+
+public readonly record struct LocalF17UiAcceptanceSnapshot(
+    int MaximumOpenSemanticViews,
+    int MaximumOpenNativeWindows,
+    Vector2 InventoryInitialPosition,
+    Vector2 MonitorInitialPosition,
+    Vector2 DraggedPosition,
+    bool ContextSelectInvoked,
+    bool ContextInteractInvoked,
+    GodotGumpWindowManagerSnapshot RetiredGumps);
 
 /// <summary>
 /// Permanent Godot consumer for one Network-free local playable application session.
@@ -150,8 +165,7 @@ public partial class LocalCabinClient : Node3D
     private CabinContentOracle? _contentOracle;
     private CabinResolvedContent? _resolvedContent;
     private string? _saveRoot;
-    private CanvasLayer? _shellHudLayer;
-    private CanvasLayer? _shellWorldUiLayer;
+    private GodotSessionUiLease? _sessionUi;
     private CabinHumanBody _humanBody = CabinHumanBody.XBot;
     private string _displayName = "Local Guest";
     private GameGuestAdmissionRequest _guestAdmission = new(
@@ -230,6 +244,7 @@ public partial class LocalCabinClient : Node3D
     private bool _primaryReleased;
     private bool _secondaryPressed;
     private bool _cancelPressed;
+    private bool _contextInteractPending;
     private float _cameraYaw = -0.7f;
     private float _cameraPitch = OrbitDefaultPitchRadians;
     private float _cameraDistance = OrbitDefaultCameraDistanceMeters;
@@ -260,8 +275,7 @@ public partial class LocalCabinClient : Node3D
         CabinContentOracle contentOracle,
         CabinResolvedContent resolvedContent,
         string saveRoot,
-        CanvasLayer? hudLayer = null,
-        CanvasLayer? worldUiLayer = null,
+        GodotSessionUiLease? sessionUi = null,
         CabinHumanBody humanBody = CabinHumanBody.XBot,
         ResolvedClientSettings? settings = null,
         bool useConceptDemoWorld = false,
@@ -281,8 +295,7 @@ public partial class LocalCabinClient : Node3D
         _contentOracle = contentOracle;
         _resolvedContent = resolvedContent;
         _saveRoot = saveRoot;
-        _shellHudLayer = hudLayer;
-        _shellWorldUiLayer = worldUiLayer;
+        _sessionUi = sessionUi;
         _humanBody = humanBody;
         _guestAdmission = new GameGuestAdmissionRequest(
             humanBody == CabinHumanBody.XBot
@@ -509,7 +522,12 @@ public partial class LocalCabinClient : Node3D
         _inventoryHost?.GetChildCount() ?? 0,
         _uiClient?.OpenViewCount ?? 0,
         _chatInput?.HasFocus() == true,
-        _gameplayInputAllowed);
+        _gameplayInputAllowed,
+        _sessionUi is not null && ReferenceEquals(_ownedHudRoot?.GetParent(), _sessionUi.HudHost),
+        _sessionUi is not null && ReferenceEquals(_ownedWorldUiRoot?.GetParent(), _sessionUi.WorldHost),
+        _sessionUi is not null && ReferenceEquals(_inventoryHost, _sessionUi.Gumps.Host),
+        _sessionUi is not null && ReferenceEquals(_systemChatBanner?.NativeParent, _ownedHudRoot),
+        _sessionUi is not null && ReferenceEquals(_hoverTooltip?.NativeParent, _sessionUi.ContextHost));
 
     /// <summary>Permanent D0.1 canary for a live, settings-shaped window rebuild.</summary>
     public LocalCabinPresentationSnapshot RunD01Acceptance()
@@ -788,6 +806,7 @@ public partial class LocalCabinClient : Node3D
             _ = _inputScheduler.TryPump(
                 Stopwatch.GetTimestamp(), TrySubmitScheduledLocalCommand);
             UpdatePointerWorldPoint();
+            _sessionUi?.ContextMenu.UpdateValidity();
             UpdateWorldHover();
             PumpChat();
             _ = _uiBridge?.Pump();
@@ -796,6 +815,11 @@ public partial class LocalCabinClient : Node3D
                 _settings ?? throw new InvalidOperationException("Client settings are unavailable."),
                 gameplayInputAdmitted && GetWindow().HasFocus() &&
                     (_chatInput is null || !_chatInput.HasFocus()));
+            if (_contextInteractPending)
+                physical = physical with
+                {
+                    HeldActions = physical.HeldActions | GamePlayerActions.Interact,
+                };
             ClientHorizontalCameraBasis basis = CameraBasis();
             ClientControlProfileDecision decision = EvaluateProfile(physical, basis);
             if (_gameplayStopPending)
@@ -834,6 +858,7 @@ public partial class LocalCabinClient : Node3D
                 _lastOutcome = "Local input scheduler busy";
             else
             {
+                _contextInteractPending = false;
                 _gameplayStopPending = false;
                 _ = _inputScheduler.TryPump(now, TrySubmitScheduledLocalCommand);
             }
@@ -861,6 +886,11 @@ public partial class LocalCabinClient : Node3D
     {
         if (TryHandleFocusedChatInput(inputEvent)) return;
         if (!_gameplayInputAllowed) return;
+        if (_sessionUi?.ContextMenu.ResolveInput(inputEvent) == true)
+        {
+            GetViewport().SetInputAsHandled();
+            return;
+        }
         if (inputEvent is InputEventKey uiKey && uiKey.Pressed && !uiKey.Echo &&
             TryHandleUiToggleKey(uiKey))
         {
@@ -875,6 +905,18 @@ public partial class LocalCabinClient : Node3D
             if (uiDisposition is GodotUiGameplayInputDisposition.Blocked or
                 GodotUiGameplayInputDisposition.OutsideCloseSubmitted)
                 GetViewport().SetInputAsHandled();
+            return;
+        }
+        if (TryGetPointerPosition(inputEvent, out Vector2 applicationPoint) &&
+            _sessionUi?.ContainsWorldPointer(applicationPoint) == false)
+        {
+            _primaryDown = false;
+            _primaryPressed = false;
+            _primaryReleased = false;
+            _pointerPointValid = false;
+            _pointerTarget = default;
+            _hoverTooltip?.Hide();
+            GetViewport().SetInputAsHandled();
             return;
         }
         if (inputEvent is InputEventKey reveal && !reveal.Echo && IsControlKey(reveal))
@@ -908,7 +950,8 @@ public partial class LocalCabinClient : Node3D
                 else if (_settings is not null && mouse.Pressed &&
                     GodotWorldInput.Matches(mouse, _settings, ClientSemanticAction.ContextMenu))
                 {
-                    _secondaryPressed = true;
+                    TryOpenWorldContext(mouse.Position);
+                    GetViewport().SetInputAsHandled();
                 }
                 else if (mouse.ButtonIndex == MouseButton.WheelUp && mouse.Pressed &&
                     _profile != ControlProfile.IndependentMoveLook)
@@ -960,6 +1003,8 @@ public partial class LocalCabinClient : Node3D
         _actorVisuals = null;
         _systemChatBanner?.Dispose();
         _systemChatBanner = null;
+        _hoverTooltip?.Dispose();
+        _hoverTooltip = null;
         _actorState = null;
         _publicPresentationMetadata = null;
         _renderer?.Dispose();
@@ -978,6 +1023,8 @@ public partial class LocalCabinClient : Node3D
         _inputScheduler = null;
         ReleaseExternalUi(_ownedHudRoot);
         ReleaseExternalUi(_ownedWorldUiRoot);
+        _sessionUi?.Dispose();
+        _sessionUi = null;
         _ownedHudRoot = null;
         _ownedWorldUiRoot = null;
         _initialized = false;
@@ -1611,21 +1658,16 @@ public partial class LocalCabinClient : Node3D
 
     private Control? FindOpenUiView()
     {
-        if (_inventoryHost is null) return null;
-        foreach (Node child in _inventoryHost.GetChildren())
-        {
-            if (child is Control candidate && candidate.Name.ToString().StartsWith(
-                    "UiView_", StringComparison.Ordinal))
-                return candidate;
-        }
-        return null;
+        return FindCompiledViewContaining(null);
     }
 
     private void CreateInventoryConsumer()
     {
         if (_localSession is null || _inventoryHost is null)
             throw new InvalidOperationException("Inventory presentation was composed out of order.");
-        _uiRenderer = new GodotUiRenderer(_inventoryHost);
+        _uiRenderer = _sessionUi is not null
+            ? new GodotUiRenderer(_sessionUi.Gumps)
+            : new GodotUiRenderer(_inventoryHost);
         _uiClient = new UiClientRuntime(_uiRenderer, new UiClientLimits(8, 8));
         _uiBridge = _localSession.AttachUiClient(
             _uiClient,
@@ -1635,11 +1677,9 @@ public partial class LocalCabinClient : Node3D
     private void OpenInventory()
     {
         if (_localSession is null || _uiClient is null) return;
-        if (_uiClient.OpenViewCount != 0)
+        if (TryRequestCloseOpenInventory())
         {
-            _lastOutcome = TryRequestCloseOpenInventory()
-                ? "Inventory close requested"
-                : "Close the current window before opening Inventory";
+            _lastOutcome = "Inventory close requested";
             return;
         }
         ulong request = _nextAdministrativeRequest++;
@@ -1654,11 +1694,6 @@ public partial class LocalCabinClient : Node3D
         if (TryRequestCloseOpenServerMonitor())
         {
             _lastOutcome = "Server Monitor close requested";
-            return;
-        }
-        if (_uiClient.OpenViewCount != 0)
-        {
-            _lastOutcome = "Close the current window before opening Server Monitor";
             return;
         }
         ulong request = _nextAdministrativeRequest++;
@@ -1680,14 +1715,7 @@ public partial class LocalCabinClient : Node3D
 
     private Control? FindOpenInventoryView()
     {
-        if (_inventoryHost is null) return null;
-        foreach (Node child in _inventoryHost.GetChildren())
-        {
-            if (child is Control candidate &&
-                candidate.FindChild("Element_items", recursive: true, owned: false) is not null)
-                return candidate;
-        }
-        return null;
+        return FindCompiledViewContaining("Element_items");
     }
 
     private bool TryRequestCloseOpenServerMonitor()
@@ -1702,13 +1730,32 @@ public partial class LocalCabinClient : Node3D
 
     private Control? FindOpenServerMonitorView()
     {
+        return FindCompiledViewContaining("Element_participants");
+    }
+
+    private Control? FindCompiledViewContaining(string? descendant)
+    {
         if (_inventoryHost is null) return null;
         foreach (Node child in _inventoryHost.GetChildren())
         {
-            if (child is Control candidate &&
-                candidate.FindChild("Element_participants", recursive: true, owned: false) is not null)
-                return candidate;
+            Node? candidate = descendant is null
+                ? FindCompiledView(child)
+                : child.FindChild(descendant, recursive: true, owned: false);
+            while (candidate is not null &&
+                !candidate.Name.ToString().StartsWith("UiView_", StringComparison.Ordinal))
+                candidate = candidate.GetParent();
+            if (candidate is Control view) return view;
         }
+        return null;
+    }
+
+    private static Control? FindCompiledView(Node node)
+    {
+        if (node is Control control && control.Name.ToString().StartsWith(
+                "UiView_", StringComparison.Ordinal))
+            return control;
+        foreach (Node child in node.GetChildren())
+            if (FindCompiledView(child) is Control found) return found;
         return null;
     }
 
@@ -2441,6 +2488,13 @@ public partial class LocalCabinClient : Node3D
         if (_camera is null || _cache is null || _window is null)
             return;
         Vector2 mouse = GetViewport().GetMousePosition();
+        if (_sessionUi?.ContainsWorldPointer(mouse) == false)
+        {
+            _pointerPointValid = false;
+            _pointerTarget = default;
+            _pointerTargetPrefab = 0;
+            return;
+        }
         Vector3 origin = _camera.ProjectRayOrigin(mouse);
         Vector3 direction = _camera.ProjectRayNormal(mouse);
         if (TryPickPresentedPublicObject(
@@ -2475,6 +2529,60 @@ public partial class LocalCabinClient : Node3D
         long globalZ = checked(_player.GlobalZMillimeters +
             (long)Math.Round(hit.Z * 1000d, MidpointRounding.AwayFromZero));
         _ = TrySetPointerWorldPoint(globalX, globalZ);
+    }
+
+    private void TryOpenWorldContext(Vector2 applicationPoint)
+    {
+        if (_sessionUi is null || !_pointerTarget.IsValid || !_pointerPointValid)
+        {
+            _sessionUi?.ContextMenu.Close();
+            return;
+        }
+        WorldPublicEntityId target = _pointerTarget;
+        ClientControlWorldPoint point = _pointerPoint;
+        string title = _publicPresentationMetadata?.TryGet(
+                target, out ClientPublicPresentationMetadata metadata) == true
+            ? metadata.DisplayLabel
+            : "World object";
+        _sessionUi.ContextMenu.Show(
+            title,
+            applicationPoint,
+            () =>
+            {
+                _pointerTarget = target;
+                _pointerPoint = point;
+                _pointerPointValid = true;
+                Select(point);
+            },
+            () =>
+            {
+                _pointerTarget = target;
+                _pointerPoint = point;
+                _pointerPointValid = true;
+                Select(point);
+                _contextInteractPending = true;
+            },
+            () => _publicPresentationMetadata?.TryGet(target, out _) == true);
+        _hoverTooltip?.Hide();
+    }
+
+    private static bool TryGetPointerPosition(InputEvent inputEvent, out Vector2 position)
+    {
+        switch (inputEvent)
+        {
+            case InputEventMouse mouse:
+                position = mouse.Position;
+                return true;
+            case InputEventScreenTouch touch:
+                position = touch.Position;
+                return true;
+            case InputEventScreenDrag drag:
+                position = drag.Position;
+                return true;
+            default:
+                position = default;
+                return false;
+        }
     }
 
     private bool TryPickPresentedPublicObject(
@@ -3126,6 +3234,93 @@ public partial class LocalCabinClient : Node3D
         }
     }
 
+    /// <summary>Focused F1.7 native composition journey using the real Local UI authority path.</summary>
+    public LocalF17UiAcceptanceSnapshot RunF17UiAcceptance()
+    {
+        if (!_initialized || _uiClient is null || _uiBridge is null || _sessionUi is null)
+            throw new InvalidOperationException("F1.7 requires an initialized shell-composed Local session.");
+        LocalCabinUiOwnershipSnapshot routes = GetUiOwnershipSnapshot();
+        if (!routes.HudOwnedBySharedHud || !routes.WorldOwnedBySharedWorld ||
+            !routes.GumpsOwnedBySharedManager || !routes.BannerOwnedByHud ||
+            !routes.TooltipOwnedByContext)
+            throw new InvalidOperationException($"F1.7 Local category routing drifted: {routes}.");
+        OpenInventory();
+        DriveLocalUntil(() => _uiClient.OpenViewCount == 1 && FindOpenInventoryView() is not null);
+        OpenServerMonitor();
+        DriveLocalUntil(() => _uiClient.OpenViewCount == 2 &&
+            FindOpenInventoryView() is not null && FindOpenServerMonitorView() is not null);
+
+        Control inventory = FindOpenInventoryView()!;
+        Control monitor = FindOpenServerMonitorView()!;
+        UiViewInstanceId inventoryId = ParseViewId(inventory);
+        UiViewInstanceId monitorId = ParseViewId(monitor);
+        GodotUiRenderHandle inventoryHandle = _sessionUi.Gumps.HandleForAcceptance(inventoryId);
+        GodotUiRenderHandle monitorHandle = _sessionUi.Gumps.HandleForAcceptance(monitorId);
+        Vector2 inventoryPosition = _sessionUi.Gumps.GetWindowPosition(inventoryHandle);
+        Vector2 monitorPosition = _sessionUi.Gumps.GetWindowPosition(monitorHandle);
+        if (inventoryPosition == monitorPosition ||
+            !_sessionUi.Gumps.BringToFront(inventoryHandle) ||
+            !ReferenceEquals(
+                _sessionUi.Gumps.HandleAt(_sessionUi.Gumps.WindowCount - 1), inventoryHandle))
+            throw new InvalidOperationException(
+                $"F1.7 modeless gump cascade/z ordering failed: inventory={inventoryPosition}, " +
+                $"monitor={monitorPosition}, order={string.Join(',', Enumerable.Range(0, _sessionUi.Gumps.WindowCount).Select(index => _sessionUi.Gumps.HandleAt(index).Instance.Value))}, " +
+                $"inventory={inventoryId.Value} monitor={monitorId.Value}.");
+        if (!_sessionUi.Gumps.DragForAcceptance(inventoryHandle, new Vector2(-4_000, -4_000)))
+            throw new InvalidOperationException("F1.7 native gump drag was rejected.");
+        Vector2 dragged = _sessionUi.Gumps.GetWindowPosition(inventoryHandle);
+        if (dragged.X < 0 || dragged.Y < 0)
+            throw new InvalidOperationException("F1.7 native gump escaped the application clamp.");
+
+        bool selected = false;
+        bool interacted = false;
+        _sessionUi.ContextMenu.Show(
+            "Disclosed acceptance target",
+            new Vector2(4, 4),
+            () => selected = true,
+            () => interacted = true);
+        Button select = _sessionUi.ContextHost.FindChild(
+            "ContextSelect", recursive: true, owned: false) as Button ??
+            throw new InvalidOperationException("F1.7 Select context action was absent.");
+        select.EmitSignal(BaseButton.SignalName.Pressed);
+        if (!selected || _sessionUi.ContextMenu.Visible)
+            throw new InvalidOperationException("F1.7 Select context action did not close exactly once.");
+        _sessionUi.ContextMenu.Show(
+            "Disclosed acceptance target",
+            new Vector2(4, 4),
+            () => selected = true,
+            () => interacted = true);
+        Button interact = _sessionUi.ContextHost.FindChild(
+            "ContextInteract", recursive: true, owned: false) as Button ??
+            throw new InvalidOperationException("F1.7 Interact context action was absent.");
+        interact.EmitSignal(BaseButton.SignalName.Pressed);
+        if (!interacted || _sessionUi.ContextMenu.Visible)
+            throw new InvalidOperationException("F1.7 Interact context action did not close exactly once.");
+
+        if (!TryRequestCloseOpenInventory())
+            throw new InvalidOperationException("F1.7 Inventory could not close independently.");
+        DriveLocalUntil(() => _uiClient.OpenViewCount == 1 &&
+            FindOpenInventoryView() is null && FindOpenServerMonitorView() is not null);
+        if (!TryRequestCloseOpenServerMonitor())
+            throw new InvalidOperationException("F1.7 Server Monitor could not close independently.");
+        DriveLocalUntil(() => _uiClient.OpenViewCount == 0);
+        GodotGumpWindowManagerSnapshot retired = _sessionUi.Gumps.GetSnapshot();
+        if (retired.OpenWindows != 0 || retired.PointerCaptured)
+            throw new InvalidOperationException("F1.7 closed gumps retained native manager state.");
+        return new LocalF17UiAcceptanceSnapshot(
+            2, 2, inventoryPosition, monitorPosition, dragged, selected, interacted, retired);
+
+        static UiViewInstanceId ParseViewId(Control root)
+        {
+            const string prefix = "UiView_";
+            string name = root.Name.ToString();
+            if (!name.StartsWith(prefix, StringComparison.Ordinal) ||
+                !ulong.TryParse(name.AsSpan(prefix.Length), out ulong value))
+                throw new InvalidOperationException("A compiled UI view lost its exact instance identity.");
+            return new UiViewInstanceId(value);
+        }
+    }
+
     private void ValidateCatalogAndHumanPresentation()
     {
         LocalCabinPresentationSnapshot snapshot = GetPresentationSnapshot();
@@ -3705,8 +3900,8 @@ public partial class LocalCabinClient : Node3D
 
         _ownedHudRoot = FullRectControl("CabinHUD");
         _ownedHudRoot.Scale = Vector2.One * (_settings?.UiScale ?? 1f);
-        if (_shellHudLayer is not null)
-            _shellHudLayer.AddChild(_ownedHudRoot);
+        if (_sessionUi is not null)
+            _sessionUi.HudHost.AddChild(_ownedHudRoot);
         else
         {
             var layer = new CanvasLayer { Name = "HUD" };
@@ -3742,7 +3937,7 @@ public partial class LocalCabinClient : Node3D
         AddProfileButton("3/F3 Iso move/look", ControlProfile.IndependentMoveLook);
         stack.AddChild(new Label
         {
-            Text = "F1: single-click selects • hold LMB steers • double-click ground travels • RMB/Esc stops\n" +
+            Text = "F1: single-click selects • hold LMB steers • double-click ground travels • RMB context • Esc stop/options\n" +
                 (_useConceptDemoWorld
                     ? "MMB drag camera • wheel zoom • E use selected door/chest/sign/telepad/gate • I inventory\n"
                     : "MMB drag camera • wheel zoom • E use selected door/chest • I inventory\n") +
@@ -3790,8 +3985,8 @@ public partial class LocalCabinClient : Node3D
         _chatInput.TextSubmitted += SubmitChat;
         chatEntry.AddChild(_chatInput);
         _ownedWorldUiRoot = FullRectControl("CabinWorldUI");
-        if (_shellWorldUiLayer is not null)
-            _shellWorldUiLayer.AddChild(_ownedWorldUiRoot);
+        if (_sessionUi is not null)
+            _sessionUi.WorldHost.AddChild(_ownedWorldUiRoot);
         else
             _ownedHudRoot.AddChild(_ownedWorldUiRoot);
         _overheadSpeech = new Label
@@ -3801,12 +3996,18 @@ public partial class LocalCabinClient : Node3D
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
         _ownedWorldUiRoot.AddChild(_overheadSpeech);
-        _systemChatBanner = new GodotSystemChatBanner(_ownedWorldUiRoot);
+        _systemChatBanner = new GodotSystemChatBanner(_ownedHudRoot);
 
-        _hoverTooltip = new GodotWorldHoverTooltip(_ownedWorldUiRoot);
+        _hoverTooltip = new GodotWorldHoverTooltip(_sessionUi?.ContextHost ?? _ownedWorldUiRoot);
+        _sessionUi?.RegisterTransientSuppressor(_hoverTooltip.Hide);
 
-        _inventoryHost = FullRectControl("CabinInventory");
-        _ownedHudRoot.AddChild(_inventoryHost);
+        if (_sessionUi is not null)
+            _inventoryHost = _sessionUi.Gumps.Host;
+        else
+        {
+            _inventoryHost = FullRectControl("CabinInventory");
+            _ownedHudRoot.AddChild(_inventoryHost);
+        }
 
         void AddProfileButton(string text, ControlProfile profile)
         {

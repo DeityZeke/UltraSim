@@ -49,6 +49,8 @@ public sealed class GodotSystemChatBanner : IDisposable
         host.AddChild(_panel);
     }
 
+    internal Node? NativeParent => _panel.GetParent();
+
     public bool TryPresent(in ClientChatOccurrence occurrence, ulong nowMilliseconds)
     {
         EnsureOperational();

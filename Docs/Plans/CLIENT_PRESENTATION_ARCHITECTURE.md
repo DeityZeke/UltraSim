@@ -808,11 +808,11 @@ Higher-quality presentation realization may be lazy where semantic safety permit
 
 # 16. UI scene-tree categories and z-order
 
-## Future application workspace and Gameplay Frame (F1.7-F1.9)
+## Application workspace and Gameplay Frame (F1.7-F1.9)
 
 The physical Application Window is not the gameplay viewport. A selected Gameplay Output Resolution (default 1920×1080, with bounded lower/higher/custom choices) determines render-target pixels and aspect. The Gameplay Frame is the application-space rectangle displaying that output: it defaults to maximum aspect-preserving fit inside the OS window, may later snap to bounded sizes, cannot exceed the window, and has no internal letterbox merely to retain 16:9. Unused window area is a dark application/UI workspace. A 480×270 output scaled into a 1920×1080 frame is still the same 16:9 view at lower fidelity; changing pixel count alone never expands world visibility.
 
-The frame is below normal UI. The intended order is workspace/background, Gameplay Frame, frame-associated World overlays, HUD, Menus/Gumps, Debug, then Context/Tooltip. Nameplates, health bars, overhead Chat, and markers track world positions in the frame; ordinary gumps can cover the frame or occupy unused workspace, supporting desktop-style layout. Frame host/shared UI composition belongs to F1.7; F1.8 owns frame-aware camera projection; F1.9 makes Godot render to the frame/SubViewport rather than implicitly to the OS window. None is implemented by F1.3.
+The frame is below normal UI. The implemented order is workspace/background, Gameplay Frame, frame-associated World overlays, HUD, Menus/Gumps, Debug, then Context/Tooltip. Nameplates, health bars, overhead Chat, and markers track world positions in the frame; ordinary gumps can cover the frame or occupy unused workspace, supporting desktop-style layout. F1.7 closes the frame host/shared UI composition with transitional main-viewport masks and a frame-local input seam. F1.8 owns frame-aware camera projection; F1.9 makes Godot render to the frame/SubViewport rather than implicitly to the OS window.
 
 The maximum stock-client world-space view is a canonical 16:9 envelope. The selected output aspect sees the largest centered rectangle of that aspect contained in the envelope: 16:9 sees all of it, 4:3 or 5:4 crops horizontally with the same vertical extent, and an aspect wider than 16:9 retains canonical width while cropping vertically. Scaling or increasing resolution never expands that envelope. This is presentation consistency, not security: a modified client can ignore crop, and Game AOI/disclosure remains authoritative. World render/residency distance is separate from window size, frame size, output pixels, and this view envelope.
 
@@ -868,7 +868,7 @@ Debug and Context/Tooltip are deliberately high:
 - Debug should remain visible while inspecting ordinary client/menu state where its active page permits it.
 - Context menus/tooltips must work over World, HUD, normal menus, and Debug.
 
-The current F0.1 shell has World/HUD/Menus/Debug roots. The client-completion pass should add/define the top transient Context/Tooltip category and make Local/Remote gameplay actually route surfaces through the intended roots.
+F1.7 extends the persistent F0.1 shell with Workspace and Context/Tooltip, and Local/Remote gameplay now leases the same World/HUD/Menus/Context composition. The transparent category hosts ignore pointer input themselves; their concrete children own only their visible interaction surfaces.
 
 ---
 
@@ -907,7 +907,7 @@ When a menu/gump/view closes, its realized native presentation should ordinarily
 
 The existing generic Godot semantic UI renderer already removes and frees its root on semantic close. Preserve that rule.
 
-A client window/gump manager still needs to own native presentation policy such as:
+The F1.7 client window/gump manager owns native presentation policy for:
 
 - category placement;
 - multiple simultaneously open non-modal gumps where allowed;
@@ -922,7 +922,9 @@ A client window/gump manager still needs to own native presentation policy such 
 
 Server UI authority should not own Godot nodes or screen coordinates.
 
-Current one-host/center-every-definition behavior is accepted vertical-slice scaffolding, not the final window manager.
+The current manager deliberately remains bounded and presentation-only. Remembered placement and a
+general modal/window policy remain later product work; semantic views and authoritative actions stay
+inside `UiClientRuntime` and Game.
 
 ---
 
@@ -953,25 +955,23 @@ Do not pool ordinary Inventory/gump windows merely because pooling exists. Stale
 
 # 20. Debug cycle and context menus
 
-The desired Debug interaction is a finite local cycle, for example:
+The Debug interaction is a finite local cycle. F1.7 currently uses:
 
 ~~~text
-F10:
+F11:
     Off
-    -> Performance
-    -> World/Render
-    -> Network
-    -> Content/Cache
-    -> UI
-    -> optional Admin/Authorized
+    -> Client
+    -> Presentation
+    -> Content
     -> Off
 ~~~
 
 Exact pages/key are configurable. The behavior is a client-local finite diagnostic state machine, not server code.
 
-Likewise, "ContextMenu" must eventually mean actual presentation/context behavior rather than only being a convenient right-click cancellation gesture.
-
-Current code still uses the ContextMenu semantic input as OrbitCommand stop/cancel behavior and has no complete first-class context-menu presenter. That is a known client-completion gap.
+`ContextMenu` now means actual presentation/context behavior. The bounded presenter shows only
+already-disclosed target identity and the finite Select, Interact/Use, and Cancel actions. It closes
+on outside click, invalid target, shell modal, and session retirement. Right-click no longer doubles
+as OrbitCommand stop; Escape and shell/modal input loss keep the explicit cancellation path.
 
 ---
 
@@ -1476,35 +1476,29 @@ Vegetation need not block PF6 unless explicitly selected for the Concept Demo, b
 
 ---
 
-# 33. Current implementation gaps this pass must acknowledge
+# 33. Current implementation state and remaining gaps
 
-The current client is a strong semantic/integration proof but not yet the final presentation composition.
+The current client is a strong semantic/integration proof with the first shared presentation
+composition. Camera projection/render-target and scalable-renderer work remain deliberately later.
 
 ## UI routing
 
-ClientRoot currently creates persistent World, HUD, Menus, and Debug layers, but Local and Remote gameplay do not consistently route surfaces through them.
-
-Examples in the current Godot implementation:
-
-- Local Inventory is parented under the local HUD root.
-- Local hover tooltip is under the World UI root.
-- Remote gameplay is configured primarily with one HUD layer/root.
-- Remote server UI, Chat, System banner, and hover tooltip share that HUD root.
-- no dedicated Context/Tooltip layer exists.
-
-The intended category/z-order model therefore exists as shell scaffolding, not end-to-end behavior.
+ClientRoot creates persistent Workspace, World, HUD, Menus, Debug, and Context/Tooltip layers.
+Local and Remote session leases route world overlays, HUD/Chat/banner, gameplay gumps, and transient
+tooltip/context presentation through the same hosts. The shell menu host is independent from the
+gameplay-gump host.
 
 ## Window/gump management
 
-The generic Godot UI renderer creates a compiled view, adds it to one host, and centers it.
-
-There is not yet a complete native window manager for multiple non-modal gumps, bring-to-front, drag/clamp, category routing, remembered placement, or context layering.
+The generic Godot UI renderer delegates native compiled-view ownership to the bounded gameplay-gump
+manager. Multiple modeless views coexist with deterministic cascade, bring-to-front, native drag,
+application clamping, and exact native retirement. Remembered placement is not yet implemented.
 
 ## Debug/context behavior
 
-The Debug layer is currently skeletal.
-
-ContextMenu is currently also used as OrbitCommand stop/cancel input and has no complete generic context-menu presentation system.
+The Debug layer has one finite Off/Client/Presentation/Content cycle. Context/Tooltip owns the
+bounded disclosed-world-target menu and hover tooltips. This does not yet attempt arbitrary
+server-defined context actions or an admin/debug framework.
 
 ## Local content packaging
 

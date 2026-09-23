@@ -37,6 +37,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         bool fallbackLabSmoke = arguments.Contains("--d0-4-smoke", StringComparer.Ordinal);
         bool primitiveOnlySmoke = arguments.Contains("--f1-3-primitive-smoke", StringComparer.Ordinal);
         bool f16DerivedSmoke = arguments.Contains("--f1-6-derived-smoke", StringComparer.Ordinal);
+        bool f17UiSmoke = arguments.Contains("--f1-7-ui-smoke", StringComparer.Ordinal);
         string? f14Mode = ReadLocalArgument("--f1-4-official-smoke=");
         bool guestAdmissionSmoke = arguments.Contains("--d0-5-smoke", StringComparer.Ordinal);
         bool f02Smoke = arguments.Contains("--f0-2-smoke", StringComparer.Ordinal);
@@ -48,7 +49,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         if (arguments.Contains("--composition-smoke", StringComparer.Ordinal) ||
             !conceptDemoSmoke && !residencySmoke && !farIslandSmoke && !signSmoke &&
             !fallbackLabSmoke && !primitiveOnlySmoke && !guestAdmissionSmoke &&
-            !f16DerivedSmoke && f14Mode is null && !f02Smoke && !sharedHostSmoke)
+            !f16DerivedSmoke && !f17UiSmoke && f14Mode is null && !f02Smoke && !sharedHostSmoke)
             return;
         try
         {
@@ -101,6 +102,25 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
                     $"diskHits={evidence.AfterRestore.DiskTextureHits}");
                 RetireCurrentSession();
                 ReturnToMainMenu("F1.6 derived Local smoke passed.");
+                GetTree().Quit(0);
+                return;
+            }
+            if (f17UiSmoke)
+            {
+                GodotClientSessionBoundarySnapshot baseline = CaptureSessionBoundary();
+                StartLocalCabin(
+                    CabinContentVariant.Default, CabinHumanBody.XBot,
+                    useConceptDemoWorld: true);
+                LocalF17UiAcceptanceSnapshot evidence = _cabin!.RunF17UiAcceptance();
+                GD.Print(
+                    $"F1.7 LOCAL UI PASS views={evidence.MaximumOpenSemanticViews} " +
+                    $"windows={evidence.MaximumOpenNativeWindows} " +
+                    $"cascade={evidence.InventoryInitialPosition}/{evidence.MonitorInitialPosition} " +
+                    $"dragged={evidence.DraggedPosition} context=" +
+                    $"{evidence.ContextSelectInvoked}/{evidence.ContextInteractInvoked}");
+                RetireCurrentSession();
+                ReturnToMainMenu("F1.7 Local UI smoke passed.");
+                RequireCleanSessionBoundary(in baseline, "F1.7 Local UI retirement");
                 GetTree().Quit(0);
                 return;
             }
@@ -605,6 +625,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         ContentCatalogRoot.AddChild(_catalogMarker);
 
         var cabin = new LocalCabinClient { Name = "LocalCabinSession" };
+        GodotSessionUiLease sessionUi = BeginSessionUi("LocalCabinSession");
 #if ULTRASIM_COMPLETE
         ILocalPlayableServerExtensionFactory? extensionFactory = serverExtensionFactory ??
             (useConceptDemoWorld ? new ConceptDemoHostedServerExtensionFactory(
@@ -621,8 +642,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             ProjectSettings.GlobalizePath(useConceptDemoWorld
                 ? "user://single-player/concept-demo-d0-0-saves"
                 : "user://single-player/cabin-saves"),
-            HudLayer,
-            WorldUiLayer,
+            sessionUi,
             human,
             EffectiveSettings,
             useConceptDemoWorld,

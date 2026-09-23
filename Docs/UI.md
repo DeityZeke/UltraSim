@@ -109,6 +109,32 @@ deletion. Character Select is explicitly modal, Inventory and Server Monitor use
 default, and informational signs use semantic click-outside Close. Local and Online interpret the
 same compiled policy.
 
+## F1.7 Godot workspace and native gumps
+
+The Godot application owns one persistent presentation composition with this category order:
+
+```text
+Workspace < World < HUD < Menus/Gumps < Debug < Context/Tooltip
+```
+
+The shell-menu host and gameplay-gump host are distinct children of Menus. A session lease adds
+only its World, HUD, and Context contributions and retires them together. `GodotUiRenderer` still
+renders the exact compiled semantic definition/model, while `GodotGumpWindowManager` owns only the
+native wrapper, bounded cascade, bring-to-front order, drag/application clamp, and native lifetime.
+Inventory and Server Monitor may therefore coexist; closing either still follows its semantic Game
+action and removes only its matching native window.
+
+The selected Gameplay Output shape (1920×1080 by default) is maximum-fit in the application window.
+Unused pixels are transitional dark workspace, frame-associated World overlays are clipped to the
+result, and world pointer input outside it is rejected. This is an input/layout seam, not the F1.8
+camera crop or F1.9 SubViewport.
+
+Context/Tooltip owns hover presentation and one bounded right-click menu over already-disclosed
+targets. The current finite actions are Select, Interact/Use, and Cancel. Outside click, target
+invalidation, shell modal, and session retirement close it. Right-click no longer doubles as world
+Stop; Escape and shell/modal gameplay-input loss remain the explicit cancellation paths. F11 owns
+the finite Off → Client → Presentation → Content → Off local diagnostic cycle.
+
 ## Local and remote paths
 
 `LocalSemanticLink` is the engine-neutral offline bridge. It transfers the same

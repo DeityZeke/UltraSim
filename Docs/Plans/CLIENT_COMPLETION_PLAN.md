@@ -1,6 +1,6 @@
 # UltraSim Client Completion Plan
 
-**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.6 are CLOSED; F1.7 is NEXT.**
+**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.7 are CLOSED; F1.8 is NEXT.**
 
 **Parent architecture:** [CLIENT_PRESENTATION_ARCHITECTURE.md](CLIENT_PRESENTATION_ARCHITECTURE.md)
 
@@ -87,8 +87,8 @@ F1.3  Primitive substrate and fallback contract (CLOSED)
 F1.4  Official Local content productization (CLOSED)
 F1.5  User presentation overrides and content generations (CLOSED)
 F1.6  Derived resources / atlas pipeline (CLOSED)
-F1.7  Application workspace, Gameplay Frame, shared UI/gump composition (NEXT)
-F1.8  Declarative camera/control rig and canonical gameplay-view crop
+F1.7  Application workspace, Gameplay Frame, shared UI/gump composition (CLOSED)
+F1.8  Declarative camera/control rig and canonical gameplay-view crop (NEXT)
 F1.8A Remote motion prediction/reconciliation/interpolation
 F1.9  Godot scalable presentation backend targeting the Gameplay Frame
 F1.10 Actor representation tiers and GPU-friendly interpolation seam
@@ -791,8 +791,7 @@ candidate publication.
 The measured two-texture `WorldOpaque` candidate produced one pixel-exact page, but the current
 Cabin geometry still needs separate materials/draws and exposes no reliable draw-call reduction.
 Production therefore remains standalone derived Texture/Material resources; the atlas candidate is
-retained only as bounded acceptance evidence, not as semantic architecture. F1.7 owns the next UI
-workspace/gump checkpoint; no F1.7 work is part of this closure.
+retained only as bounded acceptance evidence, not as semantic architecture.
 
 ---
 
@@ -863,6 +862,29 @@ Right-click ContextMenu must no longer be merely an overloaded OrbitCommand canc
 - close removes native view and focus/action ownership;
 - Local and Remote run the same routing/lifetime acceptance suite;
 - reconnect/session retirement returns to a clean shell boundary.
+
+## Closure
+
+F1.7 establishes one persistent Godot application workspace for every edition. A finite selected
+Gameplay Output shape (1920×1080 by default) produces the maximum centered aspect-preserving
+application-space Gameplay Frame. Four dark workspace masks cover unused space, the clipped World
+overlay host follows the frame, and world pointer admission rejects the unused workspace. This is
+deliberately a main-viewport transition: F1.8 still owns canonical camera crop/projection and F1.9
+still owns an independent render target/SubViewport.
+
+The persistent category order is Workspace, World, HUD, Menus, Debug, Context/Tooltip. Local and
+Remote sessions lease the same category hosts. Shell menus and gameplay gumps are distinct; the
+bounded gameplay manager supports simultaneous Inventory and Server Monitor views, deterministic
+cascade and bring-to-front order, native drag/application clamping, exact close/free, and session
+retirement. Tooltips and a finite disclosed-target Select/Interact/Cancel menu live in Context.
+Right-click no longer submits Orbit stop; Escape and shell/modal input loss remain explicit stop
+paths. Shell modals suppress transient Context without destroying modeless gameplay gumps.
+
+F11 cycles the finite client/presentation/content Debug pages back to Off without hidden page
+debt. Engine-neutral layout tests, native workspace/gump acceptance, the real Local F1.7 journey,
+the Remote Inventory/Server Monitor journey, and the mixed Local/Remote retirement guardrail freeze
+the behavior. The immutable closure evidence is
+`_Benchmarks/Baselines/client-f1.7-workspace-ui-gumps-2026-09-22.*`.
 
 ---
 

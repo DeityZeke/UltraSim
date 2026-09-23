@@ -134,14 +134,15 @@ camera profiles. The Central Island welcome sign exposes a local `Sign`
 hover from resident presentation state; select it and press E to open its authoritative
 informational view, then use the view's Close action to dismiss it.
 
-Compiled UI Canvases are centered in the viewport. The Inventory v8 definition supplies its own
-surface and authoritative Close action; `I` opens it when no UI is active and closes the existing
-Inventory instead of stacking duplicate transparent views. Compiled definitions select a bounded
+F1.7 realizes compiled UI Canvases as bounded native gameplay-gump windows above the HUD. Inventory
+and Server Monitor may coexist, receive deterministic cascade/bring-to-front behavior, drag within
+the application clamp, and retire their native wrapper exactly when the semantic view closes. `I`
+and F4 each toggle only their matching view rather than preventing the other view from opening.
+Compiled definitions still select a bounded
 outside-pointer policy. The modeless default blocks world click-through over the visible UI but
 allows outside gameplay input while the view remains open. Character Select explicitly blocks
 gameplay; informational signs submit their ordinary authoritative Close action on an outside click.
-Window dragging remains deferred. Tall
-stock public objects use bounded full-height pointer volumes before terrain projection, so the
+Tall stock public objects use bounded full-height pointer volumes before terrain projection, so the
 visible upper portions of doors and signs nominate those disclosed objects normally.
 
 I0.12 adds the first persistent world item to both local and remote consumers. An Iron Sword can be
@@ -285,7 +286,15 @@ source-generation ownership and candidate realization completes before publicati
 restore, prior derived reuse, and ineffective-pack no-churn through the actual Single Player path.
 The pixel-exact two-texture `WorldOpaque` atlas candidate is measured but not selected: it reduces
 two texture objects to one page without demonstrating fewer materials or draws. Standalone derived
-resources remain production policy; F1.7 UI/workspace work is unstarted.
+resources remain production policy.
+
+F1.7 adds one persistent application workspace shared by Local and Remote composition. The default
+1920×1080 selected output shape is maximum-fit and centered inside the application window; four
+dark transitional masks cover unused workspace, the clipped World overlay host follows the frame,
+and world pointer input outside the frame is rejected. Workspace, World, HUD, Menus, Debug, and
+Context/Tooltip have deterministic category order. Tooltips and the bounded Select/Interact/Cancel
+world context menu use Context; right-click no longer submits Orbit stop. F11 cycles
+Off/Client/Presentation/Content. The main 3D viewport is intentionally unchanged until F1.8/F1.9.
 
 `--d0-5-smoke` crosses the real Single Player button and Admission form. It proves rejected input
 does not start authority, then enters with a trimmed Unicode name and the Y body and checks the

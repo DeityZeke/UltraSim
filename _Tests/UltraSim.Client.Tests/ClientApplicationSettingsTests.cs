@@ -35,6 +35,7 @@ static class ClientApplicationSettingsTests
             [
                 Binding(ClientSemanticAction.Interact, ClientPhysicalInputKind.Keyboard, "F"),
                 Binding(ClientSemanticAction.OpenSettings, ClientPhysicalInputKind.Keyboard, "P"),
+                Binding(ClientSemanticAction.CycleDebug, ClientPhysicalInputKind.Keyboard, "F12"),
                 Binding(ClientSemanticAction.ContextMenu, ClientPhysicalInputKind.Keyboard, "ESCAPE"),
                 Binding(ClientSemanticAction.Select, ClientPhysicalInputKind.MouseButton, "MIDDLE"),
                 Binding(ClientSemanticAction.Primary, ClientPhysicalInputKind.MouseButton, "LEFT"),
@@ -56,6 +57,7 @@ static class ClientApplicationSettingsTests
         Equal("MIDDLE", RequireBinding(accepted, ClientSemanticAction.Select).Code);
         Equal("LEFT", RequireBinding(accepted, ClientSemanticAction.Primary).Code);
         Equal("SPACE", RequireBinding(accepted, ClientSemanticAction.Jump).Code);
+        Equal("F11", RequireBinding(accepted, ClientSemanticAction.CycleDebug).Code);
         ClientPhysicalInput acceptedInteract = RequireBinding(
             accepted, ClientSemanticAction.Interact);
         True(accepted.TryResolveInput(in acceptedInteract, out ClientSemanticAction resolvedInteract));

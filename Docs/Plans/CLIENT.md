@@ -10,7 +10,7 @@ Complete-hosted deployment shapes. I0.12 human-play hardening prevents visible e
 remaining a pointer-nominated world pickup, and I0.13 replaces its temporary cold property text
 with bounded typed Inspection Properties plus content-sized world-hover/Inventory presentation.
 
-F1.0-F1.6 are closed; F1.7 is next. F1.2 separates the required remote WorldPack/UI activation and its exact application proof
+F1.0-F1.7 are closed; F1.8 is next. F1.2 separates the required remote WorldPack/UI activation and its exact application proof
 from optional Realm-authorized actor-art presentation. Game manifest v31 advertises the latter
 on message 149 without changing transport revision 2. The client publishes a separate immutable
 presentation generation with Realm → `world.local` → Primitive actor selection; late art replaces
@@ -20,7 +20,9 @@ productizes exact Official X/Y art as a removable external `world.local` package
 old Godot asset mount/managed embedding. F1.5 adds explicitly installed, bounded passive User
 ActorPresentation replacements above Realm/Local/Primitive without changing semantic proof. F1.6
 adds Texture Replace, engine-neutral Texture/Material leaves, restart-stable Godot derived resources,
-and a measured/rejected optional `WorldOpaque` atlas candidate; F1.7+ remains unstarted.
+and a measured/rejected optional `WorldOpaque` atlas candidate. F1.7 closes the shared application
+workspace, Gameplay Frame input/layout seam, category routing, modeless gameplay-gump manager,
+finite Debug cycle, and first-class world context menu without beginning camera crop or SubViewport work.
 C0.2 now closes the first routed Global Chat mode plus explicit authority-originated System
 broadcast/feed/banner convergence. D0.6 now closes direct ping indication plus the first sanitized,
 read-only, content-backed Server Monitor and trusted test-marker producer. D0.7a now closes shared
@@ -811,10 +813,14 @@ ClientRoot
 │   ├── Effects
 │   └── CameraRig
 └── UILayers
+    ├── Workspace
     ├── World
     ├── HUD
     ├── Menus
-    └── Debug
+    │   ├── GameplayGumps
+    │   └── ShellMenus
+    ├── Debug
+    └── Context / Tooltip
 ```
 
 Exact node names are not frozen. Ownership is.
@@ -845,6 +851,12 @@ Disconnect/world replacement retires session-owned presentation beneath the pers
 - local Settings;
 - server-composed windows;
 - focus/z-order/modal policy.
+
+## Context / Tooltip
+
+- hover tooltips;
+- finite disclosed-target context actions;
+- transient presentation above every lower category.
 
 ## Debug
 
@@ -1730,7 +1742,7 @@ settings. The current scope key is intentionally opaque fixture/storage vocabula
 hostname, endpoint, or claim of verified `ApplicationRealmId`; F0.3a establishes that identity.
 
 `Client/Godot/Shell` now supplies one persistent `ClientRoot` with Controller,
-ContentCatalogs, World, and World/HUD/Menu/Debug layer roots. It owns readable versioned
+ContentCatalogs, World, and Workspace/World/HUD/Menu/Debug/Context layer roots. It owns readable versioned
 `user://settings/client.json` persistence with fail-closed invalid-file fallback, main/settings,
 loading/error/in-session-options surfaces, and reserved-control dispatch. All three fixed
 compositions launch this same shell while their capability entries remain tied to physically
@@ -1752,7 +1764,7 @@ interest and delivery lifetime remain separate from this client-owned structural
 Implement:
 
 - persistent ClientRoot;
-- World/HUD/Menu/Debug layers;
+- Workspace/World/HUD/Menu/Debug/Context layers;
 - Main Menu;
 - readable local Settings persistence;
 - physical binding representation;
@@ -2621,7 +2633,7 @@ Frozen requirements are ownership/dependency/security behaviors, not spellings.
 The client-shell campaign is complete when UltraSim has a real executable shell that:
 
 1. launches independently of active world/session;
-2. has persistent World/HUD/Menu/Debug layers;
+2. has persistent Workspace/World/HUD/Menu/Debug/Context layers;
 3. exposes only installed capabilities;
 4. compiles Single Player with Network physically absent;
 5. compiles Online with local authority implementation physically absent;
@@ -2790,8 +2802,8 @@ F1.3 primitive substrate/fallback contract                                    CL
 F1.4 Official Local content productization                                    CLOSED
 F1.5 user presentation overrides/content generations                          CLOSED
 F1.6 derived resources/atlas pipeline                                         CLOSED
-F1.7 application workspace/Gameplay Frame/shared UI/gump manager             NEXT
-F1.8 declarative camera/control rig + canonical gameplay-view crop            PLANNED
+F1.7 application workspace/Gameplay Frame/shared UI/gump manager             CLOSED
+F1.8 declarative camera/control rig + canonical gameplay-view crop            NEXT
 F1.8A remote motion prediction/reconciliation/interpolation                   PLANNED
 F1.9 scalable Godot backend targeting the Gameplay Frame                      PLANNED
 F1.10 actor representation tiers/realization interpolation seam               PLANNED
@@ -2820,10 +2832,12 @@ the effective texture selection. The writable Godot derived cache uses stable co
 not process generations; standalone native resources remain selected after the atlas candidate
 showed no material/draw reduction.
 
-The future Gameplay Frame distinguishes physical Application Window, render-target Gameplay
-Output Resolution, aspect-preserving application-space frame, canonical 16:9 maximum stock view,
-and independent world render/residency distance. F1.7 owns frame/workspace UI composition; F1.8
-owns centered aspect crop without disclosing more world; F1.9 targets the frame/SubViewport.
+The F1.7 Gameplay Frame distinguishes physical Application Window, selected Gameplay Output shape,
+aspect-preserving application-space frame, and independent world render/residency distance. It now
+owns the maximum-fit frame, dark unused workspace, clipped World overlay host, outside-frame world
+input rejection, shared UI composition, and modeless gump lifetime. The 3D main viewport remains
+transitional. F1.8 owns canonical centered camera crop without disclosing more world; F1.9 targets
+the frame/SubViewport.
 F1.8A separately owns controlled-remote prediction/reconciliation and non-controlled-remote
 interpolation. It selects a pose, while F1.10 may optimize its realization. These are future
 contracts, not F1.3 implementation or client-side authority.

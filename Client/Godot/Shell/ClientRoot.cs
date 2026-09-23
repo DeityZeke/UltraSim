@@ -15,6 +15,9 @@ public readonly record struct GodotClientRootSnapshot(
     bool HudLayerPresent,
     bool MenuLayerPresent,
     bool DebugLayerPresent,
+    bool ContextLayerPresent,
+    bool WorkspaceLayerPresent,
+    GodotClientUiCompositionSnapshot UiComposition,
     GodotClientSessionBoundarySnapshot Boundary);
 
 /// <summary>
@@ -31,6 +34,15 @@ public readonly record struct GodotClientSessionBoundarySnapshot(
     int MenuChildren,
     int DebugChildren,
     int MenuHostChildren,
+    int WorldHostChildren,
+    int HudHostChildren,
+    int GameplayGumpHostChildren,
+    int ShellMenuHostChildren,
+    int ContextChildren,
+    int ContextHostChildren,
+    int OpenGumpWindows,
+    bool GumpPointerCaptured,
+    GodotClientDebugPage DebugPage,
     string? FocusedControlType,
     bool ServerProfileActive,
     ClientControlGrammar ControlGrammar,
@@ -63,9 +75,11 @@ public abstract partial class ClientRoot : Control
     private CanvasLayer? _hudLayer;
     private CanvasLayer? _menuLayer;
     private CanvasLayer? _debugLayer;
+    private CanvasLayer? _contextLayer;
+    private CanvasLayer? _workspaceLayer;
     private Control? _menuHost;
     private Label? _hudStatus;
-    private Label? _debugStatus;
+    private GodotClientUiComposition? _uiComposition;
 
     protected abstract ClientCompositionManifest Composition { get; }
 
@@ -86,6 +100,11 @@ public abstract partial class ClientRoot : Control
 
     protected CanvasLayer HudLayer => _hudLayer ??
         throw new InvalidOperationException("The client shell is not ready.");
+
+    protected GodotClientUiComposition UiComposition => _uiComposition ??
+        throw new InvalidOperationException("The client UI composition is not ready.");
+
+    protected GodotSessionUiLease BeginSessionUi(string name) => UiComposition.BeginSession(name);
 
     protected ResolvedClientSettings EffectiveSettings => _resolved;
 
@@ -126,6 +145,7 @@ public abstract partial class ClientRoot : Control
 
     protected GodotClientSessionBoundarySnapshot CaptureSessionBoundary()
     {
+        GodotClientUiCompositionSnapshot ui = UiComposition.GetSnapshot();
         return new GodotClientSessionBoundarySnapshot(
             ControllerRoot.GetChildCount(),
             ContentCatalogRoot.GetChildCount(),
@@ -135,6 +155,15 @@ public abstract partial class ClientRoot : Control
             _menuLayer?.GetChildCount() ?? 0,
             _debugLayer?.GetChildCount() ?? 0,
             _menuHost?.GetChildCount() ?? 0,
+            ui.WorldHostChildren,
+            ui.HudHostChildren,
+            ui.GameplayGumpHostChildren,
+            ui.ShellMenuHostChildren,
+            ui.ContextHostChildren,
+            _contextLayer?.GetChildCount() ?? 0,
+            ui.Gumps.OpenWindows,
+            ui.Gumps.PointerCaptured,
+            ui.DebugPage,
             GetViewport().GuiGetFocusOwner()?.GetType().Name,
             _activeSettingsScope.IsValid || _activeProfileRecommendation is not null ||
             _activeProfileMode != ClientProfileApplicationMode.Ignore,
@@ -160,6 +189,15 @@ public abstract partial class ClientRoot : Control
             current.MenuChildren != baseline.MenuChildren ||
             current.DebugChildren != baseline.DebugChildren ||
             current.MenuHostChildren != baseline.MenuHostChildren ||
+            current.WorldHostChildren != baseline.WorldHostChildren ||
+            current.HudHostChildren != baseline.HudHostChildren ||
+            current.GameplayGumpHostChildren != baseline.GameplayGumpHostChildren ||
+            current.ShellMenuHostChildren != baseline.ShellMenuHostChildren ||
+            current.ContextChildren != baseline.ContextChildren ||
+            current.ContextHostChildren != baseline.ContextHostChildren ||
+            current.OpenGumpWindows != 0 ||
+            current.GumpPointerCaptured ||
+            current.DebugPage != GodotClientDebugPage.Off ||
             current.ServerProfileActive ||
             current.ControlGrammar != baseline.ControlGrammar ||
             current.CameraProfile != baseline.CameraProfile ||
@@ -242,7 +280,8 @@ public abstract partial class ClientRoot : Control
                 ValidateShellSmoke();
                 GD.Print(
                     $"F0.1 CLIENT SHELL SMOKE PASS edition={_composition.Edition} " +
-                    $"capabilities={capabilities} layers=World,HUD,Menus,Debug");
+                    $"capabilities={capabilities} " +
+                    "layers=Workspace,World,HUD,Menus,Debug,ContextTooltip");
                 GetTree().Quit(0);
             }
         }
@@ -259,6 +298,12 @@ public abstract partial class ClientRoot : Control
         if (Matches(key, ClientSemanticAction.ExitApplication))
         {
             GetTree().Quit(0);
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+        if (Matches(key, ClientSemanticAction.CycleDebug))
+        {
+            UiComposition.CycleDebug(BuildDebugPage);
             GetViewport().SetInputAsHandled();
             return;
         }
@@ -321,6 +366,9 @@ public abstract partial class ClientRoot : Control
             _hudLayer is not null,
             _menuLayer is not null,
             _debugLayer is not null,
+            _contextLayer is not null,
+            _workspaceLayer is not null,
+            UiComposition.GetSnapshot(),
             CaptureSessionBoundary());
     }
 
@@ -377,30 +425,18 @@ public abstract partial class ClientRoot : Control
         _worldRoot.AddChild(NamedNode("Effects"));
         _worldRoot.AddChild(NamedNode("CameraRig"));
 
-        Node layers = NamedNode("UILayers");
-        AddChild(layers);
-        _worldUiLayer = Layer("World", 10);
-        _hudLayer = Layer("HUD", 20);
-        _menuLayer = Layer("Menus", 30);
-        _debugLayer = Layer("Debug", 40);
-        layers.AddChild(_worldUiLayer);
-        layers.AddChild(_hudLayer);
-        layers.AddChild(_menuLayer);
-        layers.AddChild(_debugLayer);
-
-        _menuHost = FullRectControl("MenuSurface");
-        _menuLayer.AddChild(_menuHost);
+        _uiComposition = new GodotClientUiComposition(this, ResolveGameplayOutputShape());
+        _workspaceLayer = GetNode<CanvasLayer>("UILayers/Workspace");
+        _worldUiLayer = _uiComposition.WorldLayer;
+        _hudLayer = _uiComposition.HudLayer;
+        _menuLayer = _uiComposition.MenuLayer;
+        _debugLayer = _uiComposition.DebugLayer;
+        _contextLayer = _uiComposition.ContextLayer;
+        _menuHost = _uiComposition.ShellMenuHost;
         _hudStatus = new Label { Name = "SessionStatus", Visible = false };
         _hudStatus.SetAnchorsPreset(LayoutPreset.TopWide);
-        _hudLayer.AddChild(_hudStatus);
-        _debugStatus = new Label
-        {
-            Name = "Diagnostics",
-            Visible = false,
-            Text = "Client diagnostics",
-            Position = new Vector2(12, 44),
-        };
-        _debugLayer.AddChild(_debugStatus);
+        _uiComposition.HudHost.AddChild(_hudStatus);
+        Resized += _uiComposition.UpdateLayoutIfNeeded;
     }
 
     protected void RenderCurrentSurface()
@@ -408,7 +444,10 @@ public abstract partial class ClientRoot : Control
         if (_menuHost is null) return;
         ClearChildren(_menuHost);
         ClientShellSnapshot snapshot = _shell.Snapshot();
+        if (snapshot.Screen == ClientShellScreen.MainMenu && !snapshot.SessionActive)
+            UiComposition.ResetDebug();
         _menuHost.Visible = snapshot.Screen != ClientShellScreen.InSession;
+        UiComposition.SetShellModalVisible(_menuHost.Visible);
         if (_hudStatus is not null)
         {
             _hudStatus.Visible = snapshot.SessionActive;
@@ -449,6 +488,12 @@ public abstract partial class ClientRoot : Control
             default:
                 throw new InvalidOperationException($"Unsupported client shell screen {snapshot.Screen}.");
         }
+    }
+
+    public override void _ExitTree()
+    {
+        _uiComposition?.Dispose();
+        _uiComposition = null;
     }
 
     private void BuildMainMenu(in ClientShellSnapshot snapshot)
@@ -655,6 +700,7 @@ public abstract partial class ClientRoot : Control
         if (!snapshot.ControllerRootPresent || !snapshot.ContentCatalogRootPresent ||
             !snapshot.WorldRootPresent || !snapshot.WorldUiLayerPresent || !snapshot.HudLayerPresent ||
             !snapshot.MenuLayerPresent || !snapshot.DebugLayerPresent ||
+            !snapshot.ContextLayerPresent || !snapshot.WorkspaceLayerPresent ||
             snapshot.Shell.Screen != ClientShellScreen.MainMenu ||
             snapshot.Shell.Focus.Owner != ClientInputFocusOwner.ModalMenu ||
             snapshot.Shell.Focus.GameplayInputAllowed ||
@@ -937,6 +983,47 @@ public abstract partial class ClientRoot : Control
         ClientCapability.Exit => "Exit",
         _ => throw new ArgumentOutOfRangeException(nameof(capability)),
     };
+
+    private string BuildDebugPage(GodotClientDebugPage page)
+    {
+        ClientShellSnapshot shell = ShellSnapshot();
+        GodotClientUiCompositionSnapshot ui = UiComposition.GetSnapshot();
+        return page switch
+        {
+            GodotClientDebugPage.Client =>
+                $"Client\nedition={_composition.Edition}\nscreen={shell.Screen} session={shell.SessionActive}\n" +
+                $"focus={shell.Focus.Owner} gameplay={shell.Focus.GameplayInputAllowed}\n" +
+                $"profile={_resolved.ControlGrammar}/{_resolved.CameraProfile}",
+            GodotClientDebugPage.Presentation =>
+                $"Presentation\napplication={ui.Workspace.ApplicationSize.Width}x{ui.Workspace.ApplicationSize.Height}\n" +
+                $"selected={ui.Workspace.SelectedOutputShape.Width}x{ui.Workspace.SelectedOutputShape.Height}\n" +
+                $"frame={ui.Workspace.GameplayFrame.X},{ui.Workspace.GameplayFrame.Y} " +
+                $"{ui.Workspace.GameplayFrame.Width}x{ui.Workspace.GameplayFrame.Height}\n" +
+                $"world/hud/gumps={ui.WorldHostChildren}/{ui.HudHostChildren}/{ui.Gumps.OpenWindows}",
+            GodotClientDebugPage.Content =>
+                $"Content\ncatalogMarkers={ContentCatalogRoot.GetChildCount()}\n" +
+                $"session={ui.SessionActive} context={ui.ContextHostChildren}\n" +
+                "resolution=User→Realm→Local→Primitive",
+            _ => string.Empty,
+        };
+    }
+
+    private static ClientPixelSize ResolveGameplayOutputShape()
+    {
+        foreach (string argument in OS.GetCmdlineUserArgs())
+        {
+            const string prefix = "--gameplay-output=";
+            if (!argument.StartsWith(prefix, StringComparison.Ordinal)) continue;
+            string[] parts = argument[prefix.Length..].Split('x', 'X');
+            if (parts.Length == 2 && int.TryParse(parts[0], out int width) &&
+                int.TryParse(parts[1], out int height) &&
+                ClientPixelSize.TryCreate(width, height, out ClientPixelSize selected))
+                return selected;
+            throw new InvalidOperationException(
+                "--gameplay-output requires finite WIDTHxHEIGHT dimensions.");
+        }
+        return ClientPixelSize.Create(1920, 1080);
+    }
 
     private static void Validate(in ClientCompositionManifest composition)
     {

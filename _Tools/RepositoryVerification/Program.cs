@@ -25,11 +25,46 @@ Console.WriteLine("PASS documentation architecture and links");
 if (options.ArchitectureOnly)
     return 0;
 
+if (options.F17Only)
+{
+    VerifyF17ClientWorkspace(root, options);
+    Console.WriteLine("PASS F1.7 focused workspace/gump verification");
+    return 0;
+}
+
 if (options.Pf5R6Only)
 {
     VerifyPf5R6CompatibleBodySharing(root, options.Configuration);
     Console.WriteLine("PASS PF5-R6 focused compatible-body-sharing verification");
     return 0;
+}
+
+static void VerifyF17ClientWorkspace(string root, VerificationOptions options)
+{
+    Run(root, "dotnet",
+    [
+        "run", "--project", "_Tests/UltraSim.Client.Tests/UltraSim.Client.Tests.csproj",
+        "-c", options.Configuration,
+    ]);
+    const string godotProject =
+        "_Tests/UltraSim.S0.Godot.Tests/UltraSim.S0.Godot.Tests.csproj";
+    Run(root, "dotnet", ["build", godotProject, "-c", options.Configuration]);
+    string godot = ResolveGodot(options.GodotPath);
+    Run(root, godot,
+    [
+        "--headless", "--path", "_Tests/UltraSim.S0.Godot.Tests",
+        "--scene", "res://S08HeadlessAcceptance.tscn",
+    ]);
+    BuildClientApplication(root, options.Configuration, "SinglePlayer");
+    Run(root, godot,
+    [
+        "--headless", "--editor", "--path", "Client/Godot", "--quit-after", "2",
+    ]);
+    Run(root, godot,
+    [
+        "--headless", "--path", "Client/Godot", "--", "--f1-7-ui-smoke",
+        "--gameplay-output=800x600", "--expect-edition=SinglePlayer",
+    ]);
 }
 
 if (options.Pf5R7Only)
@@ -4974,9 +5009,18 @@ static void VerifyF10ClientBaselineEvidence(string path)
         localActors.GetProperty("ActiveActors").GetInt32() < 2 ||
         localUi.GetProperty("OpenSemanticViews").GetInt32() != 0 ||
         localBoundary.GetProperty("WorldUiChildren").GetInt32() !=
-            persistent.GetProperty("WorldUiChildren").GetInt32() + 1 ||
+            persistent.GetProperty("WorldUiChildren").GetInt32() ||
         localBoundary.GetProperty("HudChildren").GetInt32() !=
-            persistent.GetProperty("HudChildren").GetInt32() + 1)
+            persistent.GetProperty("HudChildren").GetInt32() ||
+        localBoundary.GetProperty("WorldHostChildren").GetInt32() !=
+            persistent.GetProperty("WorldHostChildren").GetInt32() + 1 ||
+        localBoundary.GetProperty("HudHostChildren").GetInt32() !=
+            persistent.GetProperty("HudHostChildren").GetInt32() + 1 ||
+        !localUi.GetProperty("HudOwnedBySharedHud").GetBoolean() ||
+        !localUi.GetProperty("WorldOwnedBySharedWorld").GetBoolean() ||
+        !localUi.GetProperty("GumpsOwnedBySharedManager").GetBoolean() ||
+        !localUi.GetProperty("BannerOwnedByHud").GetBoolean() ||
+        !localUi.GetProperty("TooltipOwnedByContext").GetBoolean())
         throw new InvalidOperationException(
             "The F1.0 local semantic/native/UI ownership census was incomplete.");
 
@@ -5009,7 +5053,17 @@ static void VerifyF10ClientBaselineEvidence(string path)
         coldSnapshot.GetProperty("ActorResources").GetProperty("RealizedResources").GetInt32() <= 0 ||
         coldSnapshot.GetProperty("ActorResources").GetProperty("RetainedArtifactBytes").GetInt64() <= 0 ||
         cold.GetProperty("ActiveBoundary").GetProperty("HudChildren").GetInt32() !=
-            persistent.GetProperty("HudChildren").GetInt32() + 1 ||
+            persistent.GetProperty("HudChildren").GetInt32() ||
+        cold.GetProperty("ActiveBoundary").GetProperty("HudHostChildren").GetInt32() !=
+            persistent.GetProperty("HudHostChildren").GetInt32() + 1 ||
+        !coldSnapshot.GetProperty("UiOwnership").GetProperty(
+            "HudOwnedBySharedHud").GetBoolean() ||
+        !coldSnapshot.GetProperty("UiOwnership").GetProperty(
+            "GumpsOwnedBySharedManager").GetBoolean() ||
+        !coldSnapshot.GetProperty("UiOwnership").GetProperty(
+            "BannerOwnedByHud").GetBoolean() ||
+        !coldSnapshot.GetProperty("UiOwnership").GetProperty(
+            "TooltipOwnedByContext").GetBoolean() ||
         warmSnapshot.GetProperty("ContentCacheAtOpen").GetProperty("BlobCount").GetInt32() <= 0 ||
         warmAcquisition.GetProperty("PackagesReused").GetInt32() <= 0 ||
         warmAcquisition.GetProperty("BytesFetched").GetInt64() != 0 ||
@@ -5033,18 +5087,32 @@ static void VerifyF10ClientBaselineEvidence(string path)
             persistent.GetProperty("MenuChildren").GetInt32() ||
         finalBoundary.GetProperty("DebugChildren").GetInt32() !=
             persistent.GetProperty("DebugChildren").GetInt32() ||
+        finalBoundary.GetProperty("ContextChildren").GetInt32() !=
+            persistent.GetProperty("ContextChildren").GetInt32() ||
+        finalBoundary.GetProperty("WorldHostChildren").GetInt32() !=
+            persistent.GetProperty("WorldHostChildren").GetInt32() ||
+        finalBoundary.GetProperty("HudHostChildren").GetInt32() !=
+            persistent.GetProperty("HudHostChildren").GetInt32() ||
+        finalBoundary.GetProperty("GameplayGumpHostChildren").GetInt32() !=
+            persistent.GetProperty("GameplayGumpHostChildren").GetInt32() ||
+        finalBoundary.GetProperty("ContextHostChildren").GetInt32() !=
+            persistent.GetProperty("ContextHostChildren").GetInt32() ||
+        finalBoundary.GetProperty("OpenGumpWindows").GetInt32() != 0 ||
+        finalBoundary.GetProperty("GumpPointerCaptured").GetBoolean() ||
+        finalBoundary.GetProperty("DebugPage").GetInt32() != 0 ||
         finalBoundary.GetProperty("ServerProfileActive").GetBoolean())
         throw new InvalidOperationException(
             "The F1.0 final persistent-root/session-profile boundary was not clean.");
 
-    JsonElement mismatches = root.GetProperty("KnownPreF1UiOwnership");
-    if (!mismatches.GetProperty("LocalInventoryUnderHud").GetBoolean() ||
-        !mismatches.GetProperty("LocalTooltipUnderWorld").GetBoolean() ||
-        !mismatches.GetProperty("RemoteUiChatBannerAndTooltipUnderHud").GetBoolean() ||
-        mismatches.GetProperty("ContextTooltipLayerPresent").GetBoolean() ||
-        mismatches.GetProperty("MultiWindowManagerPresent").GetBoolean())
+    JsonElement ownership = root.GetProperty("CurrentF17UiOwnership");
+    if (!ownership.GetProperty("LocalGameplayUiUsesSharedGumpHost").GetBoolean() ||
+        !ownership.GetProperty("LocalTooltipUsesContextHost").GetBoolean() ||
+        !ownership.GetProperty("RemoteGameplayUiUsesSharedGumpHost").GetBoolean() ||
+        !ownership.GetProperty("RemoteTooltipUsesContextHost").GetBoolean() ||
+        !ownership.GetProperty("ContextTooltipLayerPresent").GetBoolean() ||
+        !ownership.GetProperty("MultiWindowManagerPresent").GetBoolean())
         throw new InvalidOperationException(
-            "The F1.0 baseline did not preserve the known pre-F1 UI ownership mismatches.");
+            "The F1.0 semantic workload did not preserve the F1.7 UI ownership contract.");
     Console.WriteLine(
         $"PASS F1.0_ClientBaselineGuardrails localChunks=" +
         $"{localSnapshot.GetProperty("SemanticWorld").GetProperty("ResidentChunks").GetInt32()} " +
@@ -6060,6 +6128,7 @@ static string Relative(string root, string path) => Path.GetRelativePath(root, p
 
 internal sealed record VerificationOptions(
     bool ArchitectureOnly,
+    bool F17Only,
     bool Pf1Only,
     bool Pf2Only,
     bool Pf25Only,
@@ -6101,7 +6170,8 @@ internal sealed record VerificationOptions(
 {
     internal static VerificationOptions Parse(string[] arguments)
     {
-        bool architectureOnly = false, pf1Only = false, pf2Only = false, pf25Only = false,
+        bool architectureOnly = false, f17Only = false,
+            pf1Only = false, pf2Only = false, pf25Only = false,
             pf3Only = false, pf3NativeOnly = false, pf4aOnly = false, pf4bOnly = false,
             pf4cOnly = false, pf4dOnly = false, pf4eOnly = false, pf4eR1Only = false,
             pf4eR2Only = false, pf4fOnly = false, pf5Only = false,
@@ -6120,6 +6190,7 @@ internal sealed record VerificationOptions(
         foreach (string argument in arguments)
         {
             if (argument == "--architecture-only") architectureOnly = true;
+            else if (argument == "--f1-7-only") f17Only = true;
             else if (argument == "--pf1-only") pf1Only = true;
             else if (argument == "--pf2-only") pf2Only = true;
             else if (argument == "--pf2.5-only") pf25Only = true;
@@ -6251,14 +6322,14 @@ internal sealed record VerificationOptions(
         }
         if (configuration is not ("Debug" or "Release"))
             throw new ArgumentException("Verification configuration must be Debug or Release.");
-        if ((pf1Only || pf2Only || pf25Only || pf3Only || pf3NativeOnly || pf4aOnly ||
+        if ((f17Only || pf1Only || pf2Only || pf25Only || pf3Only || pf3NativeOnly || pf4aOnly ||
              pf4bOnly || pf4cOnly || pf4dOnly || pf4eOnly || pf4eR1Only || pf4eR2Only ||
              pf4fOnly || pf5Only || pf5R1Only || pf5R2Only || pf5R2R1Only ||
              pf5R2R2Only || pf5R3Only || pf5R4Only || pf5R5Only || pf5R6Only ||
              pf5R7Only || pf5R8Only || pf5R9Only || pf5R12Only) &&
             architectureOnly)
             throw new ArgumentException("Focused PF verification cannot be architecture-only.");
-        if ((pf1Only ? 1 : 0) + (pf2Only ? 1 : 0) + (pf25Only ? 1 : 0) +
+        if ((f17Only ? 1 : 0) + (pf1Only ? 1 : 0) + (pf2Only ? 1 : 0) + (pf25Only ? 1 : 0) +
             (pf3Only ? 1 : 0) + (pf3NativeOnly ? 1 : 0) + (pf4aOnly ? 1 : 0) +
             (pf4bOnly ? 1 : 0) + (pf4cOnly ? 1 : 0) + (pf4dOnly ? 1 : 0) +
             (pf4eOnly ? 1 : 0) + (pf4eR1Only ? 1 : 0) + (pf4eR2Only ? 1 : 0) +
@@ -6292,7 +6363,9 @@ internal sealed record VerificationOptions(
             !pf4cOnly && !pf4dOnly && !pf4eOnly && !pf4fOnly && !pf5Only)
             throw new ArgumentException(
                 "Native PF options require --pf3-only, --pf3-native-only, --pf4a-only, --pf4b-only, --pf4c-only, --pf4d-only, --pf4e-only, --pf4f-only, or --pf5-only.");
-        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only, pf4fOnly, pf5Only, pf5R1Only, pf5R2Only, pf5R2R1Only, pf5R2R2Only, pf5R3Only, pf5R4Only, pf5R5Only, pf5R6Only, pf5R7Only, pf5R8Only,
+        if (f17Only && skipGodot)
+            throw new ArgumentException("--f1-7-only requires the native Godot acceptance path.");
+        return new(architectureOnly, f17Only, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only, pf4fOnly, pf5Only, pf5R1Only, pf5R2Only, pf5R2R1Only, pf5R2R2Only, pf5R3Only, pf5R4Only, pf5R5Only, pf5R6Only, pf5R7Only, pf5R8Only,
             pf5R9Only, pf5R12Only, pf3Only, pf3NativeOnly,
             pf25LongNative,
             allConfigurations, configuration, skipGodot, noRestore, godot,

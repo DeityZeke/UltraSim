@@ -18,11 +18,18 @@ public sealed class GodotUiRenderer : IUiRenderer
 {
     private readonly IGodotUiAssetResolver? _assets;
     private readonly Control? _host;
+    private readonly GodotGumpWindowManager? _windows;
     private readonly List<GodotUiRenderHandle> _openHandles = [];
 
     public GodotUiRenderer(Control? host = null, IGodotUiAssetResolver? assets = null)
     {
         _host = host;
+        _assets = assets;
+    }
+
+    public GodotUiRenderer(GodotGumpWindowManager windows, IGodotUiAssetResolver? assets = null)
+    {
+        _windows = windows ?? throw new ArgumentNullException(nameof(windows));
         _assets = assets;
     }
 
@@ -34,7 +41,11 @@ public sealed class GodotUiRenderer : IUiRenderer
     {
         GodotUiDefinitionAdmission.Validate(definition);
         var handle = new GodotUiRenderHandle(instance, definition, model, submitAction, _assets);
-        if (_host is not null)
+        if (_windows is not null)
+        {
+            _windows.Attach(handle);
+        }
+        else if (_host is not null)
         {
             _host.AddChild(handle.Root);
             handle.CenterInHost();
@@ -61,7 +72,8 @@ public sealed class GodotUiRenderer : IUiRenderer
         if (handle is not GodotUiRenderHandle godotHandle)
             throw new ArgumentException("The render handle was not created by GodotUiRenderer.", nameof(handle));
         _openHandles.Remove(godotHandle);
-        godotHandle.Close();
+        if (_windows is not null) _windows.Detach(godotHandle);
+        else godotHandle.CloseNative();
     }
 
     /// <summary>
@@ -74,11 +86,16 @@ public sealed class GodotUiRenderer : IUiRenderer
         ArgumentNullException.ThrowIfNull(inputEvent);
         if (TryGetPointerPosition(inputEvent, out Vector2 position))
         {
-            for (int index = _openHandles.Count - 1; index >= 0; index--)
+            int count = _windows?.WindowCount ?? _openHandles.Count;
+            for (int index = count - 1; index >= 0; index--)
             {
-                GodotUiRenderHandle handle = _openHandles[index];
-                if (handle.ContainsUiSurface(position))
+                GodotUiRenderHandle handle = _windows?.HandleAt(index) ?? _openHandles[index];
+                if ((_windows?.ContainsWindowSurface(handle, position) ?? false) ||
+                    handle.ContainsUiSurface(position))
+                {
+                    _windows?.BringToFront(handle);
                     return GodotUiGameplayInputDisposition.UiSurface;
+                }
             }
 
             if (inputEvent is InputEventMouseButton
@@ -87,9 +104,9 @@ public sealed class GodotUiRenderer : IUiRenderer
                     Pressed: true,
                 })
             {
-                for (int index = _openHandles.Count - 1; index >= 0; index--)
+                for (int index = count - 1; index >= 0; index--)
                 {
-                    GodotUiRenderHandle handle = _openHandles[index];
+                    GodotUiRenderHandle handle = _windows?.HandleAt(index) ?? _openHandles[index];
                     if (handle.TrySubmitOutsideClose())
                         return GodotUiGameplayInputDisposition.OutsideCloseSubmitted;
                 }
@@ -215,6 +232,12 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
 
     public Control Root { get; }
 
+    internal UiViewInstanceId Instance => _instance;
+
+    internal string Title => _definition.Key.ToString();
+
+    internal Control? NativeWindowRoot { get; set; }
+
     internal UiOutsidePointerBehavior OutsidePointerBehavior =>
         _definition.OutsidePointerBehavior;
 
@@ -299,12 +322,14 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
         }
     }
 
-    internal void Close()
+    internal void CloseNative()
     {
-        if (GodotObject.IsInstanceValid(Root))
+        Control native = NativeWindowRoot ?? Root;
+        NativeWindowRoot = null;
+        if (GodotObject.IsInstanceValid(native))
         {
-            Root.GetParent()?.RemoveChild(Root);
-            Root.QueueFree();
+            native.GetParent()?.RemoveChild(native);
+            native.QueueFree();
         }
     }
 

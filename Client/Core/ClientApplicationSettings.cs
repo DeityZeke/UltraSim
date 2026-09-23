@@ -38,6 +38,7 @@ public enum ClientSemanticAction : byte
     Chat = 15,
     Jump = 16,
     OpenServerMonitor = 17,
+    CycleDebug = 18,
 }
 
 public enum ClientPhysicalInputKind : byte
@@ -110,7 +111,7 @@ public readonly record struct ClientPhysicalBinding(
     ClientSemanticAction Action,
     ClientPhysicalInput Input)
 {
-    public bool IsValid => Action is >= ClientSemanticAction.ExitApplication and <= ClientSemanticAction.OpenServerMonitor &&
+    public bool IsValid => Action is >= ClientSemanticAction.ExitApplication and <= ClientSemanticAction.CycleDebug &&
         Input.IsValid;
 }
 
@@ -118,7 +119,8 @@ public static class ClientReservedControls
 {
     public static bool IsReserved(ClientSemanticAction action) => action is
         ClientSemanticAction.ExitApplication or ClientSemanticAction.OpenClientMenu or
-        ClientSemanticAction.Disconnect or ClientSemanticAction.OpenSettings;
+        ClientSemanticAction.Disconnect or ClientSemanticAction.OpenSettings or
+        ClientSemanticAction.CycleDebug;
 }
 
 /// <summary>One immutable user-owned settings layer. Null fields inherit the lower layer.</summary>
@@ -182,7 +184,7 @@ public sealed class ClientSettingsLayer
             bindings.Length > ClientSettingsResolver.MaximumBindings)
             throw new ArgumentOutOfRangeException(nameof(ClientSettingsLayer));
 
-        Span<bool> actions = stackalloc bool[(int)ClientSemanticAction.OpenServerMonitor + 1];
+        Span<bool> actions = stackalloc bool[(int)ClientSemanticAction.CycleDebug + 1];
         for (int index = 0; index < bindings.Length; index++)
         {
             ClientPhysicalBinding binding = bindings[index];
@@ -499,6 +501,7 @@ public static class ClientSettingsResolver
         AddDefault(settings, ClientSemanticAction.Chat, ClientPhysicalInputKind.Keyboard, "ENTER");
         AddDefault(settings, ClientSemanticAction.Jump, ClientPhysicalInputKind.Keyboard, "SPACE");
         AddDefault(settings, ClientSemanticAction.OpenServerMonitor, ClientPhysicalInputKind.Keyboard, "F4");
+        AddDefault(settings, ClientSemanticAction.CycleDebug, ClientPhysicalInputKind.Keyboard, "F11");
         return settings;
     }
 

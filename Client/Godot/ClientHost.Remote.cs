@@ -653,12 +653,13 @@ public partial class ClientHost
             ReadArgument("--content-cache=") ??
             ProjectSettings.GlobalizePath("user://content-cache");
         var playable = new RemoteConceptDemoClient { Name = "RemoteConceptDemoSession" };
+        GodotSessionUiLease sessionUi = BeginSessionUi("RemoteConceptDemoSession");
         playable.Configure(
             peer,
             connected.ApplicationSessionEpoch,
             connected.Realm,
             cacheRoot,
-            HudLayer,
+            sessionUi,
             EffectiveSettings,
             _allowInsecurePrivateContent,
             IsAutomatedRemoteSmoke(),
@@ -1319,13 +1320,14 @@ public partial class ClientHost
             },
             FinalBoundary = finalBoundary,
             RetirementBoundariesChecked = 6,
-            KnownPreF1UiOwnership = new
+            CurrentF17UiOwnership = new
             {
-                LocalInventoryUnderHud = true,
-                LocalTooltipUnderWorld = true,
-                RemoteUiChatBannerAndTooltipUnderHud = true,
-                ContextTooltipLayerPresent = false,
-                MultiWindowManagerPresent = false,
+                LocalGameplayUiUsesSharedGumpHost = true,
+                LocalTooltipUsesContextHost = true,
+                RemoteGameplayUiUsesSharedGumpHost = true,
+                RemoteTooltipUsesContextHost = true,
+                ContextTooltipLayerPresent = true,
+                MultiWindowManagerPresent = true,
             },
         };
         string full = Path.GetFullPath(path);

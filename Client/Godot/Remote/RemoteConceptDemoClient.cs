@@ -43,15 +43,19 @@ public readonly record struct RemoteConceptDemoClientSnapshot(
     OfficialLocalPresentationResult OfficialPresentation);
 
 /// <summary>
-/// Cold, engine-thread-only observation of the pre-F1 remote HUD ownership tree. This preserves
-/// the current single-HUD mismatch as evidence; it is not the future F1.7 window contract.
+/// Cold, engine-thread-only observation of the F1.7 category hosts owned by one remote gameplay
+/// lifetime. Semantic view ownership remains independent from its native gump realization.
 /// </summary>
 public readonly record struct RemoteConceptDemoUiOwnershipSnapshot(
     int HudHostChildren,
     int ServerUiHostChildren,
     int OpenSemanticViews,
     bool ChatFocused,
-    bool GameplayInputAllowed);
+    bool GameplayInputAllowed,
+    bool HudOwnedBySharedHud,
+    bool GumpsOwnedBySharedManager,
+    bool BannerOwnedByHud,
+    bool TooltipOwnedByContext);
 
 public readonly record struct RemoteConceptDemoLifecycleResidueSnapshot(
     ulong ApplicationSessionEpoch,
@@ -112,6 +116,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private Camera3D? _camera;
     private Control? _ownedHud;
     private Control? _uiHost;
+    private GodotSessionUiLease? _sessionUi;
     private GodotUiRenderer? _uiRenderer;
     private Label? _status;
     private Label? _ping;
@@ -130,6 +135,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private bool _primaryPressed;
     private bool _primaryReleased;
     private bool _secondaryPressed;
+    private bool _contextInteractPending;
     private bool _pointerPointValid;
     private int _telemetryProbePhase;
     private ClientControlWorldPoint _pointerPoint;
@@ -159,7 +165,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         ulong applicationSessionEpoch,
         UltraSim.Game.Application.ApplicationRealmId realm,
         string cacheRoot,
-        CanvasLayer hudLayer,
+        GodotSessionUiLease sessionUi,
         ResolvedClientSettings settings,
         bool allowInsecurePrivateContent,
         bool smoke,
@@ -170,18 +176,19 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         ArgumentNullException.ThrowIfNull(peer);
         ArgumentOutOfRangeException.ThrowIfZero(applicationSessionEpoch);
         ArgumentException.ThrowIfNullOrWhiteSpace(cacheRoot);
-        ArgumentNullException.ThrowIfNull(hudLayer);
+        ArgumentNullException.ThrowIfNull(sessionUi);
         ArgumentNullException.ThrowIfNull(settings);
         if (_configured || IsInsideTree())
             throw new InvalidOperationException("Remote composition must be configured before entering the tree.");
 
-        if (!ContentCache.TryOpen(
-                cacheRoot, out _cache, out ContentCacheError cacheError))
-            throw new InvalidOperationException($"The content cache could not open: {cacheError}.");
-        _contentCacheAtOpen = _cache!.GetSnapshot();
-        _contentCacheObserved = _contentCacheAtOpen;
+        _sessionUi = sessionUi;
         try
         {
+            if (!ContentCache.TryOpen(
+                    cacheRoot, out _cache, out ContentCacheError cacheError))
+                throw new InvalidOperationException($"The content cache could not open: {cacheError}.");
+            _contentCacheAtOpen = _cache!.GetSnapshot();
+            _contentCacheObserved = _contentCacheAtOpen;
             ContentScopeActivationKey? localPresentationKey = null;
             if (OfficialLocalPresentation.TryOpenOrAcquire(
                     _cache!, officialContentRoot,
@@ -198,10 +205,9 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 allowPrivateNetworkTargets: allowInsecurePrivateContent,
                 maximumConcurrentRequests: 4));
             _ownedHud = FullRectControl("RemotePlayableHUD");
-            hudLayer.AddChild(_ownedHud);
-            _uiHost = FullRectControl("RemoteServerUi");
-            _ownedHud.AddChild(_uiHost);
-            _uiRenderer = new GodotUiRenderer(_uiHost);
+            sessionUi.HudHost.AddChild(_ownedHud);
+            _uiHost = sessionUi.Gumps.Host;
+            _uiRenderer = new GodotUiRenderer(sessionUi.Gumps);
             _session = new RemotePlayableSession(
                 peer,
                 applicationSessionEpoch,
@@ -228,6 +234,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             _cache?.Dispose();
             _source = null;
             _cache = null;
+            _sessionUi?.Dispose();
+            _sessionUi = null;
             throw;
         }
     }
@@ -349,6 +357,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             if (!_smoke)
             {
                 UpdatePointerWorldPoint();
+                _sessionUi?.ContextMenu.UpdateValidity();
                 UpdateWorldHover();
                 SubmitPhysicalInput(gameplayInputAdmitted);
             }
@@ -400,7 +409,11 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         _uiHost?.GetChildCount() ?? 0,
         _session?.UiClient.OpenViewCount ?? 0,
         _chatInput?.HasFocus() == true,
-        _gameplayInputAllowed);
+        _gameplayInputAllowed,
+        _sessionUi is not null && ReferenceEquals(_ownedHud?.GetParent(), _sessionUi.HudHost),
+        _sessionUi is not null && ReferenceEquals(_uiHost, _sessionUi.Gumps.Host),
+        _sessionUi is not null && ReferenceEquals(_systemChatBanner?.NativeParent, _ownedHud),
+        _sessionUi is not null && ReferenceEquals(_hoverTooltip?.NativeParent, _sessionUi.ContextHost));
 
     /// <summary>Starts a fresh native/client diagnostic window only.</summary>
     public void ResetTelemetryWindow()
@@ -498,10 +511,15 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         if (_state != RemoteConceptDemoClientState.Active || _settings is null) return;
         if (TryHandleFocusedChatInput(inputEvent)) return;
         if (!_gameplayInputAllowed) return;
+        if (_sessionUi?.ContextMenu.ResolveInput(inputEvent) == true)
+        {
+            GetViewport().SetInputAsHandled();
+            return;
+        }
         if (inputEvent is InputEventKey key && key.Pressed && !key.Echo &&
             GodotWorldInput.Matches(key, _settings, ClientSemanticAction.OpenInventory))
         {
-            if (!TryRequestCloseOpenInventory() && _session!.UiClient.OpenViewCount == 0)
+            if (!TryRequestCloseOpenInventory())
             {
                 _oneShotRequests.RequestInventory();
             }
@@ -511,7 +529,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         if (inputEvent is InputEventKey monitor && monitor.Pressed && !monitor.Echo &&
             GodotWorldInput.Matches(monitor, _settings, ClientSemanticAction.OpenServerMonitor))
         {
-            if (!TryRequestCloseOpenServerMonitor() && _session!.UiClient.OpenViewCount == 0)
+            if (!TryRequestCloseOpenServerMonitor())
             {
                 _oneShotRequests.RequestServerMonitor();
             }
@@ -526,6 +544,18 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             if (uiDisposition is GodotUiGameplayInputDisposition.Blocked or
                 GodotUiGameplayInputDisposition.OutsideCloseSubmitted)
                 GetViewport().SetInputAsHandled();
+            return;
+        }
+        if (TryGetPointerPosition(inputEvent, out Vector2 applicationPoint) &&
+            _sessionUi?.ContainsWorldPointer(applicationPoint) == false)
+        {
+            _primaryDown = false;
+            _primaryPressed = false;
+            _primaryReleased = false;
+            _pointerPointValid = false;
+            _pointerTarget = default;
+            _hoverTooltip?.Hide();
+            GetViewport().SetInputAsHandled();
             return;
         }
         if (inputEvent is InputEventKey chat && chat.Pressed && !chat.Echo &&
@@ -552,7 +582,10 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             }
             else if (mouse.Pressed &&
                 GodotWorldInput.Matches(mouse, _settings, ClientSemanticAction.ContextMenu))
-                _secondaryPressed = true;
+            {
+                TryOpenWorldContext(mouse.Position);
+                GetViewport().SetInputAsHandled();
+            }
             else if (mouse.ButtonIndex == MouseButton.WheelUp && mouse.Pressed)
             {
                 _cameraDistance = Math.Max(MinimumCameraDistanceMeters, _cameraDistance - 2f);
@@ -586,6 +619,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         _nativeTelemetry.Dispose();
         _actorVisuals?.Dispose();
         _systemChatBanner?.Dispose();
+        _hoverTooltip?.Dispose();
         _renderer?.Dispose();
         _ = _session?.TryRequestDetach();
         _session?.Dispose();
@@ -608,6 +642,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         }
         _ownedHud = null;
         _hoverTooltip = null;
+        _sessionUi?.Dispose();
+        _sessionUi = null;
     }
 
     private void BuildWorldPresentation(in RemotePlayableClientSnapshot playable)
@@ -718,6 +754,11 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     {
         ClientWorldInputSample sample = GodotWorldInput.Capture(
             _settings!, allowed && GetWindow().HasFocus() && _chatInput?.HasFocus() != true);
+        if (_contextInteractPending)
+            sample = sample with
+            {
+                HeldActions = sample.HeldActions | GamePlayerActions.Interact,
+            };
         ClientHorizontalCameraBasis basis = CameraBasis();
         ClientControlProfileDecision decision = EvaluateProfile(in sample, in basis);
         if (decision.SelectionRequested)
@@ -736,6 +777,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         }
         bool retained = TrySubmitObservedCommand(
             decision.Command, _selectedTarget, flags, faceX, faceZ);
+        if (retained) _contextInteractPending = false;
         _oneShotRequests.ObserveSubmission(retained);
         if (retained)
         {
@@ -939,16 +981,15 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 _smokePhase = 3;
                 break;
             case 3 when _session!.UiClient.OpenViewCount == 1:
-                if (!TryRequestCloseOpenInventory()) return;
-                _smokePhase = 4;
-                break;
-            case 4 when _session!.UiClient.OpenViewCount == 0 &&
-                !snapshot.Playable.CommandRetainedLocally:
                 if (!TrySubmitObservedCommand(
                         new ClientWorldCommandIntent(
                             GameLocomotionUpdate.Unchanged, GamePlayerActions.None, true),
                         flags: RemotePlayableCommandFlags.OpenServerMonitorRequested))
                     return;
+                _smokePhase = 4;
+                break;
+            case 4 when _session!.UiClient.OpenViewCount == 2 && HasOpenServerMonitor():
+                if (!TryRequestCloseOpenInventory()) return;
                 _smokePhase = 5;
                 break;
             case 5 when _session!.UiClient.OpenViewCount == 1 && HasOpenServerMonitor():
@@ -1056,7 +1097,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         _chatInput.TextSubmitted += SubmitChat;
         _ownedHud.AddChild(_chatInput);
         _systemChatBanner = new GodotSystemChatBanner(_ownedHud);
-        _hoverTooltip = new GodotWorldHoverTooltip(_ownedHud);
+        _hoverTooltip = new GodotWorldHoverTooltip(_sessionUi?.ContextHost ?? _ownedHud);
+        _sessionUi?.RegisterTransientSuppressor(_hoverTooltip.Hide);
         UpdateHud("Authenticated session established; acquiring required content…");
     }
 
@@ -1211,6 +1253,12 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     {
         if (_camera is null || _session is null) return;
         Vector2 mouse = GetViewport().GetMousePosition();
+        if (_sessionUi?.ContainsWorldPointer(mouse) == false)
+        {
+            _pointerPointValid = false;
+            _pointerTarget = default;
+            return;
+        }
         Vector3 origin = _camera.ProjectRayOrigin(mouse);
         Vector3 direction = _camera.ProjectRayNormal(mouse);
         if (TryPickPresentedPublicObject(origin, direction, out ClientControlWorldPoint objectPoint,
@@ -1244,6 +1292,48 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             _session.WorldCache.PreparedWorld.TryFindNearestSupport(
                 candidate, _player.YMillimeters, out WorldTerrainColumnSurface support) ==
                 WorldTerrainColumnQueryStatus.Complete && support.IsValid && support.IsSupport;
+    }
+
+    private void TryOpenWorldContext(Vector2 applicationPoint)
+    {
+        if (_sessionUi is null || _session is null || !_pointerTarget.IsValid ||
+            !_session.PublicPresentationState.TryGet(
+                _pointerTarget, out ClientPublicPresentationMetadata metadata))
+        {
+            _sessionUi?.ContextMenu.Close();
+            return;
+        }
+        WorldPublicEntityId target = _pointerTarget;
+        _sessionUi.ContextMenu.Show(
+            metadata.DisplayLabel,
+            applicationPoint,
+            () => _selectedTarget = target,
+            () =>
+            {
+                _selectedTarget = target;
+                _contextInteractPending = true;
+            },
+            () => _session?.PublicPresentationState.TryGet(target, out _) == true);
+        _hoverTooltip?.Hide();
+    }
+
+    private static bool TryGetPointerPosition(InputEvent inputEvent, out Vector2 position)
+    {
+        switch (inputEvent)
+        {
+            case InputEventMouse mouse:
+                position = mouse.Position;
+                return true;
+            case InputEventScreenTouch touch:
+                position = touch.Position;
+                return true;
+            case InputEventScreenDrag drag:
+                position = drag.Position;
+                return true;
+            default:
+                position = default;
+                return false;
+        }
     }
 
     private void UpdateWorldHover()
@@ -1372,20 +1462,12 @@ public sealed partial class RemoteConceptDemoClient : Node3D
 
     private bool TryRequestCloseOpenInventory()
     {
-        if (_uiHost is null) return false;
-        foreach (Node child in _uiHost.GetChildren())
-        {
-            if (child is not Control candidate ||
-                candidate.FindChild("Element_items", recursive: true, owned: false) is null)
-                continue;
-            Button? close = candidate.FindChild(
-                "Element_close", recursive: true, owned: false) as Button;
-            if (close is null || close.Disabled)
-                return false;
-            close.EmitSignal(BaseButton.SignalName.Pressed);
-            return true;
-        }
-        return false;
+        Control? view = FindCompiledViewContaining("Element_items");
+        Button? close = view?.FindChild(
+            "Element_close", recursive: true, owned: false) as Button;
+        if (close is null || close.Disabled) return false;
+        close.EmitSignal(BaseButton.SignalName.Pressed);
+        return true;
     }
 
     private bool TryRequestCloseOpenServerMonitor()
@@ -1402,11 +1484,20 @@ public sealed partial class RemoteConceptDemoClient : Node3D
 
     private Control? FindOpenServerMonitorView()
     {
+        return FindCompiledViewContaining("Element_participants");
+    }
+
+    private Control? FindCompiledViewContaining(string descendant)
+    {
         if (_uiHost is null) return null;
         foreach (Node child in _uiHost.GetChildren())
-            if (child is Control candidate &&
-                candidate.FindChild("Element_participants", recursive: true, owned: false) is not null)
-                return candidate;
+        {
+            Node? candidate = child.FindChild(descendant, recursive: true, owned: false);
+            while (candidate is not null &&
+                !candidate.Name.ToString().StartsWith("UiView_", StringComparison.Ordinal))
+                candidate = candidate.GetParent();
+            if (candidate is Control view) return view;
+        }
         return null;
     }
 
