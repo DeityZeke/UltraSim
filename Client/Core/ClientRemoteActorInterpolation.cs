@@ -76,7 +76,7 @@ public sealed class ClientRemoteActorInterpolation
                 actor.SnapPending = true;
                 Increment(ref _gapResets);
             }
-            else if (ClientMotionPose.HorizontalDistanceMillimeters(previous.Pose, pose) >
+            else if (ClientMotionPose.SpatialDistanceMillimeters(previous.Pose, pose) >
                 TeleportMillimeters)
             {
                 ClearSamples(index);

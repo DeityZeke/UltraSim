@@ -280,6 +280,29 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         return root is not null;
     }
 
+    /// <summary>
+    /// The pose currently assigned to this native actor, separate from its exact semantic row.
+    /// Pointer nomination may use this geometry, but Game still authorizes the selected identity.
+    /// </summary>
+    public bool TryGetPresentedPose(WorldPublicEntityId id, out ClientMotionPose pose)
+    {
+        EnsureOperational();
+        int index = Find(id);
+        if (index < 0)
+        {
+            pose = default;
+            return false;
+        }
+        ref readonly ActorSlot slot = ref _slots[index];
+        bool controlled = _controlledPoseAvailable && id == _controlledActor;
+        WorldPosition position = controlled ? _controlledPosition :
+            slot.HasPresentedPose ? slot.PresentedPosition : slot.Record.Position;
+        WorldYaw orientation = controlled ? _controlledOrientation :
+            slot.HasPresentedPose ? slot.PresentedOrientation : slot.Record.Orientation;
+        pose = ClientMotionPose.FromAuthority(position, orientation);
+        return true;
+    }
+
     public bool TryGetActorDiagnostics(
         WorldPublicEntityId id,
         out GodotActorPresentationDiagnostics diagnostics)

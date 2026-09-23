@@ -65,22 +65,7 @@ public sealed class GodotGameplayCameraRig
         _layout = layout;
         // Core FOV is vertical. KeepHeight makes that explicit even on wide viewports.
         _camera.KeepAspect = Camera3D.KeepAspectEnum.Height;
-        if (_rig.Projection == ClientCameraProjection.Perspective)
-            _camera.SetPerspective(
-                (float)_projection.MainViewportVerticalFovDegrees(layout),
-                _camera.Near, _camera.Far);
-        else
-            _camera.SetOrthogonal(
-                (float)_projection.MainViewportVerticalExtent(layout),
-                _camera.Near, _camera.Far);
-    }
-
-    public void SetPivotHeightMeters(float meters)
-    {
-        if (!float.IsFinite(meters) || meters is < 0f or > 20f)
-            throw new ArgumentOutOfRangeException(nameof(meters));
-        _pivot = meters;
-        UpdatePose();
+        UpdateProjection();
     }
 
     /// <summary>Presentation target relative to the authoritative world-render origin.</summary>
@@ -119,7 +104,26 @@ public sealed class GodotGameplayCameraRig
         _distance = Math.Clamp(_distance + (inward ? -step : step),
             _rig.MinimumDistanceMillimeters / 1_000f,
             _rig.MaximumDistanceMillimeters / 1_000f);
+        if (_rig.Projection == ClientCameraProjection.Orthographic)
+            UpdateProjection();
         UpdatePose();
+    }
+
+    private void UpdateProjection()
+    {
+        if (_rig.Projection == ClientCameraProjection.Perspective)
+        {
+            _camera.SetPerspective(
+                (float)_projection.MainViewportVerticalFovDegrees(_layout),
+                _camera.Near, _camera.Far);
+            return;
+        }
+        // Orthographic magnification is lens size, not camera distance. Distance remains the
+        // bounded zoom control's scalar so the same profile min/default/max values apply.
+        float zoomRatio = _distance / (_rig.DefaultDistanceMillimeters / 1_000f);
+        _camera.SetOrthogonal(
+            (float)_projection.MainViewportVerticalExtent(_layout) * zoomRatio,
+            _camera.Near, _camera.Far);
     }
 
     public void UpdatePose()

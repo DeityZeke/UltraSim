@@ -8,11 +8,13 @@ internal static class ClientTemporalMotionTests
     internal static void Run()
     {
         ControlledLeadAndOwnerTruth();
+        IdleAndBlockedPresentationConvergeToAuthority();
         StopReverseDestinationAndBlocked();
         DelayedPreAcknowledgementOwnerStatesDoNotSuppressPrediction();
         DeadbandAndDiscontinuityAreDistinct();
         CapacityLineageAndFrameRate();
         RemoteInterpolationAndFences();
+        VerticalRelocationSnapsRemoteInterpolation();
         HighCadenceSamplesRetainTheDelayedBracket();
         WarmedUpdatesDoNotAllocate();
         FullBoundedActorWindowHasFiniteCost();
@@ -44,6 +46,30 @@ internal static class ClientTemporalMotionTests
         motion.ObserveOwner(1, new GameControlSessionEpoch(2), 3, actor,
             2, 1, Position(900), new WorldYaw(0), false, 1_160_000);
         Assert.Equal(beforeDuplicate, motion.GetSnapshot());
+    }
+
+    private static void IdleAndBlockedPresentationConvergeToAuthority()
+    {
+        WorldPublicEntityId actor = new(11, 1);
+        var idle = NewControlled();
+        idle.ObserveOwner(1, new GameControlSessionEpoch(2), 3, actor,
+            2, 0, Position(600), WorldYaw.Zero, false, 1_050_000);
+        Assert.Equal(600L, idle.Sample(1_250_000).Pose.GlobalXMillimeters);
+        Assert.Equal(0, idle.GetSnapshot().HistoryCount);
+        Assert.True(idle.GetSnapshot().SmoothCorrections > 0);
+
+        var blocked = NewControlled();
+        GameLocomotionUpdate direct = GameLocomotionUpdate.CreateDirect(short.MaxValue, 0);
+        Assert.True(blocked.ObserveAdmittedCommand(1, direct, 1_001_000));
+        _ = blocked.Sample(1_151_000);
+        blocked.ObserveOwner(1, new GameControlSessionEpoch(2), 3, actor,
+            2, 1, Position(0), WorldYaw.Zero, true, 1_152_000);
+        Assert.Equal(0L, blocked.Sample(1_400_000).Pose.GlobalXMillimeters);
+        blocked.ObserveOwner(1, new GameControlSessionEpoch(2), 3, actor,
+            3, 1, Position(600), WorldYaw.Zero, false, 1_450_000);
+        Assert.Equal(600L, blocked.Sample(1_650_000).Pose.GlobalXMillimeters);
+        Assert.True(blocked.ObserveAdmittedCommand(2, direct, 1_651_000));
+        Assert.True(blocked.Sample(1_701_000).Pose.GlobalXMillimeters > 600);
     }
 
     private static void StopReverseDestinationAndBlocked()
@@ -116,6 +142,15 @@ internal static class ClientTemporalMotionTests
         Assert.Equal(5_010L, snap.Pose.GlobalXMillimeters);
         Assert.Equal(1UL, motion.GetSnapshot().DiscontinuityResets);
         Assert.Equal(0UL, motion.GetSnapshot().LineageResets);
+
+        var vertical = NewControlled();
+        Assert.True(WorldPosition.TryFromGlobalMillimeters(0, 10_000, 0,
+            out WorldPosition elevated));
+        vertical.ObserveOwner(1, new GameControlSessionEpoch(2), 3, actor,
+            2, 0, elevated, WorldYaw.Zero, false, 1_016_000);
+        ClientResolvedMotionPose verticalSnap = vertical.Sample(1_016_000);
+        Assert.Equal(10_000, verticalSnap.Pose.YMillimeters);
+        Assert.Equal(ClientMotionPoseProvenance.DiscontinuitySnap, verticalSnap.Provenance);
     }
 
     private static void CapacityLineageAndFrameRate()
@@ -209,6 +244,21 @@ internal static class ClientTemporalMotionTests
         Assert.True(delayed.Pose.GlobalXMillimeters is >= 1_300 and <= 1_400);
         Assert.Equal(ClientRemoteActorInterpolation.SamplesPerActor,
             interpolation.GetSnapshot().SampleHighWater);
+    }
+
+    private static void VerticalRelocationSnapsRemoteInterpolation()
+    {
+        var interpolation = new ClientRemoteActorInterpolation();
+        WorldPublicEntityId actor = new(7, 1);
+        Assert.True(interpolation.Observe(1, actor, 1,
+            new ClientMotionPose(0, 0, 0, WorldYaw.Zero), 1_000_000));
+        Assert.True(interpolation.Observe(1, actor, 2,
+            new ClientMotionPose(0, 10_000, 0, WorldYaw.Zero), 1_100_000));
+        Assert.True(interpolation.TrySample(actor, 1_150_000,
+            out ClientResolvedMotionPose relocated));
+        Assert.Equal(10_000, relocated.Pose.YMillimeters);
+        Assert.Equal(ClientMotionPoseProvenance.DiscontinuitySnap, relocated.Provenance);
+        Assert.Equal(1UL, interpolation.GetSnapshot().TeleportResets);
     }
 
     private static void WarmedUpdatesDoNotAllocate()

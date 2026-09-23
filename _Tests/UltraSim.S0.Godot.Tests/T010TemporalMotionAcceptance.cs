@@ -91,6 +91,27 @@ public partial class T010PlayableWorldAcceptance
                 reconciled.Pose.GlobalXMillimeters <= 900,
                 "The owner update caused a double-motion jump.");
 
+            var idle = new ClientControlledMotionPresentation();
+            idle.ObserveOwner(1, new GameControlSessionEpoch(2), 3, controlledId,
+                1, 0, origin, WorldYaw.Zero, false, 1_000_000);
+            Expect(WorldPosition.TryFromGlobalMillimeters(600, 0, 0,
+                out WorldPosition relocatedPosition),
+                "The idle native relocation position was invalid.");
+            idle.ObserveOwner(1, new GameControlSessionEpoch(2), 3, controlledId,
+                2, 0, relocatedPosition, WorldYaw.Zero, false, 1_050_000);
+            ClientResolvedMotionPose settled = idle.Sample(1_250_000);
+            WorldPosition settledPosition = default;
+            Expect(settled.Pose.GlobalXMillimeters == 600 &&
+                settled.Pose.TryGetWorldPosition(out settledPosition),
+                "An idle controlled actor did not settle to later authority truth.");
+            presenter.SetControlledActorPose(controlledId, settledPosition,
+                settled.Pose.Orientation, 1_250);
+            presenter.UpdateOriginAndLifetimes(origin, 1_250);
+            cameraRig.SetTargetOffset(new Vector3(0.6f, 0, 0));
+            Expect(MathF.Abs(controlledRoot.Position.X - 0.6f) < 0.002f &&
+                MathF.Abs(camera.Position.X - initialCamera.X - 0.6f) < 0.002f,
+                "The native actor/camera retained an idle pose behind authoritative relocation.");
+
             var remote = new ClientRemoteActorInterpolation();
             ClientResolvedMotionPose middle = default;
             Expect(remote.Observe(3, remoteId, 1,
@@ -108,6 +129,15 @@ public partial class T010PlayableWorldAcceptance
             Expect(MathF.Abs(remoteRoot!.Position.X - 1.5f) < 0.002f &&
                 remoteRecord.Position == remotePosition,
                 "The remote actor did not realize an intermediate pose beside exact semantic truth.");
+            Vector3 pickRayOrigin = new(1.8f, 0.5f, -5f);
+            Vector3 pickRayDirection = Vector3.Forward * -1f;
+            Expect(presenter.TryGetPresentedPose(remoteId, out ClientMotionPose pickPose) &&
+                pickPose.GlobalXMillimeters == 1_500 &&
+                GodotPublicPointerPicker.TryIntersect(GameWorldPublicPrefabIds.WoodlandAnimal,
+                    pickRayOrigin, pickRayDirection, new Vector3(1.5f, 0, 0), out _) &&
+                !GodotPublicPointerPicker.TryIntersect(GameWorldPublicPrefabIds.WoodlandAnimal,
+                    pickRayOrigin, pickRayDirection, new Vector3(1f, 0, 0), out _),
+                "The moving actor's visible pick volume did not follow its presented pose.");
             remote.Remove(remoteId);
             Expect(!remote.TrySample(remoteId, 1_160_000, out _),
                 "Removal retained old remote interpolation samples.");

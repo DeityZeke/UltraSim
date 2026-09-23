@@ -144,6 +144,21 @@ public partial class S08HeadlessAcceptance : Control
                 fourThree.Frame.X, fourThree.Frame.Y));
             Expect(centerRay.DistanceTo(edgeRay) < 0.001f,
                 "Orthographic rays were not parallel.");
+            float beforeZoomSize = camera.Size;
+            float beforeZoomDistance = controller.DistanceMeters;
+            controller.Zoom(inward: true);
+            Expect(camera.Size < beforeZoomSize &&
+                Math.Abs(camera.Size - beforeZoomSize *
+                    controller.DistanceMeters / beforeZoomDistance) < 0.001f,
+                "An admitted orthographic stepped zoom did not magnify the view.");
+            controller.Zoom(inward: false);
+            Expect(Math.Abs(camera.Size - beforeZoomSize) < 0.001f,
+                "Orthographic zoom-out did not restore the accepted profile lens.");
+            ClientCameraRig elevatedPivot = orbit with { PivotHeightMillimeters = 2_300 };
+            controller.ApplyRig(elevatedPivot, fourThree);
+            controller.UpdatePose();
+            Expect(Math.Abs(controller.PivotMeters - 2.3f) < 0.001f,
+                "The accepted profile pivot did not own the realized camera target.");
             controller.ApplyRig(orbit, fourThree);
             Expect(camera.Projection == Camera3D.ProjectionType.Perspective,
                 "A same-frame orthographic-to-perspective switch retained the old projection.");

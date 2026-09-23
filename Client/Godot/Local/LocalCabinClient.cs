@@ -232,7 +232,6 @@ public partial class LocalCabinClient : Node3D
     private LocalQueuedUiClient? _uiBridge;
     private Node3D? _humanPresentation;
     private int _humanMeshInstances;
-    private float _cameraPivotMeters = CameraPivotMeters;
     private bool _addedPresentationRealized;
     private WorldPosition _player;
     private ClientControlWorldPoint _pointerPoint;
@@ -478,7 +477,7 @@ public partial class LocalCabinClient : Node3D
             _humanBody,
             _displayName,
             _humanMeshInstances,
-            _cameraPivotMeters,
+            _cameraRig?.PivotMeters ?? CameraPivotMeters,
             NameplateHeightMeters,
             EffectsHeightMeters,
             _addedPresentationRealized,
@@ -1969,8 +1968,6 @@ public partial class LocalCabinClient : Node3D
             return;
         }
         _humanPresentation.Name = $"Controlled{_humanBody}";
-        if (_actorState.TryGet(view.PublicActor, out ClientActorPresentationRecord controlled))
-            _cameraPivotMeters = controlled.Definition.CameraPivotHeightMillimeters * 0.001f;
         _humanMeshInstances = CountMeshInstances(_humanPresentation);
         if (_humanMeshInstances == 0)
             throw new InvalidOperationException("The controlled actor contains no mesh presentation.");
@@ -2647,7 +2644,6 @@ public partial class LocalCabinClient : Node3D
     {
         if (_cameraRig is null) return;
         if (_sessionUi is not null) _cameraRig.ApplyFrame(_sessionUi.GameplayFrame);
-        _cameraRig.SetPivotHeightMeters(_cameraPivotMeters);
         _cameraRig.UpdatePose();
     }
 

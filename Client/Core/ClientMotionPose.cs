@@ -41,6 +41,15 @@ public readonly record struct ClientMotionPose(
         return (long)Math.Min(long.MaxValue, Math.Sqrt(dx * dx + dz * dz));
     }
 
+    public static long SpatialDistanceMillimeters(
+        in ClientMotionPose left, in ClientMotionPose right)
+    {
+        double dx = (double)left.GlobalXMillimeters - right.GlobalXMillimeters;
+        double dy = (double)left.YMillimeters - right.YMillimeters;
+        double dz = (double)left.GlobalZMillimeters - right.GlobalZMillimeters;
+        return (long)Math.Min(long.MaxValue, Math.Sqrt(dx * dx + dy * dy + dz * dz));
+    }
+
     private static long InterpolateLong(long from, long to, long elapsed, long duration) =>
         checked(from + (long)(((Int128)to - from) * elapsed / duration));
 }

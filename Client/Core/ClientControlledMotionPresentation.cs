@@ -155,9 +155,11 @@ public sealed class ClientControlledMotionPresentation
         ClientResolvedMotionPose before = Resolve(nowMicroseconds);
         long priorCorrectionX = CorrectionAt(_correctionX, nowMicroseconds);
         long priorCorrectionZ = CorrectionAt(_correctionZ, nowMicroseconds);
+        long spatialDistance = ClientMotionPose.SpatialDistanceMillimeters(
+            _authority, newAuthority);
         long authorityDistance = ClientMotionPose.HorizontalDistanceMillimeters(
             _authority, newAuthority);
-        if (authorityDistance > DiscontinuityMillimeters)
+        if (spatialDistance > DiscontinuityMillimeters)
         {
             ResetState(countLineageReset: false);
             Increment(ref _discontinuityResets);
@@ -178,6 +180,9 @@ public sealed class ClientControlledMotionPresentation
         _authority = newAuthority;
         _stateSequence = stateSequence;
         _lastOwnerMicroseconds = nowMicroseconds;
+        if (_suppressed && !locomotionBlocked &&
+            authorityDistance > CorrectionDeadbandMillimeters)
+            _suppressed = false;
         bool acknowledgedStop = false;
         while (_count != 0 && _history[_head].Sequence <= lastProcessedCommand)
         {
@@ -188,8 +193,9 @@ public sealed class ClientControlledMotionPresentation
             Increment(ref _acknowledgedCommands);
         }
         _lastAcknowledged = lastProcessedCommand;
-        _leadX -= newAuthority.GlobalXMillimeters - _previousAuthority.GlobalXMillimeters;
-        _leadZ -= newAuthority.GlobalZMillimeters - _previousAuthority.GlobalZMillimeters;
+        ConsumeLeadFromAuthorityDisplacement(
+            newAuthority.GlobalXMillimeters - _previousAuthority.GlobalXMillimeters,
+            newAuthority.GlobalZMillimeters - _previousAuthority.GlobalZMillimeters);
         ClampLead();
         if ((acknowledgedStop && _activeLocomotion.Kind == GameLocomotionUpdateKind.Stop) ||
             (_activeLocomotion.Kind == GameLocomotionUpdateKind.Destination &&
@@ -334,6 +340,20 @@ public sealed class ClientControlledMotionPresentation
             _leadX = _leadZ = 0;
             Increment(ref _clamps);
         }
+    }
+
+    private void ConsumeLeadFromAuthorityDisplacement(long dx, long dz)
+    {
+        // Authority can consume a lead that was actually speculated in its direction. It must
+        // never manufacture a negative lead from unrelated movement, including an idle actor's
+        // ordinary relocation or movement after a blocked prediction has been suppressed.
+        if (_leadX == 0 && _leadZ == 0) return;
+        double leadSquared = (double)_leadX * _leadX + (double)_leadZ * _leadZ;
+        double aligned = (double)dx * _leadX + (double)dz * _leadZ;
+        if (aligned <= 0) return;
+        double fraction = Math.Min(1d, aligned / leadSquared);
+        _leadX -= (long)Math.Round(_leadX * fraction);
+        _leadZ -= (long)Math.Round(_leadZ * fraction);
     }
 
     private ClientResolvedMotionPose Resolve(long nowMicroseconds)

@@ -91,7 +91,6 @@ public readonly record struct RemoteConceptDemoLifecycleResidueSnapshot(
 public sealed partial class RemoteConceptDemoClient : Node3D
 {
     private const int RenderRadiusChunks = 1;
-    private const float CameraPivotMeters = 1.6f;
     private readonly OrbitCommandProfile _orbit = new();
     private readonly ThirdPersonDirectProfile _direct = new();
     private readonly IndependentMoveLookProfile _independent = new();
@@ -152,7 +151,6 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private ClientControlWorldPoint _pointerPoint;
     private WorldPublicEntityId _pointerTarget;
     private WorldPublicEntityId _selectedTarget;
-    private float _cameraPivotMeters = CameraPivotMeters;
     private bool _smoke;
     private bool _gameplayInputAllowed;
     private bool _gameplayInputAdmittedLastFrame;
@@ -1246,10 +1244,6 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         }
         _actorPresenter.SetControlledActorPose(
             playable.PublicActor, playable.Position, playable.Orientation, Time.GetTicksMsec());
-        if (_actorState.TryGet(
-                playable.PublicActor, out ClientActorPresentationRecord controlled))
-            _cameraPivotMeters =
-                controlled.Definition.CameraPivotHeightMillimeters * 0.001f;
         _actorPresenter.Apply(
             _actorChanges.AsSpan(0, changed), _player, Time.GetTicksMsec());
         if (playable.LastProcessedCommandSequence != 0 &&
@@ -1420,16 +1414,21 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 if (!GodotPublicPointerPicker.IsPointerTarget(
                         record.PrefabId, record.StateFlags))
                     continue;
+                WorldPosition pickPosition = record.Position;
+                if (_actorPresenter?.TryGetPresentedPose(record.Id,
+                        out ClientMotionPose presented) == true &&
+                    presented.TryGetWorldPosition(out WorldPosition displayed))
+                    pickPosition = displayed;
                 Vector3 basePosition = new(
-                    checked(record.Position.GlobalXMillimeters - _player.GlobalXMillimeters) * 0.001f,
-                    checked(record.Position.YMillimeters - _player.YMillimeters) * 0.001f,
-                    checked(record.Position.GlobalZMillimeters - _player.GlobalZMillimeters) * 0.001f);
+                    checked(pickPosition.GlobalXMillimeters - _player.GlobalXMillimeters) * 0.001f,
+                    checked(pickPosition.YMillimeters - _player.YMillimeters) * 0.001f,
+                    checked(pickPosition.GlobalZMillimeters - _player.GlobalZMillimeters) * 0.001f);
                 if (!GodotPublicPointerPicker.TryIntersect(
                         record.PrefabId, rayOrigin, rayDirection, basePosition, out float distance) ||
                     distance >= nearest)
                     continue;
                 nearest = distance;
-                selected = record.Position;
+                selected = pickPosition;
                 target = record.Id;
             }
         }
@@ -1457,7 +1456,6 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     {
         if (_cameraRig is null) return;
         if (_sessionUi is not null) _cameraRig.ApplyFrame(_sessionUi.GameplayFrame);
-        _cameraRig.SetPivotHeightMeters(_cameraPivotMeters);
         _cameraRig.SetTargetOffset(new Vector3(
             checked(_presentedPlayer.GlobalXMillimeters - _player.GlobalXMillimeters) * 0.001f,
             checked(_presentedPlayer.YMillimeters - _player.YMillimeters) * 0.001f,
