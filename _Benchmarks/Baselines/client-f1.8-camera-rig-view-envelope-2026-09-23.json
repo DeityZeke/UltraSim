@@ -1,0 +1,117 @@
+{
+  "checkpoint": "F1.8",
+  "title": "Declarative camera/control rig and canonical gameplay-view crop",
+  "date": "2026-09-23",
+  "status": "closed",
+  "lineage": {
+    "startingHead": "65bcb40ca74a489d5ec226accd624ea36ca87b67",
+    "testedImplementationHead": "860d6790724733a6e577934845c72e654e2d3f1a",
+    "implementationCommits": [
+      "7d16bacd666eb9f9577c3262073a01b4a61c20cd",
+      "090a89d511532434ae5495d13419e5fb90240fa5",
+      "1e3456a206e2f1102ee5775149deffec240ddb5c",
+      "44ee67cb0a826dc741d4b56a27d871970a19acde",
+      "860d6790724733a6e577934845c72e654e2d3f1a"
+    ],
+    "finalHead": "evidence-only commit; see handoff"
+  },
+  "environment": {
+    "configuration": "Release",
+    "os": "CachyOS Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D",
+    "physicalCores": 8,
+    "logicalProcessors": 16,
+    "dotnetSdk": "8.0.131",
+    "dotnetRuntime": "8.0.31",
+    "godot": "4.7.1.stable.mono.official.a13da4feb"
+  },
+  "rig": {
+    "representation": "immutable engine-neutral fixed-unit value",
+    "distanceAndSizeUnit": "millimeters",
+    "angleAndFovUnit": "tenths of degrees",
+    "lookSpeedUnit": "millidegrees per pointer pixel",
+    "projection": ["Perspective", "Orthographic"],
+    "target": ["ControlledActor"],
+    "follow": ["Immediate"],
+    "axis": ["Locked", "Free"],
+    "zoom": ["Disabled", "Stepped"],
+    "stock": [
+      { "grammar": "OrbitCommand", "distanceMillimeters": 14000, "canonicalFovTenths": 700, "axis": "Free", "zoom": "Stepped" },
+      { "grammar": "ThirdPersonDirect", "distanceMillimeters": 8500, "canonicalFovTenths": 760, "axis": "Free", "zoom": "Stepped" },
+      { "grammar": "IndependentMoveLook", "distanceMillimeters": 14000, "canonicalFovTenths": 700, "axis": "Locked", "zoom": "Disabled" }
+    ],
+    "userNamedProfileMaximum": 16,
+    "userProfileNameMaximumCharacters": 48,
+    "namedStockEquivalentProven": true,
+    "sharedLocalRemoteGodotController": "GodotGameplayCameraRig",
+    "unsupported": ["pan", "snap yaw", "camera collision", "obstruction fade", "shoulder swap", "follow smoothing", "prediction", "actor interpolation"]
+  },
+  "settingsAndProtocol": {
+    "settingsVersion": 4,
+    "legacyChoiceDistanceFovBindingsAndRealmOverrideMigrated": true,
+    "cameraActions": {
+      "CameraLook": "middle mouse drag",
+      "CameraZoomIn": "wheel up",
+      "CameraZoomOut": "wheel down"
+    },
+    "remoteActionMappingExplicit": true,
+    "remoteRigEncodedBytes": 54,
+    "maximumProfileMessageBytes": 2048,
+    "materialRigChangeReconsent": true,
+    "exactReconnectDecisionReuse": true,
+    "gameManifestVersion": 32,
+    "networkTransportRevision": 2
+  },
+  "projection": {
+    "canonicalAspect": [16, 9],
+    "stockOrbitFovDegrees": 70,
+    "perspectiveHalfTangents": [
+      { "aspect": "16:9", "vertical": 0.7002075382097097, "horizontal": 1.2448134012617063 },
+      { "aspect": "4:3", "vertical": 0.7002075382097097, "horizontal": 0.9336100509462796 },
+      { "aspect": "3:4", "vertical": 0.7002075382097097, "horizontal": 0.5251556536572823 },
+      { "aspect": "64:27", "vertical": 0.5251556536572823, "horizontal": 1.2448134012617063 }
+    ],
+    "orthographicControlCanonicalVerticalMeters": 20,
+    "sameAspectResolutionInvariance": ["1920x1080", "1280x720", "640x360", "3840x2160", "800x600", "1600x1200"],
+    "applicationResizeInvariance": ["1920x1080", "2560x1440", "3440x1440"],
+    "mainViewportCompensation": "target vertical extent times application height divided by actual frame height",
+    "godotKeepAspect": "Height",
+    "nativeRayPoints": ["center", "near left", "near right", "near top", "near bottom"],
+    "nativeRayAspects": ["16:9", "4:3", "3:4", "64:27"],
+    "nativeHeadlessViewport": [64, 64],
+    "orthographicNativePass": true,
+    "lockedAxisNativePass": true,
+    "sameFrameRigSwitchNativePass": true,
+    "outsideFramePointerRejected": true,
+    "renderDistanceAndAoiUnchanged": true,
+    "securityBoundary": false
+  },
+  "f1BaselineComparison": {
+    "localSemanticResidentChunks": 49,
+    "localRenderedChunks": 25,
+    "localBatchCounts": [64, 7],
+    "remoteColdBytes": 733198,
+    "remoteWarmReuse": [1, 3],
+    "remoteNativeResources": [1, 2213268],
+    "retirement": "clean",
+    "mixedLifecycle": "Local-Local-RemoteA-RemoteB-RemoteA-Local",
+    "sessionResidue": "none",
+    "semanticOrAuthorityChanges": false
+  },
+  "verification": [
+    { "command": "dotnet run --project _Tests/UltraSim.Client.Tests/UltraSim.Client.Tests.csproj -c Release", "result": "33/33 pass" },
+    { "command": "dotnet run --project _Tests/UltraSim.Game.Replication.Tests/UltraSim.Game.Replication.Tests.csproj -c Release", "result": "180/180 pass" },
+    { "command": "./verify.sh --architecture-only", "result": "pass" },
+    { "command": "./verify.sh --f1-7-only --configuration=Release", "result": "pass" },
+    { "command": "./verify.sh --configuration=Release", "result": "pass", "testedHead": "860d6790724733a6e577934845c72e654e2d3f1a", "finalLine": "PASS repository verification" },
+    { "suite": "F1.8 native camera rays", "result": "pass", "aspects": ["16:9", "4:3", "3:4", "64:27"] },
+    { "suite": "F0.7 mixed Local/Remote lifecycle", "result": "pass", "boundaries": "clean" },
+    { "suite": "F1.0 client baseline guardrails", "result": "pass", "retirement": "clean" }
+  ],
+  "developmentNotes": [
+    "One transient M0.0 native-smoke attempt failed; focused reruns and final canonical Release passed.",
+    "Legacy manifest fingerprint and camera-label assertions were updated for v32 before final verification.",
+    "A same-frame rig switch initially retained a stale native lens; fixed and regressed before final verification."
+  ],
+  "deferred": ["F1.8A prediction/reconciliation/interpolation", "F1.9 real Gameplay SubViewport and independent render resolution", "render upscaling/pixel modes", "authority, AOI, disclosure or Network transport changes"]
+}
