@@ -3348,7 +3348,7 @@ public partial class LocalCabinClient : Node3D
     private void ProbePlayableInventory()
     {
         if (_localSession is null || _uiClient is null || _uiBridge is null ||
-            _inventoryHost is null)
+            _inventoryHost is null || _sessionUi is null)
             throw new InvalidOperationException("Playable Inventory presentation was not composed.");
         ulong before = _localSession.GetSnapshot().UiOperationsApplied;
         OpenInventory();
@@ -3359,13 +3359,24 @@ public partial class LocalCabinClient : Node3D
                 _localSession.GetSnapshot().UiOperationsApplied > before;
         });
         Control? inventory = FindOpenInventoryView();
+        Control? window = inventory?.GetParent() as Control;
+        Rect2 application = GetViewport().GetVisibleRect();
         if (inventory is null ||
             inventory.FindChild("Element_background", recursive: true, owned: false) is not Panel ||
             inventory.FindChild("Element_close", recursive: true, owned: false) is not Button ||
-            !Mathf.IsEqualApprox(inventory.AnchorLeft, 0.5f) ||
-            !Mathf.IsEqualApprox(inventory.AnchorTop, 0.5f))
+            window is null || window.GetParent() != _inventoryHost ||
+            !window.Name.ToString().StartsWith("GumpWindow_", StringComparison.Ordinal) ||
+            window.FindChild("WindowBackground", recursive: false, owned: false) is not Panel ||
+            window.FindChild("WindowDragHandle", recursive: false, owned: false) is not Button ||
+            !application.HasPoint(window.GetGlobalRect().Position) ||
+            _sessionUi.Gumps.GetSnapshot().OpenWindows != 1)
             throw new InvalidOperationException(
-                "Playable Inventory was not centered, backed by a surface, and closable.");
+                "Playable Inventory was not a bounded, surfaced, closable gameplay gump: " +
+                $"view={inventory is not null} window={window?.Name} parent={window?.GetParent()?.Name} " +
+                $"host={_inventoryHost.Name} background={window?.FindChild("WindowBackground", recursive: false, owned: false) is Panel} " +
+                $"drag={window?.FindChild("WindowDragHandle", recursive: false, owned: false) is Button} " +
+                $"application={application} windowRect={window?.GetGlobalRect()} " +
+                $"open={_sessionUi.Gumps.GetSnapshot().OpenWindows}.");
         OpenInventory();
         DriveLocalUntil(() =>
         {
