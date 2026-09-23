@@ -3389,8 +3389,8 @@ static void VerifyContentlessOnlineNative(
             ]), 45_000);
             RequireNativeA08Result(cold, "cold", coldReady.WorldPackFingerprint,
                 expectedWarm: false, expectedRememberedProfile: false,
-                expectedProfile: "grammar=ThirdPersonDirect camera=ThirdPersonFollow " +
-                    "distance=8.5 fov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT");
+                expectedProfile: "grammar=ThirdPersonDirect camera=Perspective/Free/Free " +
+                    "distance=8.5 canonicalFov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT");
         }
         finally { StopOwnedProcess(coldServer); }
     }
@@ -3429,8 +3429,8 @@ static void VerifyContentlessOnlineNative(
             ]), 45_000);
             RequireNativeA08Result(warm, "warm", warmReady.WorldPackFingerprint,
                 expectedWarm: true, expectedRememberedProfile: true,
-                expectedProfile: "grammar=ThirdPersonDirect camera=ThirdPersonFollow " +
-                    "distance=8.5 fov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT");
+                expectedProfile: "grammar=ThirdPersonDirect camera=Perspective/Free/Free " +
+                    "distance=8.5 canonicalFov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT");
         }
         finally { StopOwnedProcess(warmServer); }
     }
@@ -3470,8 +3470,8 @@ static void VerifyContentlessOnlineNative(
             ]), 45_000);
             RequireNativeA08Result(changed, "warm", changedReady.WorldPackFingerprint,
                 expectedWarm: true, expectedRememberedProfile: false,
-                expectedProfile: "grammar=OrbitCommand camera=Orbit " +
-                    "distance=14.0 fov=70 select=MouseButton:LEFT primary=MouseButton:MIDDLE");
+                expectedProfile: "grammar=OrbitCommand camera=Perspective/Free/Free " +
+                    "distance=14.0 canonicalFov=70 select=MouseButton:LEFT primary=MouseButton:MIDDLE");
         }
         finally { StopOwnedProcess(changedServer); }
     }
@@ -3576,14 +3576,14 @@ static void VerifyEmbeddedCompleteHostedNative(
         RequireNativeA08Result(
             bobOutput, "cold", worldPackFingerprint: string.Empty,
             expectedWarm: false, expectedRememberedProfile: false,
-            expectedProfile: "grammar=ThirdPersonDirect camera=ThirdPersonFollow " +
-                "distance=8.5 fov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT",
+            expectedProfile: "grammar=ThirdPersonDirect camera=Perspective/Free/Free " +
+                "distance=8.5 canonicalFov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT",
             requireWorldFingerprint: false);
         RequireNativeA08Result(
             carolOutput, "cold", worldPackFingerprint: string.Empty,
             expectedWarm: false, expectedRememberedProfile: false,
-            expectedProfile: "grammar=ThirdPersonDirect camera=ThirdPersonFollow " +
-                "distance=8.5 fov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT",
+            expectedProfile: "grammar=ThirdPersonDirect camera=Perspective/Free/Free " +
+                "distance=8.5 canonicalFov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT",
             requireWorldFingerprint: false);
         // Three humans plus the existing woodland animal must be concurrently presented.
         if (!bobOutput.Contains("actors=4", StringComparison.Ordinal) ||
@@ -3636,8 +3636,8 @@ static void VerifyPf2MixedExportedAccountingSwarm(
     int expectedPresentedActors = participantCapacity + 1;
     const ulong seed = 130_363;
     const string expectedProfile =
-        "grammar=ThirdPersonDirect camera=ThirdPersonFollow " +
-        "distance=8.5 fov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT";
+        "grammar=ThirdPersonDirect camera=Perspective/Free/Free " +
+        "distance=8.5 canonicalFov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT";
     int clientTimeoutMilliseconds = checked(Math.Max(
         300_000, (warmupSeconds + measurementSeconds + 300) * 1_000));
 
@@ -4557,8 +4557,8 @@ static void VerifyPf1MixedExportedSwarm(
     const ulong seed = 104_729;
     const string scenario = "mixed-chaos";
     const string expectedProfile =
-        "grammar=ThirdPersonDirect camera=ThirdPersonFollow " +
-        "distance=8.5 fov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT";
+        "grammar=ThirdPersonDirect camera=Perspective/Free/Free " +
+        "distance=8.5 canonicalFov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT";
 
     VerifyPf1BotArtifact(root, configuration);
 
