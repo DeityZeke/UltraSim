@@ -33,7 +33,10 @@ if [[ ! -x "$godot" ]]; then
 fi
 
 output="${2:-$default_output}"
-mkdir -p -- "$(dirname -- "$output")"
+output_dir="$(dirname -- "$output")"
+managed_output="$output_dir/data_UltraSim.Client.Application.Godot_linuxbsd_x86_64"
+dependency_manifest="$managed_output/UltraSim.Client.Application.Godot.deps.json"
+mkdir -p -- "$output_dir"
 
 export_release_bin="$script_dir/.godot/mono/temp/bin/ExportRelease"
 export_release_obj="$script_dir/.godot/mono/temp/obj/ExportRelease"
@@ -51,18 +54,41 @@ trap cleanup_export_state EXIT
 export UltraSimEdition="$edition"
 export UltraSimNetworkFlavor="$network_flavor"
 
-# Godot publishes with a runtime identifier and may otherwise reuse the root project's
-# project.assets.json from the previously exported edition. Because edition selection changes the
-# root project graph, force an exact restore before Godot invokes its no-restore publish step.
-dotnet restore "$script_dir/UltraSim.Client.Application.Godot.csproj" \
-  -r linux-x64 \
-  --force \
-  -p:UltraSimEdition="$edition" \
-  -p:UltraSimNetworkFlavor="$network_flavor"
+restore_export_graph() {
+  # Godot publishes with a runtime identifier and may otherwise reuse the root project's
+  # project.assets.json from the previously exported edition. Because edition selection changes
+  # the root project graph, force an exact restore before its no-restore publish step.
+  dotnet restore "$script_dir/UltraSim.Client.Application.Godot.csproj" \
+    -r linux-x64 \
+    --force \
+    -p:UltraSimEdition="$edition" \
+    -p:UltraSimNetworkFlavor="$network_flavor"
+}
 
-"$godot" --headless --path "$script_dir" --export-release "$preset" "$output"
+run_export() {
+  "$godot" --headless --path "$script_dir" --export-release "$preset" "$output"
+}
 
-official_root="$(dirname -- "$output")/Content/Official"
+restore_export_graph
+run_export
+
+# Godot 4.7 can report a successful export process after its internal managed publish has failed,
+# leaving only the native shell/PCK. Detect that exact partial state, retry once from bounded
+# generated state, and keep a repeated failure visible rather than publishing an incomplete client.
+if [[ ! -f "$output" || ! -f "$dependency_manifest" ]]; then
+  echo "Managed export was incomplete; retrying once from clean generated state." >&2
+  cleanup_export_state
+  rm -f -- "$output"
+  rm -rf -- "$managed_output"
+  restore_export_graph
+  run_export
+fi
+if [[ ! -f "$output" || ! -f "$dependency_manifest" ]]; then
+  echo "Managed export is incomplete after retry: $output" >&2
+  exit 1
+fi
+
+official_root="$output_dir/Content/Official"
 if [[ "$edition" == "Online" ]]; then
   rm -f -- "$official_root/ultrasim-official-actors-v1.uspkg"
 else
