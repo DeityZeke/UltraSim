@@ -69,6 +69,12 @@ public partial class S08HeadlessAcceptance : Control
             Expect(camera.Position.DistanceTo(stockPosition) < 0.0001f &&
                 camera.ProjectRayNormal(Center(full)).DistanceTo(fullCenter) < 0.0001f,
                 "A user-named stock-equivalent rig diverged in native Godot realization.");
+            controller.ApplyRig(ClientStockCameraRigs.ThirdPerson, full);
+            Expect(Math.Abs(camera.Fov - controller.TargetFrameProjection
+                    .MainViewportVerticalFovDegrees(full)) < 0.01d &&
+                Math.Abs(controller.TargetFrameProjection.TargetVerticalFovDegrees - 76d) < 0.01d,
+                "A same-frame perspective rig switch retained the prior native lens.");
+            controller.ApplyRig(orbit, full);
             // Pointer nomination uses the same native projection as the visible frame.
             Vector2 nominationPixel = new(full.Frame.X + full.Frame.Width * 0.75f,
                 full.Frame.Y + full.Frame.Height * 0.5f);
@@ -138,6 +144,9 @@ public partial class S08HeadlessAcceptance : Control
                 fourThree.Frame.X, fourThree.Frame.Y));
             Expect(centerRay.DistanceTo(edgeRay) < 0.001f,
                 "Orthographic rays were not parallel.");
+            controller.ApplyRig(orbit, fourThree);
+            Expect(camera.Projection == Camera3D.ProjectionType.Perspective,
+                "A same-frame orthographic-to-perspective switch retained the old projection.");
             GD.Print($"F1.8 CAMERA RAYS PASS app={application.Width}x{application.Height} " +
                 "aspects=16:9,4:3,3:4,64:27 orthographic=pass locked=pass");
         }

@@ -51,6 +51,8 @@ public sealed class GodotGameplayCameraRig
         _pitch = Mathf.DegToRad(rig.DefaultPitchTenths / 10f);
         _distance = rig.DefaultDistanceMillimeters / 1_000f;
         _pivot = rig.PivotHeightMillimeters / 1_000f;
+        // A rig change is also a lens change even when the frame geometry is unchanged.
+        _layout = default;
         ApplyFrame(layout);
         UpdatePose();
     }
