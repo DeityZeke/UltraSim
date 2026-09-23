@@ -1,0 +1,126 @@
+{
+  "checkpoint": "F1.7",
+  "title": "Application workspace, Gameplay Frame, and shared UI/gumps",
+  "date": "2026-09-22",
+  "status": "closed",
+  "lineage": {
+    "startingHead": "adf5c3b547a86a06e1c8427de1e145ebd133d404",
+    "testedImplementationHead": "55fbd0337077f1c4014a779aef51a789a7d5b899",
+    "implementationCommits": [
+      "1cba62693acf192d45641ecf995bc855fe8aa051",
+      "85d5b8d7444d191f6d18bfcbec004a1a22af15df",
+      "2b1f2c209eb8acd2d1e4ef1006235c6fd7692d88",
+      "55fbd0337077f1c4014a779aef51a789a7d5b899"
+    ]
+  },
+  "environment": {
+    "configuration": "Release",
+    "os": "CachyOS Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D",
+    "physicalCores": 8,
+    "logicalProcessors": 16,
+    "dotnetSdk": "8.0.131",
+    "dotnetRuntime": "8.0.31",
+    "godot": "4.7.1.stable.mono.official.a13da4feb"
+  },
+  "workspace": {
+    "selectedOutputDefault": { "width": 1920, "height": 1080 },
+    "layout": "centered maximum aspect-preserving fit",
+    "bounds": "finite integer half-open application-space rectangle",
+    "layers": [
+      { "name": "Workspace", "index": 5 },
+      { "name": "World", "index": 10 },
+      { "name": "HUD", "index": 20 },
+      { "name": "Menus", "index": 30 },
+      { "name": "Debug", "index": 40 },
+      { "name": "ContextTooltip", "index": 50 }
+    ],
+    "frameCases": [
+      { "application": [1920, 1080], "output": [1920, 1080], "frame": [0, 0, 1920, 1080], "unusedArea": 0 },
+      { "application": [1920, 1080], "output": [800, 600], "frame": [240, 0, 1440, 1080], "unusedArea": 518400 },
+      { "application": [1920, 1080], "output": [600, 800], "frame": [555, 0, 810, 1080], "unusedArea": 1198800 },
+      { "application": [3440, 1440], "output": [1920, 1080], "frame": [440, 0, 2560, 1440], "unusedArea": 1267200 },
+      { "application": [600, 800], "output": [800, 600], "frame": [0, 175, 600, 450], "unusedArea": 210000 }
+    ],
+    "transitionalRendering": {
+      "mainViewportRetained": true,
+      "darkWorkspaceMasks": 4,
+      "worldOverlayClippedToFrame": true,
+      "cameraProjectionMoved": false,
+      "subViewportIntroduced": false,
+      "independentRenderResolution": false
+    }
+  },
+  "gumps": {
+    "maximumWindows": 16,
+    "dragHeaderPixels": 26,
+    "separateShellAndGameplayHosts": true,
+    "inventoryAndServerMonitorCoexist": true,
+    "deterministicCascade": true,
+    "bringToFront": true,
+    "applicationClamp": true,
+    "exactIndependentClose": true,
+    "exactSessionRetirement": true,
+    "focusedNativeResult": {
+      "openViews": 2,
+      "openWindows": 2,
+      "cascade": [[8, 8], [8, 30]],
+      "clampedDrag": [8, 8],
+      "selectContextAction": true,
+      "interactContextAction": true
+    }
+  },
+  "inputAndDiagnostics": {
+    "outsideFrameWorldInputRejected": true,
+    "contextActions": ["Select", "Interact", "Cancel"],
+    "rightClickSubmitsOrbitStop": false,
+    "explicitStopPaths": ["Escape", "shell/modal input loss"],
+    "debugCycle": ["Off", "Client", "Presentation", "Content", "Off"],
+    "debugBinding": "F11",
+    "debugActionReservedFromServerProfile": true
+  },
+  "f1BaselineComparison": {
+    "localSemanticResidentChunks": 49,
+    "localRenderedChunks": 25,
+    "localBatchCounts": [64, 7],
+    "remoteColdBytes": 733198,
+    "remoteWarmReuse": [1, 3],
+    "remoteNativeResources": [1, 2213268],
+    "retirement": "clean",
+    "mixedLifecycle": "Local-Local-RemoteA-RemoteB-RemoteA-Local",
+    "sessionResidue": "none",
+    "intentionalDifferences": [
+      "Workspace and ContextTooltip are persistent categories",
+      "Inventory and server UI route through Menus/GameplayGumps",
+      "hover tooltip routes through ContextTooltip",
+      "system Chat banner routes through HUD",
+      "shell menu and gameplay-gump hosts are distinct",
+      "world pointer admission observes the Gameplay Frame",
+      "ContextMenu is no longer an Orbit stop alias"
+    ],
+    "semanticOrAuthorityChanges": false
+  },
+  "verification": [
+    { "command": "./verify.sh --architecture-only", "result": "pass" },
+    { "command": "./verify.sh --f1-7-only --configuration=Release", "result": "pass" },
+    { "command": "./verify.sh --configuration=Release", "result": "pass", "finalLine": "PASS repository verification" },
+    { "suite": "UltraSim.Client.Tests", "result": "32/32 pass" },
+    { "suite": "F0.7 mixed Local/Remote lifecycle", "result": "pass", "boundaries": "clean" },
+    { "suite": "F1.0 client baseline guardrails", "result": "pass", "retirement": "clean" }
+  ],
+  "exportHardening": {
+    "reason": "Godot could report success after an internal managed publish failure and leave an incomplete export",
+    "validatesExecutableAndManagedDeps": true,
+    "boundedRetryCount": 1,
+    "failsClosed": true,
+    "runtimeSemanticsChanged": false
+  },
+  "deferred": [
+    "F1.8 camera/control profile expansion and frame-aware projection/crop",
+    "F1.8A prediction and reconciliation",
+    "F1.9 Gameplay Frame render target/SubViewport",
+    "direct RenderingServer rewrite",
+    "content-scope or atlas changes",
+    "authority, Network, AOI, cadence, proof, or participant policy changes"
+  ]
+}
