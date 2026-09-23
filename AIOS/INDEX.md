@@ -22,6 +22,7 @@ Start here. This file is intentionally small.
 ## Cross-system canonical design references
 
 - [Simulation Time / Resolution / Control Authority](canonical/simulation-time-resolution-and-control.md) — independent world time/playback, deterministic causal aggregation, Immediate/Near/Far resolution, player autonomy/direct/command/governance control, and possession/controller binding.
+- [Visual Art / Lighting / Cabin Benchmark](canonical/visual-art-lighting-and-cabin-benchmark.md) — canonical art/material direction, environment/lighting resolver seam, two-room Cabin visual benchmark, and staged direct-light/probe/opening tests.
 
 ## Current gameplay/content references
 

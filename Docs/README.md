@@ -110,6 +110,10 @@ acceptance narratives remain available through git history.
   removable Official content, realm-scoped authorization over shared CAS bytes, renderer-independent
   source/derived-resource boundaries, atlas policy, UI/gump layering and lifetime, declarative
   camera/control profiles, and the vegetation/cut-state seam for the pre-PF6 client-completion pass.
+- [Visual art / lighting / Cabin benchmark](../AIOS/canonical/visual-art-lighting-and-cabin-benchmark.md) —
+  canonical look-and-feel direction and the selected two-room Cabin benchmark for intended real art,
+  environment profiles, direct light/shadows, cheap directional light-field work, opening
+  transmission, and presentation-only time/profile testing before authoritative environment systems exist.
 - [Asset streaming/content layering plan](Plans/ASSET_STREAMING.md) — stable logical
   content identity, activation/application proof, deterministic Default/Replace/Add,
   passive-content validation, content-addressed blobs with realm-scoped ownership,

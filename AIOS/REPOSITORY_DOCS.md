@@ -14,6 +14,7 @@ AIOS files are listed separately because this catalog was created as part of the
 - [AIOS/TOPICS.md](TOPICS.md)
 - [AIOS/canonical/README.md](canonical/README.md)
 - [AIOS/canonical/simulation-time-resolution-and-control.md](canonical/simulation-time-resolution-and-control.md)
+- [AIOS/canonical/visual-art-lighting-and-cabin-benchmark.md](canonical/visual-art-lighting-and-cabin-benchmark.md)
 - [AIOS/topics/README.md](topics/README.md)
 - [AIOS/topics/materials-and-processing.md](topics/materials-and-processing.md)
 - [AIOS/topics/armor-body-mail.md](topics/armor-body-mail.md)

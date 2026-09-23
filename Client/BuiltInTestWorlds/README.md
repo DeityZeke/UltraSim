@@ -29,4 +29,11 @@ authoritative Cabin WorldPack and bundled X/Y meshes are not repackaged here. F0
 catalog in the real Single Player shell, while A0.2 owns persistent CAS/install and A0.7 later carries
 a complete World-owned artifact through the streaming substrate.
 
+The accepted A0.1 fingerprints should remain a stable content-resolution oracle. The newer Cabin
+**visual benchmark** deliberately builds on the same overall Cabin/world content architecture but is
+not permission to churn this fixture whenever real art changes. Intended pine/rock/grass/log/door/
+window assets and lighting-test presentation should arrive through ordinary Local/Official content
+or additional logical presentation identities. See the canonical
+[Visual Art / Lighting / Cabin Benchmark](../../AIOS/canonical/visual-art-lighting-and-cabin-benchmark.md).
+
 See [`ASSET_STREAMING.md`](../../Docs/Plans/ASSET_STREAMING.md) for the owning plan.

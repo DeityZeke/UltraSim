@@ -1094,6 +1094,16 @@ Thus LocalSource, self-hosted HTTP, and external CDN must all produce the same f
 
 Use the same Cabin Test World in Single Player and externally hosted Online runs. Do not create a separate final asset-only demo.
 
+The Cabin is also selected as the future/upcoming **visual benchmark** for intended real art and foundational lighting. See [Visual Art / Lighting / Cabin Benchmark](../../AIOS/canonical/visual-art-lighting-and-cabin-benchmark.md).
+
+Keep these roles distinct:
+
+- the existing A0.1 Default/Replace/Add fixture remains a deterministic content-resolution oracle with frozen identities/fingerprints;
+- the visual benchmark may add or replace ordinary Official/local presentation through world.local to exercise the intended art style, two-room interior, door/window light spill, shadows, and environment profiles;
+- visual iteration must not casually rewrite the deterministic oracle merely because the preferred art changes.
+
+The same world can prove both systems because presentation content is replaceable while authoritative Game/world semantics remain unchanged.
+
 ## Scenario A — Default
 
 ### Local oracle

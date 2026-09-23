@@ -476,7 +476,27 @@ A local authority selects an installed Official activation. A remote realm may s
 
 Once applied, Client Core and the renderer should consume the same classes of semantic/presentation truth regardless of whether bytes came from local disk, server-hosted HTTP, external HTTPS/CDN, or warm CAS.
 
+## 8.1 Cabin Visual Benchmark
+
+The Cabin is also the selected first canonical visual/art/lighting benchmark. The owning cross-system direction is [Visual Art / Lighting / Cabin Benchmark](../../AIOS/canonical/visual-art-lighting-and-cabin-benchmark.md).
+
+This extends the Cabin's role without changing authority:
+
+- intended real/near-real art ships as ordinary removable Local/Official presentation content through world.local;
+- the primitive substrate remains independently available;
+- geometry should remain readable in neutral/texture-off presentation;
+- the official/default material treatment targets the illustrative painted/grungy UltraSim look rather than photoreal surface capture;
+- a two-room cabin, exterior door, secondary-room window, and a bookshelf/cabinet blocker provide repeatable interior-lighting tests;
+- the client environment resolver may initially consume presentation-only debug time/profile/weather state;
+- future authoritative calendar/region/weather state feeds that same seam instead of moving Game truth into the renderer.
+
+The near-term lighting target is direct sun/important lights plus credible shadows and a cheap directional ambient/light-field foundation. Window/door transmission and local interior propagation may then be layered in without requiring full general-purpose GI.
+
+The existing deterministic A0.1 Cabin content oracle remains separate evidence. Real-art iteration must not casually rewrite frozen content-oracle fingerprints.
+
 ---
+
+
 
 # 9. Global blob pool and content-scope metadata
 

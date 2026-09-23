@@ -1,6 +1,6 @@
 # UltraSim AIOS Current State
 
-**Updated:** 2026-09-22
+**Updated:** 2026-09-23
 
 This is a compact design-memory snapshot, not a replacement for implementation plans or source truth.
 
@@ -14,6 +14,7 @@ This is a compact design-memory snapshot, not a replacement for implementation p
 | Resource pools | CANONICAL design model | [Resource Pools reference](../Docs/Plans/Content/UltraSim_Resource_Pools_Reference.md) |
 | Sim reasoning / AI | CANONICAL conceptual baseline | [Sim Core reference](../Docs/Plans/Content/UltraSim_Sim_Core_Reasoning_Decision_Making_Reference_v4.md) |
 | Simulation time / resolution / control | CANONICAL conceptual model | [Simulation Time / Resolution / Control](canonical/simulation-time-resolution-and-control.md) |
+| Art / lighting / Cabin visual benchmark | CANONICAL visual direction + selected milestone | [Visual Art / Lighting / Cabin Benchmark](canonical/visual-art-lighting-and-cabin-benchmark.md) |
 | World history / knowledge | CANONICAL conceptual baseline | [History/Knowledge reference](../Docs/Plans/Content/UltraSim_World_History_Knowledge_Pools_Reference_v2.md) |
 | Magic | CANONICAL baseline with later refinements captured in AIOS | [Magic v2](../Docs/Plans/Content/UltraSim_Magic_Elements_Reification_Semantics_v2.md), [follow-up](topics/magic-post-v2-refinements.md) |
 
