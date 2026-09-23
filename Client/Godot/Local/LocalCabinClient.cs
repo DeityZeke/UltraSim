@@ -1134,23 +1134,16 @@ public partial class LocalCabinClient : Node3D
             _uiClient.OpenViewCount == 1 &&
             _localSession.GetSnapshot().UiOperationsApplied > before);
 
-        Control? root = null;
-        foreach (Node child in _inventoryHost.GetChildren())
-        {
-            if (child is Control candidate && candidate.Name.ToString().StartsWith(
-                    "UiView_", StringComparison.Ordinal))
-            {
-                root = candidate;
-                break;
-            }
-        }
+        Control? root = FindOpenUiView();
+        Control? window = root?.GetParent() as Control;
         Label? title = root?.FindChild("Element_title", recursive: true, owned: false) as Label;
         Label? body = root?.FindChild("Element_body", recursive: true, owned: false) as Label;
         Button? close = root?.FindChild("Element_close", recursive: true, owned: false) as Button;
         if (title?.Text != GameInformationalSigns.ConceptDemoWelcome.Title ||
             body?.Text != GameInformationalSigns.ConceptDemoWelcome.Body || close is null ||
-            root is null || !Mathf.IsEqualApprox(root.AnchorLeft, 0.5f) ||
-            !Mathf.IsEqualApprox(root.AnchorTop, 0.5f))
+            root is null || window is null || window.GetParent() != _inventoryHost ||
+            !window.Name.ToString().StartsWith("GumpWindow_", StringComparison.Ordinal) ||
+            window.FindChild("WindowDragHandle", recursive: false, owned: false) is not Button)
             throw new InvalidOperationException("Godot did not realize the authoritative sign title/body/actions.");
 
         close!.EmitSignal(BaseButton.SignalName.Pressed);
