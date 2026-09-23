@@ -1205,6 +1205,24 @@ At minimum include:
 
 Measure both existing node-backed and selected batch/RID paths.
 
+## Selected Cabin visual benchmark consumer
+
+The Cabin in the Woods is selected as the first real look-and-feel consumer for the intentional client. The owning direction is [Visual Art / Lighting / Cabin Benchmark](../../AIOS/canonical/visual-art-lighting-and-cabin-benchmark.md).
+
+The benchmark should use ordinary world.local/Official presentation rather than renderer-baked art and should exercise, incrementally:
+
+- tall pine(s), rocks, grass/ground, log cabin surfaces, real doorway/door, and window art;
+- a two-room interior where the main room has the exterior door and no windows;
+- a secondary room reached through an interior doorway and containing one exterior window;
+- a bookshelf/cabinet or similarly substantial object placed in the light-spill path;
+- intended painted/grungy official material treatment plus neutral/primitive comparison;
+- foundational time-of-day/environment controls, direct sun/shadows, and region-profile atmosphere;
+- later coarse directional light probes/opening transmission as earned.
+
+A presentation-only debug environment provider may drive time/profile/weather until authoritative Game systems exist. That provider must never affect Game truth.
+
+The selected benchmark should be usable during dogfooding/PF6 look-and-feel evaluation, but final game-wide art completeness and advanced GI are not PF6 requirements.
+
 ## Optional vegetation prototype
 
 Vegetation is an excellent GPU/procedural validation consumer.
@@ -1285,6 +1303,10 @@ Presentation
     Debug cycle
     dense actors/nameplates
     camera/control profile changes
+    Cabin visual benchmark: intended art vs primitive/clay
+    Cabin visual benchmark: dawn/noon/dusk/night
+    Cabin visual benchmark: bright/balanced/oppressive environment profiles
+    Cabin visual benchmark: door/window light spill and blocker occlusion
 
 Settings
     global

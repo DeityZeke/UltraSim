@@ -179,6 +179,16 @@ The exact formula need not be purely additive.
 
 Weather and temperature are not fields that belong directly inside the clock. They are world/environment state that can use time as an input.
 
+### Presentation-only visual-time testing
+
+Before authoritative calendar/region/weather systems exist, the client may synthesize presentation-only time-of-day, sun direction, Visual Environment Profile, and weather/fog state for the Cabin visual benchmark.
+
+Those values exist only to exercise lighting/atmosphere presentation. They must not affect authoritative NPC perception, combat, magic, temperature, schedules, or any other Game semantics.
+
+When authoritative state arrives, Local authority and Remote projection should feed the same client environment-resolver seam.
+
+See [Visual Art / Lighting / Cabin Benchmark](visual-art-lighting-and-cabin-benchmark.md).
+
 ## 5. Meaningful boundaries, not per-tick reconsideration
 
 A persistent Intent should usually continue until something meaningful changes.
