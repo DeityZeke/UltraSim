@@ -137,6 +137,11 @@ acceptance narratives remain available through git history.
 
 ## World / terrain
 
+- [World / WorldPack structural composition](Plans/WORLD_COMPOSITION.md) — canonical sparse
+  multi-Pack World model: centered fixed 256×256-chunk Pack addressing, immutable structural
+  manifest identity, prepared/resident state separation, atomic World-level composition
+  publication, per-Pack overlays, seamless cross-Pack identity/seams, demand-based structural
+  streaming, and the planned W1-W10 migration from the current one-Pack runtime.
 - [Terrain / World T0 plan/status](Plans/TERRAIN.md) — deterministic world/chunk
   coordinates, packed terrain/statics, UO-like Multi structure composition,
   preserved 3D region/property seams, dynamic public chunk publication, bounded

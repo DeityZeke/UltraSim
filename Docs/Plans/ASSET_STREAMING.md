@@ -43,6 +43,57 @@ and:
 
 Do not collapse trust/source, semantic operation, and physical byte delivery into one generic "mod/patch" concept.
 
+
+## Canonical multi-Pack structural delivery direction
+
+The canonical World composition direction is now owned by
+[WORLD_COMPOSITION.md](WORLD_COMPOSITION.md). A remote World eventually authenticates one exact
+immutable WorldStructuralManifest whose sparse Pack index is structural composition truth; the
+client does **not** need every referenced WorldPack byte before admission when demand-based
+structural policy permits streaming only the starting/AOI subset.
+
+The permanent delivery distinction is:
+
+```text
+manifest has no Pack entry
+    = authoritatively unauthored Pack / hard World boundary
+
+manifest has Pack entry
+but Pack artifact is not acquired/prepared
+    = structurally known but unavailable
+    = residency/acquisition state
+    != hard World boundary
+
+Pack prepared but chunk missing
+    = authoritatively unauthored chunk
+
+authored chunk + Absent base cell
+    = intentional known void
+```
+
+Target remote flow:
+
+```text
+authenticate exact WorldStructuralManifest
+    ↓
+resolve starting/AOI global SpatialChunkKeys
+    ↓
+resolve owning WorldPackCoord/manifest entries
+    ↓
+acquire/verify/open only required Pack artifacts
+    ↓
+publish resident semantic structural chunks
+```
+
+The manifest is admission-critical semantic composition identity. Individual Pack byte residency
+is a bounded cache/streaming concern below World identity. Changing or acquiring one Pack must
+not require redownloading unrelated Packs, and possession of Pack bytes still does not replace
+realm/content authorization.
+
+Current A0.7 complete-WorldPack streaming remains the accepted one-Pack implementation baseline.
+W7 is the planned transition to manifest-authenticated, demand-based multi-Pack acquisition after
+the World layer has first implemented W1-W6 composition semantics.
+
 ---
 
 # 1. Archaeology recovered from V2

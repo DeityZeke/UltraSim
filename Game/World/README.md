@@ -13,6 +13,41 @@ not make the oracle part of client storage. T1.0 adds explicit base-surface
 presence/intentional void; T1.1 adds immutable sparse terrain shells and bounded
 multi-surface column reads without turning terrain into ECS entities or voxels.
 
+## Canonical WorldPack composition direction
+
+The current runtime still prepares one exact WorldPack plus one WorldMutableOverlay. That is the
+accepted implementation baseline, not the final World-size model.
+
+The canonical forward composition is specified in
+[Docs/Plans/WORLD_COMPOSITION.md](../../Docs/Plans/WORLD_COMPOSITION.md):
+
+```text
+World / Save
+    ↓
+SpatialSpaceId
+    ↓
+World structural runtime composition
+    ↓
+immutable WorldStructuralManifest
+    ↓
+zero or many WorldPackCoord shards
+    ↓
+global SpatialChunkKeys
+```
+
+One WorldPack is a fixed 256×256 SpatialChunk / 4.096×4.096 km structural address shard. The
+globally centered Pack mapping makes Pack (0,0) own chunk coordinates -128..127 on each axis.
+WorldPack boundaries do not change World/SpatialSpace identity and must remain semantically boring.
+
+The future World layer distinguishes authoritatively unauthored Pack, manifest-known but
+unprepared Pack, missing chunk inside a prepared Pack, intentional Absent terrain cell, and
+present structural surface. Known-but-unprepared is residency state and must never be reported as
+a hard World boundary.
+
+Runtime publication eventually lifts WorldPreparedView into one atomic PreparedWorldComposition
+above per-Pack immutable base + mutable overlay lineages. WorldPack/v1 remains the initial artifact
+format; W1-W10 generalize composition around it rather than rewriting it prematurely.
+
 An entity is current in dynamic-public projection only while its valid
 `WorldPublicComponent` has `WorldPublicStateFlags.Visible`. Clearing `Visible`
 retires that public lifetime without removing authoritative identity or the

@@ -28,6 +28,50 @@ The first complete Terrain milestone is **T0 — Chunk-Native Playable World**:
 
 At the end of T0, return to [`NETWORK.md`](NETWORK.md) and implement/measure the N1 **ChunkPublication** replication profile against these accepted contracts. N1 is an additional concrete profile beside the accepted **EntityRelation** profile; T0 does not promise that N1 will delete or retire N0's relation machinery. Do not redesign Network AOI again before the world substrate exists.
 
+
+## Canonical multi-WorldPack composition direction
+
+The accepted T0/T1 implementation history below remains the executable one-Pack foundation. The
+canonical forward World composition model is now specified in
+[WORLD_COMPOSITION.md](WORLD_COMPOSITION.md). It does **not** retroactively claim that
+multi-Pack runtime composition is already implemented.
+
+Key forward invariants:
+
+```text
+World identity != WorldPack storage identity
+
+WorldPackCoord
+    fixed 256 × 256 SpatialChunks
+    fixed 4.096 km × 4.096 km address envelope
+    globally centered mapping: Pack (0,0) owns chunks -128..127
+
+WorldStructuralManifest
+    immutable sparse authored Pack index
+
+PreparedWorldComposition
+    runtime/save composition publication
+    atomic above per-Pack base/overlay lineages
+
+NotAuthoredPack
+!= KnownPackButNotPrepared
+!= AuthoredPackMissingChunk
+!= IntentionalVoid
+!= Present
+```
+
+WorldPack/v1 remains the initial structural artifact format. The planned W1-W10 campaign
+first adds exact Pack addressing and then lifts the existing one-Pack prepared-world assumption
+up into a sparse World-level composition without changing global SpatialChunkKey semantics.
+
+The first Pack byte-cap correction is 512 MiB: the existing 65,536-chunk bound exactly matches
+the fixed 256×256 envelope, while a fully populated dense terrain foundation alone is already
+about 264.4 MiB before directories/statics/Multis/sparse surfaces.
+
+Pack boundaries must never become gameplay, region, Physics, renderer, AOI, session, or durable
+semantic-identity boundaries. Cross-Pack edits publish one complete PreparedWorldComposition or
+nothing.
+
 ## Frozen principles
 
 ```
