@@ -33,6 +33,18 @@ input rejection. F1.8 adds `ClientCameraRig` and `ClientCanonicalViewProjection`
 camera meaning and a selected-aspect crop of the 16:9 canonical envelope. Pixel resolution does not
 change world coverage. F1.9 retains ownership of the SubViewport and independent render pixels.
 
+F1.8A adds `ClientMotionPose`, `ClientControlledMotionPresentation`, and
+`ClientRemoteActorInterpolation`. These are renderer-neutral, bounded presentation state beside
+exact semantic owner/public records. The controlled controller accepts only sequenced semantic
+commands admitted by the remote client; it retains 128 history slots, prunes on the existing exact
+owner acknowledgement, caps stock speculative horizontal lead at 900 mm, and resets on source or
+identity changes. Its finite local `ClientControlledMotionPolicy` is an approximation, not a Game
+movement entitlement. Game alone resolves collision, jump, fall, landing, and interactions.
+Other actors use 12 authoritative public-version samples each (maximum 64 actor buffers), indexed
+by client monotonic receipt time with 100 ms delay. Receipt time is not server simulation time;
+the interpolator never extrapolates and holds if new truth is absent. This Core state owns no
+Godot nodes or per-actor frame allocations.
+
 `ClientSettingsDocument` is a bounded, versioned, engine-neutral user document. Resolution layers
 built-in defaults, global user choices, an explicitly accepted declarative server recommendation,
 and a scoped user override. Server recommendations are deliberately absent from persistence, cannot

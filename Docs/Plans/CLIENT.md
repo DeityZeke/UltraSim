@@ -10,7 +10,7 @@ Complete-hosted deployment shapes. I0.12 human-play hardening prevents visible e
 remaining a pointer-nominated world pickup, and I0.13 replaces its temporary cold property text
 with bounded typed Inspection Properties plus content-sized world-hover/Inventory presentation.
 
-F1.0-F1.8 are closed; F1.8A is next. F1.2 separates the required remote WorldPack/UI activation and its exact application proof
+F1.0-F1.8A are closed; F1.9 is next. F1.2 separates the required remote WorldPack/UI activation and its exact application proof
 from optional Realm-authorized actor-art presentation. Game manifest v31 introduced the latter
 on message 149 without changing transport revision 2. The client publishes a separate immutable
 presentation generation with Realm → `world.local` → Primitive actor selection; late art replaces
@@ -27,8 +27,9 @@ F1.8 adds one finite fixed-unit Core camera rig and one Local/Remote Godot reali
 migration and bounded named profiles, semantic camera bindings, and a canonical 16:9 camera envelope
 that narrower/wider Gameplay Frame aspects may only crop. Game manifest v32 carries the rig and its
 exact profile hash; transport revision remains 2. Its main-viewport projection compensation is
-temporary until F1.9 supplies a frame-sized render target. F1.8A prediction/interpolation is not
-implemented.
+temporary until F1.9 supplies a frame-sized render target. F1.8A adds bounded client-local
+horizontal presentation prediction/reconciliation and receipt-time remote-actor interpolation
+without changing exact owner/public truth or application protocol.
 C0.2 now closes the first routed Global Chat mode plus explicit authority-originated System
 broadcast/feed/banner convergence. D0.6 now closes direct ping indication plus the first sanitized,
 read-only, content-backed Server Monitor and trusted test-marker producer. D0.7a now closes shared
@@ -2810,8 +2811,8 @@ F1.5 user presentation overrides/content generations                          CL
 F1.6 derived resources/atlas pipeline                                         CLOSED
 F1.7 application workspace/Gameplay Frame/shared UI/gump manager             CLOSED
 F1.8 declarative camera/control rig + canonical gameplay-view crop            CLOSED
-F1.8A remote motion prediction/reconciliation/interpolation                   NEXT
-F1.9 scalable Godot backend targeting the Gameplay Frame                      PLANNED
+F1.8A remote motion prediction/reconciliation/interpolation                   CLOSED
+F1.9 scalable Godot backend targeting the Gameplay Frame                      NEXT
 F1.10 actor representation tiers/realization interpolation seam               PLANNED
 F1.11 renderer stress consumers/vegetation prototype                          PLANNED
 F1.12 product dogfooding/PF6 readiness                                        PLANNED
@@ -2844,8 +2845,11 @@ owns the maximum-fit frame, dark unused workspace, clipped World overlay host, o
 input rejection, shared UI composition, and modeless gump lifetime. The 3D main viewport remains
 transitional. F1.8 now owns canonical centered camera crop without disclosing more world; F1.9 targets
 the frame/SubViewport.
-F1.8A separately owns controlled-remote prediction/reconciliation and non-controlled-remote
-interpolation. It selects a pose, while F1.10 may optimize its realization. These are future
-contracts, not F1.3 implementation or client-side authority.
+F1.8A now owns controlled-remote horizontal prediction/reconciliation and non-controlled-remote
+receipt-time interpolation. It selects a pose, while F1.10 may optimize its realization.
+Neither temporal pose is semantic or client-side authority. The current client-local 6 m/s
+presentation approximation is capped at 900 mm; vertical movement remains exact Game output.
+The [F1.8A baseline](../../_Benchmarks/Baselines/client-f1.8a-remote-motion-presentation-2026-09-23.md)
+records the real-UDP responsiveness and sparse-sample hold behavior.
 
 **Hard stop:** do not silently turn this roadmap into discovery, matchmaking, executable mod loading, account redesign, or unrelated gameplay campaigns. Review each checkpoint before advancing.

@@ -150,6 +150,11 @@ internal static class F03bRemotePlayableTests
         long firstPresented = -1;
         long firstOwner = -1;
         ulong lastOwnerSequence = initial.StateSequence;
+        long lastOwnerArrival = started;
+        long lastOwnerX = initialPosition.GlobalXMillimeters;
+        long maximumOwnerGap = 0;
+        long maximumOwnerStep = 0;
+        int ownerUpdates = 0;
         var deadline = Stopwatch.StartNew();
         while (deadline.ElapsedMilliseconds < 4_000 && firstOwner < 0)
         {
@@ -158,6 +163,12 @@ internal static class F03bRemotePlayableTests
             RemotePlayableClientSnapshot owner = fixture.Playable.GetSnapshot();
             if (owner.StateSequence > lastOwnerSequence)
             {
+                maximumOwnerGap = Math.Max(maximumOwnerGap, now - lastOwnerArrival);
+                maximumOwnerStep = Math.Max(maximumOwnerStep,
+                    Math.Abs(owner.Position.GlobalXMillimeters - lastOwnerX));
+                lastOwnerArrival = now;
+                lastOwnerX = owner.Position.GlobalXMillimeters;
+                ownerUpdates++;
                 temporal.ObserveOwner(owner.ApplicationSessionEpoch, owner.ControlSession,
                     owner.ServerGenerationId, owner.PublicActor, owner.StateSequence,
                     owner.LastProcessedCommandSequence, owner.Position, owner.Orientation,
@@ -195,6 +206,12 @@ internal static class F03bRemotePlayableTests
             RemotePlayableClientSnapshot owner = fixture.Playable.GetSnapshot();
             if (owner.StateSequence > lastOwnerSequence)
             {
+                maximumOwnerGap = Math.Max(maximumOwnerGap, now - lastOwnerArrival);
+                maximumOwnerStep = Math.Max(maximumOwnerStep,
+                    Math.Abs(owner.Position.GlobalXMillimeters - lastOwnerX));
+                lastOwnerArrival = now;
+                lastOwnerX = owner.Position.GlobalXMillimeters;
+                ownerUpdates++;
                 temporal.ObserveOwner(owner.ApplicationSessionEpoch, owner.ControlSession,
                     owner.ServerGenerationId, owner.PublicActor, owner.StateSequence,
                     owner.LastProcessedCommandSequence, owner.Position, owner.Orientation,
@@ -212,6 +229,8 @@ internal static class F03bRemotePlayableTests
                     publicActor.Orientation), now);
             _ = publicInterpolation.TrySample(publicActor.Id, now, out _);
         }
+        long steadyCorrectionMax =
+            temporal.GetSnapshot().MaximumCorrectionErrorMillimeters;
 
         bool reversalBeforeOwner = false;
         if (oneWayDelayMilliseconds == 50 && jitterMilliseconds == 0)
@@ -232,15 +251,11 @@ internal static class F03bRemotePlayableTests
             reversalBeforeOwner = afterReverse < beforeReverse &&
                 fixture.Playable.GetSnapshot().StateSequence == ownerBeforeReverse;
             True(reversalBeforeOwner);
-            fixture.DriveUntil(() => fixture.Playable.GetSnapshot().LastProcessedCommandSequence >=
-                reverseSequence);
-            RemotePlayableClientSnapshot reverseOwner = fixture.Playable.GetSnapshot();
-            temporal.ObserveOwner(reverseOwner.ApplicationSessionEpoch, reverseOwner.ControlSession,
-                reverseOwner.ServerGenerationId, reverseOwner.PublicActor,
-                reverseOwner.StateSequence, reverseOwner.LastProcessedCommandSequence,
-                reverseOwner.Position, reverseOwner.Orientation, false,
-                MonotonicMicroseconds());
+            _ = DriveMotionUntilAcknowledged(fixture, temporal,
+                ref lastOwnerSequence, reverseSequence);
         }
+        long reversalCorrectionMax =
+            temporal.GetSnapshot().MaximumCorrectionErrorMillimeters;
 
         var stop = new ClientWorldCommandIntent(
             GameLocomotionUpdate.Stop, GamePlayerActions.None, true);
@@ -249,20 +264,16 @@ internal static class F03bRemotePlayableTests
             RemotePlayableCommandFlags.None, 0, 0, out ulong stopSequence));
         True(temporal.ObserveAdmittedCommand(stopSequence, stop.Locomotion,
             MonotonicMicroseconds()));
-        fixture.DriveUntil(() => fixture.Playable.GetSnapshot().LastProcessedCommandSequence >=
-            stopSequence);
-        RemotePlayableClientSnapshot finalOwner = fixture.Playable.GetSnapshot();
-        long finalNow = MonotonicMicroseconds();
-        temporal.ObserveOwner(finalOwner.ApplicationSessionEpoch, finalOwner.ControlSession,
-            finalOwner.ServerGenerationId, finalOwner.PublicActor, finalOwner.StateSequence,
-            finalOwner.LastProcessedCommandSequence, finalOwner.Position,
-            finalOwner.Orientation, false, finalNow);
+        RemotePlayableClientSnapshot finalOwner = DriveMotionUntilAcknowledged(
+            fixture, temporal, ref lastOwnerSequence, stopSequence);
         Thread.Sleep(ClientControlledMotionPresentation.CorrectionDurationMilliseconds + 2);
         ClientResolvedMotionPose finalPresented = temporal.Sample(MonotonicMicroseconds());
         Equal(finalOwner.Position.GlobalXMillimeters,
             finalPresented.Pose.GlobalXMillimeters);
         Equal(finalOwner.Position.GlobalZMillimeters,
             finalPresented.Pose.GlobalZMillimeters);
+        long stopCorrectionMax =
+            temporal.GetSnapshot().MaximumCorrectionErrorMillimeters;
         bool destinationBeforeOwner = false;
         if (oneWayDelayMilliseconds == 50 && jitterMilliseconds == 0)
         {
@@ -285,24 +296,16 @@ internal static class F03bRemotePlayableTests
                     finalOwner.Position.GlobalXMillimeters &&
                 fixture.Playable.GetSnapshot().StateSequence == ownerBeforeDestination;
             True(destinationBeforeOwner);
-            fixture.DriveUntil(() => fixture.Playable.GetSnapshot().LastProcessedCommandSequence >=
-                destinationSequence);
-            RemotePlayableClientSnapshot destinationOwner = fixture.Playable.GetSnapshot();
-            temporal.ObserveOwner(destinationOwner.ApplicationSessionEpoch,
-                destinationOwner.ControlSession, destinationOwner.ServerGenerationId,
-                destinationOwner.PublicActor, destinationOwner.StateSequence,
-                destinationOwner.LastProcessedCommandSequence, destinationOwner.Position,
-                destinationOwner.Orientation,
-                destinationOwner.Locomotion == RemotePlayableActionStatus.Blocked,
-                MonotonicMicroseconds());
+            RemotePlayableClientSnapshot destinationOwner = DriveMotionUntilAcknowledged(
+                fixture, temporal, ref lastOwnerSequence, destinationSequence);
             True(temporal.Sample(MonotonicMicroseconds()).Pose.GlobalXMillimeters -
                 destinationOwner.Position.GlobalXMillimeters <=
                 ClientControlledMotionPolicy.ConceptDemo.MaximumLeadMillimeters);
             fixture.DriveUntil(() => !fixture.Playable.GetSnapshot().CommandRetainedLocally);
             True(fixture.Playable.TrySubmitCommand(in stop, default,
                 RemotePlayableCommandFlags.None, 0, 0, out ulong destinationStopSequence));
-            fixture.DriveUntil(() => fixture.Playable.GetSnapshot().LastProcessedCommandSequence >=
-                destinationStopSequence);
+            _ = DriveMotionUntilAcknowledged(fixture, temporal,
+                ref lastOwnerSequence, destinationStopSequence);
         }
         ClientControlledMotionSnapshot metrics = temporal.GetSnapshot();
         ClientRemoteActorInterpolationSnapshot publicMetrics =
@@ -314,15 +317,47 @@ internal static class F03bRemotePlayableTests
             $"input_to_present_us={firstPresented} input_to_owner_us={firstOwner} " +
             $"lead_max_mm={metrics.MaximumSpeculativeLeadMillimeters} " +
             $"smooth={metrics.SmoothCorrections} snaps={metrics.SnapCorrections} " +
-            $"history_high={metrics.HistoryHighWater} " +
+            $"correction_max_mm={metrics.MaximumCorrectionErrorMillimeters} " +
+            $"correction_steady_reverse_stop_mm={steadyCorrectionMax}/" +
+            $"{reversalCorrectionMax}/{stopCorrectionMax} " +
+            $"correction_mean_mm={metrics.MeanCorrectionErrorMillimeters} " +
+            $"clamps={metrics.PredictionClamps} history_high={metrics.HistoryHighWater} " +
+            $"owner_updates={ownerUpdates} owner_gap_max_us={maximumOwnerGap} " +
+            $"owner_step_max_mm={maximumOwnerStep} " +
             $"public_samples={publicMetrics.SamplesReceived} " +
             $"interpolated_frames={publicMetrics.InterpolatedFrames} " +
-            $"held_frames={publicMetrics.HeldFrames} " +
+            $"held_frames={publicMetrics.HeldFrames} gap_resets={publicMetrics.GapResets} " +
+            $"public_age_max_us={publicMetrics.MaximumNewestSampleAgeMicroseconds} " +
             $"reversal_before_owner={reversalBeforeOwner} " +
             $"destination_before_owner={destinationBeforeOwner} " +
             $"proxy_forwarded={fixture.MotionForwarded} " +
             $"proxy_dropped={fixture.MotionDropped}");
         if (dropPeriod != 0) True(fixture.MotionDropped > 0);
+    }
+
+    private static RemotePlayableClientSnapshot DriveMotionUntilAcknowledged(
+        RemotePlayableFixture fixture, ClientControlledMotionPresentation temporal,
+        ref ulong lastOwnerSequence, ulong commandSequence)
+    {
+        var deadline = Stopwatch.StartNew();
+        while (deadline.ElapsedMilliseconds < 5_000)
+        {
+            fixture.DriveSteps(1);
+            long now = MonotonicMicroseconds();
+            RemotePlayableClientSnapshot owner = fixture.Playable.GetSnapshot();
+            if (owner.StateSequence > lastOwnerSequence)
+            {
+                temporal.ObserveOwner(owner.ApplicationSessionEpoch, owner.ControlSession,
+                    owner.ServerGenerationId, owner.PublicActor, owner.StateSequence,
+                    owner.LastProcessedCommandSequence, owner.Position, owner.Orientation,
+                    owner.Locomotion == RemotePlayableActionStatus.Blocked, now);
+                lastOwnerSequence = owner.StateSequence;
+            }
+            _ = temporal.Sample(now);
+            if (owner.LastProcessedCommandSequence >= commandSequence) return owner;
+        }
+        throw new InvalidOperationException(
+            $"F1.8A command {commandSequence} did not receive an owner acknowledgement.");
     }
 
     private static long MonotonicMicroseconds() =>

@@ -1,6 +1,6 @@
 # UltraSim Client Completion Plan
 
-**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.8 are CLOSED; F1.8A is NEXT.**
+**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.8A are CLOSED; F1.9 is NEXT.**
 
 **Parent architecture:** [CLIENT_PRESENTATION_ARCHITECTURE.md](CLIENT_PRESENTATION_ARCHITECTURE.md)
 
@@ -89,8 +89,8 @@ F1.5  User presentation overrides and content generations (CLOSED)
 F1.6  Derived resources / atlas pipeline (CLOSED)
 F1.7  Application workspace, Gameplay Frame, shared UI/gump composition (CLOSED)
 F1.8  Declarative camera/control rig and canonical gameplay-view crop (CLOSED)
-F1.8A Remote motion prediction/reconciliation/interpolation (NEXT)
-F1.9  Godot scalable presentation backend targeting the Gameplay Frame
+F1.8A Remote motion prediction/reconciliation/interpolation (CLOSED)
+F1.9  Godot scalable presentation backend targeting the Gameplay Frame (NEXT)
 F1.10 Actor representation tiers and GPU-friendly interpolation seam
 F1.11 Renderer stress consumers / vegetation prototype
 F1.12 Product dogfooding and PF6 readiness
@@ -988,6 +988,21 @@ This dedicated checkpoint occurs after F1.8 and before F1.9. It does not move au
 For non-controlled remote actors, retain a bounded authoritative snapshot buffer and interpolate at a presentation timestamp/delay. Define gap, stale-buffer, teleport, entity replacement, and generation-reset behavior before considering extrapolation. Local packet-free play need not manufacture network prediction or reconciliation debt, though it may reuse presentation smoothing primitives.
 
 F1.8A answers which pose should be presented now. F1.10 answers how that pose is efficiently realized, including any GPU actor interpolation. PF6 may not claim prediction/reconciliation/interpolation quality until F1.8A is implemented and tested under real latency/impairment.
+
+F1.8A now implements an engine-neutral global-millimeter `ClientMotionPose`. Remote input is
+predicted only after the existing focus/profile/scheduler/`RemotePlayableClient` path admits the
+semantic command. A fixed 128-entry sequence history and exact owner acknowledgement fence a
+client-local horizontal lead (stock presentation policy 6 m/s, at most 900 mm); Game collision,
+vertical motion, landing, interaction, and AOI remain authoritative. Ordinary correction has a
+20 mm deadband and 180 ms finite decay; a >4 m discontinuity snaps. The controlled actor and
+camera consume the presented pose while exact owner and semantic positions remain unchanged.
+Non-controlled actors use 12 receipt-time authoritative samples per bounded actor, a 100 ms
+delay, no extrapolation, and explicit gap/teleport/identity resets. The 12-sample ring is required:
+four samples dropped the bracket needed for a 100 ms delay at near-60 Hz publication. Native
+acceptance, real authenticated UDP delay/jitter/loss controls, full Release verification, and
+the immutable [F1.8A evidence](../../_Benchmarks/Baselines/client-f1.8a-remote-motion-presentation-2026-09-23.md)
+close this checkpoint. Under sparse impaired public samples the policy holds the newest truth;
+it does not claim smooth motion without two usable samples.
 
 ---
 

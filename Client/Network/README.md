@@ -330,3 +330,9 @@ Client/Network is consumption-ready. New adapters should be added only for a con
 Game semantic domain with an explicit authority/application contract. Do not place
 presentation policy, AOI, ECS state, persistence ownership, or generic replication-
 profile switching in this layer.
+
+F1.8A leaves this boundary intact. `RemotePlayableClientSnapshot.Position`, orientation,
+lineage, and `LastProcessedCommandSequence` remain exact owner-authoritative facts. The Godot
+remote adapter feeds only successfully admitted semantic command sequences and exact owner
+snapshots to the adjacent Core presentation controller. No prediction state is sent over Network;
+Game manifest v32 and transport revision 2 are unchanged.

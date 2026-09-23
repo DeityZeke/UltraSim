@@ -301,6 +301,15 @@ compensated for application height/frame height before F1.9 gives the camera a f
 The output pixel count still does not change internal 3D render resolution. Native rays and outside-
 frame pointer admission are tested; crop is presentation consistency, never server disclosure policy.
 
+F1.8A keeps the authoritative remote `_player` as the structural-window, pointer-origin, and
+semantic anchor. The separate presented controlled pose moves the actor root and the F1.8 camera
+target relative to that origin. Public actors consume Core receipt-time interpolation through
+`GodotActorPresenter.SetPresentedPose`; the same root carries visual, equipment, nameplate, and
+overhead Chat. This does not generate fake semantic `Updated` operations per render frame. Local
+play stays authority-first with no remote interpolation delay. The headless native T0.10 acceptance
+checks predicted actor/camera/attachments, owner reconciliation, actual replicated actor samples,
+removal, and source-generation replacement. F1.9 still owns the frame-sized SubViewport.
+
 `--d0-5-smoke` crosses the real Single Player button and Admission form. It proves rejected input
 does not start authority, then enters with a trimmed Unicode name and the Y body and checks the
 authoritative guest identity, selected public character prefab, controlled nameplate, and spatial
