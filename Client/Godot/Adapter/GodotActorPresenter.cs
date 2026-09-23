@@ -152,6 +152,19 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         RefreshNameplates();
     }
 
+    /// <summary>Temporal pose only; the slot's semantic record remains authoritative.</summary>
+    public bool SetPresentedPose(WorldPublicEntityId id, in ClientMotionPose pose)
+    {
+        EnsureOperational();
+        if (!pose.TryGetWorldPosition(out WorldPosition position)) return false;
+        int slot = Find(id);
+        if (slot < 0 || _controlledPoseAvailable && id == _controlledActor) return false;
+        _slots[slot].PresentedPosition = position;
+        _slots[slot].PresentedOrientation = pose.Orientation;
+        _slots[slot].HasPresentedPose = true;
+        return true;
+    }
+
     public void SetRevealHeld(bool held)
     {
         EnsureOperational();
@@ -546,8 +559,10 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         ref ActorSlot slot = ref _slots[index];
         ClientActorPresentationRecord actor = slot.Record;
         bool controlled = _controlledPoseAvailable && actor.Id == _controlledActor;
-        WorldPosition position = controlled ? _controlledPosition : actor.Position;
-        WorldYaw orientation = controlled ? _controlledOrientation : actor.Orientation;
+        WorldPosition position = controlled ? _controlledPosition :
+            slot.HasPresentedPose ? slot.PresentedPosition : actor.Position;
+        WorldYaw orientation = controlled ? _controlledOrientation :
+            slot.HasPresentedPose ? slot.PresentedOrientation : actor.Orientation;
         if (nowMilliseconds != 0)
             ObserveMotion(ref slot, position, actor.VerticalPhase, nowMilliseconds);
         slot.Root!.Position = new Vector3(
@@ -1073,6 +1088,9 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
     {
         internal bool Used;
         internal ClientActorPresentationRecord Record;
+        internal bool HasPresentedPose;
+        internal WorldPosition PresentedPosition;
+        internal WorldYaw PresentedOrientation;
         internal Node3D? Root;
         internal Node3D? Visual;
         internal Vector3 BaseVisualScale;

@@ -33,7 +33,7 @@ internal static class F03bRemotePlayableTests
     internal const int F04TestCount = 2;
     internal const int F05TestCount = 1;
     internal const int TestCount = F03bTestCount + A03TestCount + A04TestCount + A05TestCount +
-        A06TestCount + A07TestCount + F04TestCount + F05TestCount + F12TestCount + F15TestCount;
+        A06TestCount + A07TestCount + F04TestCount + F05TestCount + F12TestCount + F15TestCount + 1;
 
     internal static void RunAll()
     {
@@ -91,6 +91,8 @@ internal static class F03bRemotePlayableTests
             RemoteGuestPublishesColdPresentationMetadataSeparatelyFromMovement);
         Run("PreinstalledStandardInventoryConvergesOnRemoteHotOpenAndGameAction",
             PreinstalledStandardInventoryConvergesOnRemoteHotOpenAndGameAction);
+        Run("F18aPresentedMotionPrecedesImpairedOwnerState",
+            F18aPresentedMotionPrecedesImpairedOwnerState);
     }
 
     private static void OneShotUiRequestSurvivesClientQueueBackpressure()
@@ -110,6 +112,221 @@ internal static class F03bRemotePlayableTests
         requests.RequestServerMonitor();
         Equal(RemotePlayableCommandFlags.OpenServerMonitorRequested, requests.Pending);
     }
+
+    private static void F18aPresentedMotionPrecedesImpairedOwnerState()
+    {
+        // The proxy sits outside the authenticated UDP endpoints. These measurements include
+        // actual command submission, Game authority and owner-state delivery, not a mock ACK.
+        MeasureMotion(oneWayDelayMilliseconds: 0, jitterMilliseconds: 0, dropPeriod: 0);
+        MeasureMotion(oneWayDelayMilliseconds: 50, jitterMilliseconds: 0, dropPeriod: 0);
+        MeasureMotion(oneWayDelayMilliseconds: 50, jitterMilliseconds: 15, dropPeriod: 0);
+        MeasureMotion(oneWayDelayMilliseconds: 50, jitterMilliseconds: 15, dropPeriod: 53);
+    }
+
+    private static void MeasureMotion(int oneWayDelayMilliseconds,
+        int jitterMilliseconds, int dropPeriod)
+    {
+        using var fixture = RemotePlayableFixture.CreateMotionImpaired(
+            oneWayDelayMilliseconds, jitterMilliseconds, dropPeriod);
+        fixture.Admit("Temporal Guest", GameGuestBody.HumanFemale);
+        fixture.DriveUntil(() => fixture.Playable.GetSnapshot().StateSequence != 0);
+        fixture.DriveUntil(() => fixture.TryFindPublic(
+            GameWorldPublicPrefabIds.Character, out _));
+        RemotePlayableClientSnapshot initial = fixture.Playable.GetSnapshot();
+        WorldPosition initialPosition = initial.Position;
+        var temporal = new ClientControlledMotionPresentation();
+        var publicInterpolation = new ClientRemoteActorInterpolation();
+        long started = MonotonicMicroseconds();
+        temporal.ObserveOwner(initial.ApplicationSessionEpoch, initial.ControlSession,
+            initial.ServerGenerationId, initial.PublicActor, initial.StateSequence,
+            initial.LastProcessedCommandSequence, initial.Position, initial.Orientation,
+            false, started);
+        var direct = new ClientWorldCommandIntent(
+            GameLocomotionUpdate.CreateDirect(GamePlayerCommand.MaximumAxisMagnitude, 0),
+            GamePlayerActions.None, true);
+        True(fixture.Playable.TrySubmitCommand(in direct, default,
+            RemotePlayableCommandFlags.None, 0, 0, out ulong moveSequence));
+        True(temporal.ObserveAdmittedCommand(moveSequence, direct.Locomotion, started));
+        long firstPresented = -1;
+        long firstOwner = -1;
+        ulong lastOwnerSequence = initial.StateSequence;
+        var deadline = Stopwatch.StartNew();
+        while (deadline.ElapsedMilliseconds < 4_000 && firstOwner < 0)
+        {
+            fixture.DriveSteps(1);
+            long now = MonotonicMicroseconds();
+            RemotePlayableClientSnapshot owner = fixture.Playable.GetSnapshot();
+            if (owner.StateSequence > lastOwnerSequence)
+            {
+                temporal.ObserveOwner(owner.ApplicationSessionEpoch, owner.ControlSession,
+                    owner.ServerGenerationId, owner.PublicActor, owner.StateSequence,
+                    owner.LastProcessedCommandSequence, owner.Position, owner.Orientation,
+                    owner.Locomotion == RemotePlayableActionStatus.Blocked, now);
+                lastOwnerSequence = owner.StateSequence;
+            }
+            ClientResolvedMotionPose presented = temporal.Sample(now);
+            if (fixture.TryFindPublic(GameWorldPublicPrefabIds.Character,
+                    out WorldPublicRecord publicActor) &&
+                publicActor.Id == initial.PublicActor)
+            {
+                _ = publicInterpolation.Observe(owner.ServerGenerationId, publicActor.Id,
+                    publicActor.EntityPublicVersion,
+                    ClientMotionPose.FromAuthority(publicActor.Position,
+                        publicActor.Orientation), now);
+                _ = publicInterpolation.TrySample(publicActor.Id, now, out _);
+            }
+            if (firstPresented < 0 &&
+                presented.Pose.GlobalXMillimeters - initialPosition.GlobalXMillimeters >= 20)
+                firstPresented = now - started;
+            if (owner.Position.GlobalXMillimeters - initialPosition.GlobalXMillimeters >= 20)
+                firstOwner = now - started;
+        }
+        True(firstPresented >= 0 && firstOwner >= 0);
+        if (oneWayDelayMilliseconds >= 50)
+            True(firstPresented + 40_000 < firstOwner);
+
+        // Continue past the interpolation delay: the first owner round trip is shorter than
+        // the deliberately delayed public-pose presentation window on the zero-delay control.
+        var publicWindow = Stopwatch.StartNew();
+        while (publicWindow.ElapsedMilliseconds < 1_500)
+        {
+            fixture.DriveSteps(1);
+            long now = MonotonicMicroseconds();
+            RemotePlayableClientSnapshot owner = fixture.Playable.GetSnapshot();
+            if (owner.StateSequence > lastOwnerSequence)
+            {
+                temporal.ObserveOwner(owner.ApplicationSessionEpoch, owner.ControlSession,
+                    owner.ServerGenerationId, owner.PublicActor, owner.StateSequence,
+                    owner.LastProcessedCommandSequence, owner.Position, owner.Orientation,
+                    owner.Locomotion == RemotePlayableActionStatus.Blocked, now);
+                lastOwnerSequence = owner.StateSequence;
+            }
+            _ = temporal.Sample(now);
+            if (!fixture.TryFindPublic(GameWorldPublicPrefabIds.Character,
+                    out WorldPublicRecord publicActor) ||
+                publicActor.Id != initial.PublicActor)
+                continue;
+            _ = publicInterpolation.Observe(initial.ServerGenerationId, publicActor.Id,
+                publicActor.EntityPublicVersion,
+                ClientMotionPose.FromAuthority(publicActor.Position,
+                    publicActor.Orientation), now);
+            _ = publicInterpolation.TrySample(publicActor.Id, now, out _);
+        }
+
+        bool reversalBeforeOwner = false;
+        if (oneWayDelayMilliseconds == 50 && jitterMilliseconds == 0)
+        {
+            fixture.DriveUntil(() => !fixture.Playable.GetSnapshot().CommandRetainedLocally);
+            var reverse = new ClientWorldCommandIntent(
+                GameLocomotionUpdate.CreateDirect(-GamePlayerCommand.MaximumAxisMagnitude, 0),
+                GamePlayerActions.None, true);
+            long reverseAccepted = MonotonicMicroseconds();
+            long beforeReverse = temporal.Sample(reverseAccepted).Pose.GlobalXMillimeters;
+            ulong ownerBeforeReverse = fixture.Playable.GetSnapshot().StateSequence;
+            True(fixture.Playable.TrySubmitCommand(in reverse, default,
+                RemotePlayableCommandFlags.None, 0, 0, out ulong reverseSequence));
+            True(temporal.ObserveAdmittedCommand(reverseSequence, reverse.Locomotion,
+                reverseAccepted));
+            Thread.Sleep(25); // No Network pump: this is a deliberate local-before-RTT observation.
+            long afterReverse = temporal.Sample(MonotonicMicroseconds()).Pose.GlobalXMillimeters;
+            reversalBeforeOwner = afterReverse < beforeReverse &&
+                fixture.Playable.GetSnapshot().StateSequence == ownerBeforeReverse;
+            True(reversalBeforeOwner);
+            fixture.DriveUntil(() => fixture.Playable.GetSnapshot().LastProcessedCommandSequence >=
+                reverseSequence);
+            RemotePlayableClientSnapshot reverseOwner = fixture.Playable.GetSnapshot();
+            temporal.ObserveOwner(reverseOwner.ApplicationSessionEpoch, reverseOwner.ControlSession,
+                reverseOwner.ServerGenerationId, reverseOwner.PublicActor,
+                reverseOwner.StateSequence, reverseOwner.LastProcessedCommandSequence,
+                reverseOwner.Position, reverseOwner.Orientation, false,
+                MonotonicMicroseconds());
+        }
+
+        var stop = new ClientWorldCommandIntent(
+            GameLocomotionUpdate.Stop, GamePlayerActions.None, true);
+        fixture.DriveUntil(() => !fixture.Playable.GetSnapshot().CommandRetainedLocally);
+        True(fixture.Playable.TrySubmitCommand(in stop, default,
+            RemotePlayableCommandFlags.None, 0, 0, out ulong stopSequence));
+        True(temporal.ObserveAdmittedCommand(stopSequence, stop.Locomotion,
+            MonotonicMicroseconds()));
+        fixture.DriveUntil(() => fixture.Playable.GetSnapshot().LastProcessedCommandSequence >=
+            stopSequence);
+        RemotePlayableClientSnapshot finalOwner = fixture.Playable.GetSnapshot();
+        long finalNow = MonotonicMicroseconds();
+        temporal.ObserveOwner(finalOwner.ApplicationSessionEpoch, finalOwner.ControlSession,
+            finalOwner.ServerGenerationId, finalOwner.PublicActor, finalOwner.StateSequence,
+            finalOwner.LastProcessedCommandSequence, finalOwner.Position,
+            finalOwner.Orientation, false, finalNow);
+        Thread.Sleep(ClientControlledMotionPresentation.CorrectionDurationMilliseconds + 2);
+        ClientResolvedMotionPose finalPresented = temporal.Sample(MonotonicMicroseconds());
+        Equal(finalOwner.Position.GlobalXMillimeters,
+            finalPresented.Pose.GlobalXMillimeters);
+        Equal(finalOwner.Position.GlobalZMillimeters,
+            finalPresented.Pose.GlobalZMillimeters);
+        bool destinationBeforeOwner = false;
+        if (oneWayDelayMilliseconds == 50 && jitterMilliseconds == 0)
+        {
+            fixture.DriveUntil(() => !fixture.Playable.GetSnapshot().CommandRetainedLocally);
+            var destination = new ClientWorldCommandIntent(
+                GameLocomotionUpdate.CreateDestination(
+                    finalOwner.Position.GlobalXMillimeters + 1_500,
+                    finalOwner.Position.GlobalZMillimeters), GamePlayerActions.None, true);
+            long destinationAccepted = MonotonicMicroseconds();
+            ulong ownerBeforeDestination = fixture.Playable.GetSnapshot().StateSequence;
+            True(fixture.Playable.TrySubmitCommand(in destination, default,
+                RemotePlayableCommandFlags.None, 0, 0, out ulong destinationSequence));
+            True(temporal.ObserveAdmittedCommand(destinationSequence,
+                destination.Locomotion, destinationAccepted));
+            Thread.Sleep(25);
+            ClientResolvedMotionPose destinationPresentation =
+                temporal.Sample(MonotonicMicroseconds());
+            destinationBeforeOwner =
+                destinationPresentation.Pose.GlobalXMillimeters >
+                    finalOwner.Position.GlobalXMillimeters &&
+                fixture.Playable.GetSnapshot().StateSequence == ownerBeforeDestination;
+            True(destinationBeforeOwner);
+            fixture.DriveUntil(() => fixture.Playable.GetSnapshot().LastProcessedCommandSequence >=
+                destinationSequence);
+            RemotePlayableClientSnapshot destinationOwner = fixture.Playable.GetSnapshot();
+            temporal.ObserveOwner(destinationOwner.ApplicationSessionEpoch,
+                destinationOwner.ControlSession, destinationOwner.ServerGenerationId,
+                destinationOwner.PublicActor, destinationOwner.StateSequence,
+                destinationOwner.LastProcessedCommandSequence, destinationOwner.Position,
+                destinationOwner.Orientation,
+                destinationOwner.Locomotion == RemotePlayableActionStatus.Blocked,
+                MonotonicMicroseconds());
+            True(temporal.Sample(MonotonicMicroseconds()).Pose.GlobalXMillimeters -
+                destinationOwner.Position.GlobalXMillimeters <=
+                ClientControlledMotionPolicy.ConceptDemo.MaximumLeadMillimeters);
+            fixture.DriveUntil(() => !fixture.Playable.GetSnapshot().CommandRetainedLocally);
+            True(fixture.Playable.TrySubmitCommand(in stop, default,
+                RemotePlayableCommandFlags.None, 0, 0, out ulong destinationStopSequence));
+            fixture.DriveUntil(() => fixture.Playable.GetSnapshot().LastProcessedCommandSequence >=
+                destinationStopSequence);
+        }
+        ClientControlledMotionSnapshot metrics = temporal.GetSnapshot();
+        ClientRemoteActorInterpolationSnapshot publicMetrics =
+            publicInterpolation.GetSnapshot();
+        True(publicMetrics.SamplesReceived >= 2);
+        True(publicMetrics.InterpolatedFrames > 0);
+        Console.WriteLine($"EVIDENCE F1.8A UDP one_way_ms={oneWayDelayMilliseconds} " +
+            $"jitter_ms={jitterMilliseconds} drop_period={dropPeriod} " +
+            $"input_to_present_us={firstPresented} input_to_owner_us={firstOwner} " +
+            $"lead_max_mm={metrics.MaximumSpeculativeLeadMillimeters} " +
+            $"smooth={metrics.SmoothCorrections} snaps={metrics.SnapCorrections} " +
+            $"history_high={metrics.HistoryHighWater} " +
+            $"public_samples={publicMetrics.SamplesReceived} " +
+            $"interpolated_frames={publicMetrics.InterpolatedFrames} " +
+            $"held_frames={publicMetrics.HeldFrames} " +
+            $"reversal_before_owner={reversalBeforeOwner} " +
+            $"destination_before_owner={destinationBeforeOwner} " +
+            $"proxy_forwarded={fixture.MotionForwarded} " +
+            $"proxy_dropped={fixture.MotionDropped}");
+        if (dropPeriod != 0) True(fixture.MotionDropped > 0);
+    }
+
+    private static long MonotonicMicroseconds() =>
+        checked((long)((Int128)Stopwatch.GetTimestamp() * 1_000_000 / Stopwatch.Frequency));
 
     private static void PreinstalledStandardInventoryConvergesOnRemoteHotOpenAndGameAction()
     {
@@ -2018,6 +2235,7 @@ internal static class F03bRemotePlayableTests
         private readonly HostedUdpAdmissionHost _host;
         private readonly ClientDirectConnectSession _direct;
         private readonly RemotePlayableSession _session;
+        private readonly F18aUdpMotionProxy? _motionProxy;
         private readonly ContentCache? _contentCache;
         private readonly string? _contentRoot;
         private readonly bool _preserveContentRoot;
@@ -2031,13 +2249,15 @@ internal static class F03bRemotePlayableTests
             RemotePlayableSession session,
             ContentCache? contentCache = null,
             string? contentRoot = null,
-            bool preserveContentRoot = false)
+            bool preserveContentRoot = false,
+            F18aUdpMotionProxy? motionProxy = null)
         {
             _trustDirectory = trustDirectory;
             _identity = identity;
             _host = host;
             _direct = direct;
             _session = session;
+            _motionProxy = motionProxy;
             _contentCache = contentCache;
             _contentRoot = contentRoot;
             _preserveContentRoot = preserveContentRoot;
@@ -2056,9 +2276,18 @@ internal static class F03bRemotePlayableTests
         internal ContentCache? ContentStore => _contentCache;
         internal ClientWorldSemanticCache Cache => _session.WorldCache;
         internal RemotePlayableSessionSnapshot SessionSnapshot => _session.GetSnapshot();
+        internal long MotionForwarded => _motionProxy?.Forwarded ?? 0;
+        internal long MotionDropped => _motionProxy?.Dropped ?? 0;
 
         internal static RemotePlayableFixture Create()
             => CreateCore(new UltraSim.Game.Application.ApplicationRealmId(0xF03B, 1));
+
+        internal static RemotePlayableFixture CreateMotionImpaired(
+            int oneWayDelayMilliseconds, int jitterMilliseconds = 0, int dropPeriod = 0)
+            => CreateCore(new UltraSim.Game.Application.ApplicationRealmId(0xF18A, 1),
+                motionDelayMilliseconds: oneWayDelayMilliseconds,
+                motionJitterMilliseconds: jitterMilliseconds,
+                motionDropPeriod: dropPeriod);
 
         internal static RemotePlayableFixture CreateWithStandardUi()
             => CreateCore(
@@ -2235,7 +2464,10 @@ internal static class F03bRemotePlayableTests
             RemoteRequiredWorldBinding? requiredWorld = null,
             IEnumerable<UiDefinitionIdentity>? standardUiDefinitions = null,
             Func<UiDefinitionCacheKey, CompiledUiDefinition?>? standardUiDefinitionResolver = null,
-            RemoteContentAuthorization? presentationAuthorization = null)
+            RemoteContentAuthorization? presentationAuthorization = null,
+            int motionDelayMilliseconds = -1,
+            int motionJitterMilliseconds = 0,
+            int motionDropPeriod = 0)
         {
             string trustDirectory = Path.Combine(Path.GetTempPath(),
                 $"ultrasim-f03b-{Environment.ProcessId}-{Guid.NewGuid():N}");
@@ -2258,6 +2490,10 @@ internal static class F03bRemotePlayableTests
                     UltraSimGameProtocol.Manifest);
                 try
                 {
+                    F18aUdpMotionProxy? motionProxy = motionDelayMilliseconds < 0 ? null :
+                        new F18aUdpMotionProxy(host.LocalEndPoint,
+                            motionDelayMilliseconds, motionJitterMilliseconds,
+                            motionDropPeriod);
                     var trust = new ClientServerTrustRegistry();
                     var store = new ClientServerTrustFileStore(
                         Path.Combine(trustDirectory, "servers.json"));
@@ -2266,8 +2502,10 @@ internal static class F03bRemotePlayableTests
                     {
                         ClientDeploymentKeyFingerprint fingerprint =
                             ClientDeploymentKeyFingerprint.Compute(identity.PublicKey);
-                        True(direct.TryStart(host.LocalEndPoint.ToString(), fingerprint.ToString()));
-                        DriveDirectUntil(host, direct, ClientDirectConnectState.Established);
+                        True(direct.TryStart((motionProxy?.EndPoint ?? host.LocalEndPoint).ToString(),
+                            fingerprint.ToString()));
+                        DriveDirectUntil(host, direct, ClientDirectConnectState.Established,
+                            delayedPath: motionDelayMilliseconds > 0);
                         ClientDirectConnectSnapshot connected = direct.GetSnapshot();
                         NetworkProtocolPeer peer = direct.Peer ??
                             throw new InvalidOperationException("The established client peer was absent.");
@@ -2302,11 +2540,12 @@ internal static class F03bRemotePlayableTests
                         }
                         return new RemotePlayableFixture(
                             trustDirectory, identity, host, direct, session,
-                            contentCache, contentRoot, preserveContentRoot);
+                            contentCache, contentRoot, preserveContentRoot, motionProxy);
                     }
                     catch
                     {
                         direct.Dispose();
+                        motionProxy?.Dispose();
                         throw;
                     }
                 }
@@ -2427,6 +2666,7 @@ internal static class F03bRemotePlayableTests
             }
             _direct.Dispose();
             _host.Dispose();
+            _motionProxy?.Dispose();
             _identity.Dispose();
             if (Directory.Exists(_trustDirectory))
                 Directory.Delete(_trustDirectory, recursive: true);
@@ -2440,6 +2680,7 @@ internal static class F03bRemotePlayableTests
             _host.Pump();
             _direct.Pump();
             _ = _session.ProcessReceived();
+            if (_motionProxy is not null) Thread.Sleep(1);
         }
 
         internal static ClientWorldSemanticCache CreatePreinstalledWorldCache()
@@ -2462,7 +2703,8 @@ internal static class F03bRemotePlayableTests
         private static void DriveDirectUntil(
             HostedUdpAdmissionHost host,
             ClientDirectConnectSession client,
-            ClientDirectConnectState expected)
+            ClientDirectConnectState expected,
+            bool delayedPath = false)
         {
             for (int iteration = 0; iteration < 40_000; iteration++)
             {
@@ -2472,7 +2714,8 @@ internal static class F03bRemotePlayableTests
                 if (client.State == ClientDirectConnectState.Failed)
                     throw new InvalidOperationException(
                         $"Direct Connect failed: {client.GetSnapshot()}");
-                Thread.Yield();
+                if (delayedPath) Thread.Sleep(1);
+                else Thread.Yield();
             }
             throw new InvalidOperationException($"Direct Connect did not reach {expected}.");
         }

@@ -25,6 +25,7 @@ public partial class T010PlayableWorldAcceptance : Node3D
             RunAcceptance();
             RunJoinedInputAuthorityAcceptance();
             RunRemotePublicActorAcceptance();
+            RunTemporalMotionNativeAcceptance();
             RunControlledActorOwnerPoseAcceptance();
             RunBakedBodyAnimationAcceptance();
             RunContentBackedBodyRealizationAcceptance();

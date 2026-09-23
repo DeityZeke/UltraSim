@@ -41,7 +41,12 @@ public readonly record struct RemoteConceptDemoClientSnapshot(
     ContentCacheSnapshot ContentCacheCurrent,
     RemoteConceptDemoUiOwnershipSnapshot UiOwnership,
     OfficialLocalPresentationResult OfficialPresentation,
-    GodotGameplayCameraSnapshot Camera);
+    GodotGameplayCameraSnapshot Camera)
+{
+    public ClientControlledMotionSnapshot ControlledMotion { get; init; }
+    public ClientRemoteActorInterpolationSnapshot RemoteMotion { get; init; }
+    public ClientMotionPose PresentedPlayerPose { get; init; }
+}
 
 /// <summary>
 /// Cold, engine-thread-only observation of the F1.7 category hosts owned by one remote gameplay
@@ -96,6 +101,10 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         new ClientSemanticChunkHandle[9];
     private readonly ClientActorPresentationChange[] _actorChanges =
         new ClientActorPresentationChange[128];
+    private readonly ClientActorPresentationRecord[] _actorMotionRows =
+        new ClientActorPresentationRecord[128];
+    private readonly ClientControlledMotionPresentation _controlledMotion = new();
+    private readonly ClientRemoteActorInterpolation _remoteMotion = new();
     private readonly ClientChatOccurrence[] _chatRows = new ClientChatOccurrence[64];
     private readonly GodotNativeTelemetry _nativeTelemetry = new();
     private ContentCache? _cache;
@@ -127,6 +136,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private GodotSystemChatBanner? _systemChatBanner;
     private GodotWorldHoverTooltip? _hoverTooltip;
     private WorldPosition _player;
+    private ClientMotionPose _presentedPlayer;
     private WorldPosition _smokeStart;
     private ulong _lastOwnerState;
     private ulong _lastPrimaryCommandSequence;
@@ -352,6 +362,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             bool gameplayInputAdmitted = ObserveGameplayInputAdmission(gameplayInputAllowed);
 
             SynchronizePresentation(snapshot.Playable);
+            UpdateTemporalPresentation(snapshot.Playable);
             UpdateCamera();
             if (!_smoke)
             {
@@ -390,7 +401,12 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             _contentCacheObserved,
             GetUiOwnershipSnapshot(),
             _officialPresentation,
-            _cameraRig?.GetSnapshot() ?? default);
+            _cameraRig?.GetSnapshot() ?? default)
+        {
+            ControlledMotion = _controlledMotion.GetSnapshot(),
+            RemoteMotion = _remoteMotion.GetSnapshot(),
+            PresentedPlayerPose = _presentedPlayer,
+        };
     }
 
     /// <summary>
@@ -611,6 +627,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         if (_disposed) return;
         _disposed = true;
         _actorPresenter?.Dispose();
+        _controlledMotion.Reset();
         _nativeTelemetry.Dispose();
         _actorVisuals?.Dispose();
         _systemChatBanner?.Dispose();
@@ -650,6 +667,13 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             performance.InputBurstCapacity,
             performance.InputBurstWindowMilliseconds));
         _player = playable.Position;
+        _presentedPlayer = ClientMotionPose.FromAuthority(playable.Position, playable.Orientation);
+        _controlledMotion.ObserveOwner(
+            playable.ApplicationSessionEpoch, playable.ControlSession,
+            playable.ServerGenerationId, playable.PublicActor, playable.StateSequence,
+            playable.LastProcessedCommandSequence, playable.Position, playable.Orientation,
+            false, checked((long)Time.GetTicksUsec()));
+        _remoteMotion.ResetGeneration(playable.ServerGenerationId);
         ClientPublicPresentationMetadataSnapshot metadata =
             _session!.PublicPresentationState.GetSnapshot();
         if (metadata.ServerGenerationId != playable.ServerGenerationId)
@@ -727,6 +751,15 @@ public sealed partial class RemoteConceptDemoClient : Node3D
 
     private void SynchronizePresentationCore(in RemotePlayableClientSnapshot playable)
     {
+        _controlledMotion.ObserveOwner(
+                playable.ApplicationSessionEpoch, playable.ControlSession,
+                playable.ServerGenerationId, playable.PublicActor, playable.StateSequence,
+                playable.LastProcessedCommandSequence, playable.Position, playable.Orientation,
+                playable.Locomotion is RemotePlayableActionStatus.Blocked or
+                    RemotePlayableActionStatus.Unsupported or
+                    RemotePlayableActionStatus.OutsidePreparedWorld or
+                    RemotePlayableActionStatus.RateLimited,
+                checked((long)Time.GetTicksUsec()));
         _player = playable.Position;
         if (!_window!.TryTrackPlayer(
                 _player, _presentationChanges, out _, out _,
@@ -845,7 +878,14 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             scheduled.Context.FaceXMillimeters,
             scheduled.Context.FaceZMillimeters,
             out sequence);
-        if (submitted) _nativeTelemetry.RecordCommandSubmission();
+        if (submitted)
+        {
+            _nativeTelemetry.RecordCommandSubmission();
+            _ = _controlledMotion.ObserveAdmittedCommand(sequence,
+                scheduled.Intent.HasFocus ? scheduled.Intent.Locomotion :
+                    GameLocomotionUpdate.Stop,
+                checked((long)Time.GetTicksUsec()));
+        }
         return submitted;
     }
 
@@ -1190,6 +1230,20 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 ClientActorPresentationSyncStatus.NoChanges))
             throw new InvalidOperationException(
                 $"Remote actor presentation synchronization failed: {status}.");
+        _remoteMotion.ResetGeneration(playable.ServerGenerationId);
+        long receiptMicroseconds = checked((long)Time.GetTicksUsec());
+        for (int index = 0; index < changed; index++)
+        {
+            ref readonly ClientActorPresentationChange change = ref _actorChanges[index];
+            if (change.Id == playable.PublicActor) continue;
+            if (change.Kind == ClientActorPresentationChangeKind.Removed)
+                _remoteMotion.Remove(change.Id);
+            else
+                _ = _remoteMotion.Observe(playable.ServerGenerationId, change.Id,
+                    change.Current.PublicVersion,
+                    ClientMotionPose.FromAuthority(change.Current.Position,
+                        change.Current.Orientation), receiptMicroseconds);
+        }
         _actorPresenter.SetControlledActorPose(
             playable.PublicActor, playable.Position, playable.Orientation, Time.GetTicksMsec());
         if (_actorState.TryGet(
@@ -1404,7 +1458,35 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         if (_cameraRig is null) return;
         if (_sessionUi is not null) _cameraRig.ApplyFrame(_sessionUi.GameplayFrame);
         _cameraRig.SetPivotHeightMeters(_cameraPivotMeters);
+        _cameraRig.SetTargetOffset(new Vector3(
+            checked(_presentedPlayer.GlobalXMillimeters - _player.GlobalXMillimeters) * 0.001f,
+            checked(_presentedPlayer.YMillimeters - _player.YMillimeters) * 0.001f,
+            checked(_presentedPlayer.GlobalZMillimeters - _player.GlobalZMillimeters) * 0.001f));
         _cameraRig.UpdatePose();
+    }
+
+    private void UpdateTemporalPresentation(in RemotePlayableClientSnapshot playable)
+    {
+        if (_actorPresenter is null || _actorState is null) return;
+        long now = checked((long)Time.GetTicksUsec());
+        ClientResolvedMotionPose controlled = _controlledMotion.Sample(now);
+        _presentedPlayer = controlled.Provenance == 0
+            ? ClientMotionPose.FromAuthority(playable.Position, playable.Orientation)
+            : controlled.Pose;
+        if (!_presentedPlayer.TryGetWorldPosition(out WorldPosition controlledPosition))
+            throw new InvalidOperationException("The bounded controlled presentation pose left the world.");
+        ulong nowMilliseconds = Time.GetTicksMsec();
+        _actorPresenter.SetControlledActorPose(
+            playable.PublicActor, controlledPosition, _presentedPlayer.Orientation, nowMilliseconds);
+        int count = _actorState.CopyCurrent(_actorMotionRows);
+        for (int index = 0; index < count; index++)
+        {
+            WorldPublicEntityId id = _actorMotionRows[index].Id;
+            if (id == playable.PublicActor) continue;
+            if (_remoteMotion.TrySample(id, now, out ClientResolvedMotionPose pose))
+                _ = _actorPresenter.SetPresentedPose(id, pose.Pose);
+        }
+        _actorPresenter.UpdateOriginAndLifetimes(_player, nowMilliseconds);
     }
 
     private void Fault(string detail)

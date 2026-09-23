@@ -36,6 +36,7 @@ var tests = new (string Name, Action Body)[]
     ("ClientShellLifecycleAndFocusAreExplicit", ClientShellStateTests.Run),
     ("GameplayFrameLayoutIsFiniteCenteredAndRendererNeutral", GameplayFrameLayoutTests.Run),
     ("CanonicalCameraRigsCropWithoutExpandingView", ClientCameraRigTests.Run),
+    ("RemoteTemporalMotionIsBoundedAndAuthoritySeparate", ClientTemporalMotionTests.Run),
     ("CapabilityMenuMatchesComposition", CapabilityMenuMatchesComposition),
 };
 

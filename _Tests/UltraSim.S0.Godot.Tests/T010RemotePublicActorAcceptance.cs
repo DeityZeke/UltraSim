@@ -72,6 +72,12 @@ public partial class T010PlayableWorldAcceptance
         SpatialChunkKey animalKey = GamePlayableWorld.AnimalPosition.ToChunkKey(GameWorldState.DefaultSpace);
         WorldPublicRecord initialAnimal = FindPublicRecord(
             cache, animalKey, GameWorldPublicPrefabIds.WoodlandAnimal);
+        var temporal = new ClientRemoteActorInterpolation();
+        Expect(temporal.Observe(source.Epoch.Value, initialAnimal.Id,
+                initialAnimal.EntityPublicVersion,
+                ClientMotionPose.FromAuthority(initialAnimal.Position,
+                    initialAnimal.Orientation), 1_000_000),
+            "The first remote actor pose could not enter temporal presentation.");
         Expect(CountPresentedPrefab(renderer.Root, GameWorldPublicPrefabIds.WoodlandAnimal) == 1,
             "The remotely replicated authoritative animal was not presented by Godot.");
         GodotWorldRenderChunkDiagnostics initialDiagnostics = default;
@@ -118,6 +124,16 @@ public partial class T010PlayableWorldAcceptance
                 $"version={initialAnimal.EntityPublicVersion}->{movedRecord.EntityPublicVersion}, " +
                 $"position={initialAnimal.Position}->{movedRecord.Position} expected={movedAnimal}, " +
                 $"public_root={initialDiagnostics.PublicObjectId}->{movedDiagnostics.PublicObjectId}.");
+            Expect(temporal.Observe(source.Epoch.Value, movedRecord.Id,
+                    movedRecord.EntityPublicVersion,
+                    ClientMotionPose.FromAuthority(movedRecord.Position,
+                        movedRecord.Orientation), 1_100_000) &&
+                temporal.TrySample(movedRecord.Id, 1_150_000,
+                    out ClientResolvedMotionPose intermediate) &&
+                intermediate.Provenance == ClientMotionPoseProvenance.InterpolatedRemote &&
+                intermediate.Pose.GlobalXMillimeters > initialAnimal.Position.GlobalXMillimeters &&
+                intermediate.Pose.GlobalXMillimeters < movedRecord.Position.GlobalXMillimeters,
+                "The real replicated actor did not produce a bounded intermediate pose.");
 
             GameSaveResult saved = persistence.TrySave(
                 new SaveSetContext(1, 1_700_003_011_001), static capture => capture());
@@ -180,6 +196,9 @@ public partial class T010PlayableWorldAcceptance
                 $"rejected={destroyedClient.RejectedDeliveries}, " +
                 $"contradictory={destroyedClient.ContradictoryDeliveries}, " +
                 $"lineage={link.Describe(animalKey)}.");
+            temporal.Remove(initialAnimal.Id);
+            Expect(!temporal.TrySample(initialAnimal.Id, 1_200_000, out _),
+                "The destroyed public actor retained temporal samples.");
 
             GameLoadResult loaded = persistence.TryLoad();
             Expect(loaded.Succeeded,
@@ -191,6 +210,17 @@ public partial class T010PlayableWorldAcceptance
             RefreshPresentedChunk(renderer, cache, animalKey);
             WorldPublicRecord restored = FindPublicRecord(
                 cache, animalKey, GameWorldPublicPrefabIds.WoodlandAnimal);
+            temporal.ResetGeneration(replacement.Epoch.Value);
+            Expect(!temporal.TrySample(initialAnimal.Id, 1_300_000, out _) &&
+                temporal.Observe(replacement.Epoch.Value, restored.Id,
+                    restored.EntityPublicVersion,
+                    ClientMotionPose.FromAuthority(restored.Position,
+                        restored.Orientation), 1_300_000) &&
+                temporal.TrySample(restored.Id, 1_300_000,
+                    out ClientResolvedMotionPose restoredPose) &&
+                restoredPose.Pose == ClientMotionPose.FromAuthority(
+                    restored.Position, restored.Orientation),
+                "A replacement source inherited old-generation temporal samples.");
             Expect(restored.Position == movedAnimal &&
                 cache.GetSnapshot().PublicationEpoch == replacement.Epoch &&
                 CountPresentedPrefab(renderer.Root, GameWorldPublicPrefabIds.WoodlandAnimal) == 1,

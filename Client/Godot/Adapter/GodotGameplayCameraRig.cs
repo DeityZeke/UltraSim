@@ -27,6 +27,7 @@ public sealed class GodotGameplayCameraRig
     private float _pitch;
     private float _distance;
     private float _pivot;
+    private Vector3 _targetOffset;
 
     public GodotGameplayCameraRig(Camera3D camera, ClientCameraRig rig,
         in GameplayFrameLayout layout)
@@ -82,6 +83,16 @@ public sealed class GodotGameplayCameraRig
         UpdatePose();
     }
 
+    /// <summary>Presentation target relative to the authoritative world-render origin.</summary>
+    public void SetTargetOffset(Vector3 offset)
+    {
+        if (!float.IsFinite(offset.X) || !float.IsFinite(offset.Y) ||
+            !float.IsFinite(offset.Z))
+            throw new ArgumentOutOfRangeException(nameof(offset));
+        _targetOffset = offset;
+        UpdatePose();
+    }
+
     public void Look(Vector2 relativePixels, float pointerSensitivity, bool invertY)
     {
         if (!float.IsFinite(relativePixels.X) || !float.IsFinite(relativePixels.Y) ||
@@ -114,8 +125,8 @@ public sealed class GodotGameplayCameraRig
     public void UpdatePose()
     {
         float horizontal = MathF.Cos(_pitch) * _distance;
-        Vector3 pivot = new(0, _pivot, 0);
-        _camera.Position = new Vector3(
+        Vector3 pivot = _targetOffset + new Vector3(0, _pivot, 0);
+        _camera.Position = _targetOffset + new Vector3(
             MathF.Sin(_yaw) * horizontal,
             MathF.Sin(_pitch) * _distance + _pivot,
             MathF.Cos(_yaw) * horizontal);

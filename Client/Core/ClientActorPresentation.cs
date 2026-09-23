@@ -449,7 +449,8 @@ public readonly record struct ClientActorPresentationRecord(
     uint MainHandPrefabId = 0,
     ClientPublicActorVerticalPhase VerticalPhase = ClientPublicActorVerticalPhase.None,
     ClientPublicActorActionKind Action = ClientPublicActorActionKind.None,
-    ulong ActionSequence = 0);
+    ulong ActionSequence = 0,
+    ulong PublicVersion = 0);
 
 public enum ClientActorPresentationChangeKind : byte
 {
@@ -571,7 +572,8 @@ public sealed class ClientActorPresentationState
                     hasMetadata &&
                         (presentation.Flags & ClientPublicPresentationFlags.ActorState) != 0
                             ? presentation.ActorActionSequence
-                            : 0);
+                            : 0,
+                    record.EntityPublicVersion);
             }
         }
         InsertionSort(_candidate.AsSpan(0, candidateCount));
