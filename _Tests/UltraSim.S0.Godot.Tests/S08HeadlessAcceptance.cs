@@ -157,6 +157,22 @@ public partial class S08HeadlessAcceptance : Control
             ClientCanonicalViewProjection desired = controller.TargetFrameProjection;
             float centerX = layout.Frame.X + layout.Frame.Width / 2f;
             float centerY = layout.Frame.Y + layout.Frame.Height / 2f;
+            foreach (Vector2 nominated in new[]
+                     {
+                         new Vector2(centerX, centerY),
+                         new Vector2(layout.Frame.X + layout.Frame.Width * 0.1f, centerY),
+                         new Vector2(layout.Frame.X + layout.Frame.Width * 0.9f, centerY),
+                         new Vector2(centerX, layout.Frame.Y + layout.Frame.Height * 0.1f),
+                         new Vector2(centerX, layout.Frame.Y + layout.Frame.Height * 0.9f),
+                     })
+            {
+                Vector3 world = camera.ProjectPosition(nominated, 15f);
+                if (!layout.ContainsApplicationPoint(new ClientPixelPoint(
+                        (int)nominated.X, (int)nominated.Y)) ||
+                    camera.UnprojectPosition(world).DistanceTo(nominated) > 0.1f)
+                    throw new InvalidOperationException(
+                        $"Inside-frame pointer nomination failed at {nominated}.");
+            }
             double left = Tangent(camera, new Vector2(layout.Frame.X, centerY), horizontal: true);
             double right = Tangent(camera, new Vector2(layout.Frame.Right, centerY), horizontal: true);
             double top = Tangent(camera, new Vector2(centerX, layout.Frame.Y), horizontal: false);
