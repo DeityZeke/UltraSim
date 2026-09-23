@@ -20,6 +20,76 @@ public enum RemoteClientCameraProfile : byte
     IndependentMoveLook = 3,
 }
 
+public enum RemoteClientCameraProjection : byte { Perspective = 1, Orthographic = 2 }
+public enum RemoteClientCameraTarget : byte { ControlledActor = 1 }
+public enum RemoteClientCameraFollow : byte { Immediate = 1 }
+public enum RemoteClientCameraAxisMode : byte { Locked = 1, Free = 2 }
+public enum RemoteClientCameraZoom : byte { Disabled = 1, Stepped = 2 }
+
+/// <summary>Canonical fixed-unit camera recommendation. No engine name or executable behavior.</summary>
+public readonly record struct RemoteClientCameraRig(
+    RemoteClientCameraProjection Projection,
+    RemoteClientCameraTarget Target,
+    RemoteClientCameraFollow Follow,
+    RemoteClientCameraAxisMode YawMode,
+    RemoteClientCameraAxisMode PitchMode,
+    RemoteClientCameraZoom Zoom,
+    int PivotHeightMillimeters,
+    int MinimumDistanceMillimeters,
+    int DefaultDistanceMillimeters,
+    int MaximumDistanceMillimeters,
+    int DefaultYawTenths,
+    int DefaultPitchTenths,
+    int MinimumPitchTenths,
+    int MaximumPitchTenths,
+    int LookMillidegreesPerPixel,
+    int ZoomStepMillimeters,
+    int CanonicalFovTenths,
+    int CanonicalOrthographicSizeMillimeters)
+{
+    public const int EncodedSize = 6 + 12 * sizeof(int);
+
+    public bool IsValid =>
+        Projection is RemoteClientCameraProjection.Perspective or RemoteClientCameraProjection.Orthographic &&
+        Target == RemoteClientCameraTarget.ControlledActor && Follow == RemoteClientCameraFollow.Immediate &&
+        YawMode is RemoteClientCameraAxisMode.Locked or RemoteClientCameraAxisMode.Free &&
+        PitchMode is RemoteClientCameraAxisMode.Locked or RemoteClientCameraAxisMode.Free &&
+        Zoom is RemoteClientCameraZoom.Disabled or RemoteClientCameraZoom.Stepped &&
+        PivotHeightMillimeters is >= 0 and <= 20_000 &&
+        MinimumDistanceMillimeters is >= 2_000 and <= 80_000 &&
+        DefaultDistanceMillimeters >= MinimumDistanceMillimeters &&
+        MaximumDistanceMillimeters >= DefaultDistanceMillimeters && MaximumDistanceMillimeters <= 80_000 &&
+        DefaultYawTenths is >= -3_600 and <= 3_600 &&
+        MinimumPitchTenths is >= 0 and < 900 &&
+        DefaultPitchTenths >= MinimumPitchTenths &&
+        MaximumPitchTenths >= DefaultPitchTenths && MaximumPitchTenths < 900 &&
+        LookMillidegreesPerPixel is >= 1 and <= 2_000 &&
+        (Zoom == RemoteClientCameraZoom.Disabled && ZoomStepMillimeters == 0 ||
+         Zoom == RemoteClientCameraZoom.Stepped && ZoomStepMillimeters is >= 100 and <= 10_000) &&
+        CanonicalFovTenths is >= 400 and <= 1_200 &&
+        CanonicalOrthographicSizeMillimeters is >= 2_000 and <= 80_000;
+
+    internal void WriteCanonical(Span<byte> destination)
+    {
+        if (destination.Length < EncodedSize) throw new ArgumentException("Camera rig buffer is too short.");
+        destination[0] = (byte)Projection;
+        destination[1] = (byte)Target;
+        destination[2] = (byte)Follow;
+        destination[3] = (byte)YawMode;
+        destination[4] = (byte)PitchMode;
+        destination[5] = (byte)Zoom;
+        Span<int> values = stackalloc int[]
+        {
+            PivotHeightMillimeters, MinimumDistanceMillimeters, DefaultDistanceMillimeters,
+            MaximumDistanceMillimeters, DefaultYawTenths, DefaultPitchTenths,
+            MinimumPitchTenths, MaximumPitchTenths, LookMillidegreesPerPixel,
+            ZoomStepMillimeters, CanonicalFovTenths, CanonicalOrthographicSizeMillimeters,
+        };
+        for (int index = 0; index < values.Length; index++)
+            BinaryPrimitives.WriteInt32LittleEndian(destination.Slice(6 + index * 4, 4), values[index]);
+    }
+}
+
 public enum RemoteClientSemanticAction : byte
 {
     ExitApplication = 1,
@@ -38,6 +108,9 @@ public enum RemoteClientSemanticAction : byte
     OpenInventory = 14,
     Chat = 15,
     Jump = 16,
+    CameraLook = 19,
+    CameraZoomIn = 20,
+    CameraZoomOut = 21,
 }
 
 public enum RemoteClientPhysicalInputKind : byte
@@ -96,16 +169,12 @@ public sealed class RemoteClientProfileAdvertisement
     private RemoteClientProfileAdvertisement(
         ulong revision,
         RemoteClientControlGrammar grammar,
-        RemoteClientCameraProfile camera,
-        uint cameraDistanceMillimeters,
-        ushort cameraFovTenths,
+        RemoteClientCameraRig cameraRig,
         RemoteClientProfileBinding[] bindings)
     {
         Revision = revision;
         ControlGrammar = grammar;
-        CameraProfile = camera;
-        CameraDistanceMillimeters = cameraDistanceMillimeters;
-        CameraFovTenths = cameraFovTenths;
+        CameraRig = cameraRig;
         _bindings = Array.AsReadOnly(bindings);
         Hash = ComputeHash(this);
     }
@@ -113,17 +182,13 @@ public sealed class RemoteClientProfileAdvertisement
     public ulong Revision { get; }
     public RemoteClientProfileHash Hash { get; }
     public RemoteClientControlGrammar ControlGrammar { get; }
-    public RemoteClientCameraProfile CameraProfile { get; }
-    public uint CameraDistanceMillimeters { get; }
-    public ushort CameraFovTenths { get; }
+    public RemoteClientCameraRig CameraRig { get; }
     public ReadOnlyCollection<RemoteClientProfileBinding> Bindings => _bindings;
 
     public static bool TryCreate(
         ulong revision,
         RemoteClientControlGrammar grammar,
-        RemoteClientCameraProfile camera,
-        uint cameraDistanceMillimeters,
-        ushort cameraFovTenths,
+        RemoteClientCameraRig cameraRig,
         IEnumerable<RemoteClientProfileBinding>? bindings,
         out RemoteClientProfileAdvertisement? profile)
     {
@@ -134,16 +199,14 @@ public sealed class RemoteClientProfileAdvertisement
         if (revision == 0 ||
             grammar is < RemoteClientControlGrammar.OrbitCommand or
                 > RemoteClientControlGrammar.IndependentMoveLook ||
-            camera is < RemoteClientCameraProfile.Orbit or
-                > RemoteClientCameraProfile.IndependentMoveLook ||
-            cameraDistanceMillimeters is < 2_000 or > 80_000 ||
-            cameraFovTenths is < 400 or > 1_200 || copy.Length > MaximumBindings)
+            !cameraRig.IsValid || copy.Length > MaximumBindings)
             return false;
         for (int index = 0; index < copy.Length; index++)
         {
             ref readonly RemoteClientProfileBinding binding = ref copy[index];
             if (binding.Action is < RemoteClientSemanticAction.ExitApplication or
-                    > RemoteClientSemanticAction.Jump ||
+                    > RemoteClientSemanticAction.CameraZoomOut or
+                    (RemoteClientSemanticAction)17 or (RemoteClientSemanticAction)18 ||
                 binding.Kind is < RemoteClientPhysicalInputKind.Keyboard or
                     > RemoteClientPhysicalInputKind.GamepadButton ||
                 (binding.Modifiers & ~KnownModifiers) != 0 ||
@@ -153,10 +216,45 @@ public sealed class RemoteClientProfileAdvertisement
                 index != 0 && copy[index - 1].Action == binding.Action)
                 return false;
         }
+        if (copy.Select(static value => (value.Kind, value.Modifiers, value.Code))
+            .Distinct().Count() != copy.Length)
+            return false;
         profile = new RemoteClientProfileAdvertisement(
-            revision, grammar, camera, cameraDistanceMillimeters, cameraFovTenths, copy);
+            revision, grammar, cameraRig, copy);
         return true;
     }
+
+    /// <summary>Legacy construction helper; the v2 wire always carries the resulting rig.</summary>
+    public static bool TryCreate(ulong revision, RemoteClientControlGrammar grammar,
+        RemoteClientCameraProfile camera, uint cameraDistanceMillimeters, ushort cameraFovTenths,
+        IEnumerable<RemoteClientProfileBinding>? bindings, out RemoteClientProfileAdvertisement? profile)
+    {
+        RemoteClientCameraRig stock = camera switch
+        {
+            RemoteClientCameraProfile.Orbit => Stock(14_000, -401, 450, 700, true),
+            RemoteClientCameraProfile.ThirdPersonFollow => Stock(8_500, -401, 195, 760, true),
+            RemoteClientCameraProfile.IndependentMoveLook => Stock(14_000, -450, 353, 700, false),
+            _ => default,
+        };
+        return TryCreate(revision, grammar, stock with
+        {
+            MinimumDistanceMillimeters = Math.Min(stock.MinimumDistanceMillimeters,
+                checked((int)cameraDistanceMillimeters)),
+            DefaultDistanceMillimeters = checked((int)cameraDistanceMillimeters),
+            MaximumDistanceMillimeters = Math.Max(stock.MaximumDistanceMillimeters,
+                checked((int)cameraDistanceMillimeters)),
+            CanonicalFovTenths = cameraFovTenths,
+        }, bindings, out profile);
+    }
+
+    private static RemoteClientCameraRig Stock(int distance, int yaw, int pitch, int fov, bool free) => new(
+        RemoteClientCameraProjection.Perspective, RemoteClientCameraTarget.ControlledActor,
+        RemoteClientCameraFollow.Immediate,
+        free ? RemoteClientCameraAxisMode.Free : RemoteClientCameraAxisMode.Locked,
+        free ? RemoteClientCameraAxisMode.Free : RemoteClientCameraAxisMode.Locked,
+        free ? RemoteClientCameraZoom.Stepped : RemoteClientCameraZoom.Disabled,
+        1_600, 3_000, distance, 55_000, yaw, pitch, 115, 773, 344,
+        free ? 2_000 : 0, fov, 20_000);
 
     private static bool IsCanonicalCode(string? value)
     {
@@ -168,13 +266,11 @@ public sealed class RemoteClientProfileAdvertisement
 
     private static RemoteClientProfileHash ComputeHash(RemoteClientProfileAdvertisement value)
     {
-        Span<byte> fixedBytes = stackalloc byte[8 + 1 + 1 + 4 + 2 + 1];
+        Span<byte> fixedBytes = stackalloc byte[8 + 1 + RemoteClientCameraRig.EncodedSize + 1];
         BinaryPrimitives.WriteUInt64LittleEndian(fixedBytes, value.Revision);
         fixedBytes[8] = (byte)value.ControlGrammar;
-        fixedBytes[9] = (byte)value.CameraProfile;
-        BinaryPrimitives.WriteUInt32LittleEndian(fixedBytes[10..], value.CameraDistanceMillimeters);
-        BinaryPrimitives.WriteUInt16LittleEndian(fixedBytes[14..], value.CameraFovTenths);
-        fixedBytes[16] = checked((byte)value.Bindings.Count);
+        value.CameraRig.WriteCanonical(fixedBytes[9..]);
+        fixedBytes[^1] = checked((byte)value.Bindings.Count);
         using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         hash.AppendData(fixedBytes);
         Span<byte> code = stackalloc byte[MaximumInputCodeUtf8Bytes];
@@ -196,7 +292,7 @@ public sealed class RemoteClientProfileAdvertisement
     }
 }
 
-[NetworkMessage(142, "ultrasim.game.client-profile", 1, NetworkLane.Control)]
+[NetworkMessage(142, "ultrasim.game.client-profile", 2, NetworkLane.Control)]
 public partial struct RemoteClientProfileHeader
 {
     public ulong ApplicationSessionEpoch;
@@ -206,9 +302,24 @@ public partial struct RemoteClientProfileHeader
     public ulong ProfileHash2;
     public ulong ProfileHash3;
     public byte ControlGrammar;
-    public byte CameraProfile;
-    public uint CameraDistanceMillimeters;
-    public ushort CameraFovTenths;
+    public byte CameraProjection;
+    public byte CameraTarget;
+    public byte CameraFollow;
+    public byte CameraYawMode;
+    public byte CameraPitchMode;
+    public byte CameraZoom;
+    public int PivotHeightMillimeters;
+    public int MinimumDistanceMillimeters;
+    public int DefaultDistanceMillimeters;
+    public int MaximumDistanceMillimeters;
+    public int DefaultYawTenths;
+    public int DefaultPitchTenths;
+    public int MinimumPitchTenths;
+    public int MaximumPitchTenths;
+    public int LookMillidegreesPerPixel;
+    public int ZoomStepMillimeters;
+    public int CanonicalFovTenths;
+    public int CanonicalOrthographicSizeMillimeters;
     public byte BindingCount;
 }
 
@@ -246,9 +357,24 @@ public static partial class UltraSimGameProtocol
             ProfileHash2 = profile.Hash.Part2,
             ProfileHash3 = profile.Hash.Part3,
             ControlGrammar = (byte)profile.ControlGrammar,
-            CameraProfile = (byte)profile.CameraProfile,
-            CameraDistanceMillimeters = profile.CameraDistanceMillimeters,
-            CameraFovTenths = profile.CameraFovTenths,
+            CameraProjection = (byte)profile.CameraRig.Projection,
+            CameraTarget = (byte)profile.CameraRig.Target,
+            CameraFollow = (byte)profile.CameraRig.Follow,
+            CameraYawMode = (byte)profile.CameraRig.YawMode,
+            CameraPitchMode = (byte)profile.CameraRig.PitchMode,
+            CameraZoom = (byte)profile.CameraRig.Zoom,
+            PivotHeightMillimeters = profile.CameraRig.PivotHeightMillimeters,
+            MinimumDistanceMillimeters = profile.CameraRig.MinimumDistanceMillimeters,
+            DefaultDistanceMillimeters = profile.CameraRig.DefaultDistanceMillimeters,
+            MaximumDistanceMillimeters = profile.CameraRig.MaximumDistanceMillimeters,
+            DefaultYawTenths = profile.CameraRig.DefaultYawTenths,
+            DefaultPitchTenths = profile.CameraRig.DefaultPitchTenths,
+            MinimumPitchTenths = profile.CameraRig.MinimumPitchTenths,
+            MaximumPitchTenths = profile.CameraRig.MaximumPitchTenths,
+            LookMillidegreesPerPixel = profile.CameraRig.LookMillidegreesPerPixel,
+            ZoomStepMillimeters = profile.CameraRig.ZoomStepMillimeters,
+            CanonicalFovTenths = profile.CameraRig.CanonicalFovTenths,
+            CanonicalOrthographicSizeMillimeters = profile.CameraRig.CanonicalOrthographicSizeMillimeters,
             BindingCount = checked((byte)profile.Bindings.Count),
         };
         var writer = new NetworkPacketWriter(destination);
@@ -296,12 +422,23 @@ public static partial class UltraSimGameProtocol
                 (RemoteClientInputModifiers)modifiers,
                 Encoding.UTF8.GetString(code));
         }
+        var rig = new RemoteClientCameraRig(
+            (RemoteClientCameraProjection)header.CameraProjection,
+            (RemoteClientCameraTarget)header.CameraTarget,
+            (RemoteClientCameraFollow)header.CameraFollow,
+            (RemoteClientCameraAxisMode)header.CameraYawMode,
+            (RemoteClientCameraAxisMode)header.CameraPitchMode,
+            (RemoteClientCameraZoom)header.CameraZoom,
+            header.PivotHeightMillimeters, header.MinimumDistanceMillimeters,
+            header.DefaultDistanceMillimeters, header.MaximumDistanceMillimeters,
+            header.DefaultYawTenths, header.DefaultPitchTenths,
+            header.MinimumPitchTenths, header.MaximumPitchTenths,
+            header.LookMillidegreesPerPixel, header.ZoomStepMillimeters,
+            header.CanonicalFovTenths, header.CanonicalOrthographicSizeMillimeters);
         if (!reader.IsComplete || !RemoteClientProfileAdvertisement.TryCreate(
                 header.ProfileRevision,
                 (RemoteClientControlGrammar)header.ControlGrammar,
-                (RemoteClientCameraProfile)header.CameraProfile,
-                header.CameraDistanceMillimeters,
-                header.CameraFovTenths,
+                rig,
                 bindings,
                 out RemoteClientProfileAdvertisement? candidate) ||
             candidate!.Hash != new RemoteClientProfileHash(

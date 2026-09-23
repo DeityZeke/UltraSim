@@ -93,6 +93,29 @@ public static class GodotWorldInput
             mouse.ButtonIndex == expected;
     }
 
+    /// <summary>A distinct drag gesture can coexist with an edge action on the same button.</summary>
+    public static bool Matches(
+        InputEventMouseMotion motion,
+        ResolvedClientSettings settings,
+        ClientSemanticAction action)
+    {
+        ArgumentNullException.ThrowIfNull(motion);
+        ArgumentNullException.ThrowIfNull(settings);
+        if (!settings.TryGetBinding(action, out ClientPhysicalInput binding) ||
+            binding.Kind != ClientPhysicalInputKind.MouseButton ||
+            binding.Code?.EndsWith("_DRAG", StringComparison.Ordinal) != true ||
+            !TryParseMouseButton(binding.Code[..^"_DRAG".Length], out MouseButton button))
+            return false;
+        MouseButtonMask mask = button switch
+        {
+            MouseButton.Left => MouseButtonMask.Left,
+            MouseButton.Right => MouseButtonMask.Right,
+            MouseButton.Middle => MouseButtonMask.Middle,
+            _ => 0,
+        };
+        return mask != 0 && (motion.ButtonMask & mask) != 0;
+    }
+
     private static float Strength(ResolvedClientSettings settings, ClientSemanticAction action) =>
         IsPressed(settings, action) ? 1f : 0f;
 

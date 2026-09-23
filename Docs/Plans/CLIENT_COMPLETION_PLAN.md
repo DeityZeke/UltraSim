@@ -1,6 +1,6 @@
 # UltraSim Client Completion Plan
 
-**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.7 are CLOSED; F1.8 is NEXT.**
+**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.8 are CLOSED; F1.8A is NEXT.**
 
 **Parent architecture:** [CLIENT_PRESENTATION_ARCHITECTURE.md](CLIENT_PRESENTATION_ARCHITECTURE.md)
 
@@ -88,8 +88,8 @@ F1.4  Official Local content productization (CLOSED)
 F1.5  User presentation overrides and content generations (CLOSED)
 F1.6  Derived resources / atlas pipeline (CLOSED)
 F1.7  Application workspace, Gameplay Frame, shared UI/gump composition (CLOSED)
-F1.8  Declarative camera/control rig and canonical gameplay-view crop (NEXT)
-F1.8A Remote motion prediction/reconciliation/interpolation
+F1.8  Declarative camera/control rig and canonical gameplay-view crop (CLOSED)
+F1.8A Remote motion prediction/reconciliation/interpolation (NEXT)
 F1.9  Godot scalable presentation backend targeting the Gameplay Frame
 F1.10 Actor representation tiers and GPU-friendly interpolation seam
 F1.11 Renderer stress consumers / vegetation prototype
@@ -898,7 +898,11 @@ Define 16:9 as the maximum stock-client gameplay-view envelope. At any selected 
 
 ## Camera rig vocabulary
 
-Earn a finite schema covering the Concept Demo and intended stock families:
+F1.8 implements one fixed-unit `ClientCameraRig` for the three stock profiles and bounded
+user-named compositions. It supports perspective/orthographic projection, controlled-actor target,
+immediate follow, locked/free yaw and pitch, bounded distance/pitch, stepped or disabled zoom,
+canonical lens, and pointer look speed. The following broader vocabulary remains design direction
+only; it is not accepted from the current remote profile wire:
 
 - projection;
 - target/pivot;
@@ -913,6 +917,15 @@ Earn a finite schema covering the Concept Demo and intended stock families:
 - optional edge-pan capability;
 - FOV/orthographic size;
 - stock finite occlusion/camera-collision policy where earned.
+
+The F1.8 Godot realization is shared by Local and Remote. CameraLook/ZoomIn/ZoomOut are client-local
+semantic bindings. Settings v4 migrates old camera labels/lens values; the active camera is the rig,
+while the old enum is only a stock-preset/migration label. Game manifest v32 carries and hashes the
+canonical fixed-unit rig; Network transport revision remains 2. The selected output aspect crops
+the active 16:9 canonical envelope, while its pixel count is not yet an independent render target.
+Until F1.9, Camera3D compensates for the masked Gameplay Frame using actual application/frame height.
+The immutable closure evidence is
+`_Benchmarks/Baselines/client-f1.8-camera-rig-view-envelope-2026-09-23.*`.
 
 Do not encode commercial-game names into protocol semantics.
 

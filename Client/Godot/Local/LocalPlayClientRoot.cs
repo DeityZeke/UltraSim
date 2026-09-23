@@ -878,6 +878,9 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
     {
         if (snapshot.ControlGrammar != EffectiveSettings.ControlGrammar ||
             snapshot.CameraProfile != EffectiveSettings.CameraProfile ||
+            snapshot.Camera.Rig != EffectiveSettings.CameraRig ||
+            snapshot.Camera.TargetFrameProjection.Projection !=
+                EffectiveSettings.CameraRig.Projection ||
             !Mathf.IsEqualApprox(snapshot.CameraDistance, EffectiveSettings.CameraDistance) ||
             !Mathf.IsEqualApprox(snapshot.CameraFovDegrees, EffectiveSettings.CameraFovDegrees) ||
             snapshot.RenderDistanceChunks != Math.Min(

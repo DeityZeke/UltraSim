@@ -294,7 +294,12 @@ dark transitional masks cover unused workspace, the clipped World overlay host f
 and world pointer input outside the frame is rejected. Workspace, World, HUD, Menus, Debug, and
 Context/Tooltip have deterministic category order. Tooltips and the bounded Select/Interact/Cancel
 world context menu use Context; right-click no longer submits Orbit stop. F11 cycles
-Off/Client/Presentation/Content. The main 3D viewport is intentionally unchanged until F1.8/F1.9.
+Off/Client/Presentation/Content. F1.8 retains the main 3D viewport but now realizes the shared
+Core camera rig through `GodotGameplayCameraRig` in both Local and Remote. The selected Gameplay
+Frame aspect crops the 16:9 canonical view; the native vertical FOV/orthographic size is temporarily
+compensated for application height/frame height before F1.9 gives the camera a frame-sized viewport.
+The output pixel count still does not change internal 3D render resolution. Native rays and outside-
+frame pointer admission are tested; crop is presentation consistency, never server disclosure policy.
 
 `--d0-5-smoke` crosses the real Single Player button and Admission form. It proves rejected input
 does not start authority, then enters with a trimmed Unicode name and the Y body and checks the

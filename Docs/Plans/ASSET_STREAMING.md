@@ -24,7 +24,8 @@ UI bootstrap package. Actor Add/Replace packages remain exact Realm-authorized p
 but an independent message-149 presentation advertisement acquires/publishes them without
 participating in application proof or guest admission. The optional Realm layer resolves above
 `world.local` and Primitive; corrupt/missing/incompatible art cannot replace required semantic
-truth. Game manifest v31 adds message 149; Network transport revision remains 2.
+truth. Game manifest v31 added message 149; current v32 adds only the declarative F1.8 client
+camera-profile encoding. Network transport revision remains 2.
 
 **Purpose:** restore the useful V2 content-pack, resolver, cache, server-patch, and asset-streaming ideas without reviving old ownership mistakes. The first proof uses the same Cabin in the Woods world locally and remotely so a preinstalled Single Player composition can act as a deterministic oracle for Online content.
 

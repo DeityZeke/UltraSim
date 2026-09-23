@@ -217,13 +217,22 @@ public sealed class RemoteClientProfileClient : IRemoteGameProtocolHandler, IRem
                     return false;
                 }
                 bindings[index] = new ClientPhysicalBinding(
-                    (ClientSemanticAction)binding.Action, input);
+                    MapAction(binding.Action), input);
             }
+            RemoteClientCameraRig wire = remote.CameraRig;
+            var rig = new ClientCameraRig(
+                (ClientCameraProjection)wire.Projection, (ClientCameraTarget)wire.Target,
+                (ClientCameraFollow)wire.Follow, (ClientCameraAxisMode)wire.YawMode,
+                (ClientCameraAxisMode)wire.PitchMode, (ClientCameraZoom)wire.Zoom,
+                wire.PivotHeightMillimeters, wire.MinimumDistanceMillimeters,
+                wire.DefaultDistanceMillimeters, wire.MaximumDistanceMillimeters,
+                wire.DefaultYawTenths, wire.DefaultPitchTenths,
+                wire.MinimumPitchTenths, wire.MaximumPitchTenths,
+                wire.LookMillidegreesPerPixel, wire.ZoomStepMillimeters,
+                wire.CanonicalFovTenths, wire.CanonicalOrthographicSizeMillimeters);
             recommendation = new ClientProfileRecommendation(
                 (ClientControlGrammar)remote.ControlGrammar,
-                (ClientCameraProfile)remote.CameraProfile,
-                remote.CameraDistanceMillimeters / 1_000f,
-                remote.CameraFovTenths / 10f,
+                rig,
                 bindings);
             return hash.IsValid;
         }
@@ -233,6 +242,30 @@ public sealed class RemoteClientProfileClient : IRemoteGameProtocolHandler, IRem
             return false;
         }
     }
+
+    private static ClientSemanticAction MapAction(RemoteClientSemanticAction action) => action switch
+    {
+        RemoteClientSemanticAction.ExitApplication => ClientSemanticAction.ExitApplication,
+        RemoteClientSemanticAction.OpenClientMenu => ClientSemanticAction.OpenClientMenu,
+        RemoteClientSemanticAction.Disconnect => ClientSemanticAction.Disconnect,
+        RemoteClientSemanticAction.OpenSettings => ClientSemanticAction.OpenSettings,
+        RemoteClientSemanticAction.MoveLeft => ClientSemanticAction.MoveLeft,
+        RemoteClientSemanticAction.MoveRight => ClientSemanticAction.MoveRight,
+        RemoteClientSemanticAction.MoveForward => ClientSemanticAction.MoveForward,
+        RemoteClientSemanticAction.MoveBackward => ClientSemanticAction.MoveBackward,
+        RemoteClientSemanticAction.Select => ClientSemanticAction.Select,
+        RemoteClientSemanticAction.Destination => ClientSemanticAction.Destination,
+        RemoteClientSemanticAction.ContextMenu => ClientSemanticAction.ContextMenu,
+        RemoteClientSemanticAction.Primary => ClientSemanticAction.Primary,
+        RemoteClientSemanticAction.Interact => ClientSemanticAction.Interact,
+        RemoteClientSemanticAction.OpenInventory => ClientSemanticAction.OpenInventory,
+        RemoteClientSemanticAction.Chat => ClientSemanticAction.Chat,
+        RemoteClientSemanticAction.Jump => ClientSemanticAction.Jump,
+        RemoteClientSemanticAction.CameraLook => ClientSemanticAction.CameraLook,
+        RemoteClientSemanticAction.CameraZoomIn => ClientSemanticAction.CameraZoomIn,
+        RemoteClientSemanticAction.CameraZoomOut => ClientSemanticAction.CameraZoomOut,
+        _ => throw new ArgumentOutOfRangeException(nameof(action), "Unsupported remote action."),
+    };
 
     private void Fault(string detail)
     {

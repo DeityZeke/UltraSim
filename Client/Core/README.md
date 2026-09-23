@@ -29,7 +29,9 @@ F1.7 adds the renderer-neutral `GameplayFrameLayout`: a finite selected output s
 maximum centered aspect-preserving rectangle in application space, with half-open pointer admission
 and frame-local coordinate conversion. Client Core does not create Godot nodes, crop a camera, or
 own a render target. The Godot adapter uses this seam for workspace masks and outside-frame world
-input rejection; F1.8/F1.9 retain ownership of projection and SubViewport realization.
+input rejection. F1.8 adds `ClientCameraRig` and `ClientCanonicalViewProjection`: finite fixed-unit
+camera meaning and a selected-aspect crop of the 16:9 canonical envelope. Pixel resolution does not
+change world coverage. F1.9 retains ownership of the SubViewport and independent render pixels.
 
 `ClientSettingsDocument` is a bounded, versioned, engine-neutral user document. Resolution layers
 built-in defaults, global user choices, an explicitly accepted declarative server recommendation,

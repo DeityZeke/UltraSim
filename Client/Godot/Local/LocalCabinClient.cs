@@ -65,7 +65,8 @@ public readonly record struct LocalCabinPresentationSnapshot(
     GodotContentActorVisualResolverSnapshot ActorResources,
     GodotDerivedResourceStoreSnapshot DerivedResources,
     PresentationSourceKind WallTextureSource,
-    GodotDerivedResourceKey WallDerivedKey);
+    GodotDerivedResourceKey WallDerivedKey,
+    GodotGameplayCameraSnapshot Camera);
 
 /// <summary>
 /// Cold, engine-thread-only observation of the F1.7 category hosts owned by one local gameplay
@@ -155,7 +156,6 @@ public partial class LocalCabinClient : Node3D
 
     private const int MaximumChatTextCharacters = 256;
     private const float CameraPivotMeters = 1.6f;
-    private const float MinimumZoomCameraDistanceMeters = 3f;
     private const float OrbitDefaultPitchRadians = MathF.PI * 0.25f;
     private const float OrbitDefaultCameraDistanceMeters =
         ClientSettingsResolver.DefaultOrbitCameraDistance;
@@ -215,6 +215,7 @@ public partial class LocalCabinClient : Node3D
     private readonly ClientChatOccurrence[] _chatRows = new ClientChatOccurrence[64];
     private ClientSemanticChunkInfo[] _chatChunkInfo = [];
     private Camera3D? _camera;
+    private GodotGameplayCameraRig? _cameraRig;
     private Label? _status;
     private Label? _details;
     private RichTextLabel? _chatFeed;
@@ -245,9 +246,6 @@ public partial class LocalCabinClient : Node3D
     private bool _secondaryPressed;
     private bool _cancelPressed;
     private bool _contextInteractPending;
-    private float _cameraYaw = -0.7f;
-    private float _cameraPitch = OrbitDefaultPitchRadians;
-    private float _cameraDistance = OrbitDefaultCameraDistanceMeters;
     private ControlProfile _profile;
     private bool _profileStopPending;
     private SelectionKind _selection;
@@ -493,8 +491,8 @@ public partial class LocalCabinClient : Node3D
             _uiClient?.OpenViewCount ?? 0,
             _settings?.ControlGrammar ?? default,
             _settings?.CameraProfile ?? default,
-            _cameraDistance,
-            _camera?.Fov ?? 0,
+            _cameraRig?.DistanceMeters ?? 0,
+            _settings?.CameraRig.CanonicalFovTenths / 10f ?? 0,
             _effectiveRenderDistanceChunks,
             residency.AuthoredChunks,
             residency.SemanticResidentChunks,
@@ -513,7 +511,8 @@ public partial class LocalCabinClient : Node3D
             _actorVisuals?.GetSnapshot() ?? default,
             _derivedResources?.GetSnapshot() ?? default,
             _assetResolver?.WallTextureSource ?? default,
-            _assetResolver?.WallDerivedKey ?? default);
+            _assetResolver?.WallDerivedKey ?? default,
+            _cameraRig?.GetSnapshot() ?? default);
     }
 
     private LocalCabinUiOwnershipSnapshot GetUiOwnershipSnapshot() => new(
@@ -750,7 +749,8 @@ public partial class LocalCabinClient : Node3D
             settings.CameraDistance,
             settings.CameraFovDegrees,
             settings.Bindings,
-            renderDistanceChunks)));
+            renderDistanceChunks,
+            settings.CameraRig)));
 
     public override void _Ready()
     {
@@ -953,29 +953,17 @@ public partial class LocalCabinClient : Node3D
                     TryOpenWorldContext(mouse.Position);
                     GetViewport().SetInputAsHandled();
                 }
-                else if (mouse.ButtonIndex == MouseButton.WheelUp && mouse.Pressed &&
-                    _profile != ControlProfile.IndependentMoveLook)
-                {
-                    _cameraDistance = Math.Max(
-                        MinimumZoomCameraDistanceMeters, _cameraDistance - 2f);
-                }
-                else if (mouse.ButtonIndex == MouseButton.WheelDown && mouse.Pressed &&
-                    _profile != ControlProfile.IndependentMoveLook)
-                {
-                    _cameraDistance = Math.Min(55f, _cameraDistance + 2f);
-                }
+                else if (mouse.Pressed && _settings is not null &&
+                    GodotWorldInput.Matches(mouse, _settings, ClientSemanticAction.CameraZoomIn))
+                    _cameraRig?.Zoom(inward: true);
+                else if (mouse.Pressed && _settings is not null &&
+                    GodotWorldInput.Matches(mouse, _settings, ClientSemanticAction.CameraZoomOut))
+                    _cameraRig?.Zoom(inward: false);
                 break;
             case InputEventMouseMotion motion when
-                (motion.ButtonMask & MouseButtonMask.Middle) != 0 &&
-                _profile != ControlProfile.IndependentMoveLook:
-                float sensitivity = (_settings?.PointerSensitivity ?? 1f) * 0.006f;
-                float invert = _settings?.InvertY == true ? -1f : 1f;
-                _cameraYaw -= motion.Relative.X * sensitivity;
-                _cameraPitch = Math.Clamp(
-                    _cameraPitch - motion.Relative.Y * sensitivity * invert,
-                    0.2f,
-                    1.35f);
-                UpdateCamera();
+                _settings is not null &&
+                GodotWorldInput.Matches(motion, _settings, ClientSemanticAction.CameraLook):
+                _cameraRig?.Look(motion.Relative, _settings.PointerSensitivity, _settings.InvertY);
                 break;
             case InputEventKey key when key.Pressed && !key.Echo:
                 HandleKey(key);
@@ -2649,33 +2637,18 @@ public partial class LocalCabinClient : Node3D
         return _pointerPointValid;
     }
 
-    private ClientHorizontalCameraBasis CameraBasis()
-    {
-        if (_camera is null)
-            return ClientHorizontalCameraBasis.WorldAxes;
-        Vector3 right = _camera.GlobalTransform.Basis.X;
-        Vector3 forward = -_camera.GlobalTransform.Basis.Z;
-        right.Y = 0;
-        forward.Y = 0;
-        right = right.Normalized();
-        forward = forward.Normalized();
-        return new ClientHorizontalCameraBasis(right.X, right.Z, forward.X, forward.Z);
-    }
+    private ClientHorizontalCameraBasis CameraBasis() =>
+        _cameraRig?.HorizontalBasis() ?? ClientHorizontalCameraBasis.WorldAxes;
 
     private WorldPublicEntityId SelectedInteractionTarget() =>
         _selection == SelectionKind.IronSword ? _selectedTarget : default;
 
     private void UpdateCamera()
     {
-        if (_camera is null)
-            return;
-        float horizontal = MathF.Cos(_cameraPitch) * _cameraDistance;
-        Vector3 pivot = new(0, _cameraPivotMeters, 0);
-        _camera.Position = new Vector3(
-            MathF.Sin(_cameraYaw) * horizontal,
-            MathF.Sin(_cameraPitch) * _cameraDistance + _cameraPivotMeters,
-            MathF.Cos(_cameraYaw) * horizontal);
-        _camera.LookAt(pivot, Vector3.Up);
+        if (_cameraRig is null) return;
+        if (_sessionUi is not null) _cameraRig.ApplyFrame(_sessionUi.GameplayFrame);
+        _cameraRig.SetPivotHeightMeters(_cameraPivotMeters);
+        _cameraRig.UpdatePose();
     }
 
     private void HandleKey(InputEventKey input)
@@ -2765,33 +2738,20 @@ public partial class LocalCabinClient : Node3D
             ClientControlGrammar.IndependentMoveLook => ControlProfile.IndependentMoveLook,
             _ => throw new InvalidOperationException("The resolved control grammar is unsupported."),
         };
-        ApplyCameraProfileDefaults(_settings.CameraProfile);
-        _cameraDistance = _settings.CameraDistance;
-        if (_camera is not null) _camera.Fov = _settings.CameraFovDegrees;
+        if (_cameraRig is not null)
+            _cameraRig.ApplyRig(_settings.CameraRig, CurrentCameraLayout());
         if (_ownedHudRoot is not null) _ownedHudRoot.Scale = Vector2.One * _settings.UiScale;
         if (_initialized) _profileStopPending = true;
         UpdateCamera();
     }
 
-    private void ApplyCameraProfileDefaults(ClientCameraProfile profile)
+    private GameplayFrameLayout CurrentCameraLayout()
     {
-        switch (profile)
-        {
-            case ClientCameraProfile.Orbit:
-                _cameraYaw = -0.7f;
-                _cameraPitch = OrbitDefaultPitchRadians;
-                break;
-            case ClientCameraProfile.ThirdPersonFollow:
-                _cameraYaw = -0.7f;
-                _cameraPitch = 0.34f;
-                break;
-            case ClientCameraProfile.IndependentMoveLook:
-                _cameraYaw = -MathF.PI * 0.25f;
-                _cameraPitch = 0.61548f;
-                break;
-            default:
-                throw new InvalidOperationException("The resolved camera profile is unsupported.");
-        }
+        if (_sessionUi is not null) return _sessionUi.GameplayFrame;
+        Vector2 size = GetViewport().GetVisibleRect().Size;
+        return GameplayFrameLayout.MaxFit(
+            ClientPixelSize.Create(Math.Max(1, (int)size.X), Math.Max(1, (int)size.Y)),
+            ClientPixelSize.Create(1920, 1080));
     }
 
     private void SetProfile(ControlProfile profile)
@@ -2825,8 +2785,8 @@ public partial class LocalCabinClient : Node3D
         if (!(thirdPersonCamera.Length() < orbitCamera.Length() &&
             thirdPersonCamera.Y < orbitCamera.Y &&
             independentCamera.DistanceTo(thirdPersonCamera) > 0.5f &&
-            Mathf.IsEqualApprox(_cameraPitch, OrbitDefaultPitchRadians) &&
-            Mathf.IsEqualApprox(_cameraDistance, OrbitDefaultCameraDistanceMeters)))
+            Mathf.IsEqualApprox(_cameraRig?.PitchRadians ?? 0, OrbitDefaultPitchRadians) &&
+            Mathf.IsEqualApprox(_cameraRig?.DistanceMeters ?? 0, OrbitDefaultCameraDistanceMeters)))
             throw new InvalidOperationException("Control profile switches did not realize distinct camera modes.");
 
         ValidateCatalogAndHumanPresentation();
@@ -3781,24 +3741,14 @@ public partial class LocalCabinClient : Node3D
 
     private void ApplyProfileCameraDefaults()
     {
-        switch (_profile)
+        ClientCameraRig rig = _profile switch
         {
-            case ControlProfile.OrbitCommand:
-                _cameraYaw = -0.7f;
-                _cameraPitch = OrbitDefaultPitchRadians;
-                _cameraDistance = OrbitDefaultCameraDistanceMeters;
-                break;
-            case ControlProfile.ThirdPersonDirect:
-                _cameraYaw = -0.7f;
-                _cameraPitch = 0.34f;
-                _cameraDistance = 8.5f;
-                break;
-            case ControlProfile.IndependentMoveLook:
-                _cameraYaw = -MathF.PI * 0.25f;
-                _cameraPitch = 0.61548f;
-                _cameraDistance = 14f;
-                break;
-        }
+            ControlProfile.OrbitCommand => ClientStockCameraRigs.Orbit,
+            ControlProfile.ThirdPersonDirect => ClientStockCameraRigs.ThirdPerson,
+            ControlProfile.IndependentMoveLook => ClientStockCameraRigs.Independent,
+            _ => throw new InvalidOperationException("The selected control profile is unsupported."),
+        };
+        _cameraRig?.ApplyRig(rig, CurrentCameraLayout());
     }
 
     private void SaveWorld()
@@ -3881,6 +3831,8 @@ public partial class LocalCabinClient : Node3D
             Fov = _settings?.CameraFovDegrees ?? 70f,
         };
         AddChild(_camera);
+        _cameraRig = new GodotGameplayCameraRig(_camera,
+            _settings?.CameraRig ?? ClientStockCameraRigs.Orbit, CurrentCameraLayout());
         UpdateCamera();
 
         var sun = new DirectionalLight3D

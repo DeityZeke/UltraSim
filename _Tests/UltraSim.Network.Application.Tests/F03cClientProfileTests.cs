@@ -32,7 +32,9 @@ internal static class F03cClientProfileTests
         Equal(profile.Revision, decoded!.Revision);
         Equal(profile.Hash, decoded.Hash);
         Equal(RemoteClientControlGrammar.OrbitCommand, decoded.ControlGrammar);
-        Equal(RemoteClientCameraProfile.Orbit, decoded.CameraProfile);
+        Equal(RemoteClientCameraProjection.Perspective, decoded.CameraRig.Projection);
+        Equal(RemoteClientCameraAxisMode.Free, decoded.CameraRig.YawMode);
+        Equal(14_000, decoded.CameraRig.DefaultDistanceMillimeters);
         Equal(2, decoded.Bindings.Count);
         Equal(RemoteClientSemanticAction.Primary, decoded.Bindings[0].Action);
         bytes[written] = 0;
@@ -40,7 +42,7 @@ internal static class F03cClientProfileTests
             bytes.AsSpan(0, written + 1), out _, out _));
         Equal(NetworkLane.Control, RemoteClientProfileHeaderCodec.Descriptor.Lane);
         Equal(NetworkLane.Control, RemoteClientProfileAppliedMessageCodec.Descriptor.Lane);
-        Equal((ushort)31, UltraSimGameProtocol.Manifest.Version);
+        Equal((ushort)32, UltraSimGameProtocol.Manifest.Version);
 
         string fields = string.Join(',', typeof(RemoteClientProfileHeader).GetFields()
             .Select(static value => value.Name).OrderBy(static value => value, StringComparer.Ordinal));
@@ -56,6 +58,15 @@ internal static class F03cClientProfileTests
             1, RemoteClientControlGrammar.ThirdPersonDirect,
             RemoteClientCameraProfile.ThirdPersonFollow, 8_500, 700,
             duplicate, out _));
+        False(RemoteClientProfileAdvertisement.TryCreate(
+            1, RemoteClientControlGrammar.ThirdPersonDirect,
+            profile.CameraRig with { Projection = (RemoteClientCameraProjection)99 },
+            [], out _));
+        True(RemoteClientProfileAdvertisement.TryCreate(
+            profile.Revision, profile.ControlGrammar,
+            profile.CameraRig with { CanonicalFovTenths = 760 },
+            profile.Bindings, out RemoteClientProfileAdvertisement? changedRig));
+        False(profile.Hash == changedRig!.Hash);
 
         True(RemoteClientProfileAdvertisement.TryCreate(
             2, RemoteClientControlGrammar.ThirdPersonDirect,
@@ -162,6 +173,13 @@ internal static class F03cClientProfileTests
             using (ProfileFixture changedHash = ProfileFixture.Create(
                        realm, Profile(1, orbit: false), store, decisions))
                 changedHash.DriveUntil(RemoteClientProfileState.AwaitingDecision);
+            True(RemoteClientProfileAdvertisement.TryCreate(
+                firstProfile.Revision, firstProfile.ControlGrammar,
+                firstProfile.CameraRig with { CanonicalFovTenths = 750 },
+                firstProfile.Bindings, out RemoteClientProfileAdvertisement? changedCamera));
+            using (ProfileFixture changedRig = ProfileFixture.Create(
+                       realm, changedCamera!, store, decisions))
+                changedRig.DriveUntil(RemoteClientProfileState.AwaitingDecision);
         }
         finally
         {
@@ -179,9 +197,16 @@ internal static class F03cClientProfileTests
         True(RemoteClientProfileAdvertisement.TryCreate(
             revision,
             orbit ? RemoteClientControlGrammar.OrbitCommand : RemoteClientControlGrammar.ThirdPersonDirect,
-            orbit ? RemoteClientCameraProfile.Orbit : RemoteClientCameraProfile.ThirdPersonFollow,
-            orbit ? 14_000u : 8_500u,
-            orbit ? (ushort)700 : (ushort)760,
+            new RemoteClientCameraRig(
+                RemoteClientCameraProjection.Perspective,
+                RemoteClientCameraTarget.ControlledActor,
+                RemoteClientCameraFollow.Immediate,
+                RemoteClientCameraAxisMode.Free,
+                RemoteClientCameraAxisMode.Free,
+                RemoteClientCameraZoom.Stepped,
+                1_600, 3_000, orbit ? 14_000 : 8_500, 55_000,
+                -401, orbit ? 450 : 195, 115, 773, 344, 2_000,
+                orbit ? 700 : 760, 20_000),
             bindings,
             out RemoteClientProfileAdvertisement? profile));
         return profile!;

@@ -598,7 +598,7 @@ internal static class F03bRemotePlayableTests
         True(UltraSimGameProtocol.IsValidContentApplied(in proof));
         Equal(NetworkLane.Event, RemoteContentRequirementHeaderCodec.Descriptor.Lane);
         Equal(NetworkLane.Control, RemoteContentSetAppliedMessageCodec.Descriptor.Lane);
-        Equal((ushort)31, UltraSimGameProtocol.Manifest.Version);
+        Equal((ushort)32, UltraSimGameProtocol.Manifest.Version);
 
         True(ContentActivationPlan.TryCreate(
             ContentScopeKey.Local, oracle.Replace.Plan.Activation,

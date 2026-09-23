@@ -216,9 +216,12 @@ public partial class ClientHost
                             $"F0.3c CLIENT PROFILE APPLIED realm={profile.Realm} " +
                             $"revision={profile.ProfileRevision} hash={profile.ProfileHash} " +
                             $"mode={profile.Mode} remembered={profile.RememberedDecision} " +
-                            $"grammar={EffectiveSettings.ControlGrammar} camera={EffectiveSettings.CameraProfile} " +
-                            $"distance={EffectiveSettings.CameraDistance:0.0} " +
-                            $"fov={EffectiveSettings.CameraFovDegrees:0.#} " +
+                            $"grammar={EffectiveSettings.ControlGrammar} " +
+                            $"camera={EffectiveSettings.CameraRig.Projection}/" +
+                            $"{EffectiveSettings.CameraRig.YawMode}/" +
+                            $"{EffectiveSettings.CameraRig.PitchMode} " +
+                            $"distance={EffectiveSettings.CameraRig.DefaultDistanceMillimeters / 1000f:0.0} " +
+                            $"canonicalFov={EffectiveSettings.CameraRig.CanonicalFovTenths / 10f:0.#} " +
                             $"select={PhysicalBindingEvidence(EffectiveSettings, ClientSemanticAction.Select)} " +
                             $"primary={PhysicalBindingEvidence(EffectiveSettings, ClientSemanticAction.Primary)}");
                     }
@@ -408,14 +411,17 @@ public partial class ClientHost
         VBoxContainer column = CreateScrollableCenteredColumn(620);
         column.AddChild(Title("Server Client Profile"));
         column.AddChild(CenteredLabel(
-            "This authenticated server recommends stock client controls and camera settings. " +
+            "This authenticated server recommends declarative client controls and a camera rig. " +
             "It cannot provide scripts or take away reserved client controls."));
         column.AddChild(new Label
         {
             Text = $"Realm: {profile.Realm}\nRevision: {profile.ProfileRevision}\n" +
                 $"Hash: {profile.ProfileHash}\nGrammar: {recommendation.ControlGrammar}\n" +
-                $"Camera: {recommendation.CameraProfile}\nDistance: {recommendation.CameraDistance:0.0} m\n" +
-                $"FOV: {recommendation.CameraFovDegrees:0.#}°",
+                $"Camera: {recommendation.CameraRig.Projection}, " +
+                $"yaw {recommendation.CameraRig.YawMode}, pitch {recommendation.CameraRig.PitchMode}, " +
+                $"zoom {recommendation.CameraRig.Zoom}\n" +
+                $"Distance: {recommendation.CameraRig.DefaultDistanceMillimeters / 1000f:0.0} m\n" +
+                $"Canonical 16:9 FOV: {recommendation.CameraRig.CanonicalFovTenths / 10f:0.#}°",
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
         });
         if (!string.IsNullOrWhiteSpace(_profileDecisionLoadWarning))
@@ -787,6 +793,9 @@ public partial class ClientHost
             "--f1-4-expect-local-fallback", StringComparer.Ordinal);
         var presentation = snapshot.Session.Presentation.Generation;
         if (!cold && !warm ||
+            snapshot.Camera.Rig != EffectiveSettings.CameraRig ||
+            snapshot.Camera.TargetFrameProjection.Projection !=
+                EffectiveSettings.CameraRig.Projection ||
             snapshot.RenderedChunks != 9 || snapshot.TerrainTriangles <= 0 ||
             snapshot.OpenUiViews != 1 || snapshot.Session.Chat.OccurrencesApplied == 0 ||
             snapshot.Actors.ActiveActors < 2 || snapshot.Actors.PrimitiveFallbackActors < 1 ||

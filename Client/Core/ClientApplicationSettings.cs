@@ -39,6 +39,9 @@ public enum ClientSemanticAction : byte
     Jump = 16,
     OpenServerMonitor = 17,
     CycleDebug = 18,
+    CameraLook = 19,
+    CameraZoomIn = 20,
+    CameraZoomOut = 21,
 }
 
 public enum ClientPhysicalInputKind : byte
@@ -111,7 +114,7 @@ public readonly record struct ClientPhysicalBinding(
     ClientSemanticAction Action,
     ClientPhysicalInput Input)
 {
-    public bool IsValid => Action is >= ClientSemanticAction.ExitApplication and <= ClientSemanticAction.CycleDebug &&
+    public bool IsValid => Action is >= ClientSemanticAction.ExitApplication and <= ClientSemanticAction.CameraZoomOut &&
         Input.IsValid;
 }
 
@@ -138,7 +141,8 @@ public sealed class ClientSettingsLayer
         float? cameraDistance = null,
         float? cameraFovDegrees = null,
         IEnumerable<ClientPhysicalBinding>? bindings = null,
-        int? renderDistanceChunks = null)
+        int? renderDistanceChunks = null,
+        ClientCameraRig? cameraRig = null)
     {
         UiScale = uiScale;
         MasterVolume = masterVolume;
@@ -148,6 +152,7 @@ public sealed class ClientSettingsLayer
         CameraProfile = cameraProfile;
         CameraDistance = cameraDistance;
         CameraFovDegrees = cameraFovDegrees;
+        CameraRig = cameraRig;
         RenderDistanceChunks = renderDistanceChunks;
         ClientPhysicalBinding[] copy = bindings?.ToArray() ?? [];
         Validate(copy);
@@ -163,6 +168,7 @@ public sealed class ClientSettingsLayer
     public ClientCameraProfile? CameraProfile { get; }
     public float? CameraDistance { get; }
     public float? CameraFovDegrees { get; }
+    public ClientCameraRig? CameraRig { get; }
     public int? RenderDistanceChunks { get; }
     public ReadOnlyCollection<ClientPhysicalBinding> Bindings => _bindings;
 
@@ -178,13 +184,14 @@ public sealed class ClientSettingsLayer
                 camera is < ClientCameraProfile.Orbit or > ClientCameraProfile.IndependentMoveLook ||
             CameraDistance is float distance && (!float.IsFinite(distance) || distance is < 2f or > 80f) ||
             CameraFovDegrees is float fov && (!float.IsFinite(fov) || fov is < 40f or > 120f) ||
+            CameraRig is ClientCameraRig rig && !rig.IsValid ||
             RenderDistanceChunks is int renderDistance &&
                 renderDistance is < ClientSettingsResolver.MinimumRenderDistanceChunks or
                     > ClientSettingsResolver.MaximumRenderDistanceChunks ||
             bindings.Length > ClientSettingsResolver.MaximumBindings)
             throw new ArgumentOutOfRangeException(nameof(ClientSettingsLayer));
 
-        Span<bool> actions = stackalloc bool[(int)ClientSemanticAction.CycleDebug + 1];
+        Span<bool> actions = stackalloc bool[(int)ClientSemanticAction.CameraZoomOut + 1];
         for (int index = 0; index < bindings.Length; index++)
         {
             ClientPhysicalBinding binding = bindings[index];
@@ -219,6 +226,8 @@ public sealed class ClientProfileRecommendation
         CameraProfile = cameraProfile;
         CameraDistance = cameraDistance;
         CameraFovDegrees = cameraFovDegrees;
+        CameraRig = ClientStockCameraRigs.FromLegacy(cameraProfile)
+            .WithLegacyLens(cameraDistance, cameraFovDegrees);
         ClientPhysicalBinding[] copy = bindings?.ToArray() ?? [];
         _ = new ClientSettingsLayer(bindings: copy);
         _bindings = Array.AsReadOnly(copy);
@@ -228,7 +237,31 @@ public sealed class ClientProfileRecommendation
     public ClientCameraProfile CameraProfile { get; }
     public float CameraDistance { get; }
     public float CameraFovDegrees { get; }
+    public ClientCameraRig CameraRig { get; }
     public ReadOnlyCollection<ClientPhysicalBinding> Bindings => _bindings;
+
+    public ClientProfileRecommendation(
+        ClientControlGrammar controlGrammar,
+        ClientCameraRig cameraRig,
+        IEnumerable<ClientPhysicalBinding>? bindings = null)
+    {
+        if (controlGrammar is < ClientControlGrammar.OrbitCommand or > ClientControlGrammar.IndependentMoveLook ||
+            !cameraRig.IsValid)
+            throw new ArgumentOutOfRangeException(nameof(cameraRig));
+        ControlGrammar = controlGrammar;
+        CameraRig = cameraRig;
+        CameraProfile = controlGrammar switch
+        {
+            ClientControlGrammar.OrbitCommand => ClientCameraProfile.Orbit,
+            ClientControlGrammar.ThirdPersonDirect => ClientCameraProfile.ThirdPersonFollow,
+            _ => ClientCameraProfile.IndependentMoveLook,
+        }; // Legacy UI label only; runtime uses CameraRig.
+        CameraDistance = cameraRig.DefaultDistanceMillimeters / 1_000f;
+        CameraFovDegrees = cameraRig.CanonicalFovTenths / 10f;
+        ClientPhysicalBinding[] copy = bindings?.ToArray() ?? [];
+        _ = new ClientSettingsLayer(bindings: copy);
+        _bindings = Array.AsReadOnly(copy);
+    }
 }
 
 public enum ClientProfileApplicationMode : byte
@@ -285,13 +318,15 @@ public readonly record struct ClientScopedSettings(
 /// </summary>
 public sealed class ClientSettingsDocument
 {
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
     public const int MaximumScopes = 128;
     private readonly ReadOnlyCollection<ClientScopedSettings> _scopes;
+    private readonly ReadOnlyCollection<ClientNamedControlProfile> _namedProfiles;
 
     public ClientSettingsDocument(
         ClientSettingsLayer? global = null,
-        IEnumerable<ClientScopedSettings>? scopes = null)
+        IEnumerable<ClientScopedSettings>? scopes = null,
+        IEnumerable<ClientNamedControlProfile>? namedProfiles = null)
     {
         Global = global ?? ClientSettingsLayer.Empty;
         ClientScopedSettings[] copy = scopes?.OrderBy(value => value.Scope.Value, StringComparer.Ordinal).ToArray() ?? [];
@@ -303,11 +338,37 @@ public sealed class ClientSettingsDocument
                 throw new ArgumentException("Settings scopes must be valid and unique.", nameof(scopes));
         }
         _scopes = Array.AsReadOnly(copy);
+        ClientNamedControlProfile[] named = namedProfiles?
+            .OrderBy(static value => value.Name, StringComparer.OrdinalIgnoreCase).ToArray() ?? [];
+        if (named.Length > ClientNamedControlProfile.MaximumProfiles)
+            throw new ArgumentOutOfRangeException(nameof(namedProfiles));
+        for (int index = 0; index < named.Length; index++)
+            if (named[index] is null || index != 0 && string.Equals(
+                    named[index - 1].Name, named[index].Name, StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("Named profiles must be unique.", nameof(namedProfiles));
+        _namedProfiles = Array.AsReadOnly(named);
     }
 
     public static ClientSettingsDocument Empty { get; } = new();
     public ClientSettingsLayer Global { get; }
     public ReadOnlyCollection<ClientScopedSettings> Scopes => _scopes;
+    public ReadOnlyCollection<ClientNamedControlProfile> NamedProfiles => _namedProfiles;
+
+    public bool TryGetNamedProfile(string name, out ClientNamedControlProfile? profile)
+    {
+        profile = _namedProfiles.FirstOrDefault(value =>
+            string.Equals(value.Name, name, StringComparison.OrdinalIgnoreCase));
+        return profile is not null;
+    }
+
+    public ClientSettingsDocument WithNamedProfile(ClientNamedControlProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        ClientNamedControlProfile[] values = _namedProfiles
+            .Where(value => !string.Equals(value.Name, profile.Name, StringComparison.OrdinalIgnoreCase))
+            .Append(profile).ToArray();
+        return new ClientSettingsDocument(Global, _scopes, values);
+    }
 
     public bool TryGetScope(ClientSettingsScopeKey scope, out ClientSettingsLayer layer)
     {
@@ -331,7 +392,7 @@ public sealed class ClientSettingsDocument
     }
 
     public ClientSettingsDocument WithGlobal(ClientSettingsLayer layer) =>
-        new(layer ?? throw new ArgumentNullException(nameof(layer)), _scopes);
+        new(layer ?? throw new ArgumentNullException(nameof(layer)), _scopes, _namedProfiles);
 
     public ClientSettingsDocument WithScope(ClientSettingsScopeKey scope, ClientSettingsLayer layer)
     {
@@ -349,7 +410,7 @@ public sealed class ClientSettingsDocument
             else values.Add(value);
         }
         if (!replaced) values.Add(new ClientScopedSettings(scope, layer));
-        return new ClientSettingsDocument(Global, values);
+        return new ClientSettingsDocument(Global, values, _namedProfiles);
     }
 }
 
@@ -366,6 +427,7 @@ public sealed class ResolvedClientSettings
         ClientCameraProfile cameraProfile,
         float cameraDistance,
         float cameraFovDegrees,
+        ClientCameraRig cameraRig,
         int renderDistanceChunks,
         ClientPhysicalBinding[] bindings)
     {
@@ -377,6 +439,7 @@ public sealed class ResolvedClientSettings
         CameraProfile = cameraProfile;
         CameraDistance = cameraDistance;
         CameraFovDegrees = cameraFovDegrees;
+        CameraRig = cameraRig;
         RenderDistanceChunks = renderDistanceChunks;
         _bindings = Array.AsReadOnly(bindings);
     }
@@ -389,6 +452,7 @@ public sealed class ResolvedClientSettings
     public ClientCameraProfile CameraProfile { get; }
     public float CameraDistance { get; }
     public float CameraFovDegrees { get; }
+    public ClientCameraRig CameraRig { get; }
     public int RenderDistanceChunks { get; }
     public ReadOnlyCollection<ClientPhysicalBinding> Bindings => _bindings;
 
@@ -440,7 +504,8 @@ public static class ClientSettingsResolver
         ClientSettingsDocument document,
         ClientSettingsScopeKey scope = default,
         ClientProfileRecommendation? recommendation = null,
-        ClientProfileApplicationMode mode = ClientProfileApplicationMode.Ignore)
+        ClientProfileApplicationMode mode = ClientProfileApplicationMode.Ignore,
+        string? namedProfile = null)
     {
         ArgumentNullException.ThrowIfNull(document);
         if (mode is < ClientProfileApplicationMode.Ignore or > ClientProfileApplicationMode.Customize)
@@ -448,12 +513,19 @@ public static class ClientSettingsResolver
 
         MutableSettings current = BuiltIn();
         ApplyUserLayer(current, document.Global);
+        if (namedProfile is not null)
+        {
+            if (!document.TryGetNamedProfile(namedProfile, out ClientNamedControlProfile? named))
+                throw new ArgumentException("The named profile is unavailable.", nameof(namedProfile));
+            ApplyUserLayer(current, named!.AsLayer());
+        }
         if (recommendation is not null && mode != ClientProfileApplicationMode.Ignore)
         {
             current.ControlGrammar = recommendation.ControlGrammar;
             current.CameraProfile = recommendation.CameraProfile;
             current.CameraDistance = recommendation.CameraDistance;
             current.CameraFovDegrees = recommendation.CameraFovDegrees;
+            current.CameraRig = recommendation.CameraRig;
             if (mode != ClientProfileApplicationMode.KeepMyControls)
                 ApplyRecommendationBindings(current.Bindings, recommendation.Bindings);
         }
@@ -467,7 +539,7 @@ public static class ClientSettingsResolver
         return new ResolvedClientSettings(
             current.UiScale, current.MasterVolume, current.PointerSensitivity, current.InvertY,
             current.ControlGrammar, current.CameraProfile, current.CameraDistance,
-            current.CameraFovDegrees, current.RenderDistanceChunks, bindings);
+            current.CameraFovDegrees, current.CameraRig, current.RenderDistanceChunks, bindings);
     }
 
     private static MutableSettings BuiltIn()
@@ -482,6 +554,7 @@ public static class ClientSettingsResolver
             CameraProfile = ClientCameraProfile.Orbit,
             CameraDistance = DefaultOrbitCameraDistance,
             CameraFovDegrees = 70f,
+            CameraRig = ClientStockCameraRigs.Orbit,
             RenderDistanceChunks = 1,
         };
         AddDefault(settings, ClientSemanticAction.ExitApplication, ClientPhysicalInputKind.Keyboard, "F4", ClientInputModifiers.Alt);
@@ -502,6 +575,9 @@ public static class ClientSettingsResolver
         AddDefault(settings, ClientSemanticAction.Jump, ClientPhysicalInputKind.Keyboard, "SPACE");
         AddDefault(settings, ClientSemanticAction.OpenServerMonitor, ClientPhysicalInputKind.Keyboard, "F4");
         AddDefault(settings, ClientSemanticAction.CycleDebug, ClientPhysicalInputKind.Keyboard, "F11");
+        AddDefault(settings, ClientSemanticAction.CameraLook, ClientPhysicalInputKind.MouseButton, "MIDDLE_DRAG");
+        AddDefault(settings, ClientSemanticAction.CameraZoomIn, ClientPhysicalInputKind.MouseButton, "WHEELUP");
+        AddDefault(settings, ClientSemanticAction.CameraZoomOut, ClientPhysicalInputKind.MouseButton, "WHEELDOWN");
         return settings;
     }
 
@@ -527,6 +603,17 @@ public static class ClientSettingsResolver
         current.CameraProfile = layer.CameraProfile ?? current.CameraProfile;
         current.CameraDistance = layer.CameraDistance ?? current.CameraDistance;
         current.CameraFovDegrees = layer.CameraFovDegrees ?? current.CameraFovDegrees;
+        if (layer.CameraProfile is ClientCameraProfile legacyProfile)
+            current.CameraRig = ClientStockCameraRigs.FromLegacy(legacyProfile);
+        if (layer.CameraDistance.HasValue || layer.CameraFovDegrees.HasValue)
+            current.CameraRig = current.CameraRig.WithLegacyLens(
+                current.CameraDistance, current.CameraFovDegrees);
+        if (layer.CameraRig is ClientCameraRig rig)
+        {
+            current.CameraRig = rig;
+            current.CameraDistance = rig.DefaultDistanceMillimeters / 1_000f;
+            current.CameraFovDegrees = rig.CanonicalFovTenths / 10f;
+        }
         current.RenderDistanceChunks = layer.RenderDistanceChunks ?? current.RenderDistanceChunks;
         foreach (ClientPhysicalBinding binding in layer.Bindings)
             current.Bindings[binding.Action] = binding.Input;
@@ -604,6 +691,7 @@ public static class ClientSettingsResolver
         internal ClientCameraProfile CameraProfile;
         internal float CameraDistance;
         internal float CameraFovDegrees;
+        internal ClientCameraRig CameraRig;
         internal int RenderDistanceChunks;
         internal readonly Dictionary<ClientSemanticAction, ClientPhysicalInput> Bindings = [];
     }
@@ -627,6 +715,19 @@ public static class ClientSettingsJsonCodec
             {
                 Scope = scope.Scope.Value!,
                 Settings = ToDto(scope.Layer),
+            }).ToList(),
+            NamedProfiles = document.NamedProfiles.Select(profile => new NamedProfileDto
+            {
+                Name = profile.Name,
+                ControlGrammar = profile.ControlGrammar,
+                CameraRig = profile.CameraRig,
+                Bindings = profile.Bindings.Select(binding => new BindingDto
+                {
+                    Action = binding.Action,
+                    Kind = binding.Input.Kind,
+                    Code = binding.Input.Code!,
+                    Modifiers = binding.Input.Modifiers,
+                }).ToList(),
             }).ToList(),
         };
         return JsonSerializer.Serialize(value, Options) + Environment.NewLine;
@@ -655,7 +756,22 @@ public static class ClientSettingsJsonCodec
                 LayerDto scopedDto = scope.Settings ?? new LayerDto();
                 scopes.Add(new ClientScopedSettings(key, FromDto(scopedDto)));
             }
-            document = new ClientSettingsDocument(global, scopes);
+            List<ClientNamedControlProfile> namedProfiles = [];
+            foreach (NamedProfileDto named in value.NamedProfiles ?? [])
+            {
+                ClientSettingsLayer layer = FromDto(new LayerDto
+                {
+                    ControlGrammar = named.ControlGrammar,
+                    CameraRig = named.CameraRig,
+                    Bindings = named.Bindings,
+                });
+                if (layer.ControlGrammar is not ClientControlGrammar grammar ||
+                    layer.CameraRig is not ClientCameraRig rig)
+                    throw new JsonException("A named profile omitted its grammar or camera rig.");
+                namedProfiles.Add(new ClientNamedControlProfile(
+                    named.Name ?? string.Empty, grammar, rig, layer.Bindings));
+            }
+            document = new ClientSettingsDocument(global, scopes, namedProfiles);
             ValidateDocument(document);
             error = null;
             return true;
@@ -674,6 +790,8 @@ public static class ClientSettingsJsonCodec
         _ = ClientSettingsResolver.Resolve(document);
         foreach (ClientScopedSettings scoped in document.Scopes)
             _ = ClientSettingsResolver.Resolve(document, scoped.Scope);
+        foreach (ClientNamedControlProfile named in document.NamedProfiles)
+            _ = ClientSettingsResolver.Resolve(document, namedProfile: named.Name);
     }
 
     private static void MigrateLegacyDefaults(int version, LayerDto layer)
@@ -697,6 +815,7 @@ public static class ClientSettingsJsonCodec
         CameraProfile = layer.CameraProfile,
         CameraDistance = layer.CameraDistance,
         CameraFovDegrees = layer.CameraFovDegrees,
+        CameraRig = layer.CameraRig,
         RenderDistanceChunks = layer.RenderDistanceChunks,
         Bindings = layer.Bindings.Select(binding => new BindingDto
         {
@@ -720,7 +839,7 @@ public static class ClientSettingsJsonCodec
         return new ClientSettingsLayer(
             value.UiScale, value.MasterVolume, value.PointerSensitivity, value.InvertY,
             value.ControlGrammar, value.CameraProfile, value.CameraDistance,
-            value.CameraFovDegrees, bindings, value.RenderDistanceChunks);
+            value.CameraFovDegrees, bindings, value.RenderDistanceChunks, value.CameraRig);
     }
 
     private static JsonSerializerOptions CreateOptions()
@@ -740,6 +859,15 @@ public static class ClientSettingsJsonCodec
         public int Version { get; set; }
         public LayerDto? Global { get; set; }
         public List<ScopeDto>? Scopes { get; set; }
+        public List<NamedProfileDto>? NamedProfiles { get; set; }
+    }
+
+    private sealed class NamedProfileDto
+    {
+        public string? Name { get; set; }
+        public ClientControlGrammar? ControlGrammar { get; set; }
+        public ClientCameraRig? CameraRig { get; set; }
+        public List<BindingDto>? Bindings { get; set; }
     }
 
     private sealed class ScopeDto
@@ -758,6 +886,7 @@ public static class ClientSettingsJsonCodec
         public ClientCameraProfile? CameraProfile { get; set; }
         public float? CameraDistance { get; set; }
         public float? CameraFovDegrees { get; set; }
+        public ClientCameraRig? CameraRig { get; set; }
         public int? RenderDistanceChunks { get; set; }
         public List<BindingDto>? Bindings { get; set; }
     }

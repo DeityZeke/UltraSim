@@ -10,8 +10,8 @@ Complete-hosted deployment shapes. I0.12 human-play hardening prevents visible e
 remaining a pointer-nominated world pickup, and I0.13 replaces its temporary cold property text
 with bounded typed Inspection Properties plus content-sized world-hover/Inventory presentation.
 
-F1.0-F1.7 are closed; F1.8 is next. F1.2 separates the required remote WorldPack/UI activation and its exact application proof
-from optional Realm-authorized actor-art presentation. Game manifest v31 advertises the latter
+F1.0-F1.8 are closed; F1.8A is next. F1.2 separates the required remote WorldPack/UI activation and its exact application proof
+from optional Realm-authorized actor-art presentation. Game manifest v31 introduced the latter
 on message 149 without changing transport revision 2. The client publishes a separate immutable
 presentation generation with Realm → `world.local` → Primitive actor selection; late art replaces
 only the native visual child. F1.3 adds permanent bounded primitive descriptors and native
@@ -23,6 +23,12 @@ adds Texture Replace, engine-neutral Texture/Material leaves, restart-stable God
 and a measured/rejected optional `WorldOpaque` atlas candidate. F1.7 closes the shared application
 workspace, Gameplay Frame input/layout seam, category routing, modeless gameplay-gump manager,
 finite Debug cycle, and first-class world context menu without beginning camera crop or SubViewport work.
+F1.8 adds one finite fixed-unit Core camera rig and one Local/Remote Godot realization, settings v4
+migration and bounded named profiles, semantic camera bindings, and a canonical 16:9 camera envelope
+that narrower/wider Gameplay Frame aspects may only crop. Game manifest v32 carries the rig and its
+exact profile hash; transport revision remains 2. Its main-viewport projection compensation is
+temporary until F1.9 supplies a frame-sized render target. F1.8A prediction/interpolation is not
+implemented.
 C0.2 now closes the first routed Global Chat mode plus explicit authority-originated System
 broadcast/feed/banner convergence. D0.6 now closes direct ping indication plus the first sanitized,
 read-only, content-backed Server Monitor and trusted test-marker producer. D0.7a now closes shared
@@ -2803,8 +2809,8 @@ F1.4 Official Local content productization                                    CL
 F1.5 user presentation overrides/content generations                          CLOSED
 F1.6 derived resources/atlas pipeline                                         CLOSED
 F1.7 application workspace/Gameplay Frame/shared UI/gump manager             CLOSED
-F1.8 declarative camera/control rig + canonical gameplay-view crop            NEXT
-F1.8A remote motion prediction/reconciliation/interpolation                   PLANNED
+F1.8 declarative camera/control rig + canonical gameplay-view crop            CLOSED
+F1.8A remote motion prediction/reconciliation/interpolation                   NEXT
 F1.9 scalable Godot backend targeting the Gameplay Frame                      PLANNED
 F1.10 actor representation tiers/realization interpolation seam               PLANNED
 F1.11 renderer stress consumers/vegetation prototype                          PLANNED
@@ -2836,7 +2842,7 @@ The F1.7 Gameplay Frame distinguishes physical Application Window, selected Game
 aspect-preserving application-space frame, and independent world render/residency distance. It now
 owns the maximum-fit frame, dark unused workspace, clipped World overlay host, outside-frame world
 input rejection, shared UI composition, and modeless gump lifetime. The 3D main viewport remains
-transitional. F1.8 owns canonical centered camera crop without disclosing more world; F1.9 targets
+transitional. F1.8 now owns canonical centered camera crop without disclosing more world; F1.9 targets
 the frame/SubViewport.
 F1.8A separately owns controlled-remote prediction/reconciliation and non-controlled-remote
 interpolation. It selects a pose, while F1.10 may optimize its realization. These are future

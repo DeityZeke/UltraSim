@@ -24,6 +24,7 @@ public partial class S08HeadlessAcceptance : Control
             RunNativeAdapterBoundaryAcceptance();
             RunOutsidePointerPolicyAcceptance();
             RunF17WorkspaceAndGumpAcceptance();
+            RunF18CameraRayAcceptance();
             RunRemoteInventoryAcceptance();
             GD.Print("S0.8 / I0.11 GODOT ACCEPTANCE PASS");
             GetTree().Quit(0);
@@ -35,25 +36,173 @@ public partial class S08HeadlessAcceptance : Control
         }
     }
 
+    private void RunF18CameraRayAcceptance()
+    {
+        Vector2 viewportSize = GetViewport().GetVisibleRect().Size;
+        ClientPixelSize application = ClientPixelSize.Create(
+            Math.Max(1, (int)viewportSize.X), Math.Max(1, (int)viewportSize.Y));
+        var camera = new Camera3D
+        {
+            Name = "F18CameraAcceptance",
+            Current = true,
+            Near = 0.1f,
+            Far = 500f,
+        };
+        AddChild(camera);
+        try
+        {
+            ClientCameraRig orbit = ClientStockCameraRigs.Orbit;
+            GameplayFrameLayout full = GameplayFrameLayout.MaxFit(application,
+                ClientPixelSize.Create(1920, 1080));
+            var controller = new GodotGameplayCameraRig(camera, orbit, full);
+            AssertRays(controller, full);
+            Vector3 fullCenter = camera.ProjectRayNormal(Center(full));
+            Vector3 stockPosition = camera.Position;
+            float yaw = controller.YawRadians;
+            float pitch = controller.PitchRadians;
+            float distance = controller.DistanceMeters;
+            ResolvedClientSettings defaults = ClientSettingsResolver.Resolve(
+                ClientSettingsDocument.Empty);
+            var named = new ClientNamedControlProfile("My Orbit", defaults.ControlGrammar,
+                defaults.CameraRig, defaults.Bindings);
+            controller.ApplyRig(named.CameraRig, full);
+            Expect(camera.Position.DistanceTo(stockPosition) < 0.0001f &&
+                camera.ProjectRayNormal(Center(full)).DistanceTo(fullCenter) < 0.0001f,
+                "A user-named stock-equivalent rig diverged in native Godot realization.");
+            // Pointer nomination uses the same native projection as the visible frame.
+            Vector2 nominationPixel = new(full.Frame.X + full.Frame.Width * 0.75f,
+                full.Frame.Y + full.Frame.Height * 0.5f);
+            Vector3 nominationPoint = camera.ProjectPosition(nominationPixel, 15f);
+            Expect(camera.UnprojectPosition(nominationPoint).DistanceTo(nominationPixel) < 0.1f &&
+                full.ContainsApplicationPoint(new ClientPixelPoint(
+                    (int)nominationPixel.X, (int)nominationPixel.Y)),
+                "Inside-frame pointer rays did not nominate the expected projected world point.");
+            var drag = new InputEventMouseMotion { ButtonMask = MouseButtonMask.Middle };
+            var idleMotion = new InputEventMouseMotion { ButtonMask = 0 };
+            var wheel = new InputEventMouseButton { ButtonIndex = MouseButton.WheelUp };
+            Expect(GodotWorldInput.Matches(drag, defaults, ClientSemanticAction.CameraLook) &&
+                !GodotWorldInput.Matches(idleMotion, defaults, ClientSemanticAction.CameraLook) &&
+                GodotWorldInput.Matches(wheel, defaults, ClientSemanticAction.CameraZoomIn),
+                "Native camera gestures did not resolve through semantic bindings.");
+
+            GameplayFrameLayout fourThree = GameplayFrameLayout.MaxFit(application,
+                ClientPixelSize.Create(800, 600));
+            controller.ApplyFrame(fourThree);
+            AssertRays(controller, fourThree);
+            Expect(controller.YawRadians == yaw && controller.PitchRadians == pitch &&
+                controller.DistanceMeters == distance &&
+                camera.ProjectRayNormal(Center(fourThree)).DistanceTo(fullCenter) < 0.002f,
+                "Changing frame aspect changed the camera pose or center ray.");
+            ClientCanonicalViewProjection cropped = controller.TargetFrameProjection;
+            Expect(cropped.TargetHorizontalExtent < cropped.CanonicalHorizontalExtent &&
+                Math.Abs(cropped.TargetVerticalExtent - cropped.CanonicalVerticalExtent) < 0.00001,
+                "The 4:3 frame expanded or failed to crop the canonical camera view.");
+
+            controller.ApplyFrame(GameplayFrameLayout.MaxFit(application,
+                ClientPixelSize.Create(1600, 1200)));
+            AssertRays(controller, GameplayFrameLayout.MaxFit(application,
+                ClientPixelSize.Create(1600, 1200)));
+            controller.ApplyFrame(GameplayFrameLayout.MaxFit(application,
+                ClientPixelSize.Create(600, 800)));
+            AssertRays(controller, GameplayFrameLayout.MaxFit(application,
+                ClientPixelSize.Create(600, 800)));
+            controller.ApplyFrame(GameplayFrameLayout.MaxFit(application,
+                ClientPixelSize.Create(2560, 1080)));
+            AssertRays(controller, GameplayFrameLayout.MaxFit(application,
+                ClientPixelSize.Create(2560, 1080)));
+            controller.ApplyFrame(full);
+            AssertRays(controller, full);
+
+            controller.ApplyRig(ClientStockCameraRigs.Independent, full);
+            float lockedYaw = controller.YawRadians;
+            float lockedPitch = controller.PitchRadians;
+            float lockedDistance = controller.DistanceMeters;
+            controller.Look(new Vector2(100, 100), 1f, invertY: false);
+            controller.Zoom(inward: true);
+            Expect(controller.YawRadians == lockedYaw && controller.PitchRadians == lockedPitch &&
+                controller.DistanceMeters == lockedDistance,
+                "A locked stock camera accepted pointer orbit or zoom.");
+
+            ClientCameraRig orthographic = orbit with
+            {
+                Projection = ClientCameraProjection.Orthographic,
+                CanonicalOrthographicSizeMillimeters = 20_000,
+            };
+            controller.ApplyRig(orthographic, fourThree);
+            Expect(camera.Projection == Camera3D.ProjectionType.Orthogonal &&
+                Math.Abs(camera.Size - controller.TargetFrameProjection
+                    .MainViewportVerticalExtent(fourThree)) < 0.001,
+                "The orthographic rig did not realize its compensated native size.");
+            Vector3 centerRay = camera.ProjectRayNormal(Center(fourThree));
+            Vector3 edgeRay = camera.ProjectRayNormal(new Vector2(
+                fourThree.Frame.X, fourThree.Frame.Y));
+            Expect(centerRay.DistanceTo(edgeRay) < 0.001f,
+                "Orthographic rays were not parallel.");
+            GD.Print($"F1.8 CAMERA RAYS PASS app={application.Width}x{application.Height} " +
+                "aspects=16:9,4:3,3:4,64:27 orthographic=pass locked=pass");
+        }
+        finally
+        {
+            RemoveChild(camera);
+            camera.Free();
+        }
+
+        static Vector2 Center(in GameplayFrameLayout layout) => new(
+            layout.Frame.X + layout.Frame.Width / 2f,
+            layout.Frame.Y + layout.Frame.Height / 2f);
+
+        static void AssertRays(GodotGameplayCameraRig controller, in GameplayFrameLayout layout)
+        {
+            Camera3D camera = controller.Camera;
+            ClientCanonicalViewProjection desired = controller.TargetFrameProjection;
+            float centerX = layout.Frame.X + layout.Frame.Width / 2f;
+            float centerY = layout.Frame.Y + layout.Frame.Height / 2f;
+            double left = Tangent(camera, new Vector2(layout.Frame.X, centerY), horizontal: true);
+            double right = Tangent(camera, new Vector2(layout.Frame.Right, centerY), horizontal: true);
+            double top = Tangent(camera, new Vector2(centerX, layout.Frame.Y), horizontal: false);
+            double bottom = Tangent(camera, new Vector2(centerX, layout.Frame.Bottom), horizontal: false);
+            // F1.7 max-fit integer rounding may center an odd-height frame half a pixel
+            // from the viewport center. The headless viewport is only 64x64, so retain
+            // a one-pixel geometric tolerance rather than hiding the rounding drift.
+            double onePixelVertical = 2d * desired.MainViewportVerticalExtent(layout) /
+                layout.Application.Height;
+            double onePixelHorizontal = onePixelVertical;
+            if (Math.Abs(Math.Abs(left) - desired.TargetHorizontalExtent) > onePixelHorizontal + 0.005 ||
+                Math.Abs(Math.Abs(right) - desired.TargetHorizontalExtent) > onePixelHorizontal + 0.005 ||
+                Math.Abs(Math.Abs(top) - desired.TargetVerticalExtent) > onePixelVertical + 0.005 ||
+                Math.Abs(Math.Abs(bottom) - desired.TargetVerticalExtent) > onePixelVertical + 0.005)
+                throw new InvalidOperationException(
+                    $"Frame rays disagree with the target crop: frame={layout.Frame} " +
+                    $"observed={left:0.000}/{right:0.000}/{top:0.000}/{bottom:0.000} " +
+                    $"target={desired.TargetHorizontalExtent:0.000}/{desired.TargetVerticalExtent:0.000}.");
+        }
+
+        static double Tangent(Camera3D camera, Vector2 pixel, bool horizontal)
+        {
+            Vector3 world = camera.ProjectRayNormal(pixel);
+            Vector3 local = camera.GlobalTransform.Basis.Inverse() * world;
+            return (horizontal ? local.X : local.Y) / -local.Z;
+        }
+    }
+
     private void RunF17WorkspaceAndGumpAcceptance()
     {
         var owner = new Control { Name = "F17WorkspaceAcceptance" };
         owner.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         AddChild(owner);
         var composition = new GodotClientUiComposition(
-            owner, ClientPixelSize.Create(800, 600));
+            owner, ClientPixelSize.Create(1920, 1080));
         GodotClientUiCompositionSnapshot initial = composition.GetSnapshot();
-        Expect(initial.Workspace.SelectedOutputShape == ClientPixelSize.Create(800, 600) &&
+        Expect(initial.Workspace.SelectedOutputShape == ClientPixelSize.Create(1920, 1080) &&
             initial.Workspace.GameplayFrame.Width > 0 &&
-            initial.Workspace.GameplayFrame.X > 0 &&
-            !composition.ContainsWorldPointer(new Vector2(
-                0, initial.Workspace.ApplicationSize.Height / 2f)) &&
+            initial.Workspace.UnusedArea > 0 &&
+            !composition.ContainsWorldPointer(new Vector2(0, 0)) &&
             composition.ContainsWorldPointer(new Vector2(
                 initial.Workspace.ApplicationSize.Width / 2f,
                 initial.Workspace.ApplicationSize.Height / 2f)) &&
             initial.WorldHostChildren == 0 && initial.HudHostChildren == 0 &&
             initial.Gumps.OpenWindows == 0,
-            "The F1.7 persistent category/workspace baseline was not clean.");
+            $"The F1.7 persistent category/workspace baseline was not clean: {initial}.");
 
         using GodotSessionUiLease session = composition.BeginSession("F17Test");
         session.WorldHost.AddChild(new Label { Name = "WorldCanary" });
@@ -101,9 +250,11 @@ public partial class S08HeadlessAcceptance : Control
             "Native gump drag did not clamp to the application window.");
         composition.UpdateApplicationSizeForAcceptance(ClientPixelSize.Create(600, 800));
         GodotApplicationWorkspaceSnapshot resized = composition.GetSnapshot().Workspace;
-        Expect(resized.GameplayFrame == new ClientPixelRect(0, 175, 600, 450) &&
+        ClientPixelRect expectedResized = GameplayFrameLayout.MaxFit(
+            ClientPixelSize.Create(600, 800), ClientPixelSize.Create(1920, 1080)).Frame;
+        Expect(resized.GameplayFrame == expectedResized &&
             session.Gumps.GetWindowPosition(firstHandle).X >= 8 &&
-            session.WorldHost.Size == new Vector2(600, 450),
+            session.WorldHost.Size == new Vector2(expectedResized.Width, expectedResized.Height),
             "Application resize did not recompute the frame/World host and clamp gumps.");
         client.CloseView(new UiCloseView(first));
         Expect(client.OpenViewCount == 1 && session.Gumps.GetSnapshot().OpenWindows == 1 &&

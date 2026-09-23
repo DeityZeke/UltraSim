@@ -119,9 +119,10 @@ Chat occurrence, and generic UI adapters preserve their existing independent app
 contracts.
 
 F0.3c inserts `RemoteClientProfileClient` after authenticated realm identity and before content or
-guest admission. It hostile-validates the finite profile vocabulary introduced in manifest v19,
-retained unchanged through the current manifest v29, and maps it into
-Client Core's stock recommendation, and either applies an exact remembered realm/revision/hash
+guest admission. It hostile-validates the finite profile vocabulary introduced in manifest v19;
+manifest v32 replaces the legacy camera enum/lens wire with a bounded fixed-unit declarative rig,
+while transport revision remains 2. It maps the recommendation into
+Client Core's resolved rig, and either applies an exact remembered realm/revision/hash
 decision or waits for explicit local consent. Only after durable decision persistence does it emit
 the exact application-session/profile proof that lets the server continue. Cached decisions do not
 cross realms or changed profile identities, endpoint text is never a scope, and the adapter owns no

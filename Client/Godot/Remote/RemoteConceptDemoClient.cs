@@ -40,7 +40,8 @@ public readonly record struct RemoteConceptDemoClientSnapshot(
     ContentCacheSnapshot ContentCacheAtOpen,
     ContentCacheSnapshot ContentCacheCurrent,
     RemoteConceptDemoUiOwnershipSnapshot UiOwnership,
-    OfficialLocalPresentationResult OfficialPresentation);
+    OfficialLocalPresentationResult OfficialPresentation,
+    GodotGameplayCameraSnapshot Camera);
 
 /// <summary>
 /// Cold, engine-thread-only observation of the F1.7 category hosts owned by one remote gameplay
@@ -86,7 +87,6 @@ public sealed partial class RemoteConceptDemoClient : Node3D
 {
     private const int RenderRadiusChunks = 1;
     private const float CameraPivotMeters = 1.6f;
-    private const float MinimumCameraDistanceMeters = 3f;
     private readonly OrbitCommandProfile _orbit = new();
     private readonly ThirdPersonDirectProfile _direct = new();
     private readonly IndependentMoveLookProfile _independent = new();
@@ -114,6 +114,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private ResolvedClientSettings? _settings;
     private ClientWorldInputScheduler? _inputScheduler;
     private Camera3D? _camera;
+    private GodotGameplayCameraRig? _cameraRig;
     private Control? _ownedHud;
     private Control? _uiHost;
     private GodotSessionUiLease? _sessionUi;
@@ -141,9 +142,6 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private ClientControlWorldPoint _pointerPoint;
     private WorldPublicEntityId _pointerTarget;
     private WorldPublicEntityId _selectedTarget;
-    private float _cameraYaw = -0.7f;
-    private float _cameraPitch = 0.34f;
-    private float _cameraDistance = 8.5f;
     private float _cameraPivotMeters = CameraPivotMeters;
     private bool _smoke;
     private bool _gameplayInputAllowed;
@@ -354,6 +352,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             bool gameplayInputAdmitted = ObserveGameplayInputAdmission(gameplayInputAllowed);
 
             SynchronizePresentation(snapshot.Playable);
+            UpdateCamera();
             if (!_smoke)
             {
                 UpdatePointerWorldPoint();
@@ -390,7 +389,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             _contentCacheAtOpen,
             _contentCacheObserved,
             GetUiOwnershipSnapshot(),
-            _officialPresentation);
+            _officialPresentation,
+            _cameraRig?.GetSnapshot() ?? default);
     }
 
     /// <summary>
@@ -586,26 +586,21 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 TryOpenWorldContext(mouse.Position);
                 GetViewport().SetInputAsHandled();
             }
-            else if (mouse.ButtonIndex == MouseButton.WheelUp && mouse.Pressed)
+            else if (mouse.Pressed &&
+                GodotWorldInput.Matches(mouse, _settings, ClientSemanticAction.CameraZoomIn))
             {
-                _cameraDistance = Math.Max(MinimumCameraDistanceMeters, _cameraDistance - 2f);
-                UpdateCamera();
+                _cameraRig?.Zoom(inward: true);
             }
-            else if (mouse.ButtonIndex == MouseButton.WheelDown && mouse.Pressed)
+            else if (mouse.Pressed &&
+                GodotWorldInput.Matches(mouse, _settings, ClientSemanticAction.CameraZoomOut))
             {
-                _cameraDistance = Math.Min(55f, _cameraDistance + 2f);
-                UpdateCamera();
+                _cameraRig?.Zoom(inward: false);
             }
         }
         else if (inputEvent is InputEventMouseMotion motion &&
-            (motion.ButtonMask & MouseButtonMask.Middle) != 0)
+            GodotWorldInput.Matches(motion, _settings, ClientSemanticAction.CameraLook))
         {
-            float sensitivity = _settings.PointerSensitivity * 0.006f;
-            float invert = _settings.InvertY ? -1f : 1f;
-            _cameraYaw -= motion.Relative.X * sensitivity;
-            _cameraPitch = Math.Clamp(
-                _cameraPitch - motion.Relative.Y * sensitivity * invert, 0.2f, 1.35f);
-            UpdateCamera();
+            _cameraRig?.Look(motion.Relative, _settings.PointerSensitivity, _settings.InvertY);
         }
     }
 
@@ -699,6 +694,10 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             Fov = _settings?.CameraFovDegrees ?? 70f,
         };
         AddChild(_camera);
+        _cameraRig = new GodotGameplayCameraRig(_camera,
+            _settings?.CameraRig ?? ClientStockCameraRigs.Orbit,
+            _sessionUi?.GameplayFrame ?? GameplayFrameLayout.MaxFit(
+                ClientPixelSize.Create(1920, 1080), ClientPixelSize.Create(1920, 1080)));
         ApplyCameraProfile();
         AddChild(new DirectionalLight3D
         {
@@ -1237,17 +1236,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         return triangles;
     }
 
-    private ClientHorizontalCameraBasis CameraBasis()
-    {
-        if (_camera is null) return ClientHorizontalCameraBasis.WorldAxes;
-        Vector3 right = _camera.GlobalTransform.Basis.X;
-        Vector3 forward = -_camera.GlobalTransform.Basis.Z;
-        right.Y = 0;
-        forward.Y = 0;
-        right = right.Normalized();
-        forward = forward.Normalized();
-        return new ClientHorizontalCameraBasis(right.X, right.Z, forward.X, forward.Z);
-    }
+    private ClientHorizontalCameraBasis CameraBasis() =>
+        _cameraRig?.HorizontalBasis() ?? ClientHorizontalCameraBasis.WorldAxes;
 
     private void UpdatePointerWorldPoint()
     {
@@ -1402,40 +1392,19 @@ public sealed partial class RemoteConceptDemoClient : Node3D
 
     private void ApplyCameraProfile()
     {
-        if (_settings is null) return;
-        switch (_settings.CameraProfile)
-        {
-            case ClientCameraProfile.Orbit:
-                _cameraYaw = -0.7f;
-                _cameraPitch = MathF.PI * 0.25f;
-                break;
-            case ClientCameraProfile.ThirdPersonFollow:
-                _cameraYaw = -0.7f;
-                _cameraPitch = 0.34f;
-                break;
-            case ClientCameraProfile.IndependentMoveLook:
-                _cameraYaw = -MathF.PI * 0.25f;
-                _cameraPitch = 0.61548f;
-                break;
-            default:
-                throw new InvalidOperationException(
-                    "The resolved remote camera profile is unsupported.");
-        }
-        _cameraDistance = _settings.CameraDistance;
-        if (_camera is not null) _camera.Fov = _settings.CameraFovDegrees;
+        if (_settings is null || _cameraRig is null) return;
+        _cameraRig.ApplyRig(_settings.CameraRig,
+            _sessionUi?.GameplayFrame ?? GameplayFrameLayout.MaxFit(
+                ClientPixelSize.Create(1920, 1080), ClientPixelSize.Create(1920, 1080)));
         UpdateCamera();
     }
 
     private void UpdateCamera()
     {
-        if (_camera is null) return;
-        float horizontal = MathF.Cos(_cameraPitch) * _cameraDistance;
-        Vector3 pivot = new(0, _cameraPivotMeters, 0);
-        _camera.Position = new Vector3(
-            MathF.Sin(_cameraYaw) * horizontal,
-            MathF.Sin(_cameraPitch) * _cameraDistance + _cameraPivotMeters,
-            MathF.Cos(_cameraYaw) * horizontal);
-        _camera.LookAt(pivot, Vector3.Up);
+        if (_cameraRig is null) return;
+        if (_sessionUi is not null) _cameraRig.ApplyFrame(_sessionUi.GameplayFrame);
+        _cameraRig.SetPivotHeightMeters(_cameraPivotMeters);
+        _cameraRig.UpdatePose();
     }
 
     private void Fault(string detail)

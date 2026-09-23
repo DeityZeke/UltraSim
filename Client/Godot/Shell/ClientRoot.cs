@@ -548,6 +548,9 @@ public abstract partial class ClientRoot : Control
         OptionButton camera = EnumOptions(_resolved.CameraProfile);
         HSlider distance = Slider(2, 80, 1, _resolved.CameraDistance);
         HSlider fov = Slider(40, 120, 1, _resolved.CameraFovDegrees);
+        ClientCameraProfile initialCamera = (ClientCameraProfile)camera.GetSelectedId();
+        float initialDistance = (float)distance.Value;
+        float initialFov = (float)fov.Value;
         HSlider renderDistance = Slider(
             ClientSettingsResolver.MinimumRenderDistanceChunks,
             ClientSettingsResolver.MaximumRenderDistanceChunks,
@@ -588,19 +591,33 @@ public abstract partial class ClientRoot : Control
         {
             try
             {
+                // The simple stock-preset UI must not silently replace a richer accepted or
+                // user-named rig when an unrelated preference is saved. A camera edit is an
+                // explicit choice of the displayed stock preset and lens values.
+                ClientCameraProfile chosenCamera = (ClientCameraProfile)camera.GetSelectedId();
+                float chosenDistance = (float)distance.Value;
+                float chosenFov = (float)fov.Value;
+                bool cameraEdited = chosenCamera != initialCamera ||
+                    !Mathf.IsEqualApprox(chosenDistance, initialDistance) ||
+                    !Mathf.IsEqualApprox(chosenFov, initialFov);
+                ClientCameraRig chosenRig = cameraEdited
+                    ? ClientStockCameraRigs.FromLegacy(chosenCamera)
+                        .WithLegacyLens(chosenDistance, chosenFov)
+                    : _resolved.CameraRig;
                 ClientSettingsLayer saved = new(
                     (float)uiScale.Value,
                     (float)volume.Value,
                     (float)sensitivity.Value,
                     invert.ButtonPressed,
                     (ClientControlGrammar)grammar.GetSelectedId(),
-                    (ClientCameraProfile)camera.GetSelectedId(),
-                    (float)distance.Value,
-                    (float)fov.Value,
+                    chosenCamera,
+                    chosenDistance,
+                    chosenFov,
                     scoped && _settings.TryGetScope(_activeSettingsScope, out ClientSettingsLayer existing)
                         ? existing.Bindings
                         : _settings.Global.Bindings,
-                    (int)renderDistance.Value);
+                    (int)renderDistance.Value,
+                    chosenRig);
                 _settings = scoped
                     ? _settings.WithScope(_activeSettingsScope, saved)
                     : _settings.WithGlobal(saved);
@@ -622,7 +639,8 @@ public abstract partial class ClientRoot : Control
         {
             _settings = scoped
                 ? _settings.WithScope(_activeSettingsScope, ClientSettingsLayer.Empty)
-                : new ClientSettingsDocument(ClientSettingsLayer.Empty, _settings.Scopes);
+                : new ClientSettingsDocument(ClientSettingsLayer.Empty, _settings.Scopes,
+                    _settings.NamedProfiles);
             ResolveEffectiveSettings();
             RenderCurrentSurface();
         });
@@ -988,18 +1006,29 @@ public abstract partial class ClientRoot : Control
     {
         ClientShellSnapshot shell = ShellSnapshot();
         GodotClientUiCompositionSnapshot ui = UiComposition.GetSnapshot();
+        GameplayFrameLayout frame = GameplayFrameLayout.MaxFit(
+            ui.Workspace.ApplicationSize, ui.Workspace.SelectedOutputShape);
+        ClientCanonicalViewProjection projection =
+            ClientCanonicalViewProjection.ForFrame(_resolved.CameraRig, frame);
+        ClientCameraRig rig = _resolved.CameraRig;
         return page switch
         {
             GodotClientDebugPage.Client =>
                 $"Client\nedition={_composition.Edition}\nscreen={shell.Screen} session={shell.SessionActive}\n" +
                 $"focus={shell.Focus.Owner} gameplay={shell.Focus.GameplayInputAllowed}\n" +
-                $"profile={_resolved.ControlGrammar}/{_resolved.CameraProfile}",
+                $"grammar={_resolved.ControlGrammar} camera={rig.Projection}/{rig.YawMode}/{rig.PitchMode}/{rig.Zoom}\n" +
+                $"distance={rig.DefaultDistanceMillimeters / 1000f:0.###}m " +
+                $"canonicalFov={rig.CanonicalFovTenths / 10f:0.#}° " +
+                $"canonicalOrtho={rig.CanonicalOrthographicSizeMillimeters / 1000f:0.###}m",
             GodotClientDebugPage.Presentation =>
                 $"Presentation\napplication={ui.Workspace.ApplicationSize.Width}x{ui.Workspace.ApplicationSize.Height}\n" +
                 $"selected={ui.Workspace.SelectedOutputShape.Width}x{ui.Workspace.SelectedOutputShape.Height}\n" +
                 $"frame={ui.Workspace.GameplayFrame.X},{ui.Workspace.GameplayFrame.Y} " +
                 $"{ui.Workspace.GameplayFrame.Width}x{ui.Workspace.GameplayFrame.Height}\n" +
-                $"world/hud/gumps={ui.WorldHostChildren}/{ui.HudHostChildren}/{ui.Gumps.OpenWindows}",
+                $"world/hud/gumps={ui.WorldHostChildren}/{ui.HudHostChildren}/{ui.Gumps.OpenWindows}\n" +
+                $"canonical=16:9 targetV={projection.TargetVerticalExtent:0.####} " +
+                $"targetH={projection.TargetHorizontalExtent:0.####}\n" +
+                $"temporaryViewportV={projection.MainViewportVerticalExtent(frame):0.####}",
             GodotClientDebugPage.Content =>
                 $"Content\ncatalogMarkers={ContentCatalogRoot.GetChildCount()}\n" +
                 $"session={ui.SessionActive} context={ui.ContextHostChildren}\n" +
