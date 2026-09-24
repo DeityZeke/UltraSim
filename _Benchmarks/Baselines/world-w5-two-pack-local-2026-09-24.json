@@ -1,0 +1,118 @@
+{
+  "checkpoint": "W5 connected two-Pack local proof",
+  "date": "2026-09-24",
+  "starting_head": "47e8926d196bc6c191cf12b230d62314fd25744b",
+  "tested_implementation_head": "9b430d0ef3bb525a5dfc770fbc16763d029416eb",
+  "evidence_commit": "the commit containing this file; self-referential SHA deliberately omitted",
+  "host": {
+    "os": "Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D, 8 cores/16 threads",
+    "dotnet_sdk": "8.0.131",
+    "godot": "4.7.1.stable.mono",
+    "configuration": "Release"
+  },
+  "fixture": {
+    "kind": "independently compiled declared WorldPack/v1 shards, local acceptance only",
+    "space": "GameWorldState.DefaultSpace",
+    "west": {
+      "coord": [0, 0],
+      "chunk_x_inclusive": [125, 127],
+      "chunk_z_inclusive": [-2, 2],
+      "fingerprint": "FEC7690954F83329C54C21EF72EA69D3199D9F0439821A235C55BB21FCEDC46C",
+      "frozen_static_id": 701,
+      "multi_instance_id": 1001
+    },
+    "east": {
+      "coord": [1, 0],
+      "chunk_x_inclusive": [128, 130],
+      "chunk_z_inclusive": [-2, 2],
+      "fingerprint": "66C1B70EB4908248926392CF76F01A0BD069F7AE94004755DA2E5CAD5112EE84",
+      "frozen_static_id": 702,
+      "multi_instance_id": 1002
+    },
+    "manifest_fingerprint": "AF4DF32E909774981590BADF21E1281094A40E10977C162F69853BEDAB832BDB",
+    "authored_chunks": 30,
+    "base_terrain_height_mm": 0,
+    "composition_revision_authored": 1,
+    "composition_revision_overlaid_authority": 3,
+    "seam_chunks": [127, 128],
+    "terrain_edge_vertices_checked_per_pair": 33,
+    "valid_static_query_hits": 4
+  },
+  "world_validation": {
+    "complete_two_pack": "pass",
+    "exact_q5_seam": "pass",
+    "global_mesh_parity": "pass",
+    "mismatched_seam": "rejected: TerrainSeamMismatch",
+    "duplicate_world_static_id": "rejected: DuplicateWorldStaticId",
+    "duplicate_multi_instance_id": "rejected: DuplicateMultiInstanceId",
+    "partial_prepared_subset": "valid for queries; rejected by complete validation and current v2 capture",
+    "cross_pack_logical_multi_continuation": "not implemented or claimed",
+    "cross_pack_additional_surface_continuation": "not implemented or claimed"
+  },
+  "authority": {
+    "movement": "real admitted Game direct-control movement, no teleport command",
+    "chunk_sequence": [127, 128, 127, 128, 127],
+    "crossings": 4,
+    "same_persistent_actor": true,
+    "same_public_entity_identity": true,
+    "physics_occupancy_both_sides": "clear with base support",
+    "physics_sweep_both_directions": "resolved with base support",
+    "spatial_index_home": "ordinary global chunk migration",
+    "publication": "target snapshot contains unchanged public ID; former source does not",
+    "save_after_crossing": "chunk 128 exact global position",
+    "failed_restore_active_generation_unchanged": true,
+    "successful_restore_position_exact": true
+  },
+  "persistence": {
+    "legacy_worldview_v1": "existing capture/restore tests pass unchanged",
+    "canonical_worldview_v2": true,
+    "manifest_and_pack_bytes_embedded": false,
+    "format_encodes_prepared_residency": false,
+    "sorted_overlay_rows": true,
+    "zero_changed_chunks_revised_overlay_round_trip": "revision 2, zero changed chunks",
+    "sample_v2_artifact_bytes": 4582,
+    "missing_manifest": "rejected",
+    "missing_exact_pack": "rejected",
+    "duplicate_overlay_row": "rejected",
+    "independent_pack_overlay_revisions_restored": [1, 1],
+    "composition_revision_restored": 3
+  },
+  "client_native": {
+    "semantic_resident_peak": 25,
+    "native_active_render_chunks_each_center": 9,
+    "seam_chunks_simultaneously_semantic_resident_and_natively_realized": true,
+    "same_cache_renderer_root_and_handles_across_pack_boundary": true,
+    "completed_builds": 12,
+    "completed_retirements": 12,
+    "retirement_active_render_chunks": 0,
+    "retirement_active_resources": 0,
+    "retirement_active_nodes": 1,
+    "reset_transitions_during_crossing": 0
+  },
+  "versions": {
+    "worldpack": 1,
+    "world_structural_manifest": 1,
+    "game_manifest": 32,
+    "network_transport_revision": 2
+  },
+  "verification": {
+    "world_release": "112 passed",
+    "w2_full_pack_release": "passed; 65536 chunks, 280363264 bytes",
+    "s0_integrated_release": "38 passed, including W5 four-crossing/save-restore case",
+    "game_persistence_release": "13 passed in canonical verifier",
+    "client_core_release": "34 passed in canonical verifier",
+    "client_local_release": "22 passed in canonical verifier",
+    "architecture_only": "passed",
+    "w5_native_godot": "passed in canonical Release verifier",
+    "historical_native_godot": "T0.8 and T0.10 passed in canonical Release verifier",
+    "canonical_release_first_attempt": "interrupted by existing M00SharedAuthorityTests assertion at line 319; unchanged application suite subsequently passed",
+    "canonical_release_second_attempt": "one uninterrupted pass on tested implementation HEAD; PASS repository verification"
+  },
+  "scope": {
+    "concept_demo_migration": "not started; historical cross-window one-Pack artifact unchanged",
+    "remote_multi_pack_acquisition": "not started",
+    "runtime_composition_mutation": "not started",
+    "w5r": "next"
+  }
+}

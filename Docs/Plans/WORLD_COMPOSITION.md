@@ -350,7 +350,7 @@ A Pack owns storage fragments. The World owns semantic identity.
 
 CompositionRevision is not automatically part of those semantic IDs. Replacing a Pack or publishing a new World revision does not create a new semantic mountain/structure when the authored identity remains the same.
 
-Current T1.1 WorldSurfaceId is Pack-lineage scoped because that is sufficient for the implemented one-Pack world. W4/W5 must generalize the owning composition seam before cross-Pack surface continuation is claimed.
+Current T1.1 WorldSurfaceId is Pack-lineage scoped because that is sufficient for the implemented one-Pack world. W5 does not impose global uniqueness on that ID, but cross-Pack additional-surface continuation still needs its own representation and validation before it can be claimed.
 
 ## 12. Cross-Pack seams
 
@@ -409,7 +409,7 @@ its fingerprint. The legacy unaddressed builder remains available during the
 one-Pack transition. The current Concept Demo Pack is such a legacy artifact:
 its central cluster lies in future Pack (0,0), while Far Island X=124..132
 crosses from Pack (0,0) into (1,0). It cannot validate as either single
-declared shard and is intentionally unchanged until W5/W5R migration.
+declared shard and is intentionally unchanged until W5R migration.
 
 ## 15. Pack and chunk composition operations
 
