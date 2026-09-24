@@ -1,0 +1,142 @@
+{
+  "checkpoint": "W3",
+  "status": "closed",
+  "evidence_kind": "correctness_identity_capacity",
+  "date": "2026-09-23",
+  "starting_head": "21fd44a6cdb06bfe3d674a28bf0a427159fbfc09",
+  "tested_implementation_head": "59c348fe358fb86a5ee1866906fad5d18d696a16",
+  "evidence_commit": "evidence-only successor; see git history and checkpoint handoff",
+  "environment": {
+    "os": "Linux 7.2.6-1-cachyos x86_64",
+    "dotnet_sdk": "8.0.131",
+    "godot": "4.7.1 stable mono",
+    "configuration": "Release"
+  },
+  "format": {
+    "name": "WorldStructuralManifest/v1",
+    "owner": "Game/World",
+    "magic_ascii": "USWMAN01",
+    "version": 1,
+    "header_bytes": 64,
+    "entry_bytes": 40,
+    "entry_coord_bytes": 8,
+    "entry_pack_fingerprint_bytes": 32,
+    "manifest_fingerprint_bytes": 32,
+    "fingerprint_algorithm": "SHA-256 over header bytes 0..31 followed by complete entry table",
+    "profile_id": 1,
+    "profile_name": "fixed centered WorldPack grid",
+    "chunk_edge_millimeters": 16000,
+    "pack_edge_chunks": 256,
+    "centering_bias_chunks": 128,
+    "canonical_order": "WorldPackCoord.CompareTo: X then Z, strictly increasing",
+    "retention": "one private canonical byte array; no Pack payload or per-entry objects"
+  },
+  "identity": {
+    "world_composition_revision_bytes": 8,
+    "world_composition_revision_is_manifest_content": false,
+    "world_id_in_manifest": false,
+    "spatial_space_id_in_manifest": false,
+    "runtime_residency_in_manifest": false,
+    "pack_bytes_in_manifest": false,
+    "repeated_pack_fingerprint_at_distinct_coords_allowed": true,
+    "input_order_changes_identity": false,
+    "coordinate_change_changes_identity": true,
+    "pack_fingerprint_change_changes_identity": true,
+    "add_pack_changes_identity": true,
+    "remove_pack_changes_identity": true,
+    "limits_change_identity": false
+  },
+  "limits": {
+    "maximum_packs": 65536,
+    "maximum_manifest_bytes": 2621504,
+    "exact_capacity_accepted": true,
+    "one_over_rejected": "CapacityExceeded"
+  },
+  "fixtures": {
+    "empty": {
+      "entries": 0,
+      "bytes": 64,
+      "fingerprint": "2DB59A27C45494CFD3480F95D1970CFC24DFE0D43B7F10D6F1D5C499AB8C197B",
+      "round_trip": true,
+      "lookup_miss": true
+    },
+    "one_declared_pack": {
+      "entries": 1,
+      "bytes": 104,
+      "fingerprint": "D135EE9696B17F26A41F7107EECE958EE83E212C5ECAB093DDD75C4829A280E4",
+      "pack_fingerprint_exact_lookup": true,
+      "round_trip": true
+    },
+    "multi_sparse": {
+      "entries": 4,
+      "bytes": 224,
+      "fingerprint": "7B1D41AA70578D675DF0F16F67E4637EE3BE0A2FBA24736D0E3DAA4E05C5ED34",
+      "distant_pack_coord": [2000, -500],
+      "canonical_order_and_lookup": true
+    },
+    "sparse_10000": {
+      "entries": 10000,
+      "bytes": 400064,
+      "entry_payload_bytes": 400000,
+      "observed_build_ms": 9,
+      "observed_open_ms": 0,
+      "warmed_lookup_iterations": 100000,
+      "warmed_lookup_managed_allocated_bytes": 0
+    },
+    "maximum": {
+      "entries": 65536,
+      "bytes": 2621504,
+      "opened": true
+    }
+  },
+  "rejections_tested": [
+    "duplicate coordinate with same fingerprint",
+    "duplicate coordinate with different fingerprint",
+    "invalid zero Pack fingerprint",
+    "invalid magic",
+    "unsupported version",
+    "unsupported profile and spatial fields",
+    "count beyond capacity",
+    "truncation",
+    "trailing bytes",
+    "noncanonical or duplicate encoded entries",
+    "hash and content corruption"
+  ],
+  "compatibility": {
+    "worldpack_v1_changed": false,
+    "w2_spatial_validation_changed": false,
+    "concept_demo_cross_window_artifact_remains_legacy": true,
+    "game_world_state_remains_one_pack": true,
+    "prepared_world_composition_added": false,
+    "client_content_integration_added": false,
+    "network_integration_added": false,
+    "game_manifest_version": 32,
+    "network_transport_revision": 2,
+    "w4_or_later_started": false
+  },
+  "verification": [
+    {
+      "command": "dotnet run --project _Tests/UltraSim.Game.World.Tests/UltraSim.Game.World.Tests.csproj -c Release",
+      "result": "pass",
+      "test_count": 104
+    },
+    {
+      "command": "dotnet run --project _Tests/UltraSim.Game.World.Tests/UltraSim.Game.World.Tests.csproj -c Release -- --w2-full-pack",
+      "result": "pass",
+      "chunks": 65536,
+      "artifact_bytes": 280363264
+    },
+    {
+      "command": "./verify.sh --architecture-only",
+      "result": "pass",
+      "check_count": 4
+    },
+    {
+      "command": "./verify.sh --configuration=Release",
+      "result": "pass",
+      "uninterrupted": true,
+      "retained_local_log": "/tmp/ultrasim-w3-release-2026-09-23.log"
+    }
+  ],
+  "timings_are_rated_performance_evidence": false
+}
