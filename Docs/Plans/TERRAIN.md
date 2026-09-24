@@ -69,8 +69,12 @@ W1 is closed: the World-owned `WorldPackCoord`, bounded `WorldPackLocalChunkCoor
 negative floor semantics and fail-closed inverse. W2 is also closed: declared
 authoring and opened-artifact validation require every global chunk key to fit
 one Pack address, and the default total Pack byte ceiling is 512 MiB with a
-real 65,536-chunk proof. W3 is next; no World manifest, multi-Pack runtime, or
-WorldPack/v1 format change is implied by W1-W2.
+real 65,536-chunk proof. W3 is closed: a Game/World-owned canonical
+`WorldStructuralManifest/v1` records a sparse sorted PackCoord-to-PackFingerprint
+mapping, with an independent `WorldCompositionRevision` value. Empty manifests
+are valid; the finite default is 65,536 entries/2,621,504 bytes. The manifest
+contains no WorldId, SpatialSpaceId, Pack bytes, mutable revision, or residency.
+W4 is next; W1-W3 do not change the one-Pack runtime or WorldPack/v1 format.
 
 The Pack byte-cap correction is 512 MiB in W2: the existing 65,536-chunk bound exactly matches
 the fixed 256×256 envelope, while a fully populated dense terrain foundation alone is already

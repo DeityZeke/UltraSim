@@ -39,7 +39,7 @@ One WorldPack is a fixed 256×256 SpatialChunk / 4.096×4.096 km structural addr
 globally centered Pack mapping makes Pack (0,0) own chunk coordinates -128..127 on each axis.
 WorldPack boundaries do not change World/SpatialSpace identity and must remain semantically boring.
 
-W1 and W2 are closed; W3 is next. `WorldPackAddressing.ToPackLocal` partitions every
+W1-W3 are closed; W4 is next. `WorldPackAddressing.ToPackLocal` partitions every
 signed-32-bit global `SpatialChunkCoord` into an 8-byte `WorldPackCoord` and a
 2-byte bounded `WorldPackLocalChunkCoord`. `TryToGlobal` rejects an arbitrary
 Pack/local pair if either reconstructed global axis is outside signed 32-bit
@@ -55,7 +55,17 @@ fingerprints. `WorldPackLimits` now caps `MaximumChunks` at the derived
 ceiling. A full flat Pack built/opened at 280,363,264 bytes; smaller sparse
 Packs remain sparse. The current Concept Demo remains a legacy unaddressed
 one-Pack artifact spanning future Pack (0,0)/(1,0) windows, pending W5/W5R
-migration. There is no WorldStructuralManifest or multi-Pack runtime yet.
+migration. W3 adds `WorldStructuralManifest/v1`, a private flat canonical
+64-byte header plus sorted 40-byte coordinate/fingerprint entries with a
+32-byte SHA-256 identity. Its fixed profile binds the current 16 m chunk,
+centered 256-chunk Pack edge, and 128-chunk bias. It permits zero entries,
+admits at most 65,536 entries/2,621,504 bytes by default, rejects duplicate
+addresses, malformed bytes, and unknown profiles, and uses allocation-free
+binary lookup. `WorldCompositionRevision` is a separate 8-byte runtime/save
+value, absent from immutable manifest bytes. Neither WorldId nor
+SpatialSpaceId participates in that identity. Manifest entries carry only
+Pack addresses and fingerprints; no Pack bytes, prepared state, or residency.
+There is no multi-Pack runtime yet.
 
 The future World layer distinguishes authoritatively unauthored Pack, manifest-known but
 unprepared Pack, missing chunk inside a prepared Pack, intentional Absent terrain cell, and

@@ -30,6 +30,11 @@ var tests = new (string Name, Action Body)[]
     ("OpenedPackValidationRejectsWrongAndCrossWindowDeclarations", OpenedPackValidationRejectsWrongAndCrossWindowDeclarations),
     ("DeclaredAndLegacyPackBuildsHaveIdenticalV1Bytes", DeclaredAndLegacyPackBuildsHaveIdenticalV1Bytes),
     ("ConceptDemoRemainsLegacyCrossWindowArtifact", ConceptDemoRemainsLegacyCrossWindowArtifact),
+    ("StructuralManifestEmptyAndRevisionIdentityAreSeparate", StructuralManifestEmptyAndRevisionIdentityAreSeparate),
+    ("StructuralManifestOnePackAndSparseLookupAreCanonical", StructuralManifestOnePackAndSparseLookupAreCanonical),
+    ("StructuralManifestInputOrderAndMutationsDetermineIdentity", StructuralManifestInputOrderAndMutationsDetermineIdentity),
+    ("StructuralManifestOpenRejectsMalformedBytes", StructuralManifestOpenRejectsMalformedBytes),
+    ("StructuralManifestSparseAndCapacityBoundsAreExact", StructuralManifestSparseAndCapacityBoundsAreExact),
     ("FloorDivisionOwnsNegativeBoundaries", FloorDivisionOwnsNegativeBoundaries),
     ("AllCrossingDirectionsAndCornersNormalize", AllCrossingDirectionsAndCornersNormalize),
     ("GlobalLocalRoundTripsAcrossFullProfile", GlobalLocalRoundTripsAcrossFullProfile),
@@ -527,6 +532,282 @@ static void ConceptDemoRemainsLegacyCrossWindowArtifact()
     False(demo.TryValidateSpatialWindow(new WorldPackCoord(1, 0), out _, out _));
     True(demo.TryGetBaseTerrain(new SpatialChunkKey(demo.Space, 127, 0), out _));
     True(demo.TryGetBaseTerrain(new SpatialChunkKey(demo.Space, 128, 0), out _));
+}
+
+static WorldPackFingerprint StructuralTestFingerprint(byte seed)
+{
+    byte[] digest = SHA256.HashData(new byte[] { seed });
+    True(WorldPackFingerprint.TryParse(Convert.ToHexString(digest), out WorldPackFingerprint fingerprint));
+    return fingerprint;
+}
+
+static WorldStructuralManifest StructuralManifest(params WorldStructuralManifestEntry[] entries)
+{
+    True(WorldStructuralManifest.TryCreate(entries, out WorldStructuralManifest? manifest,
+        out WorldStructuralManifestError error));
+    Equal(WorldStructuralManifestError.None, error);
+    return manifest!;
+}
+
+static byte[] StructuralManifestBytes(WorldStructuralManifest manifest)
+{
+    var bytes = new byte[manifest.Length];
+    manifest.CopyTo(bytes);
+    return bytes;
+}
+
+static void ResignStructuralManifestBytes(byte[] bytes)
+{
+    using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+    hash.AppendData(bytes.AsSpan(0, WorldStructuralManifestFormat.FingerprintOffset));
+    hash.AppendData(bytes.AsSpan(WorldStructuralManifestFormat.HeaderBytes));
+    byte[] digest = hash.GetHashAndReset();
+    digest.CopyTo(bytes.AsSpan(WorldStructuralManifestFormat.FingerprintOffset));
+}
+
+static void StructuralManifestEmptyAndRevisionIdentityAreSeparate()
+{
+    Equal(32, Marshal.SizeOf<WorldStructuralManifestFingerprint>());
+    Equal(8, Marshal.SizeOf<WorldCompositionRevision>());
+    Equal(64, WorldStructuralManifestFormat.HeaderBytes);
+    Equal(40, WorldStructuralManifestFormat.EntryBytes);
+    Equal(65_536, WorldStructuralManifestLimits.Default.MaximumPacks);
+    Equal(2_621_504, WorldStructuralManifestLimits.Default.MaximumManifestBytes);
+    Equal(1u, WorldStructuralManifestFormat.Version);
+    Throws<ArgumentOutOfRangeException>(() => _ = new WorldStructuralManifestLimits(65_537, 2_621_504));
+    Throws<ArgumentOutOfRangeException>(() => _ = new WorldStructuralManifestLimits(1, 63));
+
+    WorldStructuralManifest empty = StructuralManifest();
+    Equal(0, empty.EntryCount);
+    Equal(64, empty.Length);
+    True(empty.Fingerprint.IsValid);
+    False(empty.TryGetEntry(0, out _));
+    False(empty.TryGetPack(new WorldPackCoord(0, 0), out _));
+    byte[] bytes = StructuralManifestBytes(empty);
+    True(WorldStructuralManifest.TryOpen(bytes, out WorldStructuralManifest? reopened,
+        out WorldStructuralManifestError openError));
+    Equal(WorldStructuralManifestError.None, openError);
+    Equal(empty.Fingerprint, reopened!.Fingerprint);
+    True(bytes.AsSpan().SequenceEqual(StructuralManifestBytes(StructuralManifest())));
+    Equal(empty.Fingerprint, StructuralManifest().Fingerprint);
+
+    var first = new WorldCompositionRevision(1);
+    var second = new WorldCompositionRevision(2);
+    True(first.IsValid);
+    True(second.CompareTo(first) > 0);
+    False(default(WorldCompositionRevision).IsValid);
+    // Revision, WorldId, SpatialSpaceId and residency have no input slot in canonical bytes.
+    Equal(empty.Fingerprint, reopened.Fingerprint);
+    Console.WriteLine($"W3 EMPTY MANIFEST fingerprint={empty.Fingerprint} bytes={empty.Length}");
+}
+
+static void StructuralManifestOnePackAndSparseLookupAreCanonical()
+{
+    WorldPackArtifact validShard = BuildCabinAddressParityArtifact(declared: true);
+    var oneEntry = new WorldStructuralManifestEntry(new WorldPackCoord(0, 0), validShard.Fingerprint);
+    var mutableSource = new[] { oneEntry };
+    WorldStructuralManifest one = StructuralManifest(mutableSource);
+    mutableSource[0] = new WorldStructuralManifestEntry(new WorldPackCoord(1, 0), StructuralTestFingerprint(9));
+    Equal(1, one.EntryCount);
+    Equal(104, one.Length);
+    True(one.TryGetEntry(0, out WorldStructuralManifestEntry copied));
+    Equal(oneEntry, copied);
+    True(one.TryGetPack(oneEntry.Coord, out WorldPackFingerprint found));
+    Equal(validShard.Fingerprint, found);
+    False(one.TryGetPack(new WorldPackCoord(1, 0), out _));
+    byte[] bytes = StructuralManifestBytes(one);
+    True(WorldStructuralManifest.TryOpen(bytes, out WorldStructuralManifest? opened, out _));
+    Equal(one.Fingerprint, opened!.Fingerprint);
+    Equal(oneEntry, GetStructuralEntry(opened, 0));
+    // Opening and copying must not retain or expose the caller's mutable byte buffer.
+    bytes[WorldStructuralManifestFormat.HeaderBytes] ^= 1;
+    Equal(oneEntry, GetStructuralEntry(opened, 0));
+
+    WorldPackFingerprint reused = StructuralTestFingerprint(8);
+    WorldStructuralManifest sparse = StructuralManifest(
+        new(new WorldPackCoord(2000, -500), reused),
+        new(new WorldPackCoord(0, 0), StructuralTestFingerprint(3)),
+        new(new WorldPackCoord(-4, 7), reused),
+        new(new WorldPackCoord(1, 0), StructuralTestFingerprint(4)));
+    Equal(4, sparse.EntryCount);
+    Equal(224, sparse.Length);
+    Equal(new WorldPackCoord(-4, 7), GetStructuralEntry(sparse, 0).Coord);
+    Equal(new WorldPackCoord(0, 0), GetStructuralEntry(sparse, 1).Coord);
+    Equal(new WorldPackCoord(1, 0), GetStructuralEntry(sparse, 2).Coord);
+    Equal(new WorldPackCoord(2000, -500), GetStructuralEntry(sparse, 3).Coord);
+    True(sparse.TryGetPack(new WorldPackCoord(2000, -500), out WorldPackFingerprint far));
+    Equal(reused, far);
+    False(sparse.TryGetPack(new WorldPackCoord(1999, -500), out _));
+    Console.WriteLine($"W3 ONE PACK fingerprint={one.Fingerprint} bytes={one.Length}");
+    Console.WriteLine($"W3 SPARSE FOUR fingerprint={sparse.Fingerprint} bytes={sparse.Length}");
+}
+
+static WorldStructuralManifestEntry GetStructuralEntry(WorldStructuralManifest manifest, int index)
+{
+    True(manifest.TryGetEntry(index, out WorldStructuralManifestEntry entry));
+    return entry;
+}
+
+static void StructuralManifestInputOrderAndMutationsDetermineIdentity()
+{
+    WorldPackFingerprint a = StructuralTestFingerprint(1);
+    WorldPackFingerprint b = StructuralTestFingerprint(2);
+    WorldPackFingerprint c = StructuralTestFingerprint(3);
+    WorldStructuralManifestEntry first = new(new WorldPackCoord(0, 0), a);
+    WorldStructuralManifestEntry second = new(new WorldPackCoord(1, 0), b);
+    WorldStructuralManifest original = StructuralManifest(second, first);
+    WorldStructuralManifest reversed = StructuralManifest(first, second);
+    Equal(original.Fingerprint, reversed.Fingerprint);
+    True(StructuralManifestBytes(original).AsSpan().SequenceEqual(StructuralManifestBytes(reversed)));
+    for (int index = 0; index < original.EntryCount; index++)
+        Equal(GetStructuralEntry(original, index), GetStructuralEntry(reversed, index));
+    False(WorldStructuralManifest.TryCreate(new[] { first, first }, out _, out WorldStructuralManifestError duplicateSame));
+    Equal(WorldStructuralManifestError.DuplicatePackCoord, duplicateSame);
+    False(WorldStructuralManifest.TryCreate(new[] { first, new WorldStructuralManifestEntry(first.Coord, b) },
+        out _, out WorldStructuralManifestError duplicateDifferent));
+    Equal(WorldStructuralManifestError.DuplicatePackCoord, duplicateDifferent);
+    False(WorldStructuralManifest.TryCreate(new[] { new WorldStructuralManifestEntry(first.Coord, default) },
+        out _, out WorldStructuralManifestError invalid));
+    Equal(WorldStructuralManifestError.InvalidPackFingerprint, invalid);
+
+    WorldStructuralManifest[] changed =
+    [
+        StructuralManifest(first, new(new WorldPackCoord(1, 0), c)),
+        StructuralManifest(first, new(new WorldPackCoord(2, 0), b)),
+        StructuralManifest(first),
+        StructuralManifest(first, second, new(new WorldPackCoord(2, 0), c)),
+    ];
+    foreach (WorldStructuralManifest variant in changed)
+        False(original.Fingerprint == variant.Fingerprint);
+    var sufficient = new WorldStructuralManifestLimits(2, 144);
+    True(WorldStructuralManifest.TryCreate(new[] { first, second }, out WorldStructuralManifest? limited,
+        out _, sufficient));
+    Equal(original.Fingerprint, limited!.Fingerprint);
+    True(WorldStructuralManifest.TryOpen(StructuralManifestBytes(original), out WorldStructuralManifest? limitedOpen,
+        out _, sufficient));
+    Equal(original.Fingerprint, limitedOpen!.Fingerprint);
+    False(WorldStructuralManifest.TryCreate(new[] { first, second }, out _,
+        out WorldStructuralManifestError smallByteError, new WorldStructuralManifestLimits(2, 143)));
+    Equal(WorldStructuralManifestError.CapacityExceeded, smallByteError);
+    Equal(original.Fingerprint, StructuralManifest(first, second).Fingerprint);
+}
+
+static void StructuralManifestOpenRejectsMalformedBytes()
+{
+    WorldStructuralManifest original = StructuralManifest(
+        new(new WorldPackCoord(0, 0), StructuralTestFingerprint(1)),
+        new(new WorldPackCoord(1, 0), StructuralTestFingerprint(2)));
+    byte[] pristine = StructuralManifestBytes(original);
+    static void Reject(byte[] bytes, WorldStructuralManifestError expected)
+    {
+        False(WorldStructuralManifest.TryOpen(bytes, out WorldStructuralManifest? opened,
+            out WorldStructuralManifestError actual));
+        Equal(null, opened);
+        Equal(expected, actual);
+    }
+    byte[] changed = (byte[])pristine.Clone();
+    changed[0] ^= 1;
+    Reject(changed, WorldStructuralManifestError.InvalidMagic);
+    changed = (byte[])pristine.Clone();
+    changed[8] ^= 1;
+    Reject(changed, WorldStructuralManifestError.UnsupportedVersion);
+    changed = (byte[])pristine.Clone();
+    changed[12] ^= 1;
+    Reject(changed, WorldStructuralManifestError.UnsupportedProfile);
+    changed = (byte[])pristine.Clone();
+    changed[16] ^= 1;
+    Reject(changed, WorldStructuralManifestError.UnsupportedProfile);
+    changed = (byte[])pristine.Clone();
+    changed[20] ^= 1;
+    Reject(changed, WorldStructuralManifestError.UnsupportedProfile);
+    changed = (byte[])pristine.Clone();
+    changed[24] ^= 1;
+    Reject(changed, WorldStructuralManifestError.UnsupportedProfile);
+    changed = (byte[])pristine.Clone();
+    changed[28] = 3;
+    Reject(changed, WorldStructuralManifestError.Truncated);
+    Reject(pristine[..63], WorldStructuralManifestError.Truncated);
+    Reject(pristine[..^1], WorldStructuralManifestError.Truncated);
+    Reject([.. pristine, 0], WorldStructuralManifestError.LengthMismatch);
+    changed = (byte[])pristine.Clone();
+    changed[32] ^= 1;
+    Reject(changed, WorldStructuralManifestError.HashMismatch);
+    changed = (byte[])pristine.Clone();
+    changed[WorldStructuralManifestFormat.HeaderBytes + 4] ^= 1;
+    Reject(changed, WorldStructuralManifestError.HashMismatch);
+    changed = (byte[])pristine.Clone();
+    changed[WorldStructuralManifestFormat.HeaderBytes + 8] ^= 1;
+    Reject(changed, WorldStructuralManifestError.HashMismatch);
+    changed = (byte[])pristine.Clone();
+    pristine.AsSpan(WorldStructuralManifestFormat.HeaderBytes, 8).CopyTo(
+        changed.AsSpan(WorldStructuralManifestFormat.HeaderBytes + WorldStructuralManifestFormat.EntryBytes));
+    ResignStructuralManifestBytes(changed);
+    Reject(changed, WorldStructuralManifestError.NonCanonicalEntries);
+    changed = (byte[])pristine.Clone();
+    changed.AsSpan(WorldStructuralManifestFormat.HeaderBytes,
+        WorldStructuralManifestFormat.EntryBytes).CopyTo(
+        changed.AsSpan(WorldStructuralManifestFormat.HeaderBytes + WorldStructuralManifestFormat.EntryBytes));
+    ResignStructuralManifestBytes(changed);
+    Reject(changed, WorldStructuralManifestError.NonCanonicalEntries);
+    changed = (byte[])pristine.Clone();
+    changed.AsSpan(WorldStructuralManifestFormat.HeaderBytes + 8, 32).Clear();
+    ResignStructuralManifestBytes(changed);
+    Reject(changed, WorldStructuralManifestError.InvalidPackFingerprint);
+    changed = (byte[])pristine.Clone();
+    BinaryPrimitives.WriteUInt32LittleEndian(changed.AsSpan(28), 65_537);
+    Reject(changed, WorldStructuralManifestError.CapacityExceeded);
+    Reject(new byte[WorldStructuralManifestFormat.MaximumManifestBytes + 1],
+        WorldStructuralManifestError.CapacityExceeded);
+}
+
+static void StructuralManifestSparseAndCapacityBoundsAreExact()
+{
+    WorldPackFingerprint common = StructuralTestFingerprint(25);
+    var watch = Stopwatch.StartNew();
+    WorldStructuralManifest tenThousand = StructuralManifest(
+        Enumerable.Range(0, 10_000).Select(index =>
+            new WorldStructuralManifestEntry(new WorldPackCoord(index * 197 - 985_000, index * 11), common)).ToArray());
+    long buildMilliseconds = watch.ElapsedMilliseconds;
+    Equal(10_000, tenThousand.EntryCount);
+    Equal(400_064, tenThousand.Length);
+    True(tenThousand.TryGetPack(new WorldPackCoord(-985_000, 0), out _));
+    True(tenThousand.TryGetPack(new WorldPackCoord(984_803, 109_989), out _));
+    False(tenThousand.TryGetPack(new WorldPackCoord(984_804, 109_989), out _));
+    watch.Restart();
+    True(WorldStructuralManifest.TryOpen(StructuralManifestBytes(tenThousand),
+        out WorldStructuralManifest? reopened, out _));
+    long openMilliseconds = watch.ElapsedMilliseconds;
+    Equal(tenThousand.Fingerprint, reopened!.Fingerprint);
+    long checksum = 0;
+    long allocationBefore = GC.GetAllocatedBytesForCurrentThread();
+    for (int index = 0; index < 100_000; index++)
+    {
+        int coordinate = index % 10_000;
+        if (!reopened.TryGetPack(new WorldPackCoord(coordinate * 197 - 985_000, coordinate * 11), out _))
+            throw new Exception("A canonical sparse entry was lost.");
+        checksum += coordinate;
+    }
+    Equal(0L, GC.GetAllocatedBytesForCurrentThread() - allocationBefore);
+    True(checksum != 0);
+
+    var maximumEntries = new WorldStructuralManifestEntry[WorldStructuralManifestFormat.MaximumPacks];
+    for (int index = 0; index < maximumEntries.Length; index++)
+        maximumEntries[index] = new WorldStructuralManifestEntry(new WorldPackCoord(index, -index), common);
+    True(WorldStructuralManifest.TryCreate(maximumEntries, out WorldStructuralManifest? maximum,
+        out WorldStructuralManifestError maximumError));
+    Equal(WorldStructuralManifestError.None, maximumError);
+    Equal(2_621_504, maximum!.Length);
+    True(WorldStructuralManifest.TryOpen(StructuralManifestBytes(maximum),
+        out WorldStructuralManifest? maximumReopened, out _));
+    Equal(maximum.Fingerprint, maximumReopened!.Fingerprint);
+    var oneOver = new WorldStructuralManifestEntry[maximumEntries.Length + 1];
+    maximumEntries.CopyTo(oneOver, 0);
+    oneOver[^1] = new WorldStructuralManifestEntry(new WorldPackCoord(maximumEntries.Length, 0), common);
+    False(WorldStructuralManifest.TryCreate(oneOver, out _, out WorldStructuralManifestError oneOverError));
+    Equal(WorldStructuralManifestError.CapacityExceeded, oneOverError);
+    Console.WriteLine($"W3 SPARSE 10000 bytes={tenThousand.Length} entry_payload_bytes={tenThousand.EntryCount * 40} " +
+        $"build_ms={buildMilliseconds} open_ms={openMilliseconds} lookup_allocated_bytes=0");
+    Console.WriteLine($"W3 MAXIMUM entries={maximum.EntryCount} bytes={maximum.Length} one_over={oneOverError}");
 }
 
 static void FullDeclaredWorldPackAcceptance()

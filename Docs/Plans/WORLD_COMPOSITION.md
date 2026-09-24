@@ -1,8 +1,8 @@
 # UltraSim World / WorldPack Structural Composition
 
-**Status:** canonical World/Terrain direction; W1-W2 closed, W3 next. W3-W10 composition/runtime work remains planned.
+**Status:** canonical World/Terrain direction; W1-W3 closed, W4 next. W4-W10 composition/runtime work remains planned.
 **Accepted:** 2026-09-23.
-**Current implementation:** one prepared WorldPack remains the active runtime shape until W4/W5 generalize it. W1 adds address math; W2 adds declared-shard validation and capacity admission without changing v1 bytes.
+**Current implementation:** one prepared WorldPack remains the active runtime shape until W4/W5 generalize it. W1 adds address math, W2 adds declared-shard validation and capacity admission, and W3 adds an immutable sparse structural manifest without changing v1 Pack bytes or runtime behavior.
 **Related:** [TERRAIN.md](TERRAIN.md), [ASSET_STREAMING.md](ASSET_STREAMING.md), [../README.md](../README.md), [../../Game/World/README.md](../../Game/World/README.md).
 
 ## 1. Core model
@@ -233,6 +233,33 @@ WorldStructuralManifest
 The manifest knows all authored Packs in the immutable authored composition. It does not require all Pack bytes to be prepared/resident.
 
 WorldPack entries are content identities, not runtime memory slots.
+
+W3 implements this as `Game/World/WorldStructuralManifest.cs`. The v1 canonical
+artifact is a 64-byte fixed header followed by sorted 40-byte entries. Its
+header contains `USWMAN01`, version 1, profile 1, the current 16,000 mm chunk
+edge, 256-chunk centered Pack edge, 128-chunk centering bias, entry count, and
+the 32-byte SHA-256 fingerprint. The fingerprint covers every header field
+except its own slot plus the complete entry table. Each entry is an 8-byte
+signed `WorldPackCoord` and a 32-byte `WorldPackFingerprint`. The current
+profile is fixed, not an arbitrary per-World grid language.
+
+The manifest retains one private canonical byte array as its flat sorted
+lookup table. `TryCreate` boundedly copies and sorts source entries, rejects
+duplicate coordinates and invalid Pack fingerprints, then encodes canonical
+bytes. `TryOpen` rejects malformed format/profile/order/hash/length before
+copying and publishing untrusted bytes. `TryGetPack` performs allocation-free
+binary search. Zero entries are valid. Repeated Pack fingerprints at distinct
+coordinates are permitted at the index layer; W4 must prove each actual
+opened artifact matches its entry and W2 spatial declaration.
+
+`WorldStructuralManifestLimits.Default` admits at most 65,536 entries and
+2,621,504 canonical bytes (64 + 65,536 × 40). Limits are caller admission
+policy and are not serialized. `WorldStructuralManifestFingerprint` is a
+32-byte SHA-256 content identity. `WorldCompositionRevision` is a separate
+8-byte monotonic runtime/save publication value; W3 does not persist or
+publish it. The manifest contains no `WorldId`, `SpatialSpaceId`, revision,
+residency state, overlay, or Pack payload. A manifest entry is an authored
+expectation, not a prepared or resident Pack.
 
 ## 9. PreparedWorldComposition and atomic publication
 
@@ -519,11 +546,15 @@ Add/test WorldPackCoord, centered global-chunk mapping, exact negative-coordinat
 
 Freeze 256×256 chunks / 4096×4096 m, validate every WorldPack chunk belongs to its declared Pack window, and raise the Pack byte safety ceiling to 512 MiB with full-Pack evidence.
 
-### W3 — immutable WorldStructuralManifest (NEXT)
+### W3 — immutable WorldStructuralManifest (CLOSED)
 
-Add the canonical sparse Pack index, manifest fingerprint, explicit format/spatial profile, and runtime WorldCompositionRevision as a separate identity.
+The canonical sparse Pack index, content-derived manifest fingerprint, fixed
+format/spatial profile, and separate runtime `WorldCompositionRevision` value
+are implemented. Empty, one-Pack, 10,000-Pack sparse, and 65,536-entry
+manifests have permanent tests. This does not connect the manifest to the
+one-Pack runtime or claim any Pack residency.
 
-### W4 — PreparedWorldComposition
+### W4 — PreparedWorldComposition (NEXT)
 
 Generalize one-Pack prepared World queries to a World-level prepared composition. Preserve exact one-Pack compatibility first.
 
