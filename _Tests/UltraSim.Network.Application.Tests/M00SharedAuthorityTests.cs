@@ -12,6 +12,7 @@ using UltraSim.Game.Replication;
 using UltraSim.Game.UI;
 using UltraSim.Game.World;
 using UltraSim.Network;
+using UltraSim.Spatial;
 using UltraSim.UI;
 
 internal static class M00SharedAuthorityTests
@@ -439,7 +440,9 @@ internal static class M00SharedAuthorityTests
             new GameGuestAdmissionRequest(GameGuestBody.HumanFemale, "Host Alice"),
             serverExtensionFactory: factory);
         local.WaitUntilReady(TimeSpan.FromSeconds(10));
-        ClientWorldSemanticCache localWorld = CreateWorldCache(local.BoundWorld);
+        True(local.TryGetLatestView(out LocalPlayableAuthorityView structuralView) &&
+            structuralView.PreparedComposition is not null && structuralView.PreparedWorld is null);
+        ClientWorldSemanticCache localWorld = CreateWorldCache(structuralView.PreparedComposition!);
         var localChat = new ClientChatState(local.ApplicationSessionEpoch);
         using var localUi = new UiClientRuntime(new NullRenderer(), new UiClientLimits(8, 8));
         using LocalQueuedUiClient localUiBridge = local.AttachUiClient(localUi);
@@ -1290,6 +1293,20 @@ internal static class M00SharedAuthorityTests
         return cache;
     }
 
+    private static ClientWorldSemanticCache CreateWorldCache(PreparedWorldComposition composition)
+    {
+        var cache = new ClientWorldSemanticCache(composition,
+            new ClientWorldSemanticCacheLimits(192, 256, 32, 64, 4_096));
+        for (int index = 0; index < composition.PreparedChunkCount; index++)
+        {
+            True(composition.TryGetPreparedChunkKey(index, out SpatialChunkKey key));
+            True(cache.TryRequest(key, out ClientSemanticChunkHandle handle, out _));
+            True(cache.TryStageFromBaseWorld(handle, [], default, out _));
+            True(cache.TryPublish(handle, out _));
+        }
+        return cache;
+    }
+
     private static void True(bool condition)
     {
         if (!condition) throw new InvalidOperationException("Expected true.");
@@ -1485,7 +1502,7 @@ internal static class M00SharedAuthorityTests
                     context.LocalPublicEntity,
                     0);
                 _authority = SharedPlayableAuthority.AttachExisting(
-                    context.WorldPack,
+                    context.RemoteDeliveryCompatibilityPack,
                     context.Composition,
                     context.Runtime,
                     context.Admission,
