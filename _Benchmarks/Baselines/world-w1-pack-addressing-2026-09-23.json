@@ -1,0 +1,64 @@
+{
+  "checkpoint": "W1",
+  "status": "closed",
+  "evidence_kind": "correctness_contract",
+  "date": "2026-09-23",
+  "starting_head": "9ce042096788f3fff878c00af784767a98a67121",
+  "tested_implementation_head": "ba1c631547b88b8293ad6c9dd7a126edf40e918b",
+  "evidence_commit": "evidence-only successor; see git history and checkpoint handoff",
+  "environment": {
+    "os": "Linux 7.2.6-1-cachyos x86_64",
+    "dotnet_sdk": "8.0.131",
+    "configuration": "Release"
+  },
+  "types": {
+    "pack_coord": { "name": "WorldPackCoord", "owner": "Game/World", "bytes": 8, "axes": "signed int32 X/Z" },
+    "local_chunk_coord": { "name": "WorldPackLocalChunkCoord", "owner": "Game/World", "bytes": 2, "axes": "bounded byte X/Z, 0..255" }
+  },
+  "geometry": {
+    "chunks_per_pack_edge": 256,
+    "centering_bias_chunks": 128,
+    "world_chunk_edge_meters": 16,
+    "world_pack_edge_meters": 4096,
+    "pack_zero_global_chunk_min": -128,
+    "pack_zero_global_chunk_max": 127,
+    "forward": "SpatialMath.FloorDivRem((long)globalChunk + 128, 256)",
+    "inverse": "(long)pack * 256 + local - 128; reject outside int32"
+  },
+  "axis_examples": [
+    { "chunk": -384, "pack": -1, "local": 0 },
+    { "chunk": -129, "pack": -1, "local": 255 },
+    { "chunk": -128, "pack": 0, "local": 0 },
+    { "chunk": -1, "pack": 0, "local": 127 },
+    { "chunk": 0, "pack": 0, "local": 128 },
+    { "chunk": 127, "pack": 0, "local": 255 },
+    { "chunk": 128, "pack": 1, "local": 0 },
+    { "chunk": 383, "pack": 1, "local": 255 },
+    { "chunk": 384, "pack": 2, "local": 0 },
+    { "chunk": -2147483648, "pack": -8388608, "local": 128 },
+    { "chunk": -2147483647, "pack": -8388608, "local": 129 },
+    { "chunk": 2147483646, "pack": 8388608, "local": 126 },
+    { "chunk": 2147483647, "pack": 8388608, "local": 127 }
+  ],
+  "tests": {
+    "independent_x_z_cases": true,
+    "mixed_sign_pairs": true,
+    "space_identity_unchanged": true,
+    "pack_seam_transition_range_inclusive": [-2048, 2048],
+    "seam_offsets": [-1, 0, 1],
+    "int32_extremes_round_trip": true,
+    "inverse_overflow_rejected": true,
+    "warmed_mapping_iterations": 100000,
+    "warmed_mapping_managed_allocated_bytes": 0
+  },
+  "verification": [
+    { "command": "dotnet run --project _Tests/UltraSim.Game.World.Tests/UltraSim.Game.World.Tests.csproj -c Release", "result": "pass", "test_count": 94 },
+    { "command": "./verify.sh --architecture-only", "result": "pass", "check_count": 4 },
+    { "command": "./verify.sh --configuration=Release", "result": "pass", "uninterrupted": true }
+  ],
+  "worldpack_v1_bytes_and_fingerprints_unchanged": true,
+  "worldpack_maximum_pack_bytes_unchanged": 268435456,
+  "runtime_remains_one_pack": true,
+  "pack_bound_validation_added": false,
+  "w2_or_later_started": false
+}
