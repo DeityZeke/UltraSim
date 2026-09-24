@@ -90,10 +90,11 @@ is a bounded cache/streaming concern below World identity. Changing or acquiring
 not require redownloading unrelated Packs, and possession of Pack bytes still does not replace
 realm/content authorization.
 
-Current A0.7 complete-WorldPack streaming remains the accepted one-Pack implementation baseline.
-W5 now proves two-Pack authority, persistence, and local presentation without
-altering this remote acquisition path. W5R still owns the Concept Demo's actual
-Pack migration. W7 is the planned transition to manifest-authenticated,
+Current A0.7 complete-WorldPack streaming remains the accepted one-Pack remote
+implementation baseline. W5R migrated actual Concept Demo authority and Local
+presentation to a complete two-Pack composition, while pre-W7 remote acquisition
+still transfers the byte-identical historical combined Pack as a delivery-only
+compatibility artifact. W7 is the planned transition to manifest-authenticated,
 demand-based multi-Pack acquisition after the World layer implements W6's
 explicit structural-state vocabulary.
 

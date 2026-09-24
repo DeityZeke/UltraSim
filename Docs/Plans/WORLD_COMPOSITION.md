@@ -1,8 +1,8 @@
 # UltraSim World / WorldPack Structural Composition
 
-**Status:** canonical World/Terrain direction; W1-W5 closed, W5R next. W6-W10 composition/runtime work remains planned.
+**Status:** canonical World/Terrain direction; W1-W5R closed, W6 next. W7-W10 remain planned.
 **Accepted:** 2026-09-23.
-**Current implementation:** W5 proves connected two-Pack Game authority, exact complete-world seam/identity validation, `worldview/v2` save/restore, local semantic residency, and native Godot presentation in a dedicated fixture. The current Concept Demo still uses its temporary unaddressed one-Pack compatibility path until W5R migrates that real consumer. W1-W4 supply the address, shard, manifest, and prepared-composition foundations. Neither WorldPack/v1 nor WorldStructuralManifest/v1 bytes changed.
+**Current implementation:** W5 proves connected two-Pack authority in a dedicated fixture. W5R moves the actual Concept Demo Game authority and Local client to declared Packs `(0,0)` and `(1,0)` under one completely validated manifest. The frozen combined Pack remains solely for pre-W7 remote structural delivery and as a historical save identity. New Concept Demo saves use `worldview/v2`; historical Cabin keeps `worldview/v1`. Neither WorldPack/v1 nor WorldStructuralManifest/v1 bytes changed.
 **Related:** [TERRAIN.md](TERRAIN.md), [ASSET_STREAMING.md](ASSET_STREAMING.md), [../README.md](../README.md), [../../Game/World/README.md](../../Game/World/README.md).
 
 ## 1. Core model
@@ -406,10 +406,9 @@ v1 artifact can be checked against an external declaration through
 `WorldPack.TryValidateSpatialWindow`, which walks its canonical chunk directory
 and reports the first offending key. The declaration is not encoded in v1 or
 its fingerprint. The legacy unaddressed builder remains available during the
-one-Pack transition. The current Concept Demo Pack is such a legacy artifact:
-its central cluster lies in future Pack (0,0), while Far Island X=124..132
-crosses from Pack (0,0) into (1,0). It cannot validate as either single
-declared shard and is intentionally unchanged until W5R migration.
+one-Pack transition. The frozen combined Concept Demo Pack spans `(0,0)`/`(1,0)`
+and cannot validate as one declared shard; W5R preserves its exact bytes for
+pre-W7 remote delivery while independently compiling two authority Packs.
 
 ## 15. Pack and chunk composition operations
 
@@ -576,8 +575,8 @@ both. Its structural query surface, including the vertical-column reads used
 by Simple Physics, selects one root. `worldview/v1` explicitly refuses to
 capture a canonical composition rather than silently dropping Packs. W4 does
 not hot-swap compositions, acquire Packs, migrate persistence, or claim the
-full W6 structural-state vocabulary. The Concept Demo remains on the legacy
-path because its historical Pack spans future Pack (0,0) and (1,0).
+full W6 structural-state vocabulary. W5R subsequently migrated the product
+authority while retaining the historical Pack only for remote delivery.
 
 ### W5 — multi-Pack authority/local proof (CLOSED)
 
@@ -603,12 +602,28 @@ runtime limitation without changing the format.
 Multis are valid and globally collision-checked on both sides; one logical Multi
 continuing across Packs is not represented by this v1 profile. Repeated
 WorldSurfaceId is not globally rejected; additional-surface cross-Pack
-continuation is not claimed. The production Concept Demo is **not** multi-Pack
-yet. The immutable W5 acceptance evidence is recorded under `_Benchmarks/Baselines`.
+continuation is not claimed. The immutable W5 fixture evidence remains under `_Benchmarks/Baselines`.
 
-### W5R — Concept Demo migration
+### W5R — Concept Demo migration (CLOSED)
 
-Use the actual Concept Demo as an early sparse/multi-Pack consumer where useful rather than preserving the old one-Pack assumption artificially.
+One Game-owned authored source holds two unbound immutable declared Packs and a canonical manifest.
+Pack `(0,0)` owns 117 authored chunks (Central plus Far-Island west); Pack `(1,0)` owns
+45 (Far-Island east). `UltraSimGameComposition` binds both to admitted Game content
+for each generation and validates the complete composition before publication.
+Ordinary Single Player does not build the historical combined Pack. Local semantic
+residency and Godot presentation query the canonical composition without Pack-specific
+rendering branches. Standalone and Complete authority use the same root; their
+pre-W7 remote clients still receive the byte-identical combined compatibility Pack.
+The resulting 162-chunk terrain, static, Multi, and additional-surface semantics are
+exactly compared against that historical artifact. Direct control crosses Far-Island
+chunks 127/128 in both directions; local Far-Island save/load retains exact
+position and manifest/revision identity.
+
+No production path publishes nonempty mutable structural overlays today, but the
+legacy format permits them. A pre-W5R Concept Demo `worldview/v1` save therefore
+fails closed with an explicit compatibility error under canonical authority; it is
+not silently rebased or stripped. Cabin v1 restore remains supported. W7 owns
+remote manifest/Pack acquisition; W6 owns explicit structural absence vocabulary.
 
 ### W6 — explicit absence/residency states
 

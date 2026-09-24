@@ -107,7 +107,7 @@ public sealed class GameWorldState : IDisposable
     public ChunkPublicationStore Publications { get; private set; }
     /// <summary>Temporary one-Pack compatibility root, including the current Concept Demo.</summary>
     public BoundWorldPack? BaseWorld { get; private set; }
-    /// <summary>Temporary one-Pack compatibility view; never live with PreparedComposition.</summary>
+    /// <summary>Legacy one-Pack view (including Cabin); never live with PreparedComposition.</summary>
     public WorldPreparedView? PreparedWorld { get; private set; }
     /// <summary>Canonical immutable World structural root. Not yet supported by worldview/v1 saves.</summary>
     public PreparedWorldComposition? PreparedComposition { get; private set; }

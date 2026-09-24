@@ -1534,13 +1534,25 @@ public static class GamePlayableWorld
     public static WorldPack CreateWorldPack() => CreateWorldPackCore(conceptDemo: false);
 
     /// <summary>
-    /// Builds the first local Concept Demo world while preserving the historical Cabin fixture.
+    /// Builds the frozen pre-W5R combined Concept Demo compatibility artifact. It is used by
+    /// pre-W7 remote structural delivery and tests, not as current Game structural authority.
     /// Its BaseTerrain contains separate finite Central/Far islands; sparse immutable shells form
     /// the central mountain, cave ledge, and detached Sky Island.
     /// </summary>
     public static WorldPack CreateConceptDemoWorldPack() => CreateWorldPackCore(conceptDemo: true);
 
-    private static WorldPack CreateWorldPackCore(bool conceptDemo)
+    /// <summary>Canonical authored Concept Demo shards. The historical combined Pack above remains
+    /// only a pre-W7 remote-delivery/old-save identity.</summary>
+    public static ConceptDemoStructuralSource CreateConceptDemoStructuralSource()
+    {
+        var westCoord = new WorldPackCoord(0, 0);
+        var eastCoord = new WorldPackCoord(1, 0);
+        WorldPack west = CreateWorldPackCore(conceptDemo: true, westCoord);
+        WorldPack east = CreateWorldPackCore(conceptDemo: true, eastCoord);
+        return new ConceptDemoStructuralSource(west, east);
+    }
+
+    private static WorldPack CreateWorldPackCore(bool conceptDemo, WorldPackCoord? declaredCoord = null)
     {
         int chunkCount = conceptDemo ? ConceptChunkCount : ChunkCount;
         var limits = new WorldPackLimits(
@@ -1550,10 +1562,9 @@ public static class GamePlayableWorld
             maximumFrozenStatics: conceptDemo ? 256 : 128,
             maximumMultiInstances: 8,
             maximumMultiFragments: 32);
-        var builder = new WorldPackBuilder(
-            GameWorldState.DefaultSpace,
-            GameContent.WorldFingerprint,
-            limits);
+        var builder = declaredCoord is WorldPackCoord coord
+            ? new WorldPackBuilder(GameWorldState.DefaultSpace, GameContent.WorldFingerprint, limits, coord)
+            : new WorldPackBuilder(GameWorldState.DefaultSpace, GameContent.WorldFingerprint, limits);
         var materials = new ushort[TerrainChunkFormat.MaterialCellCount];
         var heights = new int[TerrainChunkFormat.HeightVertexCount];
         var offsets = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
@@ -1567,12 +1578,15 @@ public static class GamePlayableWorld
         }
         else
             AddCluster(MinimumChunk, MaximumChunk, MinimumChunk, MaximumChunk);
-        AddCabin(builder);
-        if (conceptDemo)
+        if (declaredCoord is null || declaredCoord.Value == new WorldPackCoord(0, 0))
         {
-            AddConceptTerrainShells(builder);
-            AddConceptMountainWalls(builder);
-            AddFallbackLab(builder);
+            AddCabin(builder);
+            if (conceptDemo)
+            {
+                AddConceptTerrainShells(builder);
+                AddConceptMountainWalls(builder);
+                AddFallbackLab(builder);
+            }
         }
         if (!builder.TryBuild(out WorldPackArtifact? artifact, out WorldPackBuildError buildError))
             throw new InvalidOperationException($"Authored playable WorldPack failed: {buildError}.");
@@ -1583,12 +1597,16 @@ public static class GamePlayableWorld
             for (int chunkZ = minimumZ; chunkZ <= maximumZ; chunkZ++)
             for (int chunkX = minimumX; chunkX <= maximumX; chunkX++)
             {
+                int ordinal = authoredOrdinal++;
+                var key = new SpatialChunkKey(GameWorldState.DefaultSpace, chunkX, chunkZ);
+                WorldPackAddressing.ToPackLocal(key.Coord, out WorldPackCoord actualCoord, out _);
+                if (declaredCoord is not null && actualCoord != declaredCoord.Value)
+                    continue;
                 FillMaterials(chunkX, chunkZ, materials);
                 FillHeights(chunkX, chunkZ, heights);
                 if (!TerrainHeightEncoding.TryEncodePlane(
                         heights, offsets, out TerrainHeightPlaneBase heightBase, out _, out _))
                     throw new InvalidOperationException("Authored woods terrain did not fit q5 encoding.");
-                var key = new SpatialChunkKey(GameWorldState.DefaultSpace, chunkX, chunkZ);
                 bool added;
                 WorldPackBuildError error;
                 if (conceptDemo)
@@ -1604,7 +1622,7 @@ public static class GamePlayableWorld
                 }
                 if (!added)
                     throw new InvalidOperationException($"Authored terrain chunk {key} failed: {error}.");
-                AddWoodsStatics(builder, chunkX, chunkZ, conceptDemo, authoredOrdinal++);
+                AddWoodsStatics(builder, chunkX, chunkZ, conceptDemo, ordinal);
             }
         }
     }

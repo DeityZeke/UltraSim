@@ -78,21 +78,21 @@ W4 is closed: `PreparedWorldComposition` provides the immutable sparse prepared
 subset above per-Pack `WorldPreparedView`, and global structural terrain/static
 queries resolve the owning Pack internally. `GameWorldState` accepts this as a
 mutually exclusive canonical root; Simple Physics consumes its Pack-agnostic
-column/bounds queries. The current Concept Demo remains on the legacy one-Pack
-path until W5R splits its cross-window artifact. W5 is closed in an independent
+column/bounds queries. W5 is closed in an independent
 two-Pack fixture: complete validation checks exact base seams and global
 static/Multi identities; real movement/Physics, local semantic residency, native
 Godot traversal, and `worldview/v2` save/restore cross chunks 127/128. Legacy
-`worldview/v1` remains intact. The production Concept Demo is not yet
-multi-Pack; W5R is next. WorldPack/v1 is unchanged.
+`worldview/v1` remains intact for Cabin. W5R migrates the production Concept Demo
+to canonical declared Packs `(0,0)`/`(1,0)` and `worldview/v2`; W6 is next.
+WorldPack/v1 is unchanged.
 
 The Pack byte-cap correction is 512 MiB in W2: the existing 65,536-chunk bound exactly matches
 the fixed 256×256 envelope, while a fully populated dense terrain foundation alone is already
 about 264.4 MiB before directories/statics/Multis/sparse surfaces.
 
-The historical Concept Demo artifact remains unaddressed in the one-Pack runtime:
-Far Island X=124..132 straddles future Pack (0,0)/(1,0). W5R owns its split;
-W2 neither moves it nor grants declared multi-window Packs an exception.
+The historical combined Concept Demo artifact remains unaddressed only as a frozen
+pre-W7 remote-delivery compatibility payload. Far Island X=124..132 is authored
+in two independently declared Packs without moving global coordinates.
 
 Pack boundaries must never become gameplay, region, Physics, renderer, AOI, session, or durable
 semantic-identity boundaries. Cross-Pack edits publish one complete PreparedWorldComposition or

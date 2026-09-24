@@ -188,8 +188,9 @@ total geography. The canonical snapshot exposes manifest fingerprint, compositio
 revision, and Space; it does not substitute an arbitrary Pack fingerprint for
 World identity. A native W5 window retains seam chunks from Packs `(0,0)` and
 `(1,0)` together and crosses between them without a cache, renderer, or session
-restart. Existing one-Pack client callers remain on the compatibility path
-until W5R migrates the Concept Demo.
+restart. W5R now has the product Local Concept Demo publish a canonical
+two-Pack root into this same cache; the old combined Pack remains only for
+pre-W7 remote structural delivery.
 
 F0.4 adds the bounded renderer-neutral actor-presentation projection above those already-resident
 chunks. `ClientActorDefinitionCatalog` maps finite public prefab vocabulary to presentation kind,

@@ -73,9 +73,11 @@ public readonly record struct LocalPlayableAuthorityView(
     LocalPlayableServerExtensionSnapshot ServerExtension,
     uint MainHandPrefabId,
     GameVerticalMotionSnapshot VerticalMotion,
-    WorldPreparedView PreparedWorld)
+    WorldPreparedView? PreparedWorld,
+    PreparedWorldComposition? PreparedComposition = null)
 {
-    public bool IsReady => GenerationId != 0 && PreparedWorld is not null;
+    public bool IsReady => GenerationId != 0 &&
+        (PreparedWorld is not null) != (PreparedComposition is not null);
 }
 
 /// <summary>Thread-safe packet-free Chat destination exposed to an optional internal-server extension.</summary>
@@ -90,7 +92,8 @@ public sealed class LocalPlayableServerContext
 {
     internal LocalPlayableServerContext(
         string identityRoot,
-        WorldPack worldPack,
+        WorldPack remoteDeliveryCompatibilityPack,
+        PreparedWorldComposition authoritativeComposition,
         UltraSimGameComposition composition,
         ServerRuntime runtime,
         AdmissionService admission,
@@ -106,7 +109,8 @@ public sealed class LocalPlayableServerContext
         ILocalPlayableChatSink localChat)
     {
         IdentityRoot = identityRoot;
-        WorldPack = worldPack;
+        RemoteDeliveryCompatibilityPack = remoteDeliveryCompatibilityPack;
+        AuthoritativeComposition = authoritativeComposition;
         Composition = composition;
         Runtime = runtime;
         Admission = admission;
@@ -125,7 +129,10 @@ public sealed class LocalPlayableServerContext
     }
 
     public string IdentityRoot { get; }
-    public WorldPack WorldPack { get; }
+    /// <summary>Historical one-Pack wire payload only; not the authority's canonical structural root.</summary>
+    public WorldPack RemoteDeliveryCompatibilityPack { get; }
+    /// <summary>Complete Game-owned structural truth; independent of the pre-W7 wire Pack.</summary>
+    public PreparedWorldComposition AuthoritativeComposition { get; }
     public UltraSimGameComposition Composition { get; }
     public ServerRuntime Runtime { get; }
     public AdmissionService Admission { get; }

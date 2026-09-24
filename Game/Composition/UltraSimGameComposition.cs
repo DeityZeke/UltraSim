@@ -56,8 +56,12 @@ public sealed class UltraSimGameComposition : IServerComposition, IGuestAdmissio
     private readonly GameRuntimeProfile _runtimeProfile;
     private readonly WorldPack? _baseWorldPack;
     private readonly PreparedWorldComposition? _preparedComposition;
+    private readonly ConceptDemoStructuralSource? _conceptDemoStructuralSource;
     private readonly InventoryRuleSelection _inventoryRuleSelection;
     private readonly GameVerticalMotionOptions _verticalMotionOptions;
+
+    /// <summary>True when this composition creates a canonical two-Pack Concept Demo root.</summary>
+    public bool HasCanonicalConceptDemoSource => _conceptDemoStructuralSource is not null;
 
     public UltraSimGameComposition(
         InventoryLimits? inventoryLimits = null,
@@ -66,7 +70,8 @@ public sealed class UltraSimGameComposition : IServerComposition, IGuestAdmissio
         WorldPack? baseWorldPack = null,
         InventoryRuleSelection? inventoryRuleSelection = null,
         GameVerticalMotionOptions? verticalMotionOptions = null,
-        PreparedWorldComposition? preparedComposition = null)
+        PreparedWorldComposition? preparedComposition = null,
+        ConceptDemoStructuralSource? conceptDemoStructuralSource = null)
     {
         _inventoryLimits = inventoryLimits ?? InventoryLimits.Default;
         _inventoryLimits.Validate();
@@ -77,9 +82,11 @@ public sealed class UltraSimGameComposition : IServerComposition, IGuestAdmissio
         _maximumChunksPerContentArchetype = maximumChunksPerContentArchetype;
         _runtimeProfile = runtimeProfile;
         _baseWorldPack = baseWorldPack;
-        if (baseWorldPack is not null && preparedComposition is not null)
+        if ((baseWorldPack is not null ? 1 : 0) + (preparedComposition is not null ? 1 : 0) +
+            (conceptDemoStructuralSource is not null ? 1 : 0) > 1)
             throw new ArgumentException("Legacy and canonical structural roots are mutually exclusive.", nameof(preparedComposition));
         _preparedComposition = preparedComposition;
+        _conceptDemoStructuralSource = conceptDemoStructuralSource;
         _inventoryRuleSelection = inventoryRuleSelection ?? InventoryRuleSelection.PerContainer;
         if (!_inventoryRuleSelection.IsValid)
             throw new ArgumentException("The inventory rule selection is invalid.", nameof(inventoryRuleSelection));
@@ -222,6 +229,14 @@ public sealed class UltraSimGameComposition : IServerComposition, IGuestAdmissio
         if (_baseWorldPack is not null)
             return _baseWorldPack.Fingerprint == fingerprint &&
                 _baseWorldPack.TryBind(content, out bound, out _);
+        if (_conceptDemoStructuralSource is not null)
+        {
+            WorldPack? source = fingerprint == _conceptDemoStructuralSource.West.Fingerprint
+                ? _conceptDemoStructuralSource.West
+                : fingerprint == _conceptDemoStructuralSource.East.Fingerprint
+                    ? _conceptDemoStructuralSource.East : null;
+            return source is not null && source.TryBind(content, out bound, out _);
+        }
         if (_preparedComposition is not null)
             for (int index = 0; index < _preparedComposition.PreparedPackCount; index++)
             {
@@ -237,8 +252,10 @@ public sealed class UltraSimGameComposition : IServerComposition, IGuestAdmissio
     }
 
     public WorldStructuralManifest? ResolveStructuralManifest(WorldStructuralManifestFingerprint fingerprint) =>
-        _preparedComposition is not null && _preparedComposition.ManifestFingerprint == fingerprint
-            ? _preparedComposition.Manifest : null;
+        _conceptDemoStructuralSource is not null && _conceptDemoStructuralSource.Manifest.Fingerprint == fingerprint
+            ? _conceptDemoStructuralSource.Manifest
+            : _preparedComposition is not null && _preparedComposition.ManifestFingerprint == fingerprint
+                ? _preparedComposition.Manifest : null;
 
     public static EcsWorldOptions CreateWorldOptions(
         int entityCapacity = 4_096,
@@ -286,13 +303,15 @@ public sealed class UltraSimGameComposition : IServerComposition, IGuestAdmissio
         if (_baseWorldPack is not null &&
             !_baseWorldPack.TryBind(content.World, out bound, out WorldPackBindingError error))
             throw new InvalidOperationException($"WorldPack could not bind to compiled game content: {error}.");
-        if (_preparedComposition is not null && _preparedComposition.PreparedPackCount != 0)
+        PreparedWorldComposition? preparedComposition = _conceptDemoStructuralSource?.Prepare(content.World)
+            ?? _preparedComposition;
+        if (preparedComposition is not null && preparedComposition.PreparedPackCount != 0)
         {
-            _preparedComposition.TryGetPreparedPackAt(0, out PreparedWorldPack first);
+            preparedComposition.TryGetPreparedPackAt(0, out PreparedWorldPack first);
             if (first.View.BaseWorld.Content.Fingerprint != content.World.Fingerprint)
                 throw new InvalidOperationException("The prepared composition does not bind to compiled Game content.");
         }
-        return new GameWorldState(world, bound, preparedComposition: _preparedComposition);
+        return new GameWorldState(world, bound, preparedComposition: preparedComposition);
     }
 
     private GameWorldActions CreateWorldActions(

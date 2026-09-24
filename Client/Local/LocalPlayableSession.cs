@@ -32,8 +32,10 @@ public sealed class LocalPlayableSession : IDisposable
     private const int MaximumTopologyChanges = MaximumSubscriptions * 2;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private readonly object _viewGate = new();
-    private readonly WorldPack _worldPack;
-    private readonly BoundWorldPack _boundWorld;
+    private readonly WorldPack? _worldPack;
+    private readonly BoundWorldPack? _boundWorld;
+    private readonly ConceptDemoStructuralSource? _conceptDemoStructuralSource;
+    private readonly WorldPack? _remoteDeliveryCompatibilityPack;
     private readonly bool _conceptDemo;
     private readonly GameGuestAdmissionRequest _guestAdmission;
     private readonly ILocalPlayableServerExtensionFactory? _serverExtensionFactory;
@@ -95,9 +97,11 @@ public sealed class LocalPlayableSession : IDisposable
         LocalPlayableSessionLimits limits = default,
         ILocalPlayableServerExtensionFactory? serverExtensionFactory = null)
     {
-        WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
-        return Create(
-            pack, saveRoot, guestAdmission, limits, conceptDemo: true, serverExtensionFactory);
+        ConceptDemoStructuralSource source = GamePlayableWorld.CreateConceptDemoStructuralSource();
+        WorldPack? compatibilityPack = serverExtensionFactory is null
+            ? null : GamePlayableWorld.CreateConceptDemoWorldPack();
+        return new LocalPlayableSession(null, null, source, compatibilityPack,
+            saveRoot, guestAdmission, limits, conceptDemo: true, serverExtensionFactory);
     }
 
     private static LocalPlayableSession Create(
@@ -128,7 +132,7 @@ public sealed class LocalPlayableSession : IDisposable
         if (!pack.TryBind(binding, out BoundWorldPack? bound, out WorldPackBindingError error))
             throw new InvalidOperationException($"The playable WorldPack did not bind: {error}.");
         return new LocalPlayableSession(
-            pack, bound!, saveRoot, guestAdmission, limits, conceptDemo, serverExtensionFactory);
+            pack, bound!, null, pack, saveRoot, guestAdmission, limits, conceptDemo, serverExtensionFactory);
     }
 
     public LocalPlayableSession(
@@ -139,14 +143,32 @@ public sealed class LocalPlayableSession : IDisposable
         LocalPlayableSessionLimits limits = default,
         bool conceptDemo = false,
         ILocalPlayableServerExtensionFactory? serverExtensionFactory = null)
+        : this(worldPack, boundWorld, null, worldPack, saveRoot, guestAdmission, limits,
+            conceptDemo, serverExtensionFactory) { }
+
+    private LocalPlayableSession(
+        WorldPack? worldPack,
+        BoundWorldPack? boundWorld,
+        ConceptDemoStructuralSource? conceptDemoStructuralSource,
+        WorldPack? remoteDeliveryCompatibilityPack,
+        string saveRoot,
+        GameGuestAdmissionRequest guestAdmission,
+        LocalPlayableSessionLimits limits,
+        bool conceptDemo,
+        ILocalPlayableServerExtensionFactory? serverExtensionFactory)
     {
-        _worldPack = worldPack ?? throw new ArgumentNullException(nameof(worldPack));
-        _boundWorld = boundWorld ?? throw new ArgumentNullException(nameof(boundWorld));
+        if ((conceptDemoStructuralSource is null) == (worldPack is null) ||
+            (worldPack is null) != (boundWorld is null))
+            throw new ArgumentException("Exactly one complete structural root is required.");
+        _worldPack = worldPack;
+        _boundWorld = boundWorld;
+        _conceptDemoStructuralSource = conceptDemoStructuralSource;
+        _remoteDeliveryCompatibilityPack = remoteDeliveryCompatibilityPack;
         _conceptDemo = conceptDemo;
         _guestAdmission = guestAdmission;
         _serverExtensionFactory = serverExtensionFactory;
         ArgumentException.ThrowIfNullOrWhiteSpace(saveRoot);
-        if (worldPack.Fingerprint != boundWorld.Fingerprint)
+        if (worldPack is not null && worldPack.Fingerprint != boundWorld!.Fingerprint)
             throw new ArgumentException("The bound world does not belong to the supplied WorldPack.", nameof(boundWorld));
         if (limits == default) limits = LocalPlayableSessionLimits.Default;
         limits.Validate();
@@ -168,7 +190,7 @@ public sealed class LocalPlayableSession : IDisposable
         _authorityThread.Start();
     }
 
-    public BoundWorldPack BoundWorld => _boundWorld;
+    public BoundWorldPack? BoundWorld => _boundWorld;
     public GameControlSessionEpoch ControlSession => _controlSession;
     public ulong ApplicationSessionEpoch => _applicationSessionEpoch;
 
@@ -412,7 +434,8 @@ public sealed class LocalPlayableSession : IDisposable
             var composition = new UltraSimGameComposition(
                 new InventoryLimits(32, 128, 32),
                 runtimeProfile: runtimeProfile,
-                baseWorldPack: _worldPack);
+                baseWorldPack: _worldPack,
+                conceptDemoStructuralSource: _conceptDemoStructuralSource);
             runtime = new ServerRuntime(
                 composition,
                 new ServerRuntimeOptions(
@@ -489,9 +512,18 @@ public sealed class LocalPlayableSession : IDisposable
                         }, out localPublic) || !localPublic.IsValid)
                     throw new InvalidOperationException(
                         "The hosted local participant could not bind its shared public identity.");
+                if (!runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider,
+                        PreparedWorldComposition?>(
+                        static (_, _, game) => game.WorldState.PreparedComposition,
+                        out PreparedWorldComposition? authoritativeComposition) ||
+                    authoritativeComposition is null)
+                    throw new InvalidOperationException(
+                        "Hosted Concept Demo requires the canonical authoritative composition.");
                 serverExtension = _serverExtensionFactory.Create(new LocalPlayableServerContext(
                     Path.Combine(_saveRoot, "hosting"),
-                    _worldPack,
+                    _remoteDeliveryCompatibilityPack ?? throw new InvalidOperationException(
+                        "Hosted delivery requires its historical compatibility Pack."),
+                    authoritativeComposition,
                     composition,
                     runtime,
                     admission,
@@ -1244,8 +1276,10 @@ public sealed class LocalPlayableSession : IDisposable
                         verticalMotion.Kind == GameVerticalMotionKind.None)
                         throw new InvalidOperationException(
                             "The local actor vertical presentation state was unavailable.");
-                    WorldPreparedView prepared = game.WorldState.PreparedWorld ??
-                        throw new InvalidOperationException("The local prepared world was unavailable.");
+                    WorldPreparedView? prepared = game.WorldState.PreparedWorld;
+                    PreparedWorldComposition? preparedComposition = game.WorldState.PreparedComposition;
+                    if ((prepared is null) == (preparedComposition is null))
+                        throw new InvalidOperationException("The local structural root was unavailable or ambiguous.");
                     return new LocalPlayableAuthorityView(
                         generationId,
                         world.TickCount,
@@ -1266,7 +1300,8 @@ public sealed class LocalPlayableSession : IDisposable
                         serverExtension,
                         mainHandPrefabId,
                         verticalMotion,
-                        prepared);
+                        prepared,
+                        preparedComposition);
                 }, out LocalPlayableAuthorityView view))
             throw new InvalidOperationException("The local owner/private view could not be captured.");
         int publicPresentationCount = extension?.CopyPublicPresentationMetadata(

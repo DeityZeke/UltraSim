@@ -16,6 +16,16 @@ and other presentation consumers can only:
 - return explicit applied/rejected proof so authority can retire or retry debt
   according to that domain's existing semantics.
 
+W5R gives the Concept Demo a distinct canonical structural source: immutable declared
+Packs `(0,0)` and `(1,0)` plus a complete manifest, bound and validated for each
+Game generation. The immutable Local authority view carries either the historical
+Cabin `PreparedWorld` or the Concept Demo `PreparedComposition`, never both. The
+client cache and native renderer consume that canonical composition without a
+Pack-aware presentation branch. Ordinary Single Player does not construct the
+historical combined Concept Demo Pack; Complete hosting constructs it only for
+pre-W7 remote structural delivery. A pre-W5R Concept Demo `worldview/v1` restore
+fails closed explicitly rather than dropping possible structural overlay state.
+
 The authority thread owns `ServerRuntime`, Admission, mutable ECS/Game state,
 Inventory and informational-sign UI policy, Chat routing, persistence, the local public recipient,
 and all Game mutation. It advances at authoritative cadence independently of Godot.

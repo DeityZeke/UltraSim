@@ -32,6 +32,7 @@ var tests = new (string Name, Action Body)[]
     ("OpenedPackValidationRejectsWrongAndCrossWindowDeclarations", OpenedPackValidationRejectsWrongAndCrossWindowDeclarations),
     ("DeclaredAndLegacyPackBuildsHaveIdenticalV1Bytes", DeclaredAndLegacyPackBuildsHaveIdenticalV1Bytes),
     ("ConceptDemoRemainsLegacyCrossWindowArtifact", ConceptDemoRemainsLegacyCrossWindowArtifact),
+    ("ConceptDemoCanonicalTwoPackMatchesLegacyTruth", ConceptDemoCanonicalTwoPackMatchesLegacyTruth),
     ("StructuralManifestEmptyAndRevisionIdentityAreSeparate", StructuralManifestEmptyAndRevisionIdentityAreSeparate),
     ("StructuralManifestOnePackAndSparseLookupAreCanonical", StructuralManifestOnePackAndSparseLookupAreCanonical),
     ("StructuralManifestInputOrderAndMutationsDetermineIdentity", StructuralManifestInputOrderAndMutationsDetermineIdentity),
@@ -542,6 +543,119 @@ static void ConceptDemoRemainsLegacyCrossWindowArtifact()
     False(demo.TryValidateSpatialWindow(new WorldPackCoord(1, 0), out _, out _));
     True(demo.TryGetBaseTerrain(new SpatialChunkKey(demo.Space, 127, 0), out _));
     True(demo.TryGetBaseTerrain(new SpatialChunkKey(demo.Space, 128, 0), out _));
+}
+
+static void ConceptDemoCanonicalTwoPackMatchesLegacyTruth()
+{
+    WorldPack legacy = GamePlayableWorld.CreateConceptDemoWorldPack();
+    Equal(731_384, legacy.Length);
+    var source = GamePlayableWorld.CreateConceptDemoStructuralSource();
+    PreparedWorldComposition canonical = source.Prepare(ConceptDemoStructuralSource.CreateBinding());
+    Equal(117, source.West.ChunkCount);
+    Equal(45, source.East.ChunkCount);
+    Equal("A76FAE182AA566BE91D312E26FCE29EA6E2854E84402D50579A6C5C2009553CB",
+        source.West.Fingerprint.ToString());
+    Equal("CE9F0CCDB591F3C3E592B8105E43C1AEB8323A5CB686533FC4735A8AA15D7B1D",
+        source.East.Fingerprint.ToString());
+    Equal("41DB6F68C26AC85DF5ABEB60BEDA3F3F07DD1E76CF30A5164874446D902B6B53",
+        source.Manifest.Fingerprint.ToString());
+    Equal("323141A827CD25ECC5BC144CE860FECF717F472E1C0ED57626BCC89EC29CF795",
+        legacy.Fingerprint.ToString());
+    Equal(2, canonical.ManifestEntryCount);
+    Equal(162, canonical.PreparedChunkCount);
+    True(canonical.TryValidateComplete(out _));
+    ConceptDemoStructuralSource again = GamePlayableWorld.CreateConceptDemoStructuralSource();
+    Equal(source.West.Fingerprint, again.West.Fingerprint);
+    Equal(source.East.Fingerprint, again.East.Fingerprint);
+    Equal(source.Manifest.Fingerprint, again.Manifest.Fingerprint);
+    Console.WriteLine($"W5R CONCEPT west={source.West.Fingerprint} bytes={source.West.Length} " +
+        $"east={source.East.Fingerprint} bytes={source.East.Length} " +
+        $"manifest={source.Manifest.Fingerprint} legacy={legacy.Fingerprint}");
+    for (int index = 0; index < legacy.ChunkCount; index++)
+    {
+        True(legacy.TryGetChunkKey(index, out SpatialChunkKey key));
+        True(legacy.TryGetBaseTerrain(key, out WorldTerrainChunkView expected));
+        True(canonical.TryGetBaseTerrain(key, out WorldTerrainChunkView actual));
+        for (int cell = 0; cell < expected.MaterialCount; cell++)
+        {
+            Equal(expected.GetMaterial(cell), actual.GetMaterial(cell));
+            Equal(expected.IsSurfacePresent(cell), actual.IsSurfacePresent(cell));
+        }
+        for (int vertex = 0; vertex < expected.HeightVertexCount; vertex++)
+            Equal(expected.GetAbsoluteHeightMillimeters(vertex),
+                actual.GetAbsoluteHeightMillimeters(vertex));
+        bool hasExpectedStatics = legacy.TryGetFrozenStatics(key, out WorldFrozenStaticChunkView expectedStatics);
+        bool hasActualStatics = canonical.TryGetFrozenStatics(key, out WorldFrozenStaticChunkView actualStatics);
+        Equal(hasExpectedStatics ? expectedStatics.Count : 0,
+            hasActualStatics ? actualStatics.Count : 0);
+        if (hasExpectedStatics && expectedStatics.Count != 0)
+        {
+            Equal(expectedStatics.Count, actualStatics.Count);
+            for (int row = 0; row < expectedStatics.Count; row++)
+                Equal(expectedStatics.GetRecord(row), actualStatics.GetRecord(row));
+        }
+        bool hasExpectedFragments = legacy.TryGetMultiFragments(key, out WorldMultiFragmentChunkView expectedFragments);
+        bool hasActualFragments = canonical.TryGetMultiFragments(key, out WorldMultiFragmentChunkView actualFragments);
+        Equal(hasExpectedFragments ? expectedFragments.Count : 0,
+            hasActualFragments ? actualFragments.Count : 0);
+        if (hasExpectedFragments && expectedFragments.Count != 0)
+        {
+            Equal(expectedFragments.Count, actualFragments.Count);
+            for (int row = 0; row < expectedFragments.Count; row++)
+                Equal(expectedFragments.GetRecord(row), actualFragments.GetRecord(row));
+        }
+        bool hasExpectedBands = legacy.TryGetAdditionalTerrainSurfaceBands(
+            key, out WorldTerrainSurfaceBandChunkView expectedBands);
+        bool hasActualBands = canonical.TryGetAdditionalTerrainSurfaceBands(
+            key, out WorldTerrainSurfaceBandChunkView actualBands);
+        Equal(hasExpectedBands ? expectedBands.Count : 0,
+            hasActualBands ? actualBands.Count : 0);
+        if (hasExpectedBands && expectedBands.Count != 0)
+            for (int row = 0; row < expectedBands.Count; row++)
+            {
+                WorldTerrainSurfaceBandView before = expectedBands.GetBand(row);
+                WorldTerrainSurfaceBandView after = actualBands.GetBand(row);
+                Equal(before.Id, after.Id);
+                Equal(before.Bounds, after.Bounds);
+                Equal(before.Faces, after.Faces);
+                Equal(before.SideMaterialId, after.SideMaterialId);
+                for (int z = 0; z < before.Bounds.CellDepth; z++)
+                for (int x = 0; x < before.Bounds.CellWidth; x++)
+                {
+                    Equal(before.IsCellPresent(x, z), after.IsCellPresent(x, z));
+                    Equal(before.GetEdgeConnections(x, z), after.GetEdgeConnections(x, z));
+                    if (before.HasTop)
+                        Equal(before.GetMaterial(WorldTerrainSurfaceFace.Top, x, z),
+                            after.GetMaterial(WorldTerrainSurfaceFace.Top, x, z));
+                    if (before.HasBottom)
+                        Equal(before.GetMaterial(WorldTerrainSurfaceFace.Bottom, x, z),
+                            after.GetMaterial(WorldTerrainSurfaceFace.Bottom, x, z));
+                }
+                for (int z = 0; z <= before.Bounds.CellDepth; z++)
+                for (int x = 0; x <= before.Bounds.CellWidth; x++)
+                {
+                    if (before.HasTop)
+                        Equal(before.GetHeight(WorldTerrainSurfaceFace.Top, x, z),
+                            after.GetHeight(WorldTerrainSurfaceFace.Top, x, z));
+                    if (before.HasBottom)
+                        Equal(before.GetHeight(WorldTerrainSurfaceFace.Bottom, x, z),
+                            after.GetHeight(WorldTerrainSurfaceFace.Bottom, x, z));
+                }
+            }
+    }
+    int canonicalMultiCount = 0;
+    for (int index = 0; index < canonical.PreparedPackCount; index++)
+    {
+        True(canonical.TryGetPreparedPackAt(index, out PreparedWorldPack prepared));
+        for (int row = 0; row < prepared.View.BaseWorld.MultiInstanceCount; row++)
+        {
+            True(prepared.View.BaseWorld.TryGetMultiInstanceAt(row, out WorldMultiInstanceRecord actual));
+            True(legacy.TryGetMultiInstance(actual.Id, out WorldMultiInstanceRecord expected));
+            Equal(expected, actual);
+            canonicalMultiCount++;
+        }
+    }
+    Equal(legacy.MultiInstanceCount, canonicalMultiCount);
 }
 
 static WorldPackFingerprint StructuralTestFingerprint(byte seed)

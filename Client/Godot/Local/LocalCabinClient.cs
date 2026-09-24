@@ -642,18 +642,20 @@ public partial class LocalCabinClient : Node3D
     public LocalCabinPresentationSnapshot RunD02Acceptance()
     {
         if (!_initialized || _settings is null || !_useConceptDemoWorld ||
-            _boundWorld is null || _cache is null || _residency is null ||
+            _cache is null || _residency is null ||
             _window is null || _renderer is null || _localSession is null || _sequencer is null)
             throw new InvalidOperationException("D0.2 requires the initialized Concept Demo consumer.");
         ApplySettings(WithRenderDistance(_settings, 1));
-        SpatialChunkKey centralKey = GamePlayableWorld.PlayerStart.ToChunkKey(_boundWorld.Space);
-        SpatialChunkKey farKey = GamePlayableWorld.FarGateDestination.ToChunkKey(_boundWorld.Space);
+        SpatialChunkKey centralKey = GamePlayableWorld.PlayerStart.ToChunkKey(_cache.StructuralSpace);
+        SpatialChunkKey farKey = GamePlayableWorld.FarGateDestination.ToChunkKey(_cache.StructuralSpace);
         var gapKey = new SpatialChunkKey(
-            _boundWorld.Space,
+            _cache.StructuralSpace,
             (GamePlayableWorld.ConceptMaximumChunk + GamePlayableWorld.FarIslandMinimumChunkX) / 2,
             0);
-        if (_boundWorld.ChunkCount != GamePlayableWorld.ConceptChunkCount ||
-            _boundWorld.TryGetBaseTerrain(gapKey, out _))
+        if ((_cache.PreparedComposition?.PreparedChunkCount ?? _boundWorld?.ChunkCount) !=
+                GamePlayableWorld.ConceptChunkCount ||
+            (_cache.PreparedComposition?.TryGetBaseTerrain(gapKey, out _) ??
+                _boundWorld?.TryGetBaseTerrain(gapKey, out _) ?? false))
             throw new InvalidOperationException(
                 "The Concept Demo does not contain two sparse authored clusters separated by unauthored distance.");
 
@@ -1758,17 +1760,21 @@ public partial class LocalCabinClient : Node3D
         in LocalPlayableAuthorityView view,
         bool preserveSemanticCache = false)
     {
-        if (_localSession is null || _boundWorld is null || !view.IsReady)
+        if (_localSession is null || !view.IsReady)
             throw new InvalidOperationException("Authority is not ready.");
         bool reuseSemanticCache = preserveSemanticCache && _cache is not null &&
             _residentGenerationId == view.GenerationId &&
-            ReferenceEquals(_cache.PreparedWorld, view.PreparedWorld);
+            (view.PreparedComposition is not null
+                ? ReferenceEquals(_cache.PreparedComposition, view.PreparedComposition)
+                : ReferenceEquals(_cache.PreparedWorld, view.PreparedWorld));
         if (preserveSemanticCache && !reuseSemanticCache)
             throw new InvalidOperationException(
                 "A presentation-only rebuild cannot replace its semantic application lineage.");
         int requestedRenderRadius = _settings?.RenderDistanceChunks ??
             ClientSettingsResolver.MinimumRenderDistanceChunks;
-        int maximumRenderRadius = MaximumRenderRadius(view.PreparedWorld.BaseWorld);
+        int maximumRenderRadius = view.PreparedComposition is not null
+            ? MaximumRenderRadius(view.PreparedComposition)
+            : MaximumRenderRadius(view.PreparedWorld!.BaseWorld);
         int renderRadius = Math.Min(requestedRenderRadius, maximumRenderRadius);
         _effectiveRenderDistanceChunks = renderRadius;
         _renderer?.Dispose();
@@ -1791,7 +1797,9 @@ public partial class LocalCabinClient : Node3D
                 maximumMultiFragmentsPerChunk: 16,
                 maximumPublicRecordsPerChunk: 16,
                 maximumKnownPublicIdentities: 64);
-            _cache = new ClientWorldSemanticCache(view.PreparedWorld, cacheLimits);
+            _cache = view.PreparedComposition is not null
+                ? new ClientWorldSemanticCache(view.PreparedComposition, cacheLimits)
+                : new ClientWorldSemanticCache(view.PreparedWorld!, cacheLimits);
             _chatChunkInfo = new ClientSemanticChunkInfo[cacheLimits.MaximumResidentChunks];
         }
         _residency = new ClientStructuralResidency(_cache, renderRadius);
@@ -2005,6 +2013,33 @@ public partial class LocalCabinClient : Node3D
             }
             return true;
         }
+    }
+
+    private static int MaximumRenderRadius(PreparedWorldComposition world)
+    {
+        for (int radius = ClientSettingsResolver.MaximumRenderDistanceChunks;
+             radius >= ClientSettingsResolver.MinimumRenderDistanceChunks; radius--)
+            for (int index = 0; index < world.PreparedChunkCount; index++)
+            {
+                if (!world.TryGetPreparedChunkKey(index, out SpatialChunkKey center))
+                    throw new InvalidOperationException("A validated composition lost a chunk key.");
+                bool complete = true;
+                for (long x = (long)center.Coord.X - radius;
+                     x <= (long)center.Coord.X + radius && complete; x++)
+                    for (long z = (long)center.Coord.Z - radius;
+                         z <= (long)center.Coord.Z + radius; z++)
+                        if (x is < int.MinValue or > int.MaxValue ||
+                            z is < int.MinValue or > int.MaxValue ||
+                            !world.TryGetBaseTerrain(new SpatialChunkKey(
+                                world.Space, checked((int)x), checked((int)z)), out _))
+                        {
+                            complete = false;
+                            break;
+                        }
+                if (complete) return radius;
+            }
+        throw new InvalidOperationException(
+            "The authored composition cannot contain the minimum client presentation window.");
     }
 
     private ClientControlProfileDecision EvaluateProfile(
@@ -2626,13 +2661,30 @@ public partial class LocalCabinClient : Node3D
                 globalZMillimeters,
                 out WorldPosition candidate) &&
             _cache is not null &&
-            _cache.PreparedWorld.TryFindNearestSupport(
-                candidate,
-                _player.YMillimeters,
-                out WorldTerrainColumnSurface support) == WorldTerrainColumnQueryStatus.Complete &&
+            TryFindPointerSupport(candidate, out WorldTerrainColumnSurface support) &&
             support.IsValid && support.IsSupport;
         return _pointerPointValid;
     }
+
+    private bool TryFindPointerSupport(in WorldPosition candidate, out WorldTerrainColumnSurface support)
+    {
+        WorldTerrainColumnQueryStatus status = _cache!.PreparedComposition is { } composition
+            ? composition.TryFindNearestSupport(candidate, _player.YMillimeters, out support)
+            : _cache.PreparedWorld.TryFindNearestSupport(candidate, _player.YMillimeters, out support);
+        return status == WorldTerrainColumnQueryStatus.Complete;
+    }
+
+    private BaseTerrainSurfaceSample ProbeLocalBaseTerrain(in WorldPosition location) =>
+        _cache!.PreparedComposition is { } composition
+            ? composition.ProbeBaseTerrainSurface(location)
+            : _boundWorld!.ProbeBaseTerrainSurface(location);
+
+    private WorldTerrainColumnQueryStatus TryCopyLocalTerrainColumnSurfaces(
+        in WorldPosition location, Span<WorldTerrainColumnSurface> destination,
+        out int count, out int required) =>
+        _cache!.PreparedComposition is { } composition
+            ? composition.TryCopyTerrainColumnSurfaces(location, destination, out count, out required)
+            : _boundWorld!.TryCopyTerrainColumnSurfaces(location, destination, out count, out required);
 
     private ClientHorizontalCameraBasis CameraBasis() =>
         _cameraRig?.HorizontalBasis() ?? ClientHorizontalCameraBasis.WorldAxes;
@@ -2984,7 +3036,7 @@ public partial class LocalCabinClient : Node3D
     /// </summary>
     public void RunD00Acceptance()
     {
-        if (_boundWorld is null || _cache is null || _renderer is null ||
+        if (_cache is null || _renderer is null ||
             _localSession is null || _sequencer is null || _camera is null)
             throw new InvalidOperationException("The Concept Demo smoke started before composition completed.");
         if (!_useConceptDemoWorld)
@@ -2996,13 +3048,13 @@ public partial class LocalCabinClient : Node3D
         ApplySettings(WithRenderDistance(_settings, 1));
 
         if (!WorldPosition.TryFromGlobalMillimeters(63_000, 0, 60_000, out WorldPosition outerVoid) ||
-            _boundWorld.ProbeBaseTerrainSurface(outerVoid).Status != BaseTerrainSurfaceStatus.Absent ||
-            _boundWorld.ProbeBaseTerrainSurface(GamePlayableWorld.SkyTelepadDestination).Status !=
+            ProbeLocalBaseTerrain(outerVoid).Status != BaseTerrainSurfaceStatus.Absent ||
+            ProbeLocalBaseTerrain(GamePlayableWorld.SkyTelepadDestination).Status !=
                 BaseTerrainSurfaceStatus.Absent)
             throw new InvalidOperationException("The central island/sky gap is not intentional BaseTerrain void.");
 
         Span<WorldTerrainColumnSurface> column = stackalloc WorldTerrainColumnSurface[8];
-        if (_boundWorld.TryCopyTerrainColumnSurfaces(
+        if (TryCopyLocalTerrainColumnSurfaces(
                 GamePlayableWorld.CaveLedgePoint, column, out int caveCount, out _) !=
                 WorldTerrainColumnQueryStatus.Complete || caveCount != 5 ||
             !column[..caveCount].Contains(new WorldTerrainColumnSurface(
@@ -3021,7 +3073,7 @@ public partial class LocalCabinClient : Node3D
                 3_500,
                 GameTerrainMaterialIds.Rock)))
             throw new InvalidOperationException("The MountainShell/preserved-base cave column is incomplete.");
-        if (_boundWorld.TryCopyTerrainColumnSurfaces(
+        if (TryCopyLocalTerrainColumnSurfaces(
                 GamePlayableWorld.SkyTelepadDestination, column, out int skyCount, out _) !=
                 WorldTerrainColumnQueryStatus.Complete || skyCount != 2 ||
             column[0].SurfaceId != GamePlayableWorld.SkyIslandSurface ||

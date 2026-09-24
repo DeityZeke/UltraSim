@@ -145,6 +145,11 @@ public sealed class GameRuntimePersistence
                     GameStaging built = staging ??
                         throw new PersistenceValidationException(
                             "The ECS participant did not prepare game content before current-world resolution.");
+                    if (_composition.HasCanonicalConceptDemoSource &&
+                        fingerprint == ConceptDemoStructuralSource.LegacyCombinedFingerprint)
+                        throw new PersistenceCompatibilityException(
+                            "Pre-W5R Concept Demo worldview/v1 uses the combined Pack; exact overlay migration " +
+                            "is not available. The save was left untouched and no canonical generation was published.");
                     if (_structuralPackResolver is not null)
                         return _structuralPackResolver(fingerprint, built.Content.World);
                     return _composition.TryResolveWorldPack(fingerprint, built.Content.World, out BoundWorldPack? bound)

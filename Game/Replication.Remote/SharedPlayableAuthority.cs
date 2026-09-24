@@ -377,11 +377,14 @@ public sealed class SharedPlayableAuthority : IDisposable
         if (limits == default) limits = SharedPlayableAuthorityLimits.Default;
         limits.Validate();
         long generationStartedTimestamp = Stopwatch.GetTimestamp();
+        ConceptDemoStructuralSource source = GamePlayableWorld.CreateConceptDemoStructuralSource();
+        // Pre-W7 remote activation still transfers the frozen historical combined Pack. It is
+        // intentionally not the structural root of this authority generation.
         WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
         var composition = new UltraSimGameComposition(
             limits.RequiredInventoryLimits,
             runtimeProfile: GameRuntimeProfile.Networked,
-            baseWorldPack: pack);
+            conceptDemoStructuralSource: source);
         var runtime = new ServerRuntime(
             composition,
             new ServerRuntimeOptions(

@@ -39,6 +39,14 @@ unprepared Packs. This is a runtime safety limitation, not a prepared-residency
 field in the v2 format. A missing/mismatched resolver or invalid seam fails
 without changing active authority.
 
+W5R makes `worldview/v2` the normal Concept Demo save format because product
+authority now has a complete two-Pack composition. Cabin remains on the exact
+v1 path. Pre-W5R Concept Demo v1 saves identify the frozen combined Pack. No
+production code currently publishes a nonempty structural overlay, but the v1
+format can contain one; canonical Concept Demo restore therefore rejects those
+saves with a specific compatibility error and leaves the active generation
+unchanged. No overlay is silently discarded or represented as canonical.
+
 The artifacts deliberately omit immutable pack bytes, runtime entity/chunk
 slots, Spatial membership storage, publication history/cursors, semantic-client
 residency, meshes, Godot objects, and edit-session/provenance history. Those are

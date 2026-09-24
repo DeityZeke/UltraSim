@@ -26,6 +26,8 @@ string? output = ReadOption(args, "--output");
 var results = new List<TestResult>();
 Run("PlayableWoodsCabinOfflineDirectRoundTrip", PlayableWoodsCabinRoundTrip, results);
 Run("W5CanonicalTwoPackAuthorityAndPersistence", W5CanonicalTwoPackAuthorityAndPersistence, results);
+Run("ConceptDemoLegacySaveFailsClosedUnderCanonicalAuthority",
+    ConceptDemoLegacySaveFailsClosedUnderCanonicalAuthority, results);
 Run("PlayableCabinHasCanonicalRectangularShell", PlayableCabinHasCanonicalRectangularShell, results);
 Run("PlayableAuthorityBlocksCabinDoorWallsAndChest", PlayableAuthorityBlocksCabinDoorWallsAndChest, results);
 Run("ConceptDemoWorldCombinesFloatingBaseCaveAndSkyShells",
@@ -301,6 +303,55 @@ static TestMetrics W5CanonicalTwoPackAuthorityAndPersistence()
             source.Manifest, packs, out PreparedWorldComposition? prepared, out _),
             "W5 overlay composition could not build.");
         return prepared!;
+    }
+}
+
+static TestMetrics ConceptDemoLegacySaveFailsClosedUnderCanonicalAuthority()
+{
+    string root = TempRoot("w5r-legacy-concept-save");
+    try
+    {
+        WorldPack legacy = GamePlayableWorld.CreateConceptDemoWorldPack();
+        var identity = new PersistenceIdentityOptions(new PersistentWorldId(0x80_D000UL));
+        var former = new UltraSimGameComposition(
+            new InventoryLimits(32, 128, 32), baseWorldPack: legacy);
+        using (var oldHost = new InternalHost(former, RuntimeOptions(identity)))
+        {
+            oldHost.Start();
+            var persistence = new GameRuntimePersistence(oldHost.RuntimeForTesting.Game,
+                former, RestoreOptions(), new SaveSetCoordinator(root));
+            GameSaveResult saved = persistence.TrySave(
+                new SaveSetContext(1, 1_700_000_000_001), static capture => capture());
+            Expect(saved.Succeeded, $"Pre-W5R Concept Demo save setup failed: {saved.Failure}");
+        }
+        ConceptDemoStructuralSource source = GamePlayableWorld.CreateConceptDemoStructuralSource();
+        var current = new UltraSimGameComposition(
+            new InventoryLimits(32, 128, 32), conceptDemoStructuralSource: source);
+        using var host = new InternalHost(current, RuntimeOptions(identity));
+        host.Start();
+        ulong generationBefore = 0;
+        Expect(host.RuntimeForTesting.Game.TryUseActiveGeneration<IGameGenerationStateProvider, ulong>(
+            (_, generation, _) => generation, out generationBefore),
+            "Canonical generation was unavailable before legacy restore.");
+        var loader = new GameRuntimePersistence(host.RuntimeForTesting.Game,
+            current, RestoreOptions(), new SaveSetCoordinator(root));
+        GameLoadResult refused = loader.TryLoad();
+        Expect(!refused.Succeeded && refused.Failure is PersistenceCompatibilityException &&
+            refused.Failure.Message.Contains("Pre-W5R Concept Demo worldview/v1", StringComparison.Ordinal),
+            $"Legacy combined save did not fail with an explicit compatibility error: {refused.Failure}");
+        Expect(host.RuntimeForTesting.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (_, generation, game) => generation == generationBefore &&
+                game.WorldState.PreparedWorld is null &&
+                game.WorldState.PreparedComposition?.ManifestFingerprint == source.Manifest.Fingerprint,
+            out bool unchanged) && unchanged,
+            "Refused legacy restore altered canonical authority.");
+        return new TestMetrics(source.Manifest.Fingerprint.ToString(),
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            "Pre-W5R worldview/v1 combined-Pack saves fail closed without dropping possible overlay state; Cabin v1 remains separately supported.");
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
     }
 }
 
@@ -927,10 +978,10 @@ static TestMetrics ConceptDemoWorldCombinesFloatingBaseCaveAndSkyShells()
 
 static TestMetrics ConceptDemoTelepadUsesAuthoritativeDestination()
 {
-    WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
+    ConceptDemoStructuralSource source = GamePlayableWorld.CreateConceptDemoStructuralSource();
     var composition = new UltraSimGameComposition(
         new InventoryLimits(32, 128, 32),
-        baseWorldPack: pack);
+        conceptDemoStructuralSource: source);
     using var host = new InternalHost(
         composition,
         RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_D000))));
@@ -998,7 +1049,8 @@ static TestMetrics ConceptDemoTelepadUsesAuthoritativeDestination()
 
 static TestMetrics ConceptDemoFarGateUsesSparseAuthoredGeography()
 {
-    WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
+    ConceptDemoStructuralSource source = GamePlayableWorld.CreateConceptDemoStructuralSource();
+    PreparedWorldComposition authored = source.Prepare(ConceptDemoStructuralSource.CreateBinding());
     var centralKey = new SpatialChunkKey(
         GameWorldState.DefaultSpace,
         GamePlayableWorld.CentralGateDestination.Chunk);
@@ -1009,9 +1061,9 @@ static TestMetrics ConceptDemoFarGateUsesSparseAuthoredGeography()
         GameWorldState.DefaultSpace,
         (centralKey.Coord.X + farKey.Coord.X) / 2,
         centralKey.Coord.Z);
-    Expect(pack.TryGetBaseTerrain(centralKey, out _) &&
-        pack.TryGetBaseTerrain(farKey, out _) &&
-        !pack.TryGetBaseTerrain(gapKey, out _),
+    Expect(authored.TryGetBaseTerrain(centralKey, out _) &&
+        authored.TryGetBaseTerrain(farKey, out _) &&
+        !authored.TryGetBaseTerrain(gapKey, out _),
         "The Far Island fixture did not preserve two authored clusters separated by genuinely unauthored geography.");
     Expect(GamePlayableWorld.FarGateDestination.GlobalXMillimeters -
         GamePlayableWorld.CentralGateDestination.GlobalXMillimeters >= 2_000_000,
@@ -1019,7 +1071,7 @@ static TestMetrics ConceptDemoFarGateUsesSparseAuthoredGeography()
 
     var composition = new UltraSimGameComposition(
         new InventoryLimits(32, 128, 32),
-        baseWorldPack: pack);
+        conceptDemoStructuralSource: source);
     using var host = new InternalHost(
         composition,
         RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_D002))));
@@ -1059,8 +1111,49 @@ static TestMetrics ConceptDemoFarGateUsesSparseAuthoredGeography()
         link.ReadPosition() == GamePlayableWorld.FarGateDestination,
         "The central Far Gate did not use its exact Game-owned Far Island destination.");
 
+    // Cross the actual authored 127/128 Pack seam under ordinary direct locomotion.
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+        (world, _, game) =>
+        {
+            long globalX = 128L * GameWorldSpatialProfile.WorldChunkEdgeUnits + 500;
+            foreach (long globalZ in new long[] { 8_000, 12_000, 24_000, -8_000 })
+            {
+                if (!WorldPosition.TryFromGlobalMillimeters(globalX, 0, globalZ,
+                        out WorldPosition groundProbe) ||
+                    !game.WorldState.TrySampleBaseTerrainHeight(groundProbe, out int height) ||
+                    !WorldPosition.TryFromGlobalMillimeters(globalX, height, globalZ,
+                        out WorldPosition candidate))
+                    continue;
+                if (game.WorldActions.RelocateActor(world, game.WorldState,
+                        ResolveInWorld(world, entities.PlayerId), candidate, out WorldPosition _) ==
+                    GameWorldActionStatus.Accepted)
+                    return true;
+            }
+            return false;
+        }, out bool seamStart) && seamStart,
+        "The actual Far Island seam had no safe movement start.");
+    var seamInput = new ClientWorldInputSequencer(input.ControlSession, useCentral.Sequence + 1);
+    Expect(seamInput.TryCreateSemanticCommand(new ClientWorldCommandIntent(
+        GameLocomotionUpdate.CreateDirect(
+            -GamePlayerCommand.MaximumAxisMagnitude, 0), GamePlayerActions.None, true),
+        out GamePlayerCommand westward), "Far Island westward command could not form.");
+    Expect(link.ApplyCommand(westward).Locomotion == GameWorldActionStatus.Accepted,
+        "Far Island westward command was not accepted.");
+    for (int ticks = 0; ticks < 250 && link.ReadPosition().Chunk.X == 128; ticks++) host.Tick();
+    Expect(link.ReadPosition().Chunk.X == 127,
+        "Ordinary movement did not cross the Far Island 128→127 Pack seam.");
+    Expect(seamInput.TryCreateSemanticCommand(new ClientWorldCommandIntent(
+        GameLocomotionUpdate.CreateDirect(
+            GamePlayerCommand.MaximumAxisMagnitude, 0), GamePlayerActions.None, true),
+        out GamePlayerCommand eastward), "Far Island eastward command could not form.");
+    Expect(link.ApplyCommand(eastward).Locomotion == GameWorldActionStatus.Accepted,
+        "Far Island eastward command was not accepted.");
+    for (int ticks = 0; ticks < 250 && link.ReadPosition().Chunk.X == 127; ticks++) host.Tick();
+    Expect(link.ReadPosition().Chunk.X == 128,
+        "Ordinary movement did not cross the Far Island 127→128 Pack seam.");
+
     Relocate(GamePlayableWorld.FarReturnGatePosition);
-    var returnInput = new ClientWorldInputSequencer(input.ControlSession, useCentral.Sequence + 1);
+    var returnInput = new ClientWorldInputSequencer(input.ControlSession, eastward.Sequence + 1);
     Expect(returnInput.TryCreateSemanticCommand(
             new ClientWorldCommandIntent(
                 GameLocomotionUpdate.Stop, GamePlayerActions.Interact, true),
@@ -1072,11 +1165,13 @@ static TestMetrics ConceptDemoFarGateUsesSparseAuthoredGeography()
         "The Far Island return gate did not use its exact Game-owned central destination.");
 
     return new TestMetrics(
-        HashText($"{pack.Fingerprint}|{centralKey}|{farKey}|{gapKey}|{outbound.Interaction}|{inbound.Interaction}"),
-        0, 0, 0, 0, 0, pack.Length, 0, 0, 0, 0, 0,
+        HashText($"{source.Manifest.Fingerprint}|{centralKey}|{farKey}|{gapKey}|{outbound.Interaction}|{inbound.Interaction}"),
+        0, 0, 0, 0, 0, source.West.Length + source.East.Length, 0, 0, 0, 0, 0,
         "D0.2 uses two sparse authored clusters with no gap chunks and reciprocal authoritative gates whose destinations never come from the client.",
         InputCommands: input.Snapshot().CommandsProduced +
-            centralInput.Snapshot().CommandsProduced + returnInput.Snapshot().CommandsProduced);
+            centralInput.Snapshot().CommandsProduced + seamInput.Snapshot().CommandsProduced +
+            returnInput.Snapshot().CommandsProduced,
+        ChunkCrossings: 2);
 
     void Relocate(in WorldPosition destination)
     {

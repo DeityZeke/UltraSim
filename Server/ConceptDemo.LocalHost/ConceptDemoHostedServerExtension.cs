@@ -102,7 +102,7 @@ public sealed class ConceptDemoHostedServerExtension : ILocalPlayableServerExten
                 context.LocalPublicEntity,
                 Slot: 0);
             _authority = SharedPlayableAuthority.AttachExisting(
-                context.WorldPack,
+                context.RemoteDeliveryCompatibilityPack,
                 context.Composition,
                 context.Runtime,
                 context.Admission,

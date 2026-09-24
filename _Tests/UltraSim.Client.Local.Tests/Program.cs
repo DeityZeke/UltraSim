@@ -40,6 +40,7 @@ var tests = new (string Name, Action Body)[]
     ("ConceptDemoWeaponUsesPacketFreeWorldInventoryAndPrimaryPath", ConceptDemoWeaponUsesPacketFreeWorldInventoryAndPrimaryPath),
     ("ConceptDemoSignUsesAuthoritativeInformationalUi", ConceptDemoSignUsesAuthoritativeInformationalUi),
     ("SaveLoadReplacesGenerationAndRebuildsPublicLineage", SaveLoadReplacesGenerationAndRebuildsPublicLineage),
+    ("ConceptDemoCanonicalFarIslandSaveLoad", ConceptDemoCanonicalFarIslandSaveLoad),
     ("DistantInterestReentryInvalidatesOldPublicDebt", DistantInterestReentryInvalidatesOldPublicDebt),
 };
 
@@ -1063,6 +1064,7 @@ static void SaveLoadReplacesGenerationAndRebuildsPublicLineage()
 {
     using Fixture fixture = Fixture.Create();
     True(fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView initial));
+    True(initial.PreparedWorld is not null && initial.PreparedComposition is null);
     True(fixture.Session.TryRequestSave(1));
     DriveUntil(() =>
         fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
@@ -1090,6 +1092,38 @@ static void SaveLoadReplacesGenerationAndRebuildsPublicLineage()
             ContainsPrefab(replacement, GameWorldPublicPrefabIds.CabinDoor) &&
             ContainsPrefab(replacement, GameWorldPublicPrefabIds.WorldChest);
     }, failure: () => fixture.Session.GetSnapshot().ToString());
+}
+
+static void ConceptDemoCanonicalFarIslandSaveLoad()
+{
+    using Fixture fixture = Fixture.CreateConcept();
+    True(fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView initial));
+    True(initial.PreparedWorld is null && initial.PreparedComposition is not null);
+    Equal(162, initial.PreparedComposition.PreparedChunkCount);
+    WorldStructuralManifestFingerprint manifest = initial.PreparedComposition.ManifestFingerprint;
+    WorldCompositionRevision revision = initial.PreparedComposition.Revision;
+
+    True(fixture.Session.TryRequestRelocation(1, GamePlayableWorld.FarGateDestination));
+    DriveUntil(() => fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastAdministrativeSequence == 1 && view.LastAdministrativeSucceeded &&
+        view.PlayerPosition == GamePlayableWorld.FarGateDestination);
+    True(fixture.Session.TryRequestSave(2));
+    DriveUntil(() => fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastAdministrativeSequence == 2 && view.LastAdministrativeSucceeded);
+    True(fixture.Session.TryRequestRelocation(3, GamePlayableWorld.CentralGateDestination));
+    DriveUntil(() => fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastAdministrativeSequence == 3 && view.LastAdministrativeSucceeded &&
+        view.PlayerPosition == GamePlayableWorld.CentralGateDestination);
+    True(fixture.Session.TryRequestLoad(4));
+    DriveUntil(() => fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastAdministrativeSequence == 4 && view.LastAdministrativeSucceeded &&
+        view.GenerationId > initial.GenerationId);
+    True(fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView restored));
+    Equal(GamePlayableWorld.FarGateDestination, restored.PlayerPosition);
+    True(restored.PreparedWorld is null && restored.PreparedComposition is not null);
+    Equal(manifest, restored.PreparedComposition.ManifestFingerprint);
+    Equal(revision, restored.PreparedComposition.Revision);
+    True(restored.PreparedComposition.TryValidateComplete(out _));
 }
 
 static void DistantInterestReentryInvalidatesOldPublicDebt()
@@ -1269,9 +1303,10 @@ sealed class Fixture : IDisposable
     internal ClientWorldSemanticCache CreateCache()
     {
         Require(Session.TryGetLatestView(out LocalPlayableAuthorityView view));
-        var cache = new ClientWorldSemanticCache(
-            view.PreparedWorld,
-            new ClientWorldSemanticCacheLimits(25, 16, 16, 16, 64));
+        var limits = new ClientWorldSemanticCacheLimits(25, 16, 16, 16, 64);
+        var cache = view.PreparedComposition is not null
+            ? new ClientWorldSemanticCache(view.PreparedComposition, limits)
+            : new ClientWorldSemanticCache(view.PreparedWorld!, limits);
         for (int z = GamePlayableWorld.MinimumChunk; z <= GamePlayableWorld.MaximumChunk; z++)
         for (int x = GamePlayableWorld.MinimumChunk; x <= GamePlayableWorld.MaximumChunk; x++)
         {
@@ -1288,9 +1323,10 @@ sealed class Fixture : IDisposable
     internal ClientWorldSemanticCache CreateCacheAround(SpatialChunkCoord center)
     {
         Require(Session.TryGetLatestView(out LocalPlayableAuthorityView view));
-        var cache = new ClientWorldSemanticCache(
-            view.PreparedWorld,
-            new ClientWorldSemanticCacheLimits(25, 16, 16, 16, 64));
+        var limits = new ClientWorldSemanticCacheLimits(25, 16, 16, 16, 64);
+        var cache = view.PreparedComposition is not null
+            ? new ClientWorldSemanticCache(view.PreparedComposition, limits)
+            : new ClientWorldSemanticCache(view.PreparedWorld!, limits);
         for (int z = center.Z - 2; z <= center.Z + 2; z++)
         for (int x = center.X - 2; x <= center.X + 2; x++)
         {

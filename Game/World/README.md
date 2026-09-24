@@ -15,9 +15,10 @@ multi-surface column reads without turning terrain into ECS entities or voxels.
 
 ## Canonical WorldPack composition direction
 
-The current Concept Demo still prepares one unaddressed WorldPack plus one
-WorldMutableOverlay for compatibility. W4 adds a separate canonical runtime
-composition root; the Concept Demo has not yet migrated to it.
+The current Concept Demo prepares two declared Packs and one complete canonical
+`PreparedWorldComposition` per Game generation. The frozen historical combined
+Pack survives only as a pre-W7 remote structural-delivery compatibility payload;
+Cabin remains a separate one-Pack fixture.
 
 The canonical forward composition is specified in
 [Docs/Plans/WORLD_COMPOSITION.md](../../Docs/Plans/WORLD_COMPOSITION.md):
@@ -40,7 +41,7 @@ One WorldPack is a fixed 256×256 SpatialChunk / 4.096×4.096 km structural addr
 globally centered Pack mapping makes Pack (0,0) own chunk coordinates -128..127 on each axis.
 WorldPack boundaries do not change World/SpatialSpace identity and must remain semantically boring.
 
-W1-W5 are closed; W5R is next. `WorldPackAddressing.ToPackLocal` partitions every
+W1-W5R are closed; W6 is next. `WorldPackAddressing.ToPackLocal` partitions every
 signed-32-bit global `SpatialChunkCoord` into an 8-byte `WorldPackCoord` and a
 2-byte bounded `WorldPackLocalChunkCoord`. `TryToGlobal` rejects an arbitrary
 Pack/local pair if either reconstructed global axis is outside signed 32-bit
@@ -54,9 +55,9 @@ already opened v1 artifact. The external declaration never enters v1 bytes or
 fingerprints. `WorldPackLimits` now caps `MaximumChunks` at the derived
 256×256=65,536 address capacity and defaults to a 512 MiB total artifact
 ceiling. A full flat Pack built/opened at 280,363,264 bytes; smaller sparse
-Packs remain sparse. The current Concept Demo remains a legacy unaddressed
-one-Pack artifact spanning future Pack (0,0)/(1,0) windows, pending W5/W5R
-migration. W3 adds `WorldStructuralManifest/v1`, a private flat canonical
+Packs remain sparse. The historical combined Concept Demo artifact remains
+unaddressed for remote compatibility; current authority uses declared Pack
+`(0,0)` (117 chunks) and `(1,0)` (45 chunks). W3 adds `WorldStructuralManifest/v1`, a private flat canonical
 64-byte header plus sorted 40-byte coordinate/fingerprint entries with a
 32-byte SHA-256 identity. Its fixed profile binds the current 16 m chunk,
 centered 256-chunk Pack edge, and 128-chunk bias. It permits zero entries,
@@ -87,13 +88,16 @@ membership and exact fingerprint, Space, W2 spatial window, duplicate addresses,
 and common content binding before publication. Zero prepared Packs are legal.
 Global terrain/column/mesh/static/Multi-fragment/replacement queries resolve
 the owning prepared Pack internally and borrow existing immutable view payloads.
-`GameWorldState` selects this root or its temporary legacy one-Pack view, never
+`GameWorldState` selects this root or a legacy one-Pack view, never
 both; Simple Physics remains Pack-agnostic. W5 adds `worldview/v2` durable
 composition identity and independently revised per-Pack overlays, with exact
 manifest/Pack resolution before whole-generation publication. Runtime
 Add/Remove/Replace Pack and remote acquisition remain later work. WorldPack/v1
-remains the initial artifact format; the actual Concept Demo remains on its
-historical one-Pack path until W5R.
+remains the initial artifact format. The actual Concept Demo now uses a complete
+two-Pack root for authority and emits `worldview/v2`; the historical combined
+artifact is used only for pre-W7 remote structural delivery. Legacy Concept Demo
+v1 saves fail closed with an explicit compatibility error rather than losing
+possible overlay state; Cabin v1 remains supported.
 
 An entity is current in dynamic-public projection only while its valid
 `WorldPublicComponent` has `WorldPublicStateFlags.Visible`. Clearing `Visible`
