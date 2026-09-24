@@ -1,8 +1,8 @@
 # UltraSim World / WorldPack Structural Composition
 
-**Status:** canonical World/Terrain direction; W1 coordinate primitive closed, W2 next. W2-W10 runtime/content work remains planned.
+**Status:** canonical World/Terrain direction; W1-W2 closed, W3 next. W3-W10 composition/runtime work remains planned.
 **Accepted:** 2026-09-23.
-**Current implementation:** one prepared WorldPack remains the active runtime shape until W4/W5 generalize it. W1 adds address math only.
+**Current implementation:** one prepared WorldPack remains the active runtime shape until W4/W5 generalize it. W1 adds address math; W2 adds declared-shard validation and capacity admission without changing v1 bytes.
 **Related:** [TERRAIN.md](TERRAIN.md), [ASSET_STREAMING.md](ASSET_STREAMING.md), [../README.md](../README.md), [../../Game/World/README.md](../../Game/World/README.md).
 
 ## 1. Core model
@@ -366,7 +366,23 @@ The initial hard Pack safety ceiling therefore becomes:
 MaximumPackBytes = 512 MiB
 ```
 
-This is a total artifact admission ceiling, not a promise that every independent per-section maximum can coexist simultaneously. A Pack may satisfy individual count maxima and still be rejected if the total canonical artifact exceeds MaximumPackBytes.
+W2 enforces at most `WorldPackAddressing.MaximumChunksPerWorldPack = 256 × 256 =
+65,536` in `WorldPackLimits`, while still permitting lower custom limits. The
+default byte ceiling is 512 MiB; it is an additional total-artifact limit, not
+a guarantee that all independent section maxima can coexist. A real flat
+65,536-chunk Pack built and opened at 280,363,264 bytes (267.375 MiB), beyond
+the old 256 MiB default.
+
+An additive declared `WorldPackBuilder(..., WorldPackCoord)` rejects a chunk
+outside its Pack window at insertion with `ChunkOutsidePackWindow`. An opened
+v1 artifact can be checked against an external declaration through
+`WorldPack.TryValidateSpatialWindow`, which walks its canonical chunk directory
+and reports the first offending key. The declaration is not encoded in v1 or
+its fingerprint. The legacy unaddressed builder remains available during the
+one-Pack transition. The current Concept Demo Pack is such a legacy artifact:
+its central cluster lies in future Pack (0,0), while Far Island X=124..132
+crosses from Pack (0,0) into (1,0). It cannot validate as either single
+declared shard and is intentionally unchanged until W5/W5R migration.
 
 ## 15. Pack and chunk composition operations
 
@@ -499,11 +515,11 @@ Terrain/static/Multi/surface queries remain global SpatialChunkKey APIs and reso
 
 Add/test WorldPackCoord, centered global-chunk mapping, exact negative-coordinate cases, and inverse mapping. No runtime behavior change.
 
-### W2 — explicit Pack spatial contract (NEXT)
+### W2 — explicit Pack spatial contract (CLOSED)
 
 Freeze 256×256 chunks / 4096×4096 m, validate every WorldPack chunk belongs to its declared Pack window, and raise the Pack byte safety ceiling to 512 MiB with full-Pack evidence.
 
-### W3 — immutable WorldStructuralManifest
+### W3 — immutable WorldStructuralManifest (NEXT)
 
 Add the canonical sparse Pack index, manifest fingerprint, explicit format/spatial profile, and runtime WorldCompositionRevision as a separate identity.
 

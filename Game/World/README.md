@@ -39,15 +39,23 @@ One WorldPack is a fixed 256×256 SpatialChunk / 4.096×4.096 km structural addr
 globally centered Pack mapping makes Pack (0,0) own chunk coordinates -128..127 on each axis.
 WorldPack boundaries do not change World/SpatialSpace identity and must remain semantically boring.
 
-W1 is closed and W2 is next. `WorldPackAddressing.ToPackLocal` partitions every
+W1 and W2 are closed; W3 is next. `WorldPackAddressing.ToPackLocal` partitions every
 signed-32-bit global `SpatialChunkCoord` into an 8-byte `WorldPackCoord` and a
 2-byte bounded `WorldPackLocalChunkCoord`. `TryToGlobal` rejects an arbitrary
 Pack/local pair if either reconstructed global axis is outside signed 32-bit
 range; the first/last representable Pack windows are partial. The constants
 are 256 chunks and 4,096 m per Pack edge, centered with a 128-chunk bias.
 This is only a World-owned address value: `SpatialSpaceId`, global positions,
-WorldPack/v1 bytes, one-Pack runtime behavior, and the existing Pack byte cap
-are unchanged. Pack-bound validation and the 512 MiB cap belong to W2.
+WorldPack/v1 bytes and one-Pack runtime behavior are unchanged. W2 adds an
+optional declared-coordinate `WorldPackBuilder` that fails early when a chunk
+lies outside that address, and `WorldPack.TryValidateSpatialWindow` for an
+already opened v1 artifact. The external declaration never enters v1 bytes or
+fingerprints. `WorldPackLimits` now caps `MaximumChunks` at the derived
+256×256=65,536 address capacity and defaults to a 512 MiB total artifact
+ceiling. A full flat Pack built/opened at 280,363,264 bytes; smaller sparse
+Packs remain sparse. The current Concept Demo remains a legacy unaddressed
+one-Pack artifact spanning future Pack (0,0)/(1,0) windows, pending W5/W5R
+migration. There is no WorldStructuralManifest or multi-Pack runtime yet.
 
 The future World layer distinguishes authoritatively unauthored Pack, manifest-known but
 unprepared Pack, missing chunk inside a prepared Pack, intentional Absent terrain cell, and

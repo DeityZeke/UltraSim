@@ -69,6 +69,7 @@ public readonly struct WorldPackLocalChunkCoord : IEquatable<WorldPackLocalChunk
 public static class WorldPackAddressing
 {
     public const int ChunksPerWorldPackEdge = 256;
+    public const int MaximumChunksPerWorldPack = ChunksPerWorldPackEdge * ChunksPerWorldPackEdge;
     public const int CenteringBiasChunks = ChunksPerWorldPackEdge / 2;
     public const int WorldPackEdgeUnits = ChunksPerWorldPackEdge * GameWorldSpatialProfile.WorldChunkEdgeUnits;
     public const int WorldPackEdgeMeters = WorldPackEdgeUnits / GameWorldSpatialProfile.UnitsPerMeter;

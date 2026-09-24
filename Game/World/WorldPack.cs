@@ -120,8 +120,8 @@ public readonly struct WorldPackFingerprint : IEquatable<WorldPackFingerprint>
 public readonly record struct WorldPackLimits
 {
     public static WorldPackLimits Default { get; } = new(
-        256 * 1024 * 1024,
-        65_536,
+        512 * 1024 * 1024,
+        WorldPackAddressing.MaximumChunksPerWorldPack,
         32,
         maximumFrozenStatics: 1_000_000,
         maximumMultiInstances: 262_144,
@@ -141,6 +141,7 @@ public readonly record struct WorldPackLimits
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(maximumPackBytes, WorldPackFormat.HeaderBytes);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumChunks);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(maximumChunks, WorldPackAddressing.MaximumChunksPerWorldPack);
         ArgumentOutOfRangeException.ThrowIfLessThan(maximumSections, 2);
         ArgumentOutOfRangeException.ThrowIfNegative(maximumFrozenStatics);
         ArgumentOutOfRangeException.ThrowIfNegative(maximumMultiInstances);
@@ -165,7 +166,8 @@ public readonly record struct WorldPackLimits
     public int MaximumMultiFragments { get; }
     public int MaximumAdditionalTerrainSurfaceFragments { get; }
     public int MaximumAdditionalTerrainSurfaceFragmentsPerChunk { get; }
-    internal bool IsValid => MaximumPackBytes >= WorldPackFormat.HeaderBytes && MaximumChunks > 0 &&
+    internal bool IsValid => MaximumPackBytes >= WorldPackFormat.HeaderBytes &&
+        MaximumChunks is > 0 and <= WorldPackAddressing.MaximumChunksPerWorldPack &&
         MaximumSections >= 2 && MaximumFrozenStatics >= 0 && MaximumMultiInstances >= 0 &&
         MaximumMultiFragments >= 0 && MaximumAdditionalTerrainSurfaceFragments >= 0 &&
         MaximumAdditionalTerrainSurfaceFragmentsPerChunk >= 0;
@@ -190,6 +192,14 @@ public enum WorldPackBuildError
     InvalidMulti,
     MissingChunk,
     SizeOverflow,
+    ChunkOutsidePackWindow,
+}
+
+/// <summary>Result of checking an opened v1 artifact against externally declared Pack ownership.</summary>
+public enum WorldPackSpatialValidationError
+{
+    None = 0,
+    ChunkOutsidePackWindow,
 }
 
 public enum WorldPackOpenError
@@ -280,6 +290,7 @@ public sealed partial class WorldPackBuilder
     private readonly SpatialSpaceId _space;
     private readonly WorldContentFingerprint _content;
     private readonly WorldPackLimits _limits;
+    private readonly WorldPackCoord? _declaredPackCoord;
     private readonly List<SourceChunk> _chunks;
     private readonly Dictionary<SpatialChunkKey, SourceChunk> _byKey;
     private bool _hasAbsentBaseSurface;
@@ -288,6 +299,21 @@ public sealed partial class WorldPackBuilder
         SpatialSpaceId space,
         WorldContentFingerprint content,
         WorldPackLimits limits)
+        : this(space, content, limits, null) { }
+
+    /// <summary>Authors one declared structural shard; its coordinate is not encoded in WorldPack/v1.</summary>
+    public WorldPackBuilder(
+        SpatialSpaceId space,
+        WorldContentFingerprint content,
+        WorldPackLimits limits,
+        WorldPackCoord declaredPackCoord)
+        : this(space, content, limits, (WorldPackCoord?)declaredPackCoord) { }
+
+    private WorldPackBuilder(
+        SpatialSpaceId space,
+        WorldContentFingerprint content,
+        WorldPackLimits limits,
+        WorldPackCoord? declaredPackCoord)
     {
         if (!space.IsValid) throw new ArgumentOutOfRangeException(nameof(space));
         if (!content.IsValid) throw new ArgumentOutOfRangeException(nameof(content));
@@ -295,6 +321,7 @@ public sealed partial class WorldPackBuilder
         _space = space;
         _content = content;
         _limits = limits;
+        _declaredPackCoord = declaredPackCoord;
         _chunks = new List<SourceChunk>(Math.Min(limits.MaximumChunks, 256));
         _byKey = new Dictionary<SpatialChunkKey, SourceChunk>();
     }
@@ -329,6 +356,12 @@ public sealed partial class WorldPackBuilder
         if (key.Space != _space)
         {
             error = WorldPackBuildError.SpaceMismatch;
+            return false;
+        }
+        if (_declaredPackCoord is WorldPackCoord declared &&
+            !WorldPackAddressing.Contains(declared, key.Coord))
+        {
+            error = WorldPackBuildError.ChunkOutsidePackWindow;
             return false;
         }
         if (_chunks.Count >= _limits.MaximumChunks)
@@ -745,10 +778,20 @@ public sealed class WorldPackArtifact
 
     public WorldPack Open()
     {
-        if (!WorldPackCodec.TryValidate(_bytes, Limits, ContentFingerprint,
-                out WorldPackMetadata metadata, out WorldPackOpenError error))
+        if (!TryOpen(Limits, out WorldPack? pack, out WorldPackOpenError error))
             throw new InvalidOperationException($"Compiler produced an invalid WorldPack: {error}.");
-        return new WorldPack(_bytes, metadata);
+        return pack!;
+    }
+
+    /// <summary>Reopens owned canonical bytes under an explicit admission policy without copying them.</summary>
+    public bool TryOpen(WorldPackLimits limits, out WorldPack? pack, out WorldPackOpenError error)
+    {
+        pack = null;
+        if (!WorldPackCodec.TryValidate(_bytes, limits, ContentFingerprint,
+                out WorldPackMetadata metadata, out error))
+            return false;
+        pack = new WorldPack(_bytes, metadata);
+        return true;
     }
 }
 
@@ -931,6 +974,31 @@ public sealed class WorldPack
             return false;
         }
         key = WorldPackCodec.ReadChunkKey(_bytes, _metadata.ChunkDirectoryOffset, index);
+        return true;
+    }
+
+    /// <summary>
+    /// Checks every canonical global chunk key against a declared structural Pack address.
+    /// Neither the declaration nor this result changes v1 bytes, fingerprint, or runtime state.
+    /// </summary>
+    public bool TryValidateSpatialWindow(
+        WorldPackCoord declaredPackCoord,
+        out SpatialChunkKey offendingKey,
+        out WorldPackSpatialValidationError error)
+    {
+        for (int index = 0; index < _metadata.ChunkCount; index++)
+        {
+            SpatialChunkKey key = WorldPackCodec.ReadChunkKey(_bytes, _metadata.ChunkDirectoryOffset, index);
+            if (!WorldPackAddressing.Contains(declaredPackCoord, key.Coord))
+            {
+                offendingKey = key;
+                error = WorldPackSpatialValidationError.ChunkOutsidePackWindow;
+                return false;
+            }
+        }
+
+        offendingKey = default;
+        error = WorldPackSpatialValidationError.None;
         return true;
     }
 

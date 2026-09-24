@@ -66,12 +66,19 @@ up into a sparse World-level composition without changing global SpatialChunkKey
 
 W1 is closed: the World-owned `WorldPackCoord`, bounded `WorldPackLocalChunkCoord`, and
 `WorldPackAddressing` map global chunks through the centered 256-chunk grid with exact
-negative floor semantics and fail-closed inverse. W2 is next; no Pack-bound admission,
-multi-Pack runtime, or WorldPack/v1 format change is implied by W1.
+negative floor semantics and fail-closed inverse. W2 is also closed: declared
+authoring and opened-artifact validation require every global chunk key to fit
+one Pack address, and the default total Pack byte ceiling is 512 MiB with a
+real 65,536-chunk proof. W3 is next; no World manifest, multi-Pack runtime, or
+WorldPack/v1 format change is implied by W1-W2.
 
-The first Pack byte-cap correction is 512 MiB in W2: the existing 65,536-chunk bound exactly matches
+The Pack byte-cap correction is 512 MiB in W2: the existing 65,536-chunk bound exactly matches
 the fixed 256×256 envelope, while a fully populated dense terrain foundation alone is already
 about 264.4 MiB before directories/statics/Multis/sparse surfaces.
+
+The historical Concept Demo artifact remains unaddressed in the one-Pack runtime:
+Far Island X=124..132 straddles future Pack (0,0)/(1,0). W5/W5R owns its split;
+W2 neither moves it nor grants declared multi-window Packs an exception.
 
 Pack boundaries must never become gameplay, region, Physics, renderer, AOI, session, or durable
 semantic-identity boundaries. Cross-Pack edits publish one complete PreparedWorldComposition or
