@@ -41,6 +41,66 @@ public readonly record struct WorldStaticQueryHit(
 /// <summary>Bounded exact queries over one immutable pack's frozen-static and static-Multi geometry.</summary>
 public static class WorldStaticQueries
 {
+    /// <summary>Global bounds query routed by each candidate chunk's structural Pack owner.</summary>
+    public static bool TryQueryStaticBounds(
+        this PreparedWorldComposition world,
+        in WorldStaticBounds bounds,
+        int maximumCandidateChunks,
+        Span<WorldStaticQueryHit> destination,
+        out int count,
+        out int required,
+        out WorldStaticQueryError error)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumCandidateChunks);
+        count = 0;
+        required = 0;
+        if (!bounds.IsValid)
+        {
+            error = WorldStaticQueryError.InvalidBounds;
+            return false;
+        }
+        if (!TryGetCandidateRange(bounds, maximumCandidateChunks,
+                out int minimumX, out int minimumZ, out int maximumX, out int maximumZ))
+        {
+            error = WorldStaticQueryError.CandidateLimitExceeded;
+            return false;
+        }
+        required = CountMatches(world, bounds, minimumX, minimumZ, maximumX, maximumZ);
+        if (destination.Length < required)
+        {
+            error = WorldStaticQueryError.DestinationTooSmall;
+            return false;
+        }
+        int written = 0;
+        for (long x = minimumX; x <= maximumX; x++)
+        {
+            for (long z = minimumZ; z <= maximumZ; z++)
+            {
+                var key = new SpatialChunkKey(world.Space, checked((int)x), checked((int)z));
+                if (world.TryGetFrozenStatics(key, out WorldFrozenStaticChunkView statics))
+                {
+                    for (int index = 0; index < statics.Count; index++)
+                    {
+                        WorldFrozenStaticRecord record = statics.GetRecord(index);
+                        if (record.Bounds.Intersects(bounds)) destination[written++] = WorldStaticQueryHit.From(record);
+                    }
+                }
+                if (world.TryGetMultiFragments(key, out WorldMultiFragmentChunkView fragments))
+                {
+                    for (int index = 0; index < fragments.Count; index++)
+                    {
+                        WorldMultiFragmentRecord record = fragments.GetRecord(index);
+                        if (record.Bounds.Intersects(bounds)) destination[written++] = WorldStaticQueryHit.From(record);
+                    }
+                }
+            }
+        }
+        count = written;
+        error = WorldStaticQueryError.None;
+        return true;
+    }
+
     public static bool TryQueryStaticBounds(
         this WorldPreparedView world,
         in WorldStaticBounds bounds,
@@ -179,6 +239,31 @@ public static class WorldStaticQueries
         ArgumentNullException.ThrowIfNull(pack);
         return pack.Pack.TryQueryStaticBounds(bounds, maximumCandidateChunks, destination,
             out count, out required, out error);
+    }
+
+    private static int CountMatches(
+        PreparedWorldComposition world,
+        in WorldStaticBounds bounds,
+        int minimumX,
+        int minimumZ,
+        int maximumX,
+        int maximumZ)
+    {
+        int count = 0;
+        for (long x = minimumX; x <= maximumX; x++)
+        {
+            for (long z = minimumZ; z <= maximumZ; z++)
+            {
+                var key = new SpatialChunkKey(world.Space, checked((int)x), checked((int)z));
+                if (world.TryGetFrozenStatics(key, out WorldFrozenStaticChunkView statics))
+                    for (int index = 0; index < statics.Count; index++)
+                        if (statics.GetRecord(index).Bounds.Intersects(bounds)) count = checked(count + 1);
+                if (world.TryGetMultiFragments(key, out WorldMultiFragmentChunkView fragments))
+                    for (int index = 0; index < fragments.Count; index++)
+                        if (fragments.GetRecord(index).Bounds.Intersects(bounds)) count = checked(count + 1);
+            }
+        }
+        return count;
     }
 
     private static int CountMatches(

@@ -1,8 +1,8 @@
 # UltraSim World / WorldPack Structural Composition
 
-**Status:** canonical World/Terrain direction; W1-W3 closed, W4 next. W4-W10 composition/runtime work remains planned.
+**Status:** canonical World/Terrain direction; W1-W4 closed, W5 next. W5-W10 composition/runtime work remains planned.
 **Accepted:** 2026-09-23.
-**Current implementation:** one prepared WorldPack remains the active runtime shape until W4/W5 generalize it. W1 adds address math, W2 adds declared-shard validation and capacity admission, and W3 adds an immutable sparse structural manifest without changing v1 Pack bytes or runtime behavior.
+**Current implementation:** W4 provides an immutable prepared-composition runtime root and composition-aware World/Game queries. The current Concept Demo still uses the temporary unaddressed one-Pack compatibility path until W5/W5R split its cross-window artifact. W1 adds address math, W2 adds declared-shard validation and capacity admission, and W3 adds the immutable sparse structural manifest. None changes v1 Pack bytes.
 **Related:** [TERRAIN.md](TERRAIN.md), [ASSET_STREAMING.md](ASSET_STREAMING.md), [../README.md](../README.md), [../../Game/World/README.md](../../Game/World/README.md).
 
 ## 1. Core model
@@ -554,9 +554,30 @@ are implemented. Empty, one-Pack, 10,000-Pack sparse, and 65,536-entry
 manifests have permanent tests. This does not connect the manifest to the
 one-Pack runtime or claim any Pack residency.
 
-### W4 — PreparedWorldComposition (NEXT)
+### W4 — PreparedWorldComposition (CLOSED)
 
-Generalize one-Pack prepared World queries to a World-level prepared composition. Preserve exact one-Pack compatibility first.
+`PreparedWorldComposition` is the canonical immutable runtime root. It retains one
+`SpatialSpaceId`, valid `WorldCompositionRevision`, unchanged immutable
+`WorldStructuralManifest`, and a private sorted array of `PreparedWorldPack`
+address/view references. The prepared subset may be empty while the manifest
+remains complete authored truth. Cold transactional construction checks duplicate
+addresses, manifest membership/fingerprint, exact Space, W2 Pack window, and a
+common effective Game content fingerprint. The per-Pack `WorldPreparedView`
+continues to own the exact bound base plus independently revised overlay.
+
+Global chunk queries resolve their Pack internally via the W1 address mapping.
+Base terrain, neighbor-capable mesh source, vertical columns, frozen statics,
+Multi fragments, additional surface bands, replacement identity, and bounded
+static-bounds scans use the same accepted algorithms and borrowed views. A
+representative 64-Pack warmed lookup/query loop allocated zero managed bytes.
+
+`GameWorldState` can own either the new root or the legacy one-Pack view, never
+both. Its structural query surface, including the vertical-column reads used
+by Simple Physics, selects one root. `worldview/v1` explicitly refuses to
+capture a canonical composition rather than silently dropping Packs. W4 does
+not hot-swap compositions, acquire Packs, migrate persistence, or claim the
+full W6 structural-state vocabulary. The Concept Demo remains on the legacy
+path because its historical Pack spans future Pack (0,0) and (1,0).
 
 ### W5 — multi-Pack authority/local proof
 

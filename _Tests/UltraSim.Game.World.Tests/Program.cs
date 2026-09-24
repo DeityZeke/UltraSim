@@ -6,6 +6,7 @@ using UltraSim.ECS;
 using UltraSim.Game.Accounting;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Persistence;
+using UltraSim.Game.Physics;
 using UltraSim.Game.World;
 using UltraSim.Server.Persistence;
 using UltraSim.Server.Runtime;
@@ -35,6 +36,12 @@ var tests = new (string Name, Action Body)[]
     ("StructuralManifestInputOrderAndMutationsDetermineIdentity", StructuralManifestInputOrderAndMutationsDetermineIdentity),
     ("StructuralManifestOpenRejectsMalformedBytes", StructuralManifestOpenRejectsMalformedBytes),
     ("StructuralManifestSparseAndCapacityBoundsAreExact", StructuralManifestSparseAndCapacityBoundsAreExact),
+    ("PreparedCompositionValidatesCompleteCandidateAndSparseSubset", PreparedCompositionValidatesCompleteCandidateAndSparseSubset),
+    ("PreparedCompositionMatchesOnePackQueriesAndOverlay", PreparedCompositionMatchesOnePackQueriesAndOverlay),
+    ("PreparedCompositionRoutesDistantAndCrossPackStatics", PreparedCompositionRoutesDistantAndCrossPackStatics),
+    ("PreparedCompositionTerrainMeshHaloReadsNeighborPack", PreparedCompositionTerrainMeshHaloReadsNeighborPack),
+    ("GameWorldStateCanonicalCompositionIsExclusiveAndNotWorldviewV1", GameWorldStateCanonicalCompositionIsExclusiveAndNotWorldviewV1),
+    ("PreparedCompositionWarmedQueriesAllocateZero", PreparedCompositionWarmedQueriesAllocateZero),
     ("FloorDivisionOwnsNegativeBoundaries", FloorDivisionOwnsNegativeBoundaries),
     ("AllCrossingDirectionsAndCornersNormalize", AllCrossingDirectionsAndCornersNormalize),
     ("GlobalLocalRoundTripsAcrossFullProfile", GlobalLocalRoundTripsAcrossFullProfile),
@@ -808,6 +815,438 @@ static void StructuralManifestSparseAndCapacityBoundsAreExact()
     Console.WriteLine($"W3 SPARSE 10000 bytes={tenThousand.Length} entry_payload_bytes={tenThousand.EntryCount * 40} " +
         $"build_ms={buildMilliseconds} open_ms={openMilliseconds} lookup_allocated_bytes=0");
     Console.WriteLine($"W3 MAXIMUM entries={maximum.EntryCount} bytes={maximum.Length} one_over={oneOverError}");
+}
+
+static WorldPreparedView W4Shard(
+    WorldPackCoord coord,
+    int localX = 128,
+    int localZ = 128,
+    SpatialSpaceId? space = null,
+    WorldContentFingerprint? content = null,
+    ulong staticId = 0)
+{
+    SpatialSpaceId selectedSpace = space ?? WorldPackTestProfile.Space;
+    WorldContentFingerprint selectedContent = content ?? WorldPackTestProfile.Content;
+    True(WorldPackAddressing.TryToGlobal(coord, new WorldPackLocalChunkCoord(localX, localZ),
+        out SpatialChunkCoord global));
+    var builder = new WorldPackBuilder(selectedSpace, selectedContent,
+        new WorldPackLimits(1024 * 1024, 1, 3), coord);
+    var materials = new ushort[TerrainChunkFormat.MaterialCellCount];
+    Array.Fill(materials, (ushort)1);
+    var heights = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+    True(TerrainHeightPlaneBase.TryCreate(0, out TerrainHeightPlaneBase heightBase));
+    True(builder.TryAddBaseTerrain(new SpatialChunkKey(selectedSpace, global.X, global.Z),
+        materials, heightBase, heights, out _));
+    if (staticId != 0)
+    {
+        var position = new WorldPosition(global.X, global.Z, (ushort)(localX == 255 ? 15_900 : 100),
+            1_000, 0);
+        True(builder.TryAddFrozenStatic(CreateFrozenStatic(staticId, 1, position, 300), out _));
+    }
+    True(builder.TryBuild(out WorldPackArtifact? artifact, out _));
+    True(artifact!.Open().TryBind(new WorldContentBinding(selectedContent, [1, 2], [1]),
+        out BoundWorldPack? bound, out _));
+    return new WorldPreparedView(bound!);
+}
+
+static PreparedWorldComposition W4Composition(
+    SpatialSpaceId space,
+    WorldStructuralManifest manifest,
+    WorldCompositionRevision revision,
+    params PreparedWorldPack[] packs)
+{
+    True(PreparedWorldComposition.TryCreate(space, revision, manifest, packs,
+        out PreparedWorldComposition? composition, out PreparedWorldCompositionError error));
+    Equal(PreparedWorldCompositionError.None, error);
+    return composition!;
+}
+
+static void PreparedCompositionValidatesCompleteCandidateAndSparseSubset()
+{
+    SpatialSpaceId space = WorldPackTestProfile.Space;
+    WorldPackCoord origin = new(0, 0);
+    WorldPackCoord east = new(1, 0);
+    WorldPreparedView first = W4Shard(origin);
+    WorldPreparedView second = W4Shard(east, 0, 128);
+    WorldStructuralManifest manifest = StructuralManifest(
+        new WorldStructuralManifestEntry(origin, first.BaseWorldFingerprint),
+        new WorldStructuralManifestEntry(east, second.BaseWorldFingerprint));
+    PreparedWorldComposition empty = W4Composition(space, manifest, new(1));
+    Equal(0, empty.PreparedPackCount);
+    Equal(2, empty.ManifestEntryCount);
+    False(empty.TryGetBaseTerrain(new SpatialChunkKey(space, 0, 0), out _));
+    WorldStructuralManifest emptyManifest = StructuralManifest();
+    Equal(0, W4Composition(space, emptyManifest, new(1)).PreparedPackCount);
+    PreparedWorldComposition subset = W4Composition(space, manifest, new(1), new PreparedWorldPack(origin, first));
+    Equal(1, subset.PreparedPackCount);
+    Equal(manifest.Fingerprint, subset.ManifestFingerprint);
+    False(subset.TryGetBaseTerrain(new SpatialChunkKey(space, 128, 0), out _));
+    False(subset.TryGetBaseTerrain(new SpatialChunkKey(space, 20, 20), out _));
+    False(subset.TryGetBaseTerrain(new SpatialChunkKey(new SpatialSpaceId(991), 0, 0), out _));
+    PreparedWorldPack[] input = [new(east, second), new(origin, first)];
+    PreparedWorldComposition complete = W4Composition(space, manifest, new(2), input);
+    input[0] = default;
+    Equal(2, complete.PreparedPackCount);
+    True(complete.TryGetPreparedPackAt(0, out PreparedWorldPack ordered));
+    Equal(origin, ordered.Coord);
+    True(complete.TryGetPreparedPack(east, out PreparedWorldPack found));
+    True(ReferenceEquals(second, found.View));
+    Equal(manifest.Fingerprint, complete.ManifestFingerprint);
+    Equal(manifest.Fingerprint, subset.ManifestFingerprint);
+    Equal(2UL, complete.Revision.Value);
+    Equal(1UL, subset.Revision.Value);
+
+    void Reject(WorldStructuralManifest source, SpatialSpaceId targetSpace,
+        WorldCompositionRevision revision, PreparedWorldCompositionError expected,
+        params PreparedWorldPack[] candidates)
+    {
+        False(PreparedWorldComposition.TryCreate(targetSpace, revision, source, candidates,
+            out PreparedWorldComposition? rejected, out PreparedWorldCompositionError error));
+        Equal(null, rejected);
+        Equal(expected, error);
+    }
+    Reject(manifest, space, default, PreparedWorldCompositionError.InvalidRevision);
+    Reject(manifest, default, new(1), PreparedWorldCompositionError.InvalidSpace);
+    Reject(manifest, space, new(1), PreparedWorldCompositionError.DuplicatePreparedPack,
+        new PreparedWorldPack(origin, first), new PreparedWorldPack(origin, first));
+    Reject(StructuralManifest(new WorldStructuralManifestEntry(east, second.BaseWorldFingerprint)), space, new(1),
+        PreparedWorldCompositionError.PackNotInManifest, new PreparedWorldPack(origin, first));
+    Reject(StructuralManifest(new WorldStructuralManifestEntry(origin, StructuralTestFingerprint(7))), space, new(1),
+        PreparedWorldCompositionError.PackFingerprintMismatch, new PreparedWorldPack(origin, first));
+    Reject(StructuralManifest(new WorldStructuralManifestEntry(origin, second.BaseWorldFingerprint)), space, new(1),
+        PreparedWorldCompositionError.PackWindowMismatch, new PreparedWorldPack(origin, second));
+    WorldPreparedView foreignSpace = W4Shard(origin, space: new SpatialSpaceId(992));
+    Reject(StructuralManifest(new WorldStructuralManifestEntry(origin, foreignSpace.BaseWorldFingerprint)), space, new(1),
+        PreparedWorldCompositionError.PackSpaceMismatch, new PreparedWorldPack(origin, foreignSpace));
+    WorldPreparedView foreignContent = W4Shard(east, 0, 128,
+        content: new WorldContentFingerprint(123, 456));
+    Reject(StructuralManifest(new WorldStructuralManifestEntry(origin, first.BaseWorldFingerprint),
+            new WorldStructuralManifestEntry(east, foreignContent.BaseWorldFingerprint)), space, new(1),
+        PreparedWorldCompositionError.ContentBindingMismatch,
+        new PreparedWorldPack(origin, first), new PreparedWorldPack(east, foreignContent));
+}
+
+static void PreparedCompositionMatchesOnePackQueriesAndOverlay()
+{
+    WorldPack pack = CreateStructuredWorldPackArtifact(false, GameContent.WorldFingerprint,
+        GameWorldState.DefaultSpace).Open();
+    True(pack.TryValidateSpatialWindow(new WorldPackCoord(0, 0), out _, out _));
+    True(pack.TryBind(CreateGameWorldBinding(), out BoundWorldPack? bound, out _));
+    SpatialSpaceId space = bound!.Space;
+    var coord = new WorldPackCoord(0, 0);
+    var key = new SpatialChunkKey(space, 0, 0);
+    var point = new WorldPosition(0, 0, 1_000, 1_000, 0);
+    WorldStructuralManifest manifest = StructuralManifest(new WorldStructuralManifestEntry(coord, bound.Fingerprint));
+    var direct = new WorldPreparedView(bound);
+    PreparedWorldComposition composition = W4Composition(space, manifest, new(1), new PreparedWorldPack(coord, direct));
+    Equal(direct.ProbeBaseTerrainSurface(point), composition.ProbeBaseTerrainSurface(point));
+    Equal(direct.TrySampleBaseTerrainHeight(point, out int directHeight),
+        composition.TrySampleBaseTerrainHeight(point, out int composedHeight));
+    Equal(directHeight, composedHeight);
+    Equal(direct.TryResolveBaseTerrainMaterial(point, out ushort directMaterial),
+        composition.TryResolveBaseTerrainMaterial(point, out ushort composedMaterial));
+    Equal(directMaterial, composedMaterial);
+    True(direct.TryGetBaseTerrain(key, out WorldTerrainChunkView directTerrain));
+    True(composition.TryGetBaseTerrain(key, out WorldTerrainChunkView composedTerrain));
+    Equal(directTerrain.GetMaterial(0), composedTerrain.GetMaterial(0));
+    True(direct.TryGetFrozenStatics(key, out WorldFrozenStaticChunkView directStatics));
+    True(composition.TryGetFrozenStatics(key, out WorldFrozenStaticChunkView composedStatics));
+    Equal(directStatics.Count, composedStatics.Count);
+    for (int index = 0; index < directStatics.Count; index++)
+        Equal(directStatics.GetRecord(index), composedStatics.GetRecord(index));
+    True(direct.TryGetMultiFragments(key, out WorldMultiFragmentChunkView directMulti));
+    True(composition.TryGetMultiFragments(key, out WorldMultiFragmentChunkView composedMulti));
+    Equal(directMulti.Count, composedMulti.Count);
+    for (int index = 0; index < directMulti.Count; index++)
+        Equal(directMulti.GetRecord(index), composedMulti.GetRecord(index));
+    Equal(direct.TryGetAdditionalTerrainSurfaceBands(key, out WorldTerrainSurfaceBandChunkView directBands),
+        composition.TryGetAdditionalTerrainSurfaceBands(key, out WorldTerrainSurfaceBandChunkView composedBands));
+    Equal(directBands.Count, composedBands.Count);
+    Span<WorldTerrainColumnSurface> directColumn = stackalloc WorldTerrainColumnSurface[8];
+    Span<WorldTerrainColumnSurface> composedColumn = stackalloc WorldTerrainColumnSurface[8];
+    Equal(direct.TryCopyTerrainColumnSurfaces(point, directColumn, out int dc, out int dr),
+        composition.TryCopyTerrainColumnSurfaces(point, composedColumn, out int cc, out int cr));
+    Equal(dc, cc);
+    Equal(dr, cr);
+    True(directColumn[..dc].SequenceEqual(composedColumn[..cc]));
+    Equal(direct.TryFindHighestSupportAtOrBelow(point, int.MaxValue, out WorldTerrainColumnSurface ds),
+        composition.TryFindHighestSupportAtOrBelow(point, int.MaxValue, out WorldTerrainColumnSurface cs));
+    Equal(ds, cs);
+
+    var verticesA = new TerrainBaseMeshVertex[TerrainChunkFormat.HeightVertexCount];
+    var verticesB = new TerrainBaseMeshVertex[verticesA.Length];
+    var indicesA = new ushort[TerrainChunkFormat.TriangleIndexCount];
+    var indicesB = new ushort[indicesA.Length];
+    var materialsA = new ushort[TerrainChunkFormat.TriangleCount];
+    var materialsB = new ushort[materialsA.Length];
+    True(direct.TryBuildBaseTerrainMesh(key, verticesA, indicesA, materialsA, out var summaryA, out _));
+    True(composition.TryBuildBaseTerrainMesh(key, verticesB, indicesB, materialsB, out var summaryB, out _));
+    Equal(summaryA, summaryB);
+    True(verticesA.AsSpan().SequenceEqual(verticesB));
+    True(indicesA.AsSpan().SequenceEqual(indicesB));
+    True(materialsA.AsSpan().SequenceEqual(materialsB));
+    var bounds = new WorldStaticBounds(-16_000, -2_000, -16_000, 16_000, 4_000, 16_000);
+    var hitsA = new WorldStaticQueryHit[16];
+    var hitsB = new WorldStaticQueryHit[16];
+    True(direct.TryQueryStaticBounds(bounds, 32, hitsA, out int countA, out int requiredA, out _));
+    True(composition.TryQueryStaticBounds(bounds, 32, hitsB, out int countB, out int requiredB, out _));
+    Equal(countA, countB);
+    Equal(requiredA, requiredB);
+    True(hitsA.AsSpan(0, countA).SequenceEqual(hitsB.AsSpan(0, countB)));
+
+    WorldMutableOverlay overlay = CreateReplacementOverlay(bound, key, GameTerrainMaterialIds.Snow,
+        new WorldStaticId(9_555));
+    direct = new WorldPreparedView(bound, overlay);
+    composition = W4Composition(space, manifest, new(2), new PreparedWorldPack(coord, direct));
+    Equal(direct.ProbeBaseTerrainSurface(point), composition.ProbeBaseTerrainSurface(point));
+    Equal(direct.TryGetReplacementIdentity(key, out WorldChunkContentRevision directRev,
+            out WorldChunkContentHash directHash),
+        composition.TryGetReplacementIdentity(key, out WorldChunkContentRevision composedRev,
+            out WorldChunkContentHash composedHash));
+    Equal(directRev, composedRev);
+    Equal(directHash, composedHash);
+    True(composition.TryQueryStaticBounds(bounds, 32, hitsB, out countB, out requiredB, out _));
+    True(direct.TryQueryStaticBounds(bounds, 32, hitsA, out countA, out requiredA, out _));
+    True(hitsA.AsSpan(0, countA).SequenceEqual(hitsB.AsSpan(0, countB)));
+
+    WorldPack voidPack = CreatePresenceWorldPackArtifact(withVoid: true, explicitAllPresent: false).Open();
+    True(voidPack.TryBind(new WorldContentBinding(WorldPackTestProfile.Content, [1, 2, 3, 4, 5]),
+        out BoundWorldPack? voidBound, out _));
+    var voidView = new WorldPreparedView(voidBound!);
+    var voidComposition = W4Composition(voidBound!.Space,
+        StructuralManifest(new WorldStructuralManifestEntry(coord, voidBound.Fingerprint)), new(1),
+        new PreparedWorldPack(coord, voidView));
+    for (int x = 0; x < 16_000; x += 500)
+    for (int z = 0; z < 16_000; z += 500)
+    {
+        var location = new WorldPosition(0, 0, checked((ushort)x), checked((ushort)z), 0);
+        Equal(voidView.ProbeBaseTerrainSurface(location), voidComposition.ProbeBaseTerrainSurface(location));
+    }
+
+    var shellBuilder = new WorldPackBuilder(WorldPackTestProfile.Space, WorldPackTestProfile.Content,
+        new WorldPackLimits(512 * 1024, 1, 8), coord);
+    var shellMaterials = new ushort[TerrainChunkFormat.MaterialCellCount];
+    Array.Fill(shellMaterials, (ushort)1);
+    var shellHeights = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+    True(TerrainHeightPlaneBase.TryCreate(0, out TerrainHeightPlaneBase zero));
+    var shellKey = new SpatialChunkKey(WorldPackTestProfile.Space, 0, 0);
+    True(shellBuilder.TryAddBaseTerrain(shellKey, shellMaterials, zero, shellHeights, out _));
+    True(shellBuilder.TryAddAdditionalTerrainSurfaceBand(shellKey, new WorldSurfaceId(11),
+        new TerrainSurfacePatchBounds(0, 0, 1, 1), WorldTerrainSurfaceFaces.Top,
+        [1UL], [TerrainSurfaceEdgeConnection.None], [2], zero,
+        [new TerrainHeightOffset(0), new TerrainHeightOffset(0),
+            new TerrainHeightOffset(0), new TerrainHeightOffset(0)],
+        [], default, [], 0, out _));
+    True(shellBuilder.TryBuild(out WorldPackArtifact? shellArtifact, out _));
+    True(shellArtifact!.Open().TryBind(new WorldContentBinding(WorldPackTestProfile.Content, [1, 2]),
+        out BoundWorldPack? shellBound, out _));
+    var shellView = new WorldPreparedView(shellBound!);
+    var shellComposition = W4Composition(WorldPackTestProfile.Space,
+        StructuralManifest(new WorldStructuralManifestEntry(coord, shellBound!.Fingerprint)), new(1),
+        new PreparedWorldPack(coord, shellView));
+    True(shellComposition.TryGetAdditionalTerrainSurfaceBands(shellKey, out WorldTerrainSurfaceBandChunkView shellBands));
+    Equal(1, shellBands.Count);
+    var shellPoint = new WorldPosition(0, 0, 100, 100, 0);
+    Equal(shellView.TryCopyTerrainColumnSurfaces(shellPoint, directColumn, out dc, out dr),
+        shellComposition.TryCopyTerrainColumnSurfaces(shellPoint, composedColumn, out cc, out cr));
+    Equal(2, dc);
+    True(directColumn[..dc].SequenceEqual(composedColumn[..cc]));
+    Equal(shellView.TryFindNearestSupport(shellPoint, 1, out ds),
+        shellComposition.TryFindNearestSupport(shellPoint, 1, out cs));
+    Equal(ds, cs);
+}
+
+static void PreparedCompositionRoutesDistantAndCrossPackStatics()
+{
+    SpatialSpaceId space = WorldPackTestProfile.Space;
+    var origin = new WorldPackCoord(0, 0);
+    var east = new WorldPackCoord(1, 0);
+    var distant = new WorldPackCoord(2000, -500);
+    WorldPreparedView left = W4Shard(origin, 255, 128, staticId: 101);
+    WorldPreparedView right = W4Shard(east, 0, 128, staticId: 102);
+    WorldPreparedView far = W4Shard(distant);
+    var manifest = StructuralManifest(new WorldStructuralManifestEntry(origin, left.BaseWorldFingerprint),
+        new WorldStructuralManifestEntry(east, right.BaseWorldFingerprint),
+        new WorldStructuralManifestEntry(distant, far.BaseWorldFingerprint));
+    PreparedWorldComposition composition = W4Composition(space, manifest, new(1),
+        new PreparedWorldPack(distant, far), new PreparedWorldPack(east, right),
+        new PreparedWorldPack(origin, left));
+    Equal(3, composition.PreparedPackCount);
+    Equal(3L * (sizeof(int) * 2 + IntPtr.Size), composition.PreparedIndexReservedBytes);
+    True(composition.TryGetBaseTerrain(new SpatialChunkKey(space, 127, 0), out _));
+    True(composition.TryGetBaseTerrain(new SpatialChunkKey(space, 128, 0), out _));
+    True(composition.TryGetBaseTerrain(new SpatialChunkKey(space, 512_000, -128_000), out _));
+    False(composition.TryGetBaseTerrain(new SpatialChunkKey(space, 256_000, 0), out _));
+    long seam = 128L * GameWorldSpatialProfile.WorldChunkEdgeUnits;
+    var bounds = new WorldStaticBounds(seam - 500, -400, 0, seam + 500, 400, 2_000);
+    var hits = new WorldStaticQueryHit[4];
+    True(composition.TryQueryStaticBounds(bounds, 16, hits, out int count, out int required, out _));
+    Equal(2, count);
+    Equal(2, required);
+    True(hits[0].StaticId != hits[1].StaticId);
+    var leftKey = new SpatialChunkKey(space, 127, 0);
+    var rightKey = new SpatialChunkKey(space, 128, 0);
+    WorldMutableOverlay? leftOverlay = null;
+    WorldMutableOverlay? rightOverlay = null;
+    for (int index = 0; index < 2; index++)
+        leftOverlay = CreateReplacementOverlay(left.BaseWorld, leftKey, 2,
+            new WorldStaticId((ulong)(201 + index)), leftOverlay);
+    for (int index = 0; index < 7; index++)
+        rightOverlay = CreateReplacementOverlay(right.BaseWorld, rightKey, 2,
+            new WorldStaticId((ulong)(301 + index)), rightOverlay);
+    PreparedWorldComposition changed = W4Composition(space, manifest, new(3),
+        new(origin, new WorldPreparedView(left.BaseWorld, leftOverlay)),
+        new(east, new WorldPreparedView(right.BaseWorld, rightOverlay)),
+        new(distant, far));
+    Equal(manifest.Fingerprint, changed.ManifestFingerprint);
+    True(changed.TryGetReplacementIdentity(leftKey, out WorldChunkContentRevision leftRevision, out _));
+    True(changed.TryGetReplacementIdentity(rightKey, out WorldChunkContentRevision rightRevision, out _));
+    Equal(2UL, leftOverlay!.Revision.Value);
+    Equal(7UL, rightOverlay!.Revision.Value);
+    Equal(2UL, leftRevision.Value);
+    Equal(7UL, rightRevision.Value);
+    Console.WriteLine($"W4 SPARSE prepared={composition.PreparedPackCount} index_bytes={composition.PreparedIndexReservedBytes} seam_statics={count}");
+}
+
+static void PreparedCompositionTerrainMeshHaloReadsNeighborPack()
+{
+    BoundWorldPack combined = CreateBoundTerrainWorld(127, 128, 0, 0, SmoothHeight, QueryMaterial);
+    BoundWorldPack left = CreateBoundTerrainWorld(127, 127, 0, 0, SmoothHeight, QueryMaterial);
+    BoundWorldPack right = CreateBoundTerrainWorld(128, 128, 0, 0, SmoothHeight, QueryMaterial);
+    var leftCoord = new WorldPackCoord(0, 0);
+    var rightCoord = new WorldPackCoord(1, 0);
+    True(left.Pack.TryValidateSpatialWindow(leftCoord, out _, out _));
+    True(right.Pack.TryValidateSpatialWindow(rightCoord, out _, out _));
+    var composition = W4Composition(left.Space,
+        StructuralManifest(new WorldStructuralManifestEntry(leftCoord, left.Fingerprint),
+            new WorldStructuralManifestEntry(rightCoord, right.Fingerprint)), new(1),
+        new PreparedWorldPack(leftCoord, new WorldPreparedView(left)),
+        new PreparedWorldPack(rightCoord, new WorldPreparedView(right)));
+    var legacy = new WorldPreparedView(combined);
+    var firstVertices = new TerrainBaseMeshVertex[TerrainChunkFormat.HeightVertexCount];
+    var secondVertices = new TerrainBaseMeshVertex[firstVertices.Length];
+    var firstIndices = new ushort[TerrainChunkFormat.TriangleIndexCount];
+    var secondIndices = new ushort[firstIndices.Length];
+    var firstMaterials = new ushort[TerrainChunkFormat.TriangleCount];
+    var secondMaterials = new ushort[firstMaterials.Length];
+    foreach (int x in new[] { 127, 128 })
+    {
+        var key = new SpatialChunkKey(left.Space, x, 0);
+        True(legacy.TryBuildBaseTerrainMesh(key, firstVertices, firstIndices, firstMaterials,
+            out TerrainBaseMeshSummary firstSummary, out _));
+        True(composition.TryBuildBaseTerrainMesh(key, secondVertices, secondIndices, secondMaterials,
+            out TerrainBaseMeshSummary secondSummary, out _));
+        Equal(firstSummary, secondSummary);
+        True(firstVertices.AsSpan().SequenceEqual(secondVertices));
+        True(firstIndices.AsSpan().SequenceEqual(secondIndices));
+        True(firstMaterials.AsSpan().SequenceEqual(secondMaterials));
+    }
+}
+
+static void GameWorldStateCanonicalCompositionIsExclusiveAndNotWorldviewV1()
+{
+    WorldPack pack = CreateStructuredWorldPackArtifact(false, GameContent.WorldFingerprint,
+        GameWorldState.DefaultSpace).Open();
+    True(pack.TryBind(CreateGameWorldBinding(), out BoundWorldPack? bound, out _));
+    var coord = new WorldPackCoord(0, 0);
+    PreparedWorldComposition composition = W4Composition(GameWorldState.DefaultSpace,
+        StructuralManifest(new WorldStructuralManifestEntry(coord, bound!.Fingerprint)), new(1),
+        new PreparedWorldPack(coord, new WorldPreparedView(bound)));
+    using var legacyWorld = new EcsWorld(GameSchema.CreateSchema(), UltraSimGameComposition.CreateWorldOptions(64));
+    using var canonicalWorld = new EcsWorld(GameSchema.CreateSchema(), UltraSimGameComposition.CreateWorldOptions(64));
+    using var legacy = new GameWorldState(legacyWorld, bound);
+    using var canonical = new GameWorldState(canonicalWorld, preparedComposition: composition);
+    Equal(null, canonical.BaseWorld);
+    Equal(null, canonical.PreparedWorld);
+    True(ReferenceEquals(composition, canonical.PreparedComposition));
+    False(canonical.TryInstallPreparedWorld(bound, null));
+    False(legacy.TryInstallPreparedComposition(composition));
+    var point = new WorldPosition(0, 0, 1_000, 1_000, 0);
+    Equal(legacy.ProbeBaseTerrainSurface(point), canonical.ProbeBaseTerrainSurface(point));
+    Equal(legacy.TryResolveBaseTerrainMaterial(point, out ushort a),
+        canonical.TryResolveBaseTerrainMaterial(point, out ushort b));
+    Equal(a, b);
+    var bounds = new WorldStaticBounds(-16_000, -2_000, -16_000, 16_000, 4_000, 16_000);
+    var hitsA = new WorldStaticQueryHit[16];
+    var hitsB = new WorldStaticQueryHit[16];
+    True(legacy.TryQueryStaticBounds(bounds, 32, hitsA, out int countA, out _, out _));
+    True(canonical.TryQueryStaticBounds(bounds, 32, hitsB, out int countB, out _, out _));
+    True(hitsA.AsSpan(0, countA).SequenceEqual(hitsB.AsSpan(0, countB)));
+    var body = new SimplePhysicsBody(200, 200, 100, 100, 1_700, 300, 300);
+    var occupancy = new SimpleOccupancyRequest(new WorldPosition(0, 0, 8_000, 8_000, 0), body);
+    Equal(new UltraSimSimplePhysics(legacy).ProbeOccupancy(occupancy, [], true),
+        new UltraSimSimplePhysics(canonical).ProbeOccupancy(occupancy, [], true));
+    using var stagingWorld = new EcsWorld(GameSchema.CreateSchema(), UltraSimGameComposition.CreateWorldOptions(64));
+    using var staging = new GameWorldState(stagingWorld);
+    True(staging.TryInstallPreparedComposition(composition));
+    False(staging.TryInstallPreparedComposition(composition));
+    False(staging.TryPublishOverlay(CreateReplacementOverlay(bound, new SpatialChunkKey(bound.Space, 0, 0),
+        GameTerrainMaterialIds.Snow, new WorldStaticId(9_777))));
+    var participant = new WorldSaveSetParticipant(canonical, new PersistentWorldId(0x7444),
+        new WorldPersistenceOptions(1_000_000));
+    Throws<NotSupportedException>(() => participant.Capture(new SaveSetContext(1, 0)));
+    PreparedWorldComposition empty = W4Composition(GameWorldState.DefaultSpace,
+        StructuralManifest(), new(1));
+    using var emptyWorld = new EcsWorld(GameSchema.CreateSchema(), UltraSimGameComposition.CreateWorldOptions(64));
+    using var emptyState = new GameWorldState(emptyWorld, preparedComposition: empty);
+    Equal(BaseTerrainSurfaceStatus.Unavailable, emptyState.ProbeBaseTerrainSurface(point).Status);
+    False(emptyState.TrySampleBaseTerrainHeight(point, out _));
+    True(emptyState.TryQueryStaticBounds(bounds, 32, hitsB, out countB, out _, out _));
+    Equal(0, countB);
+    Throws<ArgumentException>(() => _ = new GameWorldState(canonicalWorld, bound,
+        preparedComposition: composition));
+}
+
+static void PreparedCompositionWarmedQueriesAllocateZero()
+{
+    SpatialSpaceId space = WorldPackTestProfile.Space;
+    var entries = new WorldStructuralManifestEntry[64];
+    var prepared = new PreparedWorldPack[64];
+    for (int index = 0; index < 64; index++)
+    {
+        var coord = new WorldPackCoord(index, -index);
+        WorldPreparedView view = W4Shard(coord);
+        entries[index] = new WorldStructuralManifestEntry(coord, view.BaseWorldFingerprint);
+        prepared[index] = new PreparedWorldPack(coord, view);
+    }
+    PreparedWorldComposition composition = W4Composition(space, StructuralManifest(entries), new(1), prepared);
+    var key = new SpatialChunkKey(space, 0, 0);
+    var point = new WorldPosition(0, 0, 1_000, 1_000, 0);
+    True(composition.TryGetPreparedPack(new WorldPackCoord(0, 0), out _));
+    True(composition.TryGetBaseTerrain(key, out _));
+    True(composition.TrySampleBaseTerrainHeight(point, out _));
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    int checksum = 0;
+    long lookupStarted = Stopwatch.GetTimestamp();
+    for (int iteration = 0; iteration < 100_000; iteration++)
+    {
+        WorldPackCoord coord = new(iteration % 64, -(iteration % 64));
+        if (!composition.TryGetPreparedPack(coord, out PreparedWorldPack pack))
+            throw new Exception("Missing prepared Pack.");
+        checksum += pack.Coord.X;
+    }
+    long lookupTicks = Stopwatch.GetTimestamp() - lookupStarted;
+    long queryStarted = Stopwatch.GetTimestamp();
+    for (int iteration = 0; iteration < 100_000; iteration++)
+    {
+        if (!composition.TryGetBaseTerrain(key, out WorldTerrainChunkView terrain))
+            throw new Exception("Missing prepared chunk.");
+        checksum += terrain.GetMaterial(iteration % TerrainChunkFormat.MaterialCellCount);
+    }
+    long queryTicks = Stopwatch.GetTimestamp() - queryStarted;
+    for (int iteration = 0; iteration < 100_000; iteration++)
+    {
+        if (!composition.TrySampleBaseTerrainHeight(point, out int height))
+            throw new Exception("Missing prepared height.");
+        checksum += height;
+    }
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+    Equal(0L, allocated);
+    True(checksum != 0);
+    Console.WriteLine($"W4 LOOKUP64 operations_each=100000 lookup_ticks={lookupTicks} " +
+        $"lookup_ns_each={lookupTicks * 1_000_000_000.0 / Stopwatch.Frequency / 100_000:F1} " +
+        $"chunk_query_ticks={queryTicks} chunk_query_ns_each={queryTicks * 1_000_000_000.0 / Stopwatch.Frequency / 100_000:F1} " +
+        $"allocated_bytes={allocated}");
 }
 
 static void FullDeclaredWorldPackAcceptance()

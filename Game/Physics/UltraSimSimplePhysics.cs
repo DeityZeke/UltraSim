@@ -297,12 +297,12 @@ public sealed class UltraSimSimplePhysics
         if (!request.IsValid)
             throw new ArgumentException(
                 "A valid Simple Physics airborne request is required.", nameof(request));
-        if (_world.PreparedWorld is not WorldPreparedView world ||
-            !WorldPosition.TryFromGlobalMillimeters(
-                request.TargetXMillimeters,
-                request.TargetYMillimeters,
-                request.TargetZMillimeters,
-                out WorldPosition target))
+        GameWorldState world = _world;
+        if (!WorldPosition.TryFromGlobalMillimeters(
+            request.TargetXMillimeters,
+            request.TargetYMillimeters,
+            request.TargetZMillimeters,
+            out WorldPosition target))
         {
             return new SimpleAirborneMotionResult(
                 SimpleAirborneMotionStatus.OutsidePreparedWorld, default);
@@ -534,7 +534,7 @@ public sealed class UltraSimSimplePhysics
     }
 
     private bool TryResolveDescendingEdgeMotion(
-        WorldPreparedView world,
+        GameWorldState world,
         in SimpleAirborneMotionRequest request,
         ReadOnlySpan<WorldStaticBounds> dynamicBlockingBounds,
         bool dynamicProjectionComplete,
@@ -745,9 +745,7 @@ public sealed class UltraSimSimplePhysics
     {
         resolved = default;
         support = default;
-        WorldPreparedView? world = _world.PreparedWorld;
-        if (world is null)
-            return TerrainResolutionStatus.OutsidePreparedWorld;
+        GameWorldState world = _world;
         WorldTerrainColumnQueryStatus query = world.TryFindNearestSupport(
             target,
             target.YMillimeters,
@@ -805,13 +803,12 @@ public sealed class UltraSimSimplePhysics
     {
         resolved = default;
         support = default;
-        WorldPreparedView? world = _world.PreparedWorld;
-        if (world is null ||
-            !WorldPosition.TryFromGlobalMillimeters(
-                globalXMillimeters,
-                referenceYMillimeters,
-                globalZMillimeters,
-                out WorldPosition probe))
+        GameWorldState world = _world;
+        if (!WorldPosition.TryFromGlobalMillimeters(
+            globalXMillimeters,
+            referenceYMillimeters,
+            globalZMillimeters,
+            out WorldPosition probe))
             return TerrainResolutionStatus.OutsidePreparedWorld;
 
         int maximumY = ClampAdd(referenceYMillimeters, maximumStepUpMillimeters);
@@ -974,13 +971,13 @@ public sealed class UltraSimSimplePhysics
         bounds.MaximumZExclusiveMillimeters >= maximumZExclusive;
 
     private static TerrainResolutionStatus ValidateTerrainClearance(
-        WorldPreparedView world,
+        GameWorldState world,
         in WorldPosition standing,
         in SimplePhysicsBody body) =>
         ValidateTerrainClearance(world, standing, body, default);
 
     private static TerrainResolutionStatus ValidateTerrainClearance(
-        WorldPreparedView world,
+        GameWorldState world,
         in WorldPosition standing,
         in SimplePhysicsBody body,
         in WorldTerrainColumnSurface centerSupport)
@@ -1040,7 +1037,7 @@ public sealed class UltraSimSimplePhysics
     }
 
     private static TerrainResolutionStatus ValidateFootprintAndClearance(
-        WorldPreparedView world,
+        GameWorldState world,
         in WorldPosition standing,
         in SimplePhysicsBody body,
         in WorldTerrainColumnSurface centerSupport,
@@ -1092,7 +1089,7 @@ public sealed class UltraSimSimplePhysics
     }
 
     private static TerrainResolutionStatus ValidateStructuralFootprint(
-        WorldPreparedView world,
+        GameWorldState world,
         in WorldPosition position,
         in SimplePhysicsBody body)
     {

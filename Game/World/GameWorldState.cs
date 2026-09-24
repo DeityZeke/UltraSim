@@ -56,7 +56,8 @@ public sealed class GameWorldState : IDisposable
         EcsWorld world,
         BoundWorldPack? baseWorld = null,
         ChunkPublicationLimits? publicationLimits = null,
-        WorldMutableOverlay? overlay = null)
+        WorldMutableOverlay? overlay = null,
+        PreparedWorldComposition? preparedComposition = null)
     {
         ArgumentNullException.ThrowIfNull(world);
         if (baseWorld is not null && baseWorld.Space != DefaultSpace)
@@ -67,6 +68,10 @@ public sealed class GameWorldState : IDisposable
         }
         if (baseWorld is null && overlay is not null)
             throw new ArgumentException("A mutable overlay requires an exact immutable base world.", nameof(overlay));
+        if (preparedComposition is not null && (baseWorld is not null || overlay is not null))
+            throw new ArgumentException("Legacy and canonical structural roots are mutually exclusive.", nameof(preparedComposition));
+        if (preparedComposition is not null && preparedComposition.Space != DefaultSpace)
+            throw new ArgumentException("The prepared composition belongs to a different Game space.", nameof(preparedComposition));
         if (world.Options.LifecycleRecordCapacity <= 0)
             throw new ArgumentException("Spatial-enabled worlds require retained ECS lifecycle history.", nameof(world));
         _worldId = world.Id;
@@ -94,13 +99,18 @@ public sealed class GameWorldState : IDisposable
         Publications = new ChunkPublicationStore(PublicationEpoch.Create(), limits);
         BaseWorld = baseWorld;
         PreparedWorld = baseWorld is null ? null : new WorldPreparedView(baseWorld, overlay);
+        PreparedComposition = preparedComposition;
     }
 
     public WorldId WorldId => _worldId;
     public WorldSpatialIndex Index { get; private set; }
     public ChunkPublicationStore Publications { get; private set; }
+    /// <summary>Temporary one-Pack compatibility root, including the current Concept Demo.</summary>
     public BoundWorldPack? BaseWorld { get; private set; }
+    /// <summary>Temporary one-Pack compatibility view; never live with PreparedComposition.</summary>
     public WorldPreparedView? PreparedWorld { get; private set; }
+    /// <summary>Canonical immutable World structural root. Not yet supported by worldview/v1 saves.</summary>
+    public PreparedWorldComposition? PreparedComposition { get; private set; }
     public WorldMutableOverlay? Overlay => PreparedWorld?.Overlay;
 
     /// <summary>Installs the fully resolved current-world view into an unpublished staging shell.</summary>
@@ -108,7 +118,7 @@ public sealed class GameWorldState : IDisposable
     {
         EnsureOwner();
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_initialized || BaseWorld is not null || PreparedWorld is not null ||
+        if (_initialized || BaseWorld is not null || PreparedWorld is not null || PreparedComposition is not null ||
             baseWorld is null && overlay is not null ||
             baseWorld is not null && baseWorld.Space != DefaultSpace ||
             overlay is not null &&
@@ -116,6 +126,19 @@ public sealed class GameWorldState : IDisposable
             return false;
         BaseWorld = baseWorld;
         PreparedWorld = baseWorld is null ? null : new WorldPreparedView(baseWorld, overlay);
+        return true;
+    }
+
+    /// <summary>Installs one validated immutable composition in an unpublished staging shell.</summary>
+    public bool TryInstallPreparedComposition(PreparedWorldComposition candidate)
+    {
+        EnsureOwner();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(candidate);
+        if (_initialized || BaseWorld is not null || PreparedWorld is not null ||
+            PreparedComposition is not null || candidate.Space != DefaultSpace)
+            return false;
+        PreparedComposition = candidate;
         return true;
     }
 
@@ -141,6 +164,8 @@ public sealed class GameWorldState : IDisposable
     public bool TrySampleBaseTerrainHeight(in WorldPosition location, out int heightMillimeters)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (PreparedComposition is not null)
+            return PreparedComposition.TrySampleBaseTerrainHeight(location, out heightMillimeters);
         if (PreparedWorld is null)
         {
             heightMillimeters = 0;
@@ -157,9 +182,9 @@ public sealed class GameWorldState : IDisposable
     public BaseTerrainSurfaceSample ProbeBaseTerrainSurface(in WorldPosition location)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        return PreparedWorld is null
-            ? BaseTerrainSurfaceSample.Unavailable
-            : PreparedWorld.ProbeBaseTerrainSurface(location);
+        if (PreparedComposition is not null)
+            return PreparedComposition.ProbeBaseTerrainSurface(location);
+        return PreparedWorld?.ProbeBaseTerrainSurface(location) ?? BaseTerrainSurfaceSample.Unavailable;
     }
 
     /// <summary>
@@ -168,12 +193,64 @@ public sealed class GameWorldState : IDisposable
     public bool TryResolveBaseTerrainMaterial(in WorldPosition location, out ushort materialId)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (PreparedComposition is not null)
+            return PreparedComposition.TryResolveBaseTerrainMaterial(location, out materialId);
         if (PreparedWorld is null)
         {
             materialId = 0;
             return false;
         }
         return PreparedWorld.TryResolveBaseTerrainMaterial(location, out materialId);
+    }
+
+    /// <summary>Reads the complete authoritative vertical terrain column from one structural root.</summary>
+    public WorldTerrainColumnQueryStatus TryCopyTerrainColumnSurfaces(
+        in WorldPosition location, Span<WorldTerrainColumnSurface> destination,
+        out int count, out int required)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (PreparedComposition is not null)
+            return PreparedComposition.TryCopyTerrainColumnSurfaces(location, destination, out count, out required);
+        if (PreparedWorld is not null)
+            return PreparedWorld.TryCopyTerrainColumnSurfaces(location, destination, out count, out required);
+        count = required = 0;
+        return WorldTerrainColumnQueryStatus.Unavailable;
+    }
+
+    public WorldTerrainColumnQueryStatus TryFindHighestSupportAtOrBelow(
+        in WorldPosition location, int maximumHeightMillimeters, out WorldTerrainColumnSurface support)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (PreparedComposition is not null)
+            return PreparedComposition.TryFindHighestSupportAtOrBelow(location, maximumHeightMillimeters, out support);
+        if (PreparedWorld is not null)
+            return PreparedWorld.TryFindHighestSupportAtOrBelow(location, maximumHeightMillimeters, out support);
+        support = default;
+        return WorldTerrainColumnQueryStatus.Unavailable;
+    }
+
+    public WorldTerrainColumnQueryStatus TryFindNearestSupport(
+        in WorldPosition location, int requestedHeightMillimeters, out WorldTerrainColumnSurface support)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (PreparedComposition is not null)
+            return PreparedComposition.TryFindNearestSupport(location, requestedHeightMillimeters, out support);
+        if (PreparedWorld is not null)
+            return PreparedWorld.TryFindNearestSupport(location, requestedHeightMillimeters, out support);
+        support = default;
+        return WorldTerrainColumnQueryStatus.Unavailable;
+    }
+
+    public WorldTerrainColumnQueryStatus TryFindLowestCeilingAtOrAbove(
+        in WorldPosition location, int minimumHeightMillimeters, out WorldTerrainColumnSurface ceiling)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (PreparedComposition is not null)
+            return PreparedComposition.TryFindLowestCeilingAtOrAbove(location, minimumHeightMillimeters, out ceiling);
+        if (PreparedWorld is not null)
+            return PreparedWorld.TryFindLowestCeilingAtOrAbove(location, minimumHeightMillimeters, out ceiling);
+        ceiling = default;
+        return WorldTerrainColumnQueryStatus.Unavailable;
     }
 
     /// <summary>
@@ -196,6 +273,9 @@ public sealed class GameWorldState : IDisposable
             error = WorldStaticQueryError.InvalidBounds;
             return false;
         }
+        if (PreparedComposition is not null)
+            return PreparedComposition.TryQueryStaticBounds(bounds, maximumCandidateChunks, destination,
+                out count, out required, out error);
         if (PreparedWorld is null)
         {
             error = WorldStaticQueryError.None;

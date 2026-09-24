@@ -332,6 +332,14 @@ public static class WorldTerrainColumnQueries
         out int required) =>
         Query(new TerrainColumnSource(world), location, destination, out count, out required);
 
+    public static WorldTerrainColumnQueryStatus TryCopyTerrainColumnSurfaces(
+        this PreparedWorldComposition world,
+        in WorldPosition location,
+        Span<WorldTerrainColumnSurface> destination,
+        out int count,
+        out int required) =>
+        Query(new TerrainColumnSource(world), location, destination, out count, out required);
+
     public static WorldTerrainColumnQueryStatus TryFindHighestSupportAtOrBelow(
         this BoundWorldPack world,
         in WorldPosition location,
@@ -341,6 +349,13 @@ public static class WorldTerrainColumnQueries
 
     public static WorldTerrainColumnQueryStatus TryFindHighestSupportAtOrBelow(
         this WorldPreparedView world,
+        in WorldPosition location,
+        int maximumHeightMillimeters,
+        out WorldTerrainColumnSurface support) =>
+        Find(new TerrainColumnSource(world), location, maximumHeightMillimeters, support: true, out support);
+
+    public static WorldTerrainColumnQueryStatus TryFindHighestSupportAtOrBelow(
+        this PreparedWorldComposition world,
         in WorldPosition location,
         int maximumHeightMillimeters,
         out WorldTerrainColumnSurface support) =>
@@ -367,6 +382,14 @@ public static class WorldTerrainColumnQueries
         FindNearestSupport(
             new TerrainColumnSource(world), location, requestedHeightMillimeters, out support);
 
+    public static WorldTerrainColumnQueryStatus TryFindNearestSupport(
+        this PreparedWorldComposition world,
+        in WorldPosition location,
+        int requestedHeightMillimeters,
+        out WorldTerrainColumnSurface support) =>
+        FindNearestSupport(
+            new TerrainColumnSource(world), location, requestedHeightMillimeters, out support);
+
     public static WorldTerrainColumnQueryStatus TryFindLowestCeilingAtOrAbove(
         this BoundWorldPack world,
         in WorldPosition location,
@@ -376,6 +399,13 @@ public static class WorldTerrainColumnQueries
 
     public static WorldTerrainColumnQueryStatus TryFindLowestCeilingAtOrAbove(
         this WorldPreparedView world,
+        in WorldPosition location,
+        int minimumHeightMillimeters,
+        out WorldTerrainColumnSurface ceiling) =>
+        Find(new TerrainColumnSource(world), location, minimumHeightMillimeters, support: false, out ceiling);
+
+    public static WorldTerrainColumnQueryStatus TryFindLowestCeilingAtOrAbove(
+        this PreparedWorldComposition world,
         in WorldPosition location,
         int minimumHeightMillimeters,
         out WorldTerrainColumnSurface ceiling) =>
@@ -633,11 +663,13 @@ public static class WorldTerrainColumnQueries
     {
         private readonly BoundWorldPack? _baseWorld;
         private readonly WorldPreparedView? _preparedWorld;
+        private readonly PreparedWorldComposition? _composition;
 
         internal TerrainColumnSource(BoundWorldPack world)
         {
             _baseWorld = world ?? throw new ArgumentNullException(nameof(world));
             _preparedWorld = null;
+            _composition = null;
             Space = world.Space;
         }
 
@@ -645,20 +677,33 @@ public static class WorldTerrainColumnQueries
         {
             _baseWorld = null;
             _preparedWorld = world ?? throw new ArgumentNullException(nameof(world));
+            _composition = null;
+            Space = world.Space;
+        }
+
+        internal TerrainColumnSource(PreparedWorldComposition world)
+        {
+            _baseWorld = null;
+            _preparedWorld = null;
+            _composition = world ?? throw new ArgumentNullException(nameof(world));
             Space = world.Space;
         }
 
         internal SpatialSpaceId Space { get; }
         internal bool TryGetBaseTerrain(SpatialChunkKey key, out WorldTerrainChunkView terrain) =>
-            _preparedWorld is not null
-                ? _preparedWorld.TryGetBaseTerrain(key, out terrain)
-                : _baseWorld!.TryGetBaseTerrain(key, out terrain);
+            _composition is not null
+                ? _composition.TryGetBaseTerrain(key, out terrain)
+                : _preparedWorld is not null
+                    ? _preparedWorld.TryGetBaseTerrain(key, out terrain)
+                    : _baseWorld!.TryGetBaseTerrain(key, out terrain);
         internal bool TryGetAdditionalTerrainSurfaceBands(
             SpatialChunkKey key,
             out WorldTerrainSurfaceBandChunkView bands) =>
-            _preparedWorld is not null
-                ? _preparedWorld.TryGetAdditionalTerrainSurfaceBands(key, out bands)
-                : _baseWorld!.TryGetAdditionalTerrainSurfaceBands(key, out bands);
+            _composition is not null
+                ? _composition.TryGetAdditionalTerrainSurfaceBands(key, out bands)
+                : _preparedWorld is not null
+                    ? _preparedWorld.TryGetAdditionalTerrainSurfaceBands(key, out bands)
+                    : _baseWorld!.TryGetAdditionalTerrainSurfaceBands(key, out bands);
     }
 }
 

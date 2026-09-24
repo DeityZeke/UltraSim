@@ -74,7 +74,13 @@ real 65,536-chunk proof. W3 is closed: a Game/World-owned canonical
 mapping, with an independent `WorldCompositionRevision` value. Empty manifests
 are valid; the finite default is 65,536 entries/2,621,504 bytes. The manifest
 contains no WorldId, SpatialSpaceId, Pack bytes, mutable revision, or residency.
-W4 is next; W1-W3 do not change the one-Pack runtime or WorldPack/v1 format.
+W4 is closed: `PreparedWorldComposition` provides the immutable sparse prepared
+subset above per-Pack `WorldPreparedView`, and global structural terrain/static
+queries resolve the owning Pack internally. `GameWorldState` accepts this as a
+mutually exclusive canonical root; Simple Physics consumes its Pack-agnostic
+column/bounds queries. The current Concept Demo remains on the legacy one-Pack
+path until W5/W5R splits its cross-window artifact. `worldview/v1` does not
+serialize canonical compositions. W5 is next; WorldPack/v1 is unchanged.
 
 The Pack byte-cap correction is 512 MiB in W2: the existing 65,536-chunk bound exactly matches
 the fixed 256×256 envelope, while a fully populated dense terrain foundation alone is already

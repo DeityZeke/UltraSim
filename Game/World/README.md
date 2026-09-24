@@ -15,8 +15,9 @@ multi-surface column reads without turning terrain into ECS entities or voxels.
 
 ## Canonical WorldPack composition direction
 
-The current runtime still prepares one exact WorldPack plus one WorldMutableOverlay. That is the
-accepted implementation baseline, not the final World-size model.
+The current Concept Demo still prepares one unaddressed WorldPack plus one
+WorldMutableOverlay for compatibility. W4 adds a separate canonical runtime
+composition root; the Concept Demo has not yet migrated to it.
 
 The canonical forward composition is specified in
 [Docs/Plans/WORLD_COMPOSITION.md](../../Docs/Plans/WORLD_COMPOSITION.md):
@@ -39,7 +40,7 @@ One WorldPack is a fixed 256×256 SpatialChunk / 4.096×4.096 km structural addr
 globally centered Pack mapping makes Pack (0,0) own chunk coordinates -128..127 on each axis.
 WorldPack boundaries do not change World/SpatialSpace identity and must remain semantically boring.
 
-W1-W3 are closed; W4 is next. `WorldPackAddressing.ToPackLocal` partitions every
+W1-W4 are closed; W5 is next. `WorldPackAddressing.ToPackLocal` partitions every
 signed-32-bit global `SpatialChunkCoord` into an 8-byte `WorldPackCoord` and a
 2-byte bounded `WorldPackLocalChunkCoord`. `TryToGlobal` rejects an arbitrary
 Pack/local pair if either reconstructed global axis is outside signed 32-bit
@@ -65,16 +66,25 @@ binary lookup. `WorldCompositionRevision` is a separate 8-byte runtime/save
 value, absent from immutable manifest bytes. Neither WorldId nor
 SpatialSpaceId participates in that identity. Manifest entries carry only
 Pack addresses and fingerprints; no Pack bytes, prepared state, or residency.
-There is no multi-Pack runtime yet.
+W4 now supplies the immutable multi-Pack query router, but not the W5 connected
+two-Pack playable World proof.
 
 The future World layer distinguishes authoritatively unauthored Pack, manifest-known but
 unprepared Pack, missing chunk inside a prepared Pack, intentional Absent terrain cell, and
 present structural surface. Known-but-unprepared is residency state and must never be reported as
 a hard World boundary.
 
-Runtime publication eventually lifts WorldPreparedView into one atomic PreparedWorldComposition
-above per-Pack immutable base + mutable overlay lineages. WorldPack/v1 remains the initial artifact
-format; W1-W10 generalize composition around it rather than rewriting it prematurely.
+`PreparedWorldComposition` is one immutable runtime root with a valid Space and
+revision, the complete unchanged manifest, and a private canonically sorted
+array of prepared Pack address/view references. Construction validates manifest
+membership and exact fingerprint, Space, W2 spatial window, duplicate addresses,
+and common content binding before publication. Zero prepared Packs are legal.
+Global terrain/column/mesh/static/Multi-fragment/replacement queries resolve
+the owning prepared Pack internally and borrow existing immutable view payloads.
+`GameWorldState` selects this root or its temporary legacy one-Pack view, never
+both; Simple Physics remains Pack-agnostic. Runtime Add/Remove/Replace Pack,
+multi-Pack persistence, acquisition, and the full connected seam proof remain
+W5+ work. WorldPack/v1 remains the initial artifact format.
 
 An entity is current in dynamic-public projection only while its valid
 `WorldPublicComponent` has `WorldPublicStateFlags.Visible`. Clearing `Visible`

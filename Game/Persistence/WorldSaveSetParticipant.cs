@@ -78,6 +78,8 @@ public sealed class WorldSaveSetParticipant : ISaveSetParticipant
             throw new ArgumentOutOfRangeException(nameof(context));
         GameWorldState source = _source ??
             throw new InvalidOperationException("A restore-only current-world participant cannot capture a save.");
+        if (source.PreparedComposition is not null)
+            throw new NotSupportedException("worldview/v1 cannot capture a prepared World composition.");
         if (source.PreparedWorld is null)
             return new Captured(Key, context.Sequence, _sourceWorldId, null, null);
         WorldMutableOverlay overlay = source.Overlay ??

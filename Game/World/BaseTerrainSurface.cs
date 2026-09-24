@@ -108,6 +108,14 @@ public static class BaseTerrainSurface
         return Probe(new TerrainMeshSource(world), location);
     }
 
+    public static BaseTerrainSurfaceSample ProbeBaseTerrainSurface(
+        this PreparedWorldComposition world,
+        in WorldPosition location)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        return Probe(new TerrainMeshSource(world), location);
+    }
+
     /// <summary>
     /// Samples the canonical triangle plane beneath the supplied X/Z. The location's Y is ignored.
     /// </summary>
@@ -124,6 +132,16 @@ public static class BaseTerrainSurface
     /// <summary>Samples the current prepared base plus durable replacement terrain.</summary>
     public static bool TrySampleBaseTerrainHeight(
         this WorldPreparedView world,
+        in WorldPosition location,
+        out int heightMillimeters)
+    {
+        BaseTerrainSurfaceSample sample = world.ProbeBaseTerrainSurface(location);
+        heightMillimeters = sample.HeightMillimeters;
+        return sample.IsPresent;
+    }
+
+    public static bool TrySampleBaseTerrainHeight(
+        this PreparedWorldComposition world,
         in WorldPosition location,
         out int heightMillimeters)
     {
@@ -171,6 +189,16 @@ public static class BaseTerrainSurface
         return sample.IsPresent;
     }
 
+    public static bool TryResolveBaseTerrainMaterial(
+        this PreparedWorldComposition world,
+        in WorldPosition location,
+        out ushort materialId)
+    {
+        BaseTerrainSurfaceSample sample = world.ProbeBaseTerrainSurface(location);
+        materialId = sample.MaterialId;
+        return sample.IsPresent;
+    }
+
     /// <summary>
     /// Emits one complete 33x33 fixed-grid base mesh. Border frames resolve a bounded immutable
     /// neighbor halo around the root chunk. All destinations are preflighted before writes. Triangle
@@ -196,6 +224,20 @@ public static class BaseTerrainSurface
     /// </summary>
     public static bool TryBuildBaseTerrainMesh(
         this WorldPreparedView world,
+        SpatialChunkKey key,
+        Span<TerrainBaseMeshVertex> vertices,
+        Span<ushort> indices,
+        Span<ushort> triangleMaterials,
+        out TerrainBaseMeshSummary summary,
+        out TerrainBaseMeshBuildError error)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        return TryBuildBaseTerrainMesh(new TerrainMeshSource(world), key, vertices, indices,
+            triangleMaterials, out summary, out error);
+    }
+
+    public static bool TryBuildBaseTerrainMesh(
+        this PreparedWorldComposition world,
         SpatialChunkKey key,
         Span<TerrainBaseMeshVertex> vertices,
         Span<ushort> indices,
@@ -437,11 +479,13 @@ public static class BaseTerrainSurface
     {
         private readonly BoundWorldPack? _baseWorld;
         private readonly WorldPreparedView? _preparedWorld;
+        private readonly PreparedWorldComposition? _composition;
 
         internal TerrainMeshSource(BoundWorldPack world)
         {
             _baseWorld = world;
             _preparedWorld = null;
+            _composition = null;
             Space = world.Space;
         }
 
@@ -449,15 +493,26 @@ public static class BaseTerrainSurface
         {
             _baseWorld = null;
             _preparedWorld = world;
+            _composition = null;
+            Space = world.Space;
+        }
+
+        internal TerrainMeshSource(PreparedWorldComposition world)
+        {
+            _baseWorld = null;
+            _preparedWorld = null;
+            _composition = world;
             Space = world.Space;
         }
 
         internal SpatialSpaceId Space { get; }
 
         internal bool TryGetBaseTerrain(SpatialChunkKey key, out WorldTerrainChunkView terrain) =>
-            _preparedWorld is not null
-                ? _preparedWorld.TryGetBaseTerrain(key, out terrain)
-                : _baseWorld!.TryGetBaseTerrain(key, out terrain);
+            _composition is not null
+                ? _composition.TryGetBaseTerrain(key, out terrain)
+                : _preparedWorld is not null
+                    ? _preparedWorld.TryGetBaseTerrain(key, out terrain)
+                    : _baseWorld!.TryGetBaseTerrain(key, out terrain);
     }
 
     private static long FloorDivide(long value, int positiveDivisor)
