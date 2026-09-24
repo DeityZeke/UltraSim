@@ -1,0 +1,106 @@
+{
+  "checkpoint": "W4",
+  "status": "closed",
+  "evidence_kind": "correctness_runtime_composition_query",
+  "date": "2026-09-23",
+  "starting_head": "a8d26a8e1f6ab5f03b62f79fcf299b392ce93ded",
+  "tested_implementation_head": "24ad1d31a3361feaa134cc7907b1710e4ab7eb38",
+  "evidence_commit": "evidence-only successor; see git history and checkpoint handoff",
+  "environment": {
+    "os": "Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "dotnet_sdk": "8.0.131",
+    "godot": "4.7.1 stable mono",
+    "configuration": "Release"
+  },
+  "representation": {
+    "root": "PreparedWorldComposition",
+    "pack": "PreparedWorldPack(WorldPackCoord, WorldPreparedView)",
+    "space_valid_required": true,
+    "revision_nonzero_required": true,
+    "manifest_complete_authored_truth": true,
+    "prepared_subset_may_be_empty": true,
+    "storage": "private copied sorted flat PreparedWorldPack reference array",
+    "sort": "WorldPackCoord X then Z",
+    "lookup": "binary search",
+    "bytes_per_prepared_entry_x64": 16,
+    "pack_payloads_copied": false,
+    "queries_allocate_after_warmup": false
+  },
+  "validation": {
+    "invalid_revision": "rejected",
+    "invalid_space": "rejected",
+    "duplicate_prepared_coord": "rejected",
+    "pack_not_in_manifest": "rejected",
+    "pack_fingerprint_mismatch": "rejected",
+    "pack_space_mismatch": "rejected",
+    "pack_window_mismatch": "rejected",
+    "content_binding_mismatch": "rejected",
+    "overlay_base_invariant": "inherited from WorldPreparedView constructor",
+    "source_array_mutation_after_create": "no effect",
+    "construction_transactional": true
+  },
+  "fixtures": {
+    "empty_manifest_empty_prepared": { "valid": true, "structural_terrain": "unavailable" },
+    "two_manifest_entries_zero_prepared": { "valid": true, "manifest_entries": 2, "prepared_packs": 0 },
+    "two_manifest_entries_one_prepared": { "valid": true, "manifest_entries": 2, "prepared_packs": 1, "unprepared_pack_query": "unavailable" },
+    "one_pack_equivalence": {
+      "base_terrain": true,
+      "material": true,
+      "mesh_vertices_indices_materials": true,
+      "additional_surface_bands_and_columns": true,
+      "frozen_statics": true,
+      "multi_fragments": true,
+      "static_bounds": true,
+      "intentional_void": true,
+      "overlay_replacement_identity_and_effective_reads": true
+    },
+    "multi_pack_routing": {
+      "prepared_packs": 3,
+      "distant_pack_coord": [2000, -500],
+      "prepared_index_bytes_x64": 48,
+      "cross_seam_static_hits": 2,
+      "cross_pack_neighbor_halo_matches_legacy_combined_mesh": true,
+      "per_pack_overlay_revisions": [2, 7],
+      "composition_revision": 3
+    },
+    "game_world_state": {
+      "legacy_and_canonical_exclusive": true,
+      "terrain_material_static_parity": true,
+      "physics_occupancy_parity": true,
+      "empty_canonical_state_supported": true,
+      "worldview_v1_capture": "explicit_not_supported"
+    }
+  },
+  "lookup_diagnostic": {
+    "prepared_packs": 64,
+    "iterations_per_observation": 100000,
+    "lookup_ticks": 3832478,
+    "lookup_ns_per_operation": 38.3,
+    "chunk_query_ticks": 24473699,
+    "chunk_query_ns_per_operation": 244.7,
+    "warmed_managed_allocated_bytes": 0,
+    "performance_rating": false
+  },
+  "identity_and_compatibility": {
+    "manifest_fingerprint_changes_with_composition_revision": false,
+    "manifest_fingerprint_changes_with_prepared_subset": false,
+    "worldpack_v1_changed": false,
+    "worldstructuralmanifest_v1_changed": false,
+    "concept_demo_split_or_moved": false,
+    "concept_demo_uses_legacy_one_pack": true,
+    "persistence_format_migrated": false,
+    "client_changed": false,
+    "network_changed": false,
+    "game_manifest_version": 32,
+    "network_transport_revision": 2,
+    "w5_or_later_started": false
+  },
+  "verification": [
+    { "command": "dotnet run --project _Tests/UltraSim.Game.World.Tests/UltraSim.Game.World.Tests.csproj -c Release", "result": "pass", "test_count": 110 },
+    { "command": "dotnet run --project _Tests/UltraSim.Game.World.Tests/UltraSim.Game.World.Tests.csproj -c Release -- --w2-full-pack", "result": "pass", "chunks": 65536, "artifact_bytes": 280363264 },
+    { "command": "./verify.sh --architecture-only", "result": "pass", "check_count": 4 },
+    { "command": "./verify.sh --configuration=Release", "result": "pass", "uninterrupted": true },
+    { "command": "git diff --check", "result": "pass" }
+  ]
+}
