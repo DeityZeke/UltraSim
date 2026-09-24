@@ -39,6 +39,16 @@ One WorldPack is a fixed 256×256 SpatialChunk / 4.096×4.096 km structural addr
 globally centered Pack mapping makes Pack (0,0) own chunk coordinates -128..127 on each axis.
 WorldPack boundaries do not change World/SpatialSpace identity and must remain semantically boring.
 
+W1 is closed and W2 is next. `WorldPackAddressing.ToPackLocal` partitions every
+signed-32-bit global `SpatialChunkCoord` into an 8-byte `WorldPackCoord` and a
+2-byte bounded `WorldPackLocalChunkCoord`. `TryToGlobal` rejects an arbitrary
+Pack/local pair if either reconstructed global axis is outside signed 32-bit
+range; the first/last representable Pack windows are partial. The constants
+are 256 chunks and 4,096 m per Pack edge, centered with a 128-chunk bias.
+This is only a World-owned address value: `SpatialSpaceId`, global positions,
+WorldPack/v1 bytes, one-Pack runtime behavior, and the existing Pack byte cap
+are unchanged. Pack-bound validation and the 512 MiB cap belong to W2.
+
 The future World layer distinguishes authoritatively unauthored Pack, manifest-known but
 unprepared Pack, missing chunk inside a prepared Pack, intentional Absent terrain cell, and
 present structural surface. Known-but-unprepared is residency state and must never be reported as

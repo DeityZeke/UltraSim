@@ -1,8 +1,8 @@
 # UltraSim World / WorldPack Structural Composition
 
-**Status:** canonical World/Terrain direction; implementation sequence W1-W10 is planned and unstarted.
+**Status:** canonical World/Terrain direction; W1 coordinate primitive closed, W2 next. W2-W10 runtime/content work remains planned.
 **Accepted:** 2026-09-23.
-**Current implementation:** one prepared WorldPack remains the active runtime shape until W4/W5 generalize it.
+**Current implementation:** one prepared WorldPack remains the active runtime shape until W4/W5 generalize it. W1 adds address math only.
 **Related:** [TERRAIN.md](TERRAIN.md), [ASSET_STREAMING.md](ASSET_STREAMING.md), [../README.md](../README.md), [../../Game/World/README.md](../../Game/World/README.md).
 
 ## 1. Core model
@@ -85,6 +85,16 @@ ChunkZ = PackZ * 256 + LocalZ - 128
 ```
 
 All arithmetic must preserve the canonical floor-division semantics already used by Spatial, including negative coordinates and checked overflow behavior.
+
+W1 implements this mapping in `Game/World/WorldPackAddressing.cs`: `WorldPackCoord`
+is an 8-byte signed X/Z value, `WorldPackLocalChunkCoord` is a 2-byte bounded
+X/Z value, and `WorldPackAddressing.ToPackLocal` / `TryToGlobal` provide the
+canonical conversion. `Contains` tests Pack ownership without changing
+`SpatialChunkKey` or incorporating `SpatialSpaceId`. The bias and division use
+widened `long` arithmetic and `SpatialMath.FloorDivRem`. Every signed-32-bit
+global chunk maps forward; the inverse rejects arbitrary Pack/local addresses
+outside signed-32-bit global SpatialChunk coordinates. The extreme Pack windows
+are consequently partial at the representable Spatial boundary.
 
 Representative cases:
 
@@ -485,11 +495,11 @@ Terrain/static/Multi/surface queries remain global SpatialChunkKey APIs and reso
 
 ## 23. Implementation sequence
 
-### W1 — WorldPack coordinate primitive
+### W1 — WorldPack coordinate primitive (CLOSED)
 
 Add/test WorldPackCoord, centered global-chunk mapping, exact negative-coordinate cases, and inverse mapping. No runtime behavior change.
 
-### W2 — explicit Pack spatial contract
+### W2 — explicit Pack spatial contract (NEXT)
 
 Freeze 256×256 chunks / 4096×4096 m, validate every WorldPack chunk belongs to its declared Pack window, and raise the Pack byte safety ceiling to 512 MiB with full-Pack evidence.
 

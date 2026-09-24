@@ -64,7 +64,12 @@ WorldPack/v1 remains the initial structural artifact format. The planned W1-W10 
 first adds exact Pack addressing and then lifts the existing one-Pack prepared-world assumption
 up into a sparse World-level composition without changing global SpatialChunkKey semantics.
 
-The first Pack byte-cap correction is 512 MiB: the existing 65,536-chunk bound exactly matches
+W1 is closed: the World-owned `WorldPackCoord`, bounded `WorldPackLocalChunkCoord`, and
+`WorldPackAddressing` map global chunks through the centered 256-chunk grid with exact
+negative floor semantics and fail-closed inverse. W2 is next; no Pack-bound admission,
+multi-Pack runtime, or WorldPack/v1 format change is implied by W1.
+
+The first Pack byte-cap correction is 512 MiB in W2: the existing 65,536-chunk bound exactly matches
 the fixed 256×256 envelope, while a fully populated dense terrain foundation alone is already
 about 264.4 MiB before directories/statics/Multis/sparse surfaces.
 

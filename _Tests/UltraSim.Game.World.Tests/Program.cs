@@ -13,6 +13,11 @@ using UltraSim.Spatial;
 var tests = new (string Name, Action Body)[]
 {
     ("FrozenProfileAndPayloadWidths", FrozenProfileAndPayloadWidths),
+    ("WorldPackAddressValuesAndBoundsAreCanonical", WorldPackAddressValuesAndBoundsAreCanonical),
+    ("CenteredWorldPackMappingOwnsSignedSeams", CenteredWorldPackMappingOwnsSignedSeams),
+    ("WorldPackAddressBoundariesAndExtremesRoundTrip", WorldPackAddressBoundariesAndExtremesRoundTrip),
+    ("WorldPackInverseRejectsOutOfSpatialRange", WorldPackInverseRejectsOutOfSpatialRange),
+    ("WorldPackAddressingWarmedAllocationZero", WorldPackAddressingWarmedAllocationZero),
     ("FloorDivisionOwnsNegativeBoundaries", FloorDivisionOwnsNegativeBoundaries),
     ("AllCrossingDirectionsAndCornersNormalize", AllCrossingDirectionsAndCornersNormalize),
     ("GlobalLocalRoundTripsAcrossFullProfile", GlobalLocalRoundTripsAcrossFullProfile),
@@ -162,6 +167,8 @@ static void FrozenProfileAndPayloadWidths()
     Equal(100, GameWorldSpatialProfile.PlacementSnapUnits);
     Equal(8, Marshal.SizeOf<SpatialSpaceId>());
     Equal(8, Marshal.SizeOf<SpatialChunkCoord>());
+    Equal(8, Marshal.SizeOf<WorldPackCoord>());
+    Equal(2, Marshal.SizeOf<WorldPackLocalChunkCoord>());
     Equal(16, Marshal.SizeOf<SpatialChunkKey>());
     Equal(32, Marshal.SizeOf<SpatialBounds>());
     Equal(8, Marshal.SizeOf<WorldLocalPosition>());
@@ -171,6 +178,173 @@ static void FrozenProfileAndPayloadWidths()
     Equal(2, Marshal.SizeOf<TerrainVertexCoord>());
     Equal(4, Marshal.SizeOf<TerrainHeightPlaneBase>());
     Equal(2, Marshal.SizeOf<TerrainHeightOffset>());
+}
+
+static void WorldPackAddressValuesAndBoundsAreCanonical()
+{
+    Equal(256, WorldPackAddressing.ChunksPerWorldPackEdge);
+    Equal(128, WorldPackAddressing.CenteringBiasChunks);
+    Equal(4_096_000, WorldPackAddressing.WorldPackEdgeUnits);
+    Equal(4_096, WorldPackAddressing.WorldPackEdgeMeters);
+
+    var pack = new WorldPackCoord(-2, 3);
+    Equal(pack, new WorldPackCoord(-2, 3));
+    Equal(pack.GetHashCode(), new WorldPackCoord(-2, 3).GetHashCode());
+    True(pack.CompareTo(new WorldPackCoord(-2, 4)) < 0);
+    True(pack.CompareTo(new WorldPackCoord(-1, -100)) < 0);
+    Equal("Pack(-2,3)", pack.ToString());
+    False(pack == new WorldPackCoord(-2, 4));
+
+    var local = new WorldPackLocalChunkCoord(0, 255);
+    Equal(local, new WorldPackLocalChunkCoord(0, 255));
+    Equal(local.GetHashCode(), new WorldPackLocalChunkCoord(0, 255).GetHashCode());
+    True(local.CompareTo(new WorldPackLocalChunkCoord(1, 0)) < 0);
+    Equal("Local(0,255)", local.ToString());
+    Throws<ArgumentOutOfRangeException>(() => _ = new WorldPackLocalChunkCoord(-1, 0));
+    Throws<ArgumentOutOfRangeException>(() => _ = new WorldPackLocalChunkCoord(256, 0));
+    Throws<ArgumentOutOfRangeException>(() => _ = new WorldPackLocalChunkCoord(0, -1));
+    Throws<ArgumentOutOfRangeException>(() => _ = new WorldPackLocalChunkCoord(0, 256));
+    Throws<ArgumentOutOfRangeException>(() => _ = new WorldPackLocalChunkCoord(int.MaxValue, 0));
+}
+
+static void CenteredWorldPackMappingOwnsSignedSeams()
+{
+    (int Chunk, int Pack, int Local)[] cases =
+    {
+        (-384, -1, 0), (-129, -1, 255),
+        (-128, 0, 0), (-1, 0, 127), (0, 0, 128), (127, 0, 255),
+        (128, 1, 0), (383, 1, 255), (384, 2, 0),
+    };
+    foreach ((int chunk, int expectedPack, int expectedLocal) in cases)
+    {
+        WorldPackAddressing.ToPackLocal(new SpatialChunkCoord(chunk, 0),
+            out WorldPackCoord packX, out WorldPackLocalChunkCoord localX);
+        Equal(new WorldPackCoord(expectedPack, 0), packX);
+        Equal(new WorldPackLocalChunkCoord(expectedLocal, 128), localX);
+        WorldPackAddressing.ToPackLocal(new SpatialChunkCoord(0, chunk),
+            out WorldPackCoord packZ, out WorldPackLocalChunkCoord localZ);
+        Equal(new WorldPackCoord(0, expectedPack), packZ);
+        Equal(new WorldPackLocalChunkCoord(128, expectedLocal), localZ);
+        True(WorldPackAddressing.Contains(packX, new SpatialChunkCoord(chunk, 0)));
+        False(WorldPackAddressing.Contains(new WorldPackCoord(expectedPack + 1, 0),
+            new SpatialChunkCoord(chunk, 0)));
+    }
+
+    var mixed = new SpatialChunkCoord(-129, 384);
+    WorldPackAddressing.ToPackLocal(mixed, out WorldPackCoord mixedPack, out WorldPackLocalChunkCoord mixedLocal);
+    Equal(new WorldPackCoord(-1, 2), mixedPack);
+    Equal(new WorldPackLocalChunkCoord(255, 0), mixedLocal);
+    True(WorldPackAddressing.TryToGlobal(mixedPack, mixedLocal, out SpatialChunkCoord reconstructed));
+    Equal(mixed, reconstructed);
+
+    // Space identity encloses the same numerical Pack address; mapping never changes it.
+    var first = new SpatialChunkKey(new SpatialSpaceId(1), mixed);
+    var second = new SpatialChunkKey(new SpatialSpaceId(2), mixed);
+    False(first == second);
+    WorldPackAddressing.ToPackLocal(first.Coord, out WorldPackCoord firstPack, out _);
+    WorldPackAddressing.ToPackLocal(second.Coord, out WorldPackCoord secondPack, out _);
+    Equal(firstPack, secondPack);
+}
+
+static void WorldPackAddressBoundariesAndExtremesRoundTrip()
+{
+    var seen = new Dictionary<(WorldPackCoord Pack, WorldPackLocalChunkCoord Local), SpatialChunkCoord>();
+    int[] extremes = { int.MinValue, int.MinValue + 1, int.MaxValue - 1, int.MaxValue };
+    foreach (int x in extremes)
+    foreach (int z in extremes)
+        AssertWorldPackRoundTrip(new SpatialChunkCoord(x, z), seen);
+    WorldPackAddressing.ToPackLocal(new SpatialChunkCoord(int.MinValue, int.MinValue + 1),
+        out WorldPackCoord minimumPack, out WorldPackLocalChunkCoord minimumLocal);
+    Equal(new WorldPackCoord(-8_388_608, -8_388_608), minimumPack);
+    Equal(new WorldPackLocalChunkCoord(128, 129), minimumLocal);
+    WorldPackAddressing.ToPackLocal(new SpatialChunkCoord(int.MaxValue - 1, int.MaxValue),
+        out WorldPackCoord maximumPack, out WorldPackLocalChunkCoord maximumLocal);
+    Equal(new WorldPackCoord(8_388_608, 8_388_608), maximumPack);
+    Equal(new WorldPackLocalChunkCoord(126, 127), maximumLocal);
+
+    // The first and last representable Packs have partial windows; interior Pack seams are complete.
+    for (int pack = -2_048; pack <= 2_048; pack++)
+    {
+        long seam = (long)pack * WorldPackAddressing.ChunksPerWorldPackEdge -
+            WorldPackAddressing.CenteringBiasChunks;
+        foreach (int offset in new[] { -1, 0, 1 })
+        {
+            int chunk = checked((int)(seam + offset));
+            AssertWorldPackRoundTrip(new SpatialChunkCoord(chunk, 0), seen);
+            AssertWorldPackRoundTrip(new SpatialChunkCoord(0, chunk), seen);
+        }
+
+        int before = checked((int)(seam - 1));
+        int at = checked((int)seam);
+        WorldPackAddressing.ToPackLocal(new SpatialChunkCoord(before, 0),
+            out WorldPackCoord previousPack, out WorldPackLocalChunkCoord previousLocal);
+        WorldPackAddressing.ToPackLocal(new SpatialChunkCoord(at, 0),
+            out WorldPackCoord nextPack, out WorldPackLocalChunkCoord nextLocal);
+        Equal(pack - 1, previousPack.X);
+        Equal(255, (int)previousLocal.X);
+        Equal(pack, nextPack.X);
+        Equal(0, (int)nextLocal.X);
+    }
+}
+
+static void AssertWorldPackRoundTrip(
+    SpatialChunkCoord original,
+    Dictionary<(WorldPackCoord Pack, WorldPackLocalChunkCoord Local), SpatialChunkCoord> seen)
+{
+    WorldPackAddressing.ToPackLocal(original, out WorldPackCoord pack, out WorldPackLocalChunkCoord local);
+    True(WorldPackAddressing.TryToGlobal(pack, local, out SpatialChunkCoord restored));
+    Equal(original, restored);
+    if (seen.TryGetValue((pack, local), out SpatialChunkCoord prior))
+        Equal(prior, original);
+    else
+        seen.Add((pack, local), original);
+}
+
+static void WorldPackInverseRejectsOutOfSpatialRange()
+{
+    foreach (WorldPackCoord pack in new[]
+    {
+        new WorldPackCoord(int.MinValue, 0), new WorldPackCoord(int.MaxValue, 0),
+        new WorldPackCoord(0, int.MinValue), new WorldPackCoord(0, int.MaxValue),
+    })
+    {
+        False(WorldPackAddressing.TryToGlobal(pack, default, out SpatialChunkCoord rejected));
+        Equal(default, rejected);
+    }
+
+    WorldPackAddressing.ToPackLocal(new SpatialChunkCoord(int.MinValue, int.MaxValue),
+        out WorldPackCoord edgePack, out WorldPackLocalChunkCoord edgeLocal);
+    True(WorldPackAddressing.TryToGlobal(edgePack, edgeLocal, out SpatialChunkCoord restored));
+    Equal(new SpatialChunkCoord(int.MinValue, int.MaxValue), restored);
+    False(WorldPackAddressing.TryToGlobal(edgePack, new WorldPackLocalChunkCoord(0, 255), out _));
+    False(WorldPackAddressing.TryToGlobal(new WorldPackCoord(8_388_608, 0),
+        new WorldPackLocalChunkCoord(128, 128), out _));
+}
+
+static void WorldPackAddressingWarmedAllocationZero()
+{
+    long checksum = 0;
+    for (int iteration = 0; iteration < 1_000; iteration++)
+    {
+        WorldPackAddressing.ToPackLocal(new SpatialChunkCoord(iteration - 500, 500 - iteration),
+            out WorldPackCoord pack, out WorldPackLocalChunkCoord local);
+        if (!WorldPackAddressing.TryToGlobal(pack, local, out SpatialChunkCoord global))
+            throw new Exception("A forward Pack address must round-trip.");
+        checksum += global.X;
+    }
+
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    for (int iteration = 0; iteration < 100_000; iteration++)
+    {
+        WorldPackAddressing.ToPackLocal(new SpatialChunkCoord(iteration - 50_000, 50_000 - iteration),
+            out WorldPackCoord pack, out WorldPackLocalChunkCoord local);
+        if (!WorldPackAddressing.TryToGlobal(pack, local, out SpatialChunkCoord global) ||
+            !WorldPackAddressing.Contains(pack, global))
+            throw new Exception("A forward Pack address must round-trip and be contained.");
+        checksum += global.Z;
+    }
+    Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
+    True(checksum != 0);
 }
 
 static void TerrainFoundationLayoutIsFrozen()
