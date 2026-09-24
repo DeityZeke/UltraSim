@@ -1,0 +1,107 @@
+{
+  "checkpoint": "W2",
+  "status": "closed",
+  "evidence_kind": "correctness_capacity",
+  "date": "2026-09-23",
+  "starting_head": "ecd23de77c9fab875233d8932cc589512e417d79",
+  "tested_implementation_head": "a8bc01e0bdf9d6fb8ee71c9bb182f1484f54b047",
+  "evidence_commit": "evidence-only successor; see git history and checkpoint handoff",
+  "environment": {
+    "os": "Linux 7.2.6-1-cachyos x86_64",
+    "dotnet_sdk": "8.0.131",
+    "godot": "4.7.1 stable mono",
+    "configuration": "Release"
+  },
+  "spatial_contract": {
+    "chunks_per_pack_edge": 256,
+    "maximum_chunks_per_world_pack": 65536,
+    "declared_builder": "WorldPackBuilder(..., WorldPackCoord)",
+    "declared_builder_early_rejection": "WorldPackBuildError.ChunkOutsidePackWindow",
+    "opened_artifact_validation": "WorldPack.TryValidateSpatialWindow(WorldPackCoord, out SpatialChunkKey, out WorldPackSpatialValidationError)",
+    "opened_artifact_rejection": "WorldPackSpatialValidationError.ChunkOutsidePackWindow",
+    "space_mismatch_separate": true,
+    "sparse_pack_chunk_count": 3,
+    "sparse_pack_bytes_less_than": 20000,
+    "static_geometry_crossing_pack_seam_allowed_when_home_chunk_valid": true,
+    "edge_partial_pack_validated": true,
+    "wrong_declared_coordinate_rejected": true,
+    "cross_window_legacy_artifact_rejected_for_both_declarations": true,
+    "warmed_valid_checks": 10000,
+    "warmed_validation_managed_allocated_bytes": 0
+  },
+  "limits": {
+    "maximum_chunks_above_65536_rejected": true,
+    "old_default_maximum_pack_bytes": 268435456,
+    "new_default_maximum_pack_bytes": 536870912,
+    "stream_over_limit_header_rejected_before_body_allocation": true,
+    "independent_section_maxima_unchanged": true
+  },
+  "full_pack": {
+    "command": "dotnet run --project _Tests/UltraSim.Game.World.Tests/UltraSim.Game.World.Tests.csproj -c Release -- --w2-full-pack",
+    "declared_pack_x": 0,
+    "declared_pack_z": 0,
+    "global_chunk_axis_min": -128,
+    "global_chunk_axis_max": 127,
+    "authored_and_opened_chunk_count": 65536,
+    "artifact_bytes": 280363264,
+    "artifact_mib": 267.375244140625,
+    "chunk_directory_bytes": 3145728,
+    "foundation_terrain_bytes": 277217280,
+    "old_256_mib_admission": "CapacityExceeded",
+    "default_512_mib_admission": "None",
+    "declared_spatial_validation": "pass",
+    "observed_build_ms": 836,
+    "observed_open_and_validate_ms": 518,
+    "timings_are_rated_performance_evidence": false
+  },
+  "compatibility": {
+    "declared_vs_unaddressed_25_chunk_fixture_length_equal": true,
+    "declared_vs_unaddressed_world_pack_fingerprint_equal": true,
+    "declared_vs_unaddressed_world_content_fingerprint_equal": true,
+    "declared_vs_unaddressed_canonical_bytes_equal": true,
+    "worldpack_v1_format_and_bytes_unchanged": true,
+    "concept_demo_legacy_artifact_crosses_pack_0_0_and_1_0": true,
+    "concept_demo_current_runtime_unchanged": true,
+    "runtime_remains_one_pack": true,
+    "world_manifest_added": false,
+    "pack_residency_added": false,
+    "game_manifest_version": 32,
+    "network_transport_revision": 2,
+    "w3_or_later_started": false
+  },
+  "verification": [
+    {
+      "command": "dotnet run --project _Tests/UltraSim.Game.World.Tests/UltraSim.Game.World.Tests.csproj -c Release",
+      "result": "pass",
+      "test_count": 99
+    },
+    {
+      "command": "dotnet run --project _Tests/UltraSim.Game.World.Tests/UltraSim.Game.World.Tests.csproj -c Release -- --w2-full-pack",
+      "result": "pass"
+    },
+    {
+      "command": "./verify.sh --architecture-only",
+      "result": "pass",
+      "check_count": 4
+    },
+    {
+      "command": "./verify.sh --configuration=Release",
+      "attempt": 1,
+      "result": "fail",
+      "exit_code": 134,
+      "scope": "F0.3b remote playable Network Application suite",
+      "exact_assertion": "unavailable: initial tool output truncated"
+    },
+    {
+      "command": "dotnet run --project _Tests/UltraSim.Network.Application.Tests/UltraSim.Network.Application.Tests.csproj -c Release",
+      "result": "pass"
+    },
+    {
+      "command": "./verify.sh --configuration=Release",
+      "attempt": 2,
+      "result": "pass",
+      "uninterrupted": true,
+      "retained_local_log": "/tmp/ultrasim-w2-release-2026-09-23.log"
+    }
+  ]
+}
