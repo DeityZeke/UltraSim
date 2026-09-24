@@ -1,0 +1,114 @@
+{
+  "checkpoint": "W5R Concept Demo migration",
+  "date": "2026-09-24",
+  "startingHead": "1d1558cb30e03edecf74e86de01ee8c554e2f53b",
+  "implementationCommit": "3d50f3d659e8b459c91bb73301df1455910be7bd",
+  "testedImplementationHead": "78afe1ea63c25ca230bcf5bd982494533889b40a",
+  "finalEvidenceHead": "commit containing this immutable artifact; see git history",
+  "environment": {
+    "os": "Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "logicalProcessors": 16,
+    "dotnetSdk": "8.0.131",
+    "dotnetRuntime": "8.0.31",
+    "godot": "4.7.1-stable Mono",
+    "configuration": "Release",
+    "productEditions": ["SinglePlayer", "Online", "Complete"]
+  },
+  "wirePolicy": {
+    "gameManifestVersion": 32,
+    "transportWireRevision": 2,
+    "remoteStructuralDelivery": "historical combined WorldPack/v1 until W7",
+    "changed": false
+  },
+  "canonicalComposition": {
+    "space": "GameWorldState.DefaultSpace",
+    "revision": 1,
+    "manifestFingerprint": "41DB6F68C26AC85DF5ABEB60BEDA3F3F07DD1E76CF30A5164874446D902B6B53",
+    "manifestBytes": 144,
+    "preparedIndexBytes": 32,
+    "completeValidation": "pass",
+    "authoredChunks": 162,
+    "packs": [
+      {
+        "coord": [0, 0],
+        "chunks": 117,
+        "bytes": 531138,
+        "fingerprint": "A76FAE182AA566BE91D312E26FCE29EA6E2854E84402D50579A6C5C2009553CB"
+      },
+      {
+        "coord": [1, 0],
+        "chunks": 45,
+        "bytes": 199910,
+        "fingerprint": "CE9F0CCDB591F3C3E592B8105E43C1AEB8323A5CB686533FC4735A8AA15D7B1D"
+      }
+    ],
+    "totalPackBytes": 731048,
+    "historicalCombined": {
+      "bytes": 731384,
+      "fingerprint": "323141A827CD25ECC5BC144CE860FECF717F472E1C0ED57626BCC89EC29CF795",
+      "buildInOrdinarySinglePlayer": false,
+      "roles": ["pre-W7 remote structural delivery", "historical save identity", "test parity oracle"]
+    }
+  },
+  "exactStructuralParity": {
+    "comparedChunks": 162,
+    "terrainMaterialsAndPresence": "all 1024 cells per chunk equal",
+    "terrainHeights": "all 1089 vertices per chunk equal",
+    "worldStaticRecords": "all records and IDs equal",
+    "multiFragmentRecords": "all records, pieces and IDs equal",
+    "multiInstances": "all records and IDs equal",
+    "additionalSurfaceBands": "all IDs, bounds, faces, connections, materials and heights equal",
+    "historicalCounts": {
+      "frozenStatics": 124,
+      "multiInstances": 3,
+      "multiFragments": 17,
+      "additionalSurfaceFragments": 3
+    },
+    "repeatBuildFingerprints": "equal",
+    "farIslandPackSeam": "direct Game movement 128→127→128 passed",
+    "farGate": "central→far→central authoritative destination passed"
+  },
+  "productPaths": {
+    "singlePlayerAuthorityRoot": "PreparedWorldComposition; legacy PreparedWorld null",
+    "completeHostingAuthorityRoot": "PreparedWorldComposition; compatibility Pack delivery separate",
+    "standaloneOnlineAuthorityRoot": "PreparedWorldComposition; compatibility Pack delivery separate",
+    "localSemanticSource": "ClientWorldSemanticCache(PreparedWorldComposition)",
+    "remoteSemanticSourceBeforeW7": "historical combined WorldPack/v1",
+    "localFarIslandSaveLoad": "worldview/v2; exact position, manifest and revision restored",
+    "cabinSaveLoad": "worldview/v1 retained",
+    "preW5RConceptDemoSave": "explicit fail-closed PersistenceCompatibilityException; active canonical generation unchanged; no overlay dropped",
+    "nonemptyStructuralOverlayPublishedByProduction": false
+  },
+  "nativeObservations": {
+    "d0_0": { "passed": true, "authored": 162, "resident": 25, "rendered": 9 },
+    "d0_1": { "passed": true, "authored": 162, "resident": 81, "rendered": 49 },
+    "d0_2": { "passed": true, "authored": 162, "resident": 25, "rendered": 9 },
+    "f0_7MixedLifecycle": "pass; Local→Local→Remote A→Remote B→Remote A→Local; clean boundaries",
+    "f1_0Control": {
+      "localSemanticChunks": 49,
+      "localRenderedChunks": 25,
+      "remoteColdAcquiredBytes": 733198,
+      "remoteWarmReusedPackages": "1/3",
+      "retirement": "clean"
+    }
+  },
+  "verification": {
+    "focusedWorld": "113/113 pass",
+    "w2FullPack": "pass; 65536 chunks, 280363264 bytes",
+    "focusedClientLocal": "23/23 pass",
+    "focusedIntegration": "39/39 pass",
+    "focusedCompleteHost": "3/3 pass",
+    "directConnectEphemeral": "pass",
+    "architectureOnly": "pass",
+    "canonicalReleaseOnTestedImplementationHead": "pass; uninterrupted including native/export/Contentless/real UDP/mixed lifecycle",
+    "earlierAttempt": "The first full Release run stopped at an M0.0 test-adapter compile error after renaming context.WorldPack; fixed in tested implementation. A separate broad Network application run then observed F1.8A InterpolatedFrames=0 once; focused and broad reruns and the final full Release gate passed without modifying production motion code."
+  },
+  "scope": {
+    "w6Started": false,
+    "w7Started": false,
+    "w8Started": false,
+    "gameplayCoordinatesChanged": false,
+    "networkProtocolChanged": false
+  }
+}
