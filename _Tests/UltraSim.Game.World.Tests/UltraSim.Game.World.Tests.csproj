@@ -9,6 +9,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../UltraSim.World.Testing/W5TwoPackFixture.cs" Link="W5TwoPackFixture.cs" />
     <ProjectReference Include="../../Game/Accounting/UltraSim.Game.Accounting.csproj" />
     <ProjectReference Include="../../Game/Composition/UltraSim.Game.Composition.csproj" />
     <ProjectReference Include="../../Game/Contracts/UltraSim.Game.Contracts.csproj" />

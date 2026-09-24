@@ -11,6 +11,7 @@ using UltraSim.Game.World;
 using UltraSim.Server.Persistence;
 using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
+using UltraSim.World.Testing;
 
 if (args.Length == 1 && args[0] == "--w2-full-pack")
 {
@@ -42,6 +43,8 @@ var tests = new (string Name, Action Body)[]
     ("PreparedCompositionTerrainMeshHaloReadsNeighborPack", PreparedCompositionTerrainMeshHaloReadsNeighborPack),
     ("GameWorldStateCanonicalCompositionIsExclusiveAndNotWorldviewV1", GameWorldStateCanonicalCompositionIsExclusiveAndNotWorldviewV1),
     ("PreparedCompositionWarmedQueriesAllocateZero", PreparedCompositionWarmedQueriesAllocateZero),
+    ("W5CompleteTwoPackValidationAndIdentityCollisions", W5CompleteTwoPackValidationAndIdentityCollisions),
+    ("W5WorldviewV2RowsAndResolverFailures", W5WorldviewV2RowsAndResolverFailures),
     ("FloorDivisionOwnsNegativeBoundaries", FloorDivisionOwnsNegativeBoundaries),
     ("AllCrossingDirectionsAndCornersNormalize", AllCrossingDirectionsAndCornersNormalize),
     ("GlobalLocalRoundTripsAcrossFullProfile", GlobalLocalRoundTripsAcrossFullProfile),
@@ -1184,7 +1187,12 @@ static void GameWorldStateCanonicalCompositionIsExclusiveAndNotWorldviewV1()
         GameTerrainMaterialIds.Snow, new WorldStaticId(9_777))));
     var participant = new WorldSaveSetParticipant(canonical, new PersistentWorldId(0x7444),
         new WorldPersistenceOptions(1_000_000));
-    Throws<NotSupportedException>(() => participant.Capture(new SaveSetContext(1, 0)));
+    using (ICapturedSaveSetParticipant captured = participant.Capture(new SaveSetContext(1, 0)))
+    using (var encoded = new MemoryStream())
+    {
+        captured.WriteArtifact(encoded);
+        Equal((ushort)2, BinaryPrimitives.ReadUInt16LittleEndian(encoded.GetBuffer().AsSpan(4)));
+    }
     PreparedWorldComposition empty = W4Composition(GameWorldState.DefaultSpace,
         StructuralManifest(), new(1));
     using var emptyWorld = new EcsWorld(GameSchema.CreateSchema(), UltraSimGameComposition.CreateWorldOptions(64));
@@ -1195,6 +1203,180 @@ static void GameWorldStateCanonicalCompositionIsExclusiveAndNotWorldviewV1()
     Equal(0, countB);
     Throws<ArgumentException>(() => _ = new GameWorldState(canonicalWorld, bound,
         preparedComposition: composition));
+}
+
+static void W5CompleteTwoPackValidationAndIdentityCollisions()
+{
+    var (valid, west, east) = W5TwoPackFixture.Create();
+    True(valid.TryValidateComplete(out PreparedWorldCompositionError validError));
+    Equal(PreparedWorldCompositionError.None, validError);
+    Equal(2, valid.PreparedPackCount);
+    Equal(30, valid.PreparedChunkCount);
+    Equal(W5TwoPackFixture.Space, valid.Space);
+    True(west.Fingerprint != east.Fingerprint);
+    var westKey = new SpatialChunkKey(valid.Space, 127, 0);
+    var eastKey = new SpatialChunkKey(valid.Space, 128, 0);
+    True(valid.TryGetBaseTerrain(westKey, out WorldTerrainChunkView westTerrain));
+    True(valid.TryGetBaseTerrain(eastKey, out WorldTerrainChunkView eastTerrain));
+    for (byte vertex = 0; vertex < TerrainChunkFormat.HeightVertexEdge; vertex++)
+        Equal(westTerrain.GetAbsoluteHeightMillimeters(TerrainChunkFormat.GetHeightIndex(
+                new TerrainVertexCoord(32, vertex))),
+            eastTerrain.GetAbsoluteHeightMillimeters(TerrainChunkFormat.GetHeightIndex(
+                new TerrainVertexCoord(0, vertex))));
+    var bounds = new WorldStaticBounds(127L * 16_000, -1_000, 0,
+        129L * 16_000, 2_000, 8_000);
+    Span<WorldStaticQueryHit> hits = stackalloc WorldStaticQueryHit[8];
+    True(valid.TryQueryStaticBounds(bounds, 16, hits, out int count, out _, out _));
+    Equal(4, count); // one frozen static and one Multi fragment per Pack.
+    int frozen = 0;
+    int multi = 0;
+    for (int index = 0; index < count; index++)
+    {
+        if (hits[index].Kind == WorldStaticQueryKind.FrozenStatic) frozen++;
+        if (hits[index].Kind == WorldStaticQueryKind.MultiFragment) multi++;
+    }
+    Equal(2, frozen);
+    Equal(2, multi);
+    True(valid.TryGetMultiFragments(westKey, out WorldMultiFragmentChunkView westPieces));
+    True(valid.TryGetMultiFragments(eastKey, out WorldMultiFragmentChunkView eastPieces));
+    Equal(1, westPieces.Count);
+    Equal(1, eastPieces.Count);
+    WorldMultiInstanceRecord westRoot = default;
+    WorldMultiInstanceRecord eastRoot = default;
+    True(valid.TryGetPreparedPack(W5TwoPackFixture.WestCoord, out PreparedWorldPack westPack) &&
+        westPack.View.TryGetMultiInstance(new MultiInstanceId(1001), out westRoot));
+    True(valid.TryGetPreparedPack(W5TwoPackFixture.EastCoord, out PreparedWorldPack eastPack) &&
+        eastPack.View.TryGetMultiInstance(new MultiInstanceId(1002), out eastRoot));
+    Equal(1, westRoot.PieceCount);
+    Equal(1, eastRoot.PieceCount);
+    var westVertices = new TerrainBaseMeshVertex[TerrainChunkFormat.HeightVertexCount];
+    var eastVertices = new TerrainBaseMeshVertex[westVertices.Length];
+    var westIndices = new ushort[TerrainChunkFormat.TriangleIndexCount];
+    var eastIndices = new ushort[westIndices.Length];
+    var westMaterials = new ushort[TerrainChunkFormat.TriangleCount];
+    var eastMaterials = new ushort[westMaterials.Length];
+    True(valid.TryBuildBaseTerrainMesh(westKey, westVertices, westIndices, westMaterials, out _, out _));
+    True(valid.TryBuildBaseTerrainMesh(eastKey, eastVertices, eastIndices, eastMaterials, out _, out _));
+    for (byte vertex = 0; vertex < TerrainChunkFormat.HeightVertexEdge; vertex++)
+    {
+        int wi = TerrainChunkFormat.GetHeightIndex(new TerrainVertexCoord(32, vertex));
+        int ei = TerrainChunkFormat.GetHeightIndex(new TerrainVertexCoord(0, vertex));
+        Equal(westVertices[wi].AbsoluteYMillimeters, eastVertices[ei].AbsoluteYMillimeters);
+        Equal(westVertices[wi].LocalZMillimeters, eastVertices[ei].LocalZMillimeters);
+    }
+    // Cell 31 of chunk 127 is globally odd; cell 0 of chunk 128 is globally even.
+    Equal((ushort)32, westIndices[31 * 6 + 2]);
+    Equal((ushort)34, eastIndices[2]);
+
+    var (broken, _, _) = W5TwoPackFixture.Create(brokenSeam: true);
+    False(broken.TryValidateComplete(out PreparedWorldCompositionError seamError));
+    Equal(PreparedWorldCompositionError.TerrainSeamMismatch, seamError);
+    var (duplicateStatic, _, _) = W5TwoPackFixture.Create(duplicateStaticId: true);
+    False(duplicateStatic.TryValidateComplete(out PreparedWorldCompositionError staticError));
+    Equal(PreparedWorldCompositionError.DuplicateWorldStaticId, staticError);
+    var (duplicateMulti, _, _) = W5TwoPackFixture.Create(duplicateMultiId: true);
+    False(duplicateMulti.TryValidateComplete(out PreparedWorldCompositionError multiError));
+    Equal(PreparedWorldCompositionError.DuplicateMultiInstanceId, multiError);
+    var subset = W4Composition(valid.Space, valid.Manifest, valid.Revision,
+        new PreparedWorldPack(W5TwoPackFixture.WestCoord, new WorldPreparedView(west)));
+    False(subset.TryValidateComplete(out PreparedWorldCompositionError incomplete));
+    Equal(PreparedWorldCompositionError.IncompleteComposition, incomplete);
+    Console.WriteLine($"W5 TWO PACK west={west.Fingerprint} east={east.Fingerprint} " +
+        $"manifest={valid.ManifestFingerprint} chunks={valid.PreparedChunkCount} static_hits={count}");
+}
+
+static void W5WorldviewV2RowsAndResolverFailures()
+{
+    var (source, west, east) = W5TwoPackFixture.Create();
+    var westKey = new SpatialChunkKey(source.Space, 125, 0);
+    var eastKey = new SpatialChunkKey(source.Space, 130, 0);
+    True(west.TryGetBaseTerrain(westKey, out WorldTerrainChunkView westTerrain));
+    var originalMaterials = new ushort[TerrainChunkFormat.MaterialCellCount];
+    var originalHeights = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+    westTerrain.CopyMaterials(originalMaterials);
+    for (int index = 0; index < originalHeights.Length; index++)
+        originalHeights[index] = westTerrain.GetHeightOffset(index);
+    var changedMaterials = (ushort[])originalMaterials.Clone();
+    Array.Fill(changedMaterials, (ushort)2);
+    var first = new WorldMutableOverlayBuilder(west);
+    True(first.TryReplaceTerrain(westKey, changedMaterials, westTerrain.HeightBase, originalHeights));
+    True(first.TryBuild(out WorldMutableOverlay? westChanged));
+    var revert = new WorldMutableOverlayBuilder(west, prior: westChanged);
+    True(revert.TryReplaceTerrain(westKey, originalMaterials, westTerrain.HeightBase, originalHeights));
+    True(revert.TryBuild(out WorldMutableOverlay? westRevisedEmpty));
+    Equal(2UL, westRevisedEmpty!.Revision.Value);
+    Equal(0, westRevisedEmpty.ChangedChunkCount);
+
+    True(east.TryGetBaseTerrain(eastKey, out WorldTerrainChunkView eastTerrain));
+    var eastMaterials = new ushort[TerrainChunkFormat.MaterialCellCount];
+    var eastHeights = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+    eastTerrain.CopyMaterials(eastMaterials);
+    for (int index = 0; index < eastHeights.Length; index++)
+        eastHeights[index] = eastTerrain.GetHeightOffset(index);
+    Array.Fill(eastMaterials, (ushort)3);
+    var eastBuilder = new WorldMutableOverlayBuilder(east);
+    True(eastBuilder.TryReplaceTerrain(eastKey, eastMaterials, eastTerrain.HeightBase, eastHeights));
+    True(eastBuilder.TryBuild(out WorldMutableOverlay? eastChanged));
+
+    True(PreparedWorldComposition.TryCreate(source.Space, new WorldCompositionRevision(7),
+        source.Manifest,
+        [new PreparedWorldPack(W5TwoPackFixture.WestCoord, new WorldPreparedView(west, westRevisedEmpty)),
+         new PreparedWorldPack(W5TwoPackFixture.EastCoord, new WorldPreparedView(east, eastChanged))],
+        out PreparedWorldComposition? composed, out _));
+    True(composed!.TryValidateComplete(out _));
+    using var ecs = new EcsWorld(GameSchema.CreateSchema(), UltraSimGameComposition.CreateWorldOptions(64));
+    using var state = new GameWorldState(ecs, preparedComposition: composed);
+    var capture = new WorldSaveSetParticipant(state, new PersistentWorldId(0x5755_0002));
+    byte[] artifact = EncodeWorldView(capture, 17);
+    Equal((ushort)2, BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(4)));
+    Equal(2, BinaryPrimitives.ReadInt32LittleEndian(artifact.AsSpan(72)));
+    True(artifact.Length < west.Pack.Length + east.Pack.Length);
+    var restore = new WorldSaveSetParticipant(
+        fingerprint => fingerprint == source.ManifestFingerprint ? source.Manifest : null,
+        fingerprint => fingerprint == west.Fingerprint ? west :
+            fingerprint == east.Fingerprint ? east : null);
+    using (IPreparedLoadParticipant pending = restore.Prepare(artifact, new SaveSetContext(17, 0)))
+    {
+        pending.Resolve(EmptyPersistentResolver.Instance);
+        pending.Validate();
+        PreparedWorldComposition restored = ((PreparedWorldParticipant)pending).PreparedComposition!;
+        Equal(composed.ManifestFingerprint, restored.ManifestFingerprint);
+        Equal(composed.Revision, restored.Revision);
+        True(restored.TryGetPreparedPack(W5TwoPackFixture.WestCoord, out PreparedWorldPack westRow));
+        True(restored.TryGetPreparedPack(W5TwoPackFixture.EastCoord, out PreparedWorldPack eastRow));
+        Equal(2UL, westRow.View.Overlay.Revision.Value);
+        Equal(0, westRow.View.Overlay.ChangedChunkCount);
+        Equal(1UL, eastRow.View.Overlay.Revision.Value);
+        True(eastRow.View.Overlay.TryGetChunkRevision(eastKey, out _, out _));
+    }
+    var missingManifest = new WorldSaveSetParticipant(
+        _ => null, _ => west);
+    Throws<PersistenceCompatibilityException>(() =>
+    {
+        using IPreparedLoadParticipant pending = missingManifest.Prepare(artifact, new SaveSetContext(17, 0));
+        pending.Resolve(EmptyPersistentResolver.Instance);
+    });
+    var missingEast = new WorldSaveSetParticipant(
+        _ => source.Manifest, fingerprint => fingerprint == west.Fingerprint ? west : null);
+    Throws<PersistenceCompatibilityException>(() =>
+    {
+        using IPreparedLoadParticipant pending = missingEast.Prepare(artifact, new SaveSetContext(17, 0));
+        pending.Resolve(EmptyPersistentResolver.Instance);
+    });
+    byte[] duplicateRow = (byte[])artifact.Clone();
+    int firstRowLength = BinaryPrimitives.ReadInt32LittleEndian(duplicateRow.AsSpan(84));
+    BinaryPrimitives.WriteInt32LittleEndian(duplicateRow.AsSpan(88 + firstRowLength), 0);
+    Throws<PersistenceValidationException>(() =>
+        restore.Prepare(duplicateRow, new SaveSetContext(17, 0)));
+    var subset = W4Composition(source.Space, source.Manifest, source.Revision,
+        new PreparedWorldPack(W5TwoPackFixture.WestCoord, new WorldPreparedView(west)));
+    using var partialEcs = new EcsWorld(GameSchema.CreateSchema(), UltraSimGameComposition.CreateWorldOptions(64));
+    using var partialState = new GameWorldState(partialEcs, preparedComposition: subset);
+    Throws<PersistenceValidationException>(() =>
+        new WorldSaveSetParticipant(partialState, new PersistentWorldId(0x5755_0002))
+            .Capture(new SaveSetContext(17, 0)));
+    Console.WriteLine($"W5 WORLDVIEW v2_bytes={artifact.Length} zero_row_revision=2 " +
+        "duplicate/missing resolver/partial capture rejected");
 }
 
 static void PreparedCompositionWarmedQueriesAllocateZero()

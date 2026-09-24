@@ -23,7 +23,7 @@ public sealed class GodotSlidingRenderWindow
     {
         ArgumentNullException.ThrowIfNull(cache);
         _renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
-        _space = cache.BaseWorld.Space;
+        _space = cache.StructuralSpace;
         _window = new ClientPresentationWindow(cache, renderRadiusChunks);
         if (_window.MaximumActiveChunks > renderer.Limits.MaximumRenderChunks)
             throw new ArgumentOutOfRangeException(nameof(renderRadiusChunks),

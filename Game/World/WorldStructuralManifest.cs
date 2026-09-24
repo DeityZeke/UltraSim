@@ -37,6 +37,21 @@ public readonly struct WorldStructuralManifestFingerprint : IEquatable<WorldStru
 
     public bool IsValid => _part0 != 0 || _part1 != 0 || _part2 != 0 || _part3 != 0;
     internal static WorldStructuralManifestFingerprint Read(ReadOnlySpan<byte> digest) => new(digest);
+    /// <summary>Reads an exact canonical digest identity for external immutable-content lookup.</summary>
+    public static bool TryRead(ReadOnlySpan<byte> digest, out WorldStructuralManifestFingerprint fingerprint)
+    {
+        fingerprint = digest.Length == WorldStructuralManifestFormat.FingerprintBytes ? new(digest) : default;
+        return fingerprint.IsValid;
+    }
+    public void CopyTo(Span<byte> destination)
+    {
+        if (destination.Length < WorldStructuralManifestFormat.FingerprintBytes)
+            throw new ArgumentException("Destination is too small.", nameof(destination));
+        BinaryPrimitives.WriteUInt64LittleEndian(destination, _part0);
+        BinaryPrimitives.WriteUInt64LittleEndian(destination[8..], _part1);
+        BinaryPrimitives.WriteUInt64LittleEndian(destination[16..], _part2);
+        BinaryPrimitives.WriteUInt64LittleEndian(destination[24..], _part3);
+    }
     public bool Equals(WorldStructuralManifestFingerprint other) =>
         _part0 == other._part0 && _part1 == other._part1 &&
         _part2 == other._part2 && _part3 == other._part3;

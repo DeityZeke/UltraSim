@@ -18,12 +18,14 @@ using UltraSim.Server.Persistence;
 using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
 using UltraSim.UI;
+using UltraSim.World.Testing;
 
 const string Workload = "ultrasim-t0.10-integrated-acceptance-v9";
 string? output = ReadOption(args, "--output");
 
 var results = new List<TestResult>();
 Run("PlayableWoodsCabinOfflineDirectRoundTrip", PlayableWoodsCabinRoundTrip, results);
+Run("W5CanonicalTwoPackAuthorityAndPersistence", W5CanonicalTwoPackAuthorityAndPersistence, results);
 Run("PlayableCabinHasCanonicalRectangularShell", PlayableCabinHasCanonicalRectangularShell, results);
 Run("PlayableAuthorityBlocksCabinDoorWallsAndChest", PlayableAuthorityBlocksCabinDoorWallsAndChest, results);
 Run("ConceptDemoWorldCombinesFloatingBaseCaveAndSkyShells",
@@ -91,6 +93,216 @@ if (!string.IsNullOrWhiteSpace(output))
     File.WriteAllText(path, json + Environment.NewLine);
 }
 Console.WriteLine($"All {results.Count} integrated acceptance gates passed.");
+
+static TestMetrics W5CanonicalTwoPackAuthorityAndPersistence()
+{
+    string root = TempRoot("w5-two-pack");
+    try
+    {
+        var (baseComposition, west, east) = W5TwoPackFixture.Create();
+        Expect(baseComposition.TryValidateComplete(out _), "W5 authored composition failed complete validation.");
+        PreparedWorldComposition world = WithOverlay(baseComposition, west, east);
+        Expect(world.TryValidateComplete(out _), "W5 overlaid composition failed complete validation.");
+        var composition = new UltraSimGameComposition(
+            new InventoryLimits(32, 128, 32), preparedComposition: world);
+        using var host = new InternalHost(composition,
+            RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x5755_0001))));
+        host.Start();
+        ServerRuntime runtime = host.RuntimeForTesting;
+        using var admission = new AdmissionService(runtime.Game, composition);
+        AdmissionResult entered = admission.JoinAccountless(new ParticipantId(0x5755));
+        Expect(entered.IsEntered, "W5 playable admission failed.");
+        var start = new WorldPosition(127, 0, 15_000, 8_000, 0);
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (ecs, _, game) => game.WorldState.TrySetPosition(ecs, entered.Entity, start),
+            out bool placed) && placed, "W5 actor setup failed.");
+        PersistentEntityId durableActor = GetPersistentId(runtime.Game, entered.Entity);
+        host.Tick();
+        var input = new ClientWorldInputSequencer();
+        var link = new PlayableOfflineDirectLink(runtime.Game, durableActor, input.ControlSession);
+        WorldPublicEntityId publicId = default;
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (ecs, _, game) => game.WorldState.Publications.TryGetPublicEntityId(entered.Entity, out publicId),
+            out bool publicPresent) && publicPresent, "W5 actor did not publish a public identity.");
+        Expect(ReadHome().Coord.X == 127, "W5 actor did not start in chunk 127.");
+        Expect(CheckPhysicsAcrossSeam(), "W5 Physics occupancy/support/sweep failed across the seam.");
+        Cross(1, 128);
+        Cross(-1, 127);
+        Cross(1, 128);
+        WorldPosition savedPosition = link.ReadPosition();
+        Expect(savedPosition.Chunk.X == 128, "W5 save point was not east of the Pack seam.");
+        var persistence = new GameRuntimePersistence(runtime.Game, composition,
+            RestoreOptions(), new SaveSetCoordinator(root));
+        GameSaveResult saved = persistence.TrySave(new SaveSetContext(1, 1_700_000_000_001),
+            static capture => capture());
+        Expect(saved.Succeeded, $"W5 save failed: {saved.Failure}");
+        Cross(-1, 127);
+        ulong generationBeforeFailedRestore = ReadGeneration();
+        WorldPosition positionBeforeFailedRestore = link.ReadPosition();
+        var unavailableContent = new GameRuntimePersistence(runtime.Game, composition,
+            RestoreOptions(), new SaveSetCoordinator(root),
+            structuralManifestResolver: _ => world.Manifest,
+            structuralPackResolver: (_, _) => null);
+        GameLoadResult refused = unavailableContent.TryLoad();
+        Expect(!refused.Succeeded && refused.Failure is not null &&
+            ReadGeneration() == generationBeforeFailedRestore &&
+            link.ReadPosition() == positionBeforeFailedRestore,
+            "W5 failed exact-Pack resolution partially published a generation.");
+        GameLoadResult loaded = persistence.TryLoad();
+        Expect(loaded.Succeeded, $"W5 restore failed: {loaded.Failure}");
+        WorldPosition restored = ReadWorldPosition(runtime.Game, durableActor);
+        Expect(restored == savedPosition && restored.Chunk.X == 128,
+            "W5 actor global position was not restored after seam crossing.");
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (ecs, _, game) =>
+            {
+                PreparedWorldComposition? restoredWorld = game.WorldState.PreparedComposition;
+                return restoredWorld is not null &&
+                    restoredWorld.ManifestFingerprint == world.ManifestFingerprint &&
+                    restoredWorld.Revision == world.Revision &&
+                    restoredWorld.TryValidateComplete(out PreparedWorldCompositionError validationError) &&
+                    restoredWorld.TryGetPreparedPack(W5TwoPackFixture.WestCoord, out PreparedWorldPack w) &&
+                    restoredWorld.TryGetPreparedPack(W5TwoPackFixture.EastCoord, out PreparedWorldPack e) &&
+                    w.View.BaseWorldFingerprint == west.Fingerprint &&
+                    e.View.BaseWorldFingerprint == east.Fingerprint &&
+                    w.View.Overlay.Revision == new WorldOverlayRevision(1) &&
+                    e.View.Overlay.Revision == new WorldOverlayRevision(1) &&
+                    w.View.Overlay.TryGetChunkRevision(new SpatialChunkKey(world.Space, 125, 0),
+                        out WorldChunkContentRevision westRevision, out WorldChunkContentHash westHash) &&
+                    e.View.Overlay.TryGetChunkRevision(new SpatialChunkKey(world.Space, 130, 0),
+                        out WorldChunkContentRevision eastRevision, out WorldChunkContentHash eastHash) &&
+                    westRevision.IsValid && eastRevision.IsValid && westHash.IsValid && eastHash.IsValid;
+            }, out bool restoredComposition) && restoredComposition,
+            "W5 exact manifest, revision, and independent per-Pack overlays did not restore.");
+        return new TestMetrics(HashText($"{world.ManifestFingerprint}|{savedPosition}|{publicId}"),
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            "W5 real controlled movement crosses 127/128 in both directions; worldview/v2 restores exact global position and two overlays.",
+            ChunkCrossings: 4);
+
+        ulong ReadGeneration()
+        {
+            Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, ulong>(
+                (_, generation, _) => generation, out ulong value),
+                "W5 active generation identity was unavailable.");
+            return value;
+        }
+
+        bool CheckPhysicsAcrossSeam()
+        {
+            Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+                (_, _, game) =>
+                {
+                    var body = new SimplePhysicsBody(200, 200, 100, 100, 1_700, 300, 300);
+                    var before = new WorldPosition(127, 0, 15_800, 8_000, 0);
+                    var after = new WorldPosition(128, 0, 200, 8_000, 0);
+                    SimpleOccupancyResult first = game.SimplePhysics.ProbeOccupancy(
+                        new SimpleOccupancyRequest(before, body), [], true);
+                    SimpleOccupancyResult last = game.SimplePhysics.ProbeOccupancy(
+                        new SimpleOccupancyRequest(after, body), [], true);
+                    SimpleMotionResult forward = game.SimplePhysics.ResolveMotion(
+                        new SimpleMotionRequest(before, after.GlobalXMillimeters,
+                            after.GlobalZMillimeters, body), [], true);
+                    SimpleMotionResult reverse = game.SimplePhysics.ResolveMotion(
+                        new SimpleMotionRequest(after, before.GlobalXMillimeters,
+                            before.GlobalZMillimeters, body), [], true);
+                    return first.CanOccupy && last.CanOccupy && forward.WasResolved &&
+                        reverse.WasResolved && first.Support.IsBase && last.Support.IsBase &&
+                        forward.Support.IsBase && reverse.Support.IsBase;
+                }, out bool valid), "W5 Physics seam probe could not run.");
+            return valid;
+        }
+
+        SpatialChunkKey ReadHome()
+        {
+            Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, SpatialChunkKey>(
+                (ecs, _, game) =>
+                {
+                    Expect(game.WorldState.Index.TryGetHome(ResolveInWorld(ecs, durableActor), out SpatialChunkKey home),
+                        "W5 actor lost spatial-index membership.");
+                    return home;
+                }, out SpatialChunkKey key), "W5 home lookup failed.");
+            return key;
+        }
+
+        void Cross(int direction, int destinationChunk)
+        {
+            Expect(input.TryCreateSemanticCommand(new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.CreateDirect(
+                        checked((short)(direction * GamePlayerCommand.MaximumAxisMagnitude)), 0),
+                    GamePlayerActions.None, true), out GamePlayerCommand move),
+                "W5 direct movement command could not form.");
+            Expect(link.ApplyCommand(move).Locomotion == GameWorldActionStatus.Accepted,
+                "W5 direct movement command was not admitted.");
+            int remaining = 250;
+            while (link.ReadPosition().Chunk.X != destinationChunk && remaining-- > 0)
+                host.Tick();
+            Expect(link.ReadPosition().Chunk.X == destinationChunk,
+                $"W5 controlled movement did not enter chunk {destinationChunk}.");
+            Expect(ReadHome().Coord.X == destinationChunk,
+                "W5 spatial index did not follow ordinary chunk migration.");
+            Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+                (ecs, _, game) => game.WorldState.Publications.TryGetPublicEntityId(
+                    ResolveInWorld(ecs, durableActor), out WorldPublicEntityId current) && current == publicId,
+                out bool samePublic) && samePublic,
+                "W5 public identity changed at a Pack boundary.");
+            Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+                (_, _, game) =>
+                {
+                    var records = new WorldPublicRecord[8];
+                    bool targetPresent = game.WorldState.Publications.TryCopySnapshot(
+                        new SpatialChunkKey(world.Space, destinationChunk, 0), records,
+                        out ChunkPublicationBatch target) == ChunkPublicationReadStatus.Snapshot;
+                    bool foundId = false;
+                    for (int index = 0; index < target.Count; index++)
+                        foundId |= records[index].Id == publicId;
+                    int sourceChunk = destinationChunk == 127 ? 128 : 127;
+                    ChunkPublicationReadStatus sourceStatus = game.WorldState.Publications.TryCopySnapshot(
+                        new SpatialChunkKey(world.Space, sourceChunk, 0), records,
+                        out ChunkPublicationBatch source);
+                    bool oldGone = sourceStatus == ChunkPublicationReadStatus.ChunkAbsent;
+                    if (sourceStatus == ChunkPublicationReadStatus.Snapshot)
+                    {
+                        oldGone = true;
+                        for (int index = 0; index < source.Count; index++)
+                            oldGone &= records[index].Id != publicId;
+                    }
+                    return targetPresent && foundId && oldGone;
+                }, out bool publicationMoved) && publicationMoved,
+                "W5 ordinary source retirement/target publication did not follow the actor.");
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+
+    static PreparedWorldComposition WithOverlay(PreparedWorldComposition source,
+        BoundWorldPack west, BoundWorldPack east)
+    {
+        var packs = new PreparedWorldPack[2];
+        BoundWorldPack[] bases = [west, east];
+        WorldPackCoord[] coords = [W5TwoPackFixture.WestCoord, W5TwoPackFixture.EastCoord];
+        for (int index = 0; index < 2; index++)
+        {
+            BoundWorldPack baseWorld = bases[index];
+            var builder = new WorldMutableOverlayBuilder(baseWorld);
+            var materials = new ushort[TerrainChunkFormat.MaterialCellCount];
+            Array.Fill(materials, (ushort)(index == 0 ? 2 : 3));
+            var heights = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+            Expect(TerrainHeightPlaneBase.TryCreate(0, out TerrainHeightPlaneBase heightBase),
+                "W5 overlay height base is invalid.");
+            Expect(builder.TryReplaceTerrain(new SpatialChunkKey(baseWorld.Space, index == 0 ? 125 : 130, 0),
+                materials, heightBase, heights), "W5 overlay replacement was rejected.");
+            Expect(builder.TryBuild(out WorldMutableOverlay? overlay) && overlay is not null,
+                "W5 per-Pack overlay fixture could not build.");
+            packs[index] = new PreparedWorldPack(coords[index], new WorldPreparedView(baseWorld, overlay));
+        }
+        Expect(PreparedWorldComposition.TryCreate(source.Space, new WorldCompositionRevision(3),
+            source.Manifest, packs, out PreparedWorldComposition? prepared, out _),
+            "W5 overlay composition could not build.");
+        return prepared!;
+    }
+}
 
 static TestMetrics PlayableWoodsCabinRoundTrip()
 {

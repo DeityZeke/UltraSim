@@ -91,8 +91,11 @@ not require redownloading unrelated Packs, and possession of Pack bytes still do
 realm/content authorization.
 
 Current A0.7 complete-WorldPack streaming remains the accepted one-Pack implementation baseline.
-W7 is the planned transition to manifest-authenticated, demand-based multi-Pack acquisition after
-the World layer has first implemented W1-W6 composition semantics.
+W5 now proves two-Pack authority, persistence, and local presentation without
+altering this remote acquisition path. W5R still owns the Concept Demo's actual
+Pack migration. W7 is the planned transition to manifest-authenticated,
+demand-based multi-Pack acquisition after the World layer implements W6's
+explicit structural-state vocabulary.
 
 ---
 

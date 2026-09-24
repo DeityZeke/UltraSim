@@ -127,7 +127,12 @@ public readonly record struct ClientWorldSemanticCacheSnapshot(
     ulong ChunkKeyLookups,
     ulong ChunkKeyProbes,
     ClientSemanticHash WorldSemanticHash,
-    long ReservedBytes);
+    long ReservedBytes)
+{
+    public WorldStructuralManifestFingerprint StructuralManifestFingerprint { get; init; }
+    public WorldCompositionRevision CompositionRevision { get; init; }
+    public bool HasCanonicalComposition { get; init; }
+}
 
 /// <summary>Borrowed semantic page; valid only until the next cache mutation.</summary>
 public readonly ref struct ClientSemanticChunkView
@@ -170,8 +175,10 @@ public readonly ref struct ClientSemanticChunkView
 public sealed class ClientWorldSemanticCache
 {
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
-    private readonly BoundWorldPack _baseWorld;
-    private readonly WorldPreparedView _preparedWorld;
+    private readonly BoundWorldPack? _baseWorld;
+    private readonly WorldPreparedView? _preparedWorld;
+    private readonly PreparedWorldComposition? _preparedComposition;
+    private readonly SpatialSpaceId _structuralSpace;
     private readonly ClientWorldSemanticCacheLimits _limits;
     private readonly ChunkSlot[] _slots;
     private readonly int[] _freeSlots;
@@ -213,9 +220,22 @@ public sealed class ClientWorldSemanticCache
     public ClientWorldSemanticCache(
         WorldPreparedView preparedWorld,
         ClientWorldSemanticCacheLimits limits = default)
+        : this(preparedWorld ?? throw new ArgumentNullException(nameof(preparedWorld)), null, limits) { }
+
+    public ClientWorldSemanticCache(
+        PreparedWorldComposition preparedComposition,
+        ClientWorldSemanticCacheLimits limits = default)
+        : this(null, preparedComposition ?? throw new ArgumentNullException(nameof(preparedComposition)), limits) { }
+
+    private ClientWorldSemanticCache(
+        WorldPreparedView? preparedWorld,
+        PreparedWorldComposition? preparedComposition,
+        ClientWorldSemanticCacheLimits limits)
     {
-        _preparedWorld = preparedWorld ?? throw new ArgumentNullException(nameof(preparedWorld));
-        _baseWorld = preparedWorld.BaseWorld;
+        _preparedWorld = preparedWorld;
+        _baseWorld = preparedWorld?.BaseWorld;
+        _preparedComposition = preparedComposition;
+        _structuralSpace = preparedWorld?.Space ?? preparedComposition!.Space;
         if (limits == default) limits = ClientWorldSemanticCacheLimits.Default;
         limits.Validate();
         int knowledgeBucketCapacity = SpatialStorageCapacity.DoubleAndRoundUpPowerOfTwo(
@@ -254,8 +274,44 @@ public sealed class ClientWorldSemanticCache
     }
 
     public ClientWorldSemanticCacheLimits Limits => _limits;
-    public BoundWorldPack BaseWorld => _baseWorld;
-    public WorldPreparedView PreparedWorld => _preparedWorld;
+    public BoundWorldPack BaseWorld => _baseWorld ??
+        throw new InvalidOperationException("A canonical structural composition is not one BaseWorld.");
+    public WorldPreparedView PreparedWorld => _preparedWorld ??
+        throw new InvalidOperationException("A canonical structural composition is not one prepared Pack.");
+    public PreparedWorldComposition? PreparedComposition => _preparedComposition;
+    public SpatialSpaceId StructuralSpace => _structuralSpace;
+    internal int PreparedStructuralChunkCount => _preparedComposition?.PreparedChunkCount ?? _baseWorld!.ChunkCount;
+
+    internal bool TryGetPreparedStructuralChunkKey(int index, out SpatialChunkKey key) =>
+        _preparedComposition is not null
+            ? _preparedComposition.TryGetPreparedChunkKey(index, out key)
+            : _baseWorld!.TryGetChunkKey(index, out key);
+
+    internal bool TryGetStructuralTerrain(SpatialChunkKey key, out WorldTerrainChunkView terrain) =>
+        _preparedComposition is not null
+            ? _preparedComposition.TryGetBaseTerrain(key, out terrain)
+            : _preparedWorld!.TryGetBaseTerrain(key, out terrain);
+
+    internal bool TryGetStructuralStatics(SpatialChunkKey key, out WorldFrozenStaticChunkView statics) =>
+        _preparedComposition is not null
+            ? _preparedComposition.TryGetFrozenStatics(key, out statics)
+            : _preparedWorld!.TryGetFrozenStatics(key, out statics);
+
+    internal bool TryGetStructuralMultiFragments(SpatialChunkKey key, out WorldMultiFragmentChunkView fragments) =>
+        _preparedComposition is not null
+            ? _preparedComposition.TryGetMultiFragments(key, out fragments)
+            : _preparedWorld!.TryGetMultiFragments(key, out fragments);
+
+    internal bool TryGetStructuralSurfaceBands(SpatialChunkKey key, out WorldTerrainSurfaceBandChunkView bands) =>
+        _preparedComposition is not null
+            ? _preparedComposition.TryGetAdditionalTerrainSurfaceBands(key, out bands)
+            : _preparedWorld!.TryGetAdditionalTerrainSurfaceBands(key, out bands);
+
+    internal bool TryGetStructuralReplacementIdentity(SpatialChunkKey key,
+        out WorldChunkContentRevision revision, out WorldChunkContentHash hash) =>
+        _preparedComposition is not null
+            ? _preparedComposition.TryGetReplacementIdentity(key, out revision, out hash)
+            : _preparedWorld!.TryGetReplacementIdentity(key, out revision, out hash);
 
     public bool TryRequest(
         SpatialChunkKey key,
@@ -263,7 +319,7 @@ public sealed class ClientWorldSemanticCache
         out ClientSemanticChunkError error)
     {
         EnsureOwner();
-        if (!key.Space.IsValid || key.Space != _baseWorld.Space)
+        if (!key.Space.IsValid || key.Space != _structuralSpace)
         {
             handle = default;
             error = ClientSemanticChunkError.InvalidKey;
@@ -303,6 +359,13 @@ public sealed class ClientWorldSemanticCache
         ClientSemanticChunkHandle handle,
         ReadOnlySpan<WorldPublicRecord> publicSnapshot,
         ChunkPublicationCursor publicationCursor,
+        out ClientSemanticChunkError error) =>
+        TryStageFromStructuralWorld(handle, publicSnapshot, publicationCursor, out error);
+
+    public bool TryStageFromStructuralWorld(
+        ClientSemanticChunkHandle handle,
+        ReadOnlySpan<WorldPublicRecord> publicSnapshot,
+        ChunkPublicationCursor publicationCursor,
         out ClientSemanticChunkError error)
     {
         EnsureOwner();
@@ -317,13 +380,13 @@ public sealed class ClientWorldSemanticCache
             error = ClientSemanticChunkError.InvalidState;
             return false;
         }
-        if (!_preparedWorld.TryGetBaseTerrain(state.Key, out WorldTerrainChunkView terrain))
+        if (!TryGetStructuralTerrain(state.Key, out WorldTerrainChunkView terrain))
         {
             error = ClientSemanticChunkError.MissingTerrain;
             return false;
         }
         int frozenCount = 0;
-        if (_preparedWorld.TryGetFrozenStatics(state.Key, out WorldFrozenStaticChunkView frozenView))
+        if (TryGetStructuralStatics(state.Key, out WorldFrozenStaticChunkView frozenView))
         {
             frozenCount = frozenView.Count;
             if (frozenCount > _frozenStaticScratch.Length)
@@ -333,7 +396,7 @@ public sealed class ClientWorldSemanticCache
             }
         }
         int multiCount = 0;
-        if (_preparedWorld.TryGetMultiFragments(state.Key, out WorldMultiFragmentChunkView multiView))
+        if (TryGetStructuralMultiFragments(state.Key, out WorldMultiFragmentChunkView multiView))
         {
             multiCount = multiView.Count;
             if (multiCount > _multiFragmentScratch.Length)
@@ -343,7 +406,7 @@ public sealed class ClientWorldSemanticCache
             }
         }
         int additionalTerrainCount = 0;
-        if (_preparedWorld.TryGetAdditionalTerrainSurfaceBands(
+        if (TryGetStructuralSurfaceBands(
                 state.Key, out WorldTerrainSurfaceBandChunkView additionalTerrainView))
         {
             additionalTerrainCount = additionalTerrainView.Count;
@@ -375,13 +438,13 @@ public sealed class ClientWorldSemanticCache
         terrain.CopySurfacePresence(_surfacePresenceScratch);
         if (frozenCount != 0)
         {
-            _preparedWorld.TryGetFrozenStatics(state.Key, out WorldFrozenStaticChunkView stagedFrozen);
+            TryGetStructuralStatics(state.Key, out WorldFrozenStaticChunkView stagedFrozen);
             for (int index = 0; index < frozenCount; index++)
                 _frozenStaticScratch[index] = stagedFrozen.GetRecord(index);
         }
         if (multiCount != 0)
         {
-            _preparedWorld.TryGetMultiFragments(state.Key, out WorldMultiFragmentChunkView stagedMulti);
+            TryGetStructuralMultiFragments(state.Key, out WorldMultiFragmentChunkView stagedMulti);
             for (int index = 0; index < multiCount; index++)
                 _multiFragmentScratch[index] = stagedMulti.GetRecord(index);
         }
@@ -395,7 +458,7 @@ public sealed class ClientWorldSemanticCache
         state.MultiFragmentCount = multiCount;
         state.AdditionalTerrainSurfaceFragmentCount = additionalTerrainCount;
         state.PublicRecordCount = publicCount;
-        _preparedWorld.TryGetReplacementIdentity(
+        TryGetStructuralReplacementIdentity(
             state.Key, out state.StructuralRevision, out state.StructuralContentHash);
         state.PublicationCursor = publicationCursor;
         AdmitCursorEpoch(publicationCursor);
@@ -736,7 +799,7 @@ public sealed class ClientWorldSemanticCache
             return false;
         }
         ref readonly ChunkSlot state = ref _slots[slot];
-        _preparedWorld.TryGetAdditionalTerrainSurfaceBands(
+        TryGetStructuralSurfaceBands(
             state.Key, out WorldTerrainSurfaceBandChunkView additionalTerrain);
         view = new ClientSemanticChunkView(
             Info(slot),
@@ -779,8 +842,12 @@ public sealed class ClientWorldSemanticCache
             meshError = TerrainBaseMeshBuildError.None;
             return false;
         }
-        if (!_preparedWorld.TryBuildBaseTerrainMesh(
-                _slots[slot].Key, vertices, indices, triangleMaterials, out summary, out meshError))
+        bool built = _preparedComposition is not null
+            ? _preparedComposition.TryBuildBaseTerrainMesh(
+                _slots[slot].Key, vertices, indices, triangleMaterials, out summary, out meshError)
+            : _preparedWorld!.TryBuildBaseTerrainMesh(
+                _slots[slot].Key, vertices, indices, triangleMaterials, out summary, out meshError);
+        if (!built)
         {
             semanticError = ClientSemanticChunkError.None;
             return false;
@@ -816,7 +883,7 @@ public sealed class ClientWorldSemanticCache
             meshError = TerrainSurfaceBandMeshBuildError.None;
             return false;
         }
-        if (!_preparedWorld.TryGetAdditionalTerrainSurfaceBands(
+        if (!TryGetStructuralSurfaceBands(
                 _slots[slot].Key, out WorldTerrainSurfaceBandChunkView fragments))
             throw new InvalidOperationException("A resident additional terrain fragment disappeared.");
         if (!TerrainSurfaceBandMesh.TryBuild(
@@ -865,8 +932,8 @@ public sealed class ClientWorldSemanticCache
             }
         }
         return new ClientWorldSemanticCacheSnapshot(
-            _baseWorld.Fingerprint,
-            _preparedWorld.Overlay.Revision,
+            _baseWorld?.Fingerprint ?? default,
+            _preparedWorld?.Overlay.Revision ?? default,
             _publicationEpoch,
             requested,
             staged,
@@ -880,7 +947,12 @@ public sealed class ClientWorldSemanticCache
             _chunkKeyLookups,
             _chunkKeyProbes,
             ComputeWorldHash(),
-            CalculateReservedBytes());
+            CalculateReservedBytes())
+        {
+            HasCanonicalComposition = _preparedComposition is not null,
+            StructuralManifestFingerprint = _preparedComposition?.ManifestFingerprint ?? default,
+            CompositionRevision = _preparedComposition?.Revision ?? default,
+        };
     }
 
     private bool TryPrepareSnapshot(
@@ -1139,7 +1211,7 @@ public sealed class ClientWorldSemanticCache
         hash.Add(unchecked((uint)state.AdditionalTerrainSurfaceFragmentCount));
         if (state.AdditionalTerrainSurfaceFragmentCount != 0)
         {
-            if (!_preparedWorld.TryGetAdditionalTerrainSurfaceBands(
+            if (!TryGetStructuralSurfaceBands(
                     state.Key, out WorldTerrainSurfaceBandChunkView bands) ||
                 bands.Count != state.AdditionalTerrainSurfaceFragmentCount)
                 throw new InvalidOperationException("Resident additional terrain semantics changed.");

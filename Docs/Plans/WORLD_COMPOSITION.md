@@ -1,8 +1,8 @@
 # UltraSim World / WorldPack Structural Composition
 
-**Status:** canonical World/Terrain direction; W1-W4 closed, W5 next. W5-W10 composition/runtime work remains planned.
+**Status:** canonical World/Terrain direction; W1-W5 closed, W5R next. W6-W10 composition/runtime work remains planned.
 **Accepted:** 2026-09-23.
-**Current implementation:** W4 provides an immutable prepared-composition runtime root and composition-aware World/Game queries. The current Concept Demo still uses the temporary unaddressed one-Pack compatibility path until W5/W5R split its cross-window artifact. W1 adds address math, W2 adds declared-shard validation and capacity admission, and W3 adds the immutable sparse structural manifest. None changes v1 Pack bytes.
+**Current implementation:** W5 proves connected two-Pack Game authority, exact complete-world seam/identity validation, `worldview/v2` save/restore, local semantic residency, and native Godot presentation in a dedicated fixture. The current Concept Demo still uses its temporary unaddressed one-Pack compatibility path until W5R migrates that real consumer. W1-W4 supply the address, shard, manifest, and prepared-composition foundations. Neither WorldPack/v1 nor WorldStructuralManifest/v1 bytes changed.
 **Related:** [TERRAIN.md](TERRAIN.md), [ASSET_STREAMING.md](ASSET_STREAMING.md), [../README.md](../README.md), [../../Game/World/README.md](../../Game/World/README.md).
 
 ## 1. Core model
@@ -579,9 +579,32 @@ not hot-swap compositions, acquire Packs, migrate persistence, or claim the
 full W6 structural-state vocabulary. The Concept Demo remains on the legacy
 path because its historical Pack spans future Pack (0,0) and (1,0).
 
-### W5 — multi-Pack authority/local proof
+### W5 — multi-Pack authority/local proof (CLOSED)
 
-Use at least two connected Packs and prove terrain seams, Physics support, statics/Multis, persistence, local semantic streaming, and Godot traversal without a player-visible transition.
+The dedicated `(0,0)`/`(1,0)` fixture independently compiles two declared Packs around
+global chunks 127/128. A complete prepared-composition validation requires every
+manifest Pack, checks exact q5 base-terrain edges across Pack addresses, and rejects
+duplicate WorldStaticId and MultiInstanceId ownership. Partial prepared subsets
+remain valid for bounded runtime queries, but cannot make complete-world claims.
+
+Real Game control moves one persistent/public actor 127→128→127 with continuous
+Simple Physics support, ordinary SpatialChunkKey migration, and source/target
+ChunkPublication behavior. Client semantic residency and the Pack-blind Godot
+renderer keep their instances while a presentation window straddles the seam.
+`worldview/v2` records exact manifest identity, World-level composition revision,
+and sorted durable per-Pack overlays; it resolves immutable manifest/Pack bytes
+externally and privately validates the complete candidate before generation
+publication. Legacy `worldview/v1` remains readable and writable for the
+historical one-Pack path. Capture currently refuses a partial prepared runtime
+instead of risking omission of durable overlay state; the v2 *format* does not
+encode prepared residency. A later durable overlay catalog may relax that
+runtime limitation without changing the format.
+
+Multis are valid and globally collision-checked on both sides; one logical Multi
+continuing across Packs is not represented by this v1 profile. Repeated
+WorldSurfaceId is not globally rejected; additional-surface cross-Pack
+continuation is not claimed. The production Concept Demo is **not** multi-Pack
+yet. The immutable W5 acceptance evidence is recorded under `_Benchmarks/Baselines`.
 
 ### W5R — Concept Demo migration
 

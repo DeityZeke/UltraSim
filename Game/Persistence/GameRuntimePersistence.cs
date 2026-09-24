@@ -32,6 +32,8 @@ public sealed class GameRuntimePersistence
     private readonly AccountingPersistenceOptions _accountingOptions;
     private readonly WorldPersistenceOptions _worldOptions;
     private readonly Func<PersistenceRestoreRequirements, GameStaging>? _stagingOverride;
+    private readonly Func<WorldStructuralManifestFingerprint, WorldStructuralManifest?>? _structuralManifestResolver;
+    private readonly Func<WorldPackFingerprint, WorldContentBinding, BoundWorldPack?>? _structuralPackResolver;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
 
     public GameRuntimePersistence(
@@ -41,7 +43,9 @@ public sealed class GameRuntimePersistence
         SaveSetCoordinator coordinator,
         AccountingPersistenceOptions? accountingOptions = null,
         Func<PersistenceRestoreRequirements, GameStaging>? stagingOverride = null,
-        WorldPersistenceOptions? worldOptions = null)
+        WorldPersistenceOptions? worldOptions = null,
+        Func<WorldStructuralManifestFingerprint, WorldStructuralManifest?>? structuralManifestResolver = null,
+        Func<WorldPackFingerprint, WorldContentBinding, BoundWorldPack?>? structuralPackResolver = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _composition = composition ?? throw new ArgumentNullException(nameof(composition));
@@ -50,6 +54,8 @@ public sealed class GameRuntimePersistence
         _accountingOptions = accountingOptions ?? new AccountingPersistenceOptions();
         _worldOptions = worldOptions ?? new WorldPersistenceOptions();
         _stagingOverride = stagingOverride;
+        _structuralManifestResolver = structuralManifestResolver;
+        _structuralPackResolver = structuralPackResolver;
     }
 
     public GameSaveResult TrySave(in SaveSetContext context, Action<Action> captureBoundary)
@@ -133,17 +139,21 @@ public sealed class GameRuntimePersistence
                     return value.World;
                 });
             var accountingParticipant = new AccountingSaveSetParticipant(_accountingOptions);
-            var worldParticipant = new WorldSaveSetParticipant(
+            Func<WorldPackFingerprint, BoundWorldPack?> packResolver =
                 fingerprint =>
                 {
                     GameStaging built = staging ??
                         throw new PersistenceValidationException(
                             "The ECS participant did not prepare game content before current-world resolution.");
+                    if (_structuralPackResolver is not null)
+                        return _structuralPackResolver(fingerprint, built.Content.World);
                     return _composition.TryResolveWorldPack(fingerprint, built.Content.World, out BoundWorldPack? bound)
                         ? bound
                         : null;
-                },
-                _worldOptions);
+                };
+            var worldParticipant = new WorldSaveSetParticipant(
+                _structuralManifestResolver ?? _composition.ResolveStructuralManifest,
+                packResolver, _worldOptions);
             var clockParticipant = new WorldClockSaveSetParticipant();
             using PreparedLoadGeneration prepared = _coordinator.PrepareLoad(
                 [ecsParticipant, worldParticipant, accountingParticipant, clockParticipant],
@@ -162,9 +172,10 @@ public sealed class GameRuntimePersistence
                     "The restored ECS scheduler tick disagrees with authoritative world-clock state.");
             GameStaging built = staging ??
                 throw new InvalidOperationException("The game staging factory did not produce state.");
-            if (!built.WorldState.TryInstallPreparedWorld(
-                    preparedWorld.BaseWorld,
-                    preparedWorld.Overlay))
+            bool worldInstalled = preparedWorld.PreparedComposition is PreparedWorldComposition canonical
+                ? built.WorldState.TryInstallPreparedComposition(canonical)
+                : built.WorldState.TryInstallPreparedWorld(preparedWorld.BaseWorld, preparedWorld.Overlay);
+            if (!worldInstalled)
                 throw new PersistenceValidationException(
                     "The resolved current-world view could not be installed into the private staging generation.");
             built.Inventory.Rebuild(stagedWorld);

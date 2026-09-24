@@ -55,6 +55,7 @@ public sealed class UltraSimGameComposition : IServerComposition, IGuestAdmissio
     private readonly int _maximumChunksPerContentArchetype;
     private readonly GameRuntimeProfile _runtimeProfile;
     private readonly WorldPack? _baseWorldPack;
+    private readonly PreparedWorldComposition? _preparedComposition;
     private readonly InventoryRuleSelection _inventoryRuleSelection;
     private readonly GameVerticalMotionOptions _verticalMotionOptions;
 
@@ -64,7 +65,8 @@ public sealed class UltraSimGameComposition : IServerComposition, IGuestAdmissio
         GameRuntimeProfile runtimeProfile = GameRuntimeProfile.Local,
         WorldPack? baseWorldPack = null,
         InventoryRuleSelection? inventoryRuleSelection = null,
-        GameVerticalMotionOptions? verticalMotionOptions = null)
+        GameVerticalMotionOptions? verticalMotionOptions = null,
+        PreparedWorldComposition? preparedComposition = null)
     {
         _inventoryLimits = inventoryLimits ?? InventoryLimits.Default;
         _inventoryLimits.Validate();
@@ -75,6 +77,9 @@ public sealed class UltraSimGameComposition : IServerComposition, IGuestAdmissio
         _maximumChunksPerContentArchetype = maximumChunksPerContentArchetype;
         _runtimeProfile = runtimeProfile;
         _baseWorldPack = baseWorldPack;
+        if (baseWorldPack is not null && preparedComposition is not null)
+            throw new ArgumentException("Legacy and canonical structural roots are mutually exclusive.", nameof(preparedComposition));
+        _preparedComposition = preparedComposition;
         _inventoryRuleSelection = inventoryRuleSelection ?? InventoryRuleSelection.PerContainer;
         if (!_inventoryRuleSelection.IsValid)
             throw new ArgumentException("The inventory rule selection is invalid.", nameof(inventoryRuleSelection));
@@ -213,10 +218,27 @@ public sealed class UltraSimGameComposition : IServerComposition, IGuestAdmissio
     {
         ArgumentNullException.ThrowIfNull(content);
         bound = null;
-        return fingerprint.IsValid && _baseWorldPack is not null &&
-            _baseWorldPack.Fingerprint == fingerprint &&
-            _baseWorldPack.TryBind(content, out bound, out _);
+        if (!fingerprint.IsValid) return false;
+        if (_baseWorldPack is not null)
+            return _baseWorldPack.Fingerprint == fingerprint &&
+                _baseWorldPack.TryBind(content, out bound, out _);
+        if (_preparedComposition is not null)
+            for (int index = 0; index < _preparedComposition.PreparedPackCount; index++)
+            {
+                _preparedComposition.TryGetPreparedPackAt(index, out PreparedWorldPack pack);
+                if (pack.View.BaseWorldFingerprint == fingerprint &&
+                    pack.View.BaseWorld.Content.Fingerprint == content.Fingerprint)
+                {
+                    bound = pack.View.BaseWorld;
+                    return true;
+                }
+            }
+        return false;
     }
+
+    public WorldStructuralManifest? ResolveStructuralManifest(WorldStructuralManifestFingerprint fingerprint) =>
+        _preparedComposition is not null && _preparedComposition.ManifestFingerprint == fingerprint
+            ? _preparedComposition.Manifest : null;
 
     public static EcsWorldOptions CreateWorldOptions(
         int entityCapacity = 4_096,
@@ -264,7 +286,13 @@ public sealed class UltraSimGameComposition : IServerComposition, IGuestAdmissio
         if (_baseWorldPack is not null &&
             !_baseWorldPack.TryBind(content.World, out bound, out WorldPackBindingError error))
             throw new InvalidOperationException($"WorldPack could not bind to compiled game content: {error}.");
-        return new GameWorldState(world, bound);
+        if (_preparedComposition is not null && _preparedComposition.PreparedPackCount != 0)
+        {
+            _preparedComposition.TryGetPreparedPackAt(0, out PreparedWorldPack first);
+            if (first.View.BaseWorld.Content.Fingerprint != content.World.Fingerprint)
+                throw new InvalidOperationException("The prepared composition does not bind to compiled Game content.");
+        }
+        return new GameWorldState(world, bound, preparedComposition: _preparedComposition);
     }
 
     private GameWorldActions CreateWorldActions(

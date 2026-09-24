@@ -40,7 +40,7 @@ One WorldPack is a fixed 256×256 SpatialChunk / 4.096×4.096 km structural addr
 globally centered Pack mapping makes Pack (0,0) own chunk coordinates -128..127 on each axis.
 WorldPack boundaries do not change World/SpatialSpace identity and must remain semantically boring.
 
-W1-W4 are closed; W5 is next. `WorldPackAddressing.ToPackLocal` partitions every
+W1-W5 are closed; W5R is next. `WorldPackAddressing.ToPackLocal` partitions every
 signed-32-bit global `SpatialChunkCoord` into an 8-byte `WorldPackCoord` and a
 2-byte bounded `WorldPackLocalChunkCoord`. `TryToGlobal` rejects an arbitrary
 Pack/local pair if either reconstructed global axis is outside signed 32-bit
@@ -66,8 +66,14 @@ binary lookup. `WorldCompositionRevision` is a separate 8-byte runtime/save
 value, absent from immutable manifest bytes. Neither WorldId nor
 SpatialSpaceId participates in that identity. Manifest entries carry only
 Pack addresses and fingerprints; no Pack bytes, prepared state, or residency.
-W4 now supplies the immutable multi-Pack query router, but not the W5 connected
-two-Pack playable World proof.
+W4 supplies the immutable multi-Pack query router. W5's independent two-Pack
+fixture proves a continuous playable crossing of global chunks 127/128 through
+Game control, Simple Physics, Spatial and public publication, local semantic
+residency, and native Godot. `TryValidateComplete` requires all manifest Packs
+to be prepared and checks exact cross-Pack base-terrain edges plus global
+static/Multi identities. Partial prepared compositions remain legal for queries;
+they cannot establish complete-world validity. Logical Multi continuation and
+additional-surface continuation across Packs remain unimplemented.
 
 The future World layer distinguishes authoritatively unauthored Pack, manifest-known but
 unprepared Pack, missing chunk inside a prepared Pack, intentional Absent terrain cell, and
@@ -82,9 +88,12 @@ and common content binding before publication. Zero prepared Packs are legal.
 Global terrain/column/mesh/static/Multi-fragment/replacement queries resolve
 the owning prepared Pack internally and borrow existing immutable view payloads.
 `GameWorldState` selects this root or its temporary legacy one-Pack view, never
-both; Simple Physics remains Pack-agnostic. Runtime Add/Remove/Replace Pack,
-multi-Pack persistence, acquisition, and the full connected seam proof remain
-W5+ work. WorldPack/v1 remains the initial artifact format.
+both; Simple Physics remains Pack-agnostic. W5 adds `worldview/v2` durable
+composition identity and independently revised per-Pack overlays, with exact
+manifest/Pack resolution before whole-generation publication. Runtime
+Add/Remove/Replace Pack and remote acquisition remain later work. WorldPack/v1
+remains the initial artifact format; the actual Concept Demo remains on its
+historical one-Pack path until W5R.
 
 An entity is current in dynamic-public projection only while its valid
 `WorldPublicComponent` has `WorldPublicStateFlags.Visible`. Clearing `Visible`

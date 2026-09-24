@@ -126,7 +126,7 @@ public sealed class ClientPresentationWindow
         long identity = Interlocked.Increment(ref s_nextWindowIdentity);
         if (identity <= 0) throw new InvalidOperationException("Presentation window identity exhausted.");
         _windowIdentity = checked((ulong)identity);
-        _space = cache.BaseWorld.Space;
+        _space = cache.StructuralSpace;
         _radius = presentationRadiusChunks;
         _active = new WindowEntry[maximumActive];
         _candidate = new WindowEntry[maximumActive];

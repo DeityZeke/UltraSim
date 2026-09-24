@@ -2405,6 +2405,12 @@ foreach (string configuration in configurations)
         [
             "--headless",
             "--path", "_Tests/UltraSim.S0.Godot.Tests",
+            "--scene", "res://W5TwoPackHeadlessAcceptance.tscn",
+        ]);
+        Run(root, godot,
+        [
+            "--headless",
+            "--path", "_Tests/UltraSim.S0.Godot.Tests",
             "--scene", "res://T010PlayableWorldAcceptance.tscn",
         ]);
         BuildClientApplication(root, configuration, "Complete");

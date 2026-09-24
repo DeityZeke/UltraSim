@@ -19,6 +19,10 @@ public enum PreparedWorldCompositionError
     PackSpaceMismatch,
     PackWindowMismatch,
     ContentBindingMismatch,
+    IncompleteComposition,
+    TerrainSeamMismatch,
+    DuplicateWorldStaticId,
+    DuplicateMultiInstanceId,
 }
 
 /// <summary>
@@ -48,6 +52,112 @@ public sealed class PreparedWorldComposition
     public int ManifestEntryCount => Manifest.EntryCount;
     public int PreparedPackCount => _packs.Length;
     public long PreparedIndexReservedBytes => (long)_packs.Length * (sizeof(int) * 2 + IntPtr.Size);
+
+    /// <summary>Number of authored chunks in the prepared subset, not the whole manifest.</summary>
+    public int PreparedChunkCount
+    {
+        get
+        {
+            int count = 0;
+            foreach (PreparedWorldPack pack in _packs)
+                count = checked(count + pack.View.BaseWorld.ChunkCount);
+            return count;
+        }
+    }
+
+    /// <summary>Cold sparse enumeration for client-residency construction.</summary>
+    public bool TryGetPreparedChunkKey(int index, out SpatialChunkKey key)
+    {
+        foreach (PreparedWorldPack pack in _packs)
+        {
+            int count = pack.View.BaseWorld.ChunkCount;
+            if (index < count)
+                return pack.View.BaseWorld.TryGetChunkKey(index, out key);
+            index -= count;
+        }
+        key = default;
+        return false;
+    }
+
+    /// <summary>
+    /// Cold complete-world validation. A partial prepared subset is useful for queries but cannot
+    /// establish claims about authored seams and durable identities in unavailable Pack bytes.
+    /// </summary>
+    public bool TryValidateComplete(out PreparedWorldCompositionError error)
+    {
+        if (_packs.Length != Manifest.EntryCount)
+        {
+            error = PreparedWorldCompositionError.IncompleteComposition;
+            return false;
+        }
+        var staticIds = new HashSet<WorldStaticId>();
+        var multiIds = new HashSet<MultiInstanceId>();
+        foreach (PreparedWorldPack pack in _packs)
+        {
+            BoundWorldPack authored = pack.View.BaseWorld;
+            int rootCount = pack.View.Overlay.ReplacesMultiInstances
+                ? pack.View.Overlay.ReplacementMultiInstanceCount : authored.MultiInstanceCount;
+            for (int index = 0; index < rootCount; index++)
+            {
+                WorldMultiInstanceRecord root;
+                if (pack.View.Overlay.ReplacesMultiInstances)
+                    root = pack.View.Overlay.MultiInstances[index];
+                else if (!authored.TryGetMultiInstanceAt(index, out root))
+                    throw new InvalidOperationException("A validated Pack lost a Multi root.");
+                if (!multiIds.Add(root.Id))
+                {
+                    error = PreparedWorldCompositionError.DuplicateMultiInstanceId;
+                    return false;
+                }
+            }
+            for (int index = 0; index < authored.ChunkCount; index++)
+            {
+                if (!authored.TryGetChunkKey(index, out SpatialChunkKey key))
+                    throw new InvalidOperationException("A validated Pack lost an authored chunk.");
+                if (pack.View.TryGetFrozenStatics(key, out WorldFrozenStaticChunkView statics))
+                    for (int row = 0; row < statics.Count; row++)
+                        if (!staticIds.Add(statics.GetRecord(row).Id))
+                        {
+                            error = PreparedWorldCompositionError.DuplicateWorldStaticId;
+                            return false;
+                        }
+                if (key.Coord.X != int.MaxValue &&
+                    !ValidateNeighborEdge(key, new SpatialChunkKey(Space, key.Coord.X + 1, key.Coord.Z), true))
+                {
+                    error = PreparedWorldCompositionError.TerrainSeamMismatch;
+                    return false;
+                }
+                if (key.Coord.Z != int.MaxValue &&
+                    !ValidateNeighborEdge(key, new SpatialChunkKey(Space, key.Coord.X, key.Coord.Z + 1), false))
+                {
+                    error = PreparedWorldCompositionError.TerrainSeamMismatch;
+                    return false;
+                }
+            }
+        }
+        error = PreparedWorldCompositionError.None;
+        return true;
+    }
+
+    private bool ValidateNeighborEdge(SpatialChunkKey firstKey, SpatialChunkKey secondKey, bool east)
+    {
+        WorldPackAddressing.ToPackLocal(firstKey.Coord, out WorldPackCoord firstPack, out _);
+        WorldPackAddressing.ToPackLocal(secondKey.Coord, out WorldPackCoord secondPack, out _);
+        if (firstPack == secondPack || !TryGetBaseTerrain(secondKey, out WorldTerrainChunkView second))
+            return true; // Per-Pack validation owns internal edges; absent neighbors are not seams.
+        if (!TryGetBaseTerrain(firstKey, out WorldTerrainChunkView first))
+            throw new InvalidOperationException("A validated Pack lost an authored terrain chunk.");
+        for (byte vertex = 0; vertex < TerrainChunkFormat.HeightVertexEdge; vertex++)
+        {
+            int firstIndex = TerrainChunkFormat.GetHeightIndex(east
+                ? new TerrainVertexCoord(32, vertex) : new TerrainVertexCoord(vertex, 32));
+            int secondIndex = TerrainChunkFormat.GetHeightIndex(east
+                ? new TerrainVertexCoord(0, vertex) : new TerrainVertexCoord(vertex, 0));
+            if (first.GetAbsoluteHeightMillimeters(firstIndex) != second.GetAbsoluteHeightMillimeters(secondIndex))
+                return false;
+        }
+        return true;
+    }
 
     /// <summary>Validates the complete candidate before publishing any runtime root.</summary>
     public static bool TryCreate(

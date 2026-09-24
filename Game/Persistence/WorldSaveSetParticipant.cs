@@ -33,6 +33,7 @@ public sealed class WorldSaveSetParticipant : ISaveSetParticipant
 {
     private const uint Magic = 0x56575355; // "USWV"
     private const ushort FormatVersion = 1;
+    private const ushort CompositionFormatVersion = 2;
     private const byte HasBaseWorld = 1 << 0;
     private const byte ReplacesMultiInstances = 1 << 1;
     private const int StaticRecordBytes = 82;
@@ -42,6 +43,7 @@ public sealed class WorldSaveSetParticipant : ISaveSetParticipant
     private readonly GameWorldState? _source;
     private readonly PersistentWorldId _sourceWorldId;
     private readonly Func<WorldPackFingerprint, BoundWorldPack?>? _packResolver;
+    private readonly Func<WorldStructuralManifestFingerprint, WorldStructuralManifest?>? _manifestResolver;
     private readonly WorldPersistenceOptions _options;
 
     public WorldSaveSetParticipant(
@@ -69,6 +71,17 @@ public sealed class WorldSaveSetParticipant : ISaveSetParticipant
         Key = ValidateKey(key);
     }
 
+    /// <summary>Restore-only exact immutable manifest and Pack resolvers for canonical worldview/v2.</summary>
+    public WorldSaveSetParticipant(
+        Func<WorldStructuralManifestFingerprint, WorldStructuralManifest?> manifestResolver,
+        Func<WorldPackFingerprint, BoundWorldPack?> packResolver,
+        WorldPersistenceOptions? options = null,
+        string key = "worldview")
+        : this(packResolver, options, key)
+    {
+        _manifestResolver = manifestResolver ?? throw new ArgumentNullException(nameof(manifestResolver));
+    }
+
     public string Key { get; }
     public long MaximumArtifactBytes => _options.MaximumArtifactBytes;
 
@@ -78,8 +91,21 @@ public sealed class WorldSaveSetParticipant : ISaveSetParticipant
             throw new ArgumentOutOfRangeException(nameof(context));
         GameWorldState source = _source ??
             throw new InvalidOperationException("A restore-only current-world participant cannot capture a save.");
-        if (source.PreparedComposition is not null)
-            throw new NotSupportedException("worldview/v1 cannot capture a prepared World composition.");
+        if (source.PreparedComposition is PreparedWorldComposition composition)
+        {
+            // The artifact describes durable overlay state for the whole manifest, not the
+            // currently prepared subset. Until a separate durable overlay catalog exists,
+            // refusing a partial runtime is safer than silently omitting an unprepared Pack.
+            if (!composition.TryValidateComplete(out PreparedWorldCompositionError validationError))
+                throw new PersistenceValidationException(
+                    $"The canonical current-world composition cannot be captured: {validationError}.");
+            for (int index = 0; index < composition.PreparedPackCount; index++)
+            {
+                composition.TryGetPreparedPackAt(index, out PreparedWorldPack pack);
+                ValidateOverlayBounds(pack.View.Overlay, _options);
+            }
+            return new CapturedComposition(Key, context.Sequence, _sourceWorldId, composition);
+        }
         if (source.PreparedWorld is null)
             return new Captured(Key, context.Sequence, _sourceWorldId, null, null);
         WorldMutableOverlay overlay = source.Overlay ??
@@ -94,10 +120,19 @@ public sealed class WorldSaveSetParticipant : ISaveSetParticipant
             throw new ArgumentOutOfRangeException(nameof(context));
         if (artifact.Length == 0 || artifact.Length > _options.MaximumArtifactBytes)
             throw new PersistenceValidationException("The current-world artifact size is outside its configured bound.");
-        Parsed parsed;
+        Parsed? parsed = null;
+        ParsedComposition? parsedComposition = null;
         try
         {
-            parsed = Parse(artifact.Span, context.Sequence, _options);
+            if (artifact.Length < 6)
+                throw new PersistenceValidationException("The current-world artifact is truncated.");
+            ushort version = BinaryPrimitives.ReadUInt16LittleEndian(artifact.Span[4..]);
+            if (version == FormatVersion)
+                parsed = Parse(artifact.Span, context.Sequence, _options);
+            else if (version == CompositionFormatVersion)
+                parsedComposition = ParseComposition(artifact.Span, context.Sequence, _options);
+            else
+                throw new PersistenceCompatibilityException("The current-world artifact format is unsupported.");
         }
         catch (PersistenceException)
         {
@@ -108,7 +143,42 @@ public sealed class WorldSaveSetParticipant : ISaveSetParticipant
             throw new PersistenceValidationException(
                 $"The current-world artifact contains invalid state: {exception.Message}");
         }
-        return new PreparedWorldParticipant(Key, parsed, _packResolver);
+        return new PreparedWorldParticipant(Key, parsed, parsedComposition, _manifestResolver, _packResolver);
+    }
+
+    private static ParsedComposition ParseComposition(ReadOnlySpan<byte> bytes, ulong expectedSequence,
+        WorldPersistenceOptions options)
+    {
+        var reader = new WorldArtifactReader(bytes);
+        if (reader.ReadUInt32() != Magic || reader.ReadUInt16() != CompositionFormatVersion ||
+            reader.ReadUInt16() != 0 || reader.ReadUInt64() != expectedSequence)
+            throw new PersistenceValidationException("The canonical current-world header is invalid.");
+        var worldId = new PersistentWorldId(reader.ReadUInt64());
+        var space = new SpatialSpaceId(reader.ReadUInt64());
+        var revision = new WorldCompositionRevision(reader.ReadUInt64());
+        if (!space.IsValid || !revision.IsValid ||
+            !WorldStructuralManifestFingerprint.TryRead(reader.ReadBytes(32), out var manifestFingerprint))
+            throw new PersistenceValidationException("The canonical current-world identity is invalid.");
+        int count = reader.ReadCount("Pack overlay");
+        if (count > WorldStructuralManifestFormat.MaximumPacks)
+            throw new PersistenceValidationException("The canonical current-world Pack row count is excessive.");
+        var rows = new ParsedCompositionRow[count];
+        WorldPackCoord previous = default;
+        for (int index = 0; index < count; index++)
+        {
+            var coord = new WorldPackCoord(reader.ReadInt32(), reader.ReadInt32());
+            int length = reader.ReadCount("Pack overlay bytes");
+            if (length == 0 || index != 0 && previous.CompareTo(coord) >= 0)
+                throw new PersistenceValidationException("Canonical Pack overlay rows are invalid or unsorted.");
+            Parsed row = Parse(reader.ReadBytes(length), expectedSequence, options);
+            if (!row.HasBaseWorld || row.DurableWorldId != worldId || row.Space != space ||
+                !row.OverlayRevision.IsValid && row.Chunks.Length == 0 && row.MultiInstances is null)
+                throw new PersistenceValidationException("A canonical Pack overlay row has inconsistent identity.");
+            rows[index] = new ParsedCompositionRow(coord, row);
+            previous = coord;
+        }
+        reader.EnsureEnd();
+        return new ParsedComposition(worldId, space, revision, manifestFingerprint, rows);
     }
 
     private static Parsed Parse(
@@ -360,6 +430,69 @@ public sealed class WorldSaveSetParticipant : ISaveSetParticipant
         }
     }
 
+    private sealed class CapturedComposition : ICapturedSaveSetParticipant
+    {
+        private readonly ulong _sequence;
+        private readonly PersistentWorldId _worldId;
+        private PreparedWorldComposition? _composition;
+
+        internal CapturedComposition(string key, ulong sequence, PersistentWorldId worldId,
+            PreparedWorldComposition composition)
+        {
+            Key = key;
+            _sequence = sequence;
+            _worldId = worldId;
+            _composition = composition;
+        }
+
+        public string Key { get; }
+
+        public void WriteArtifact(Stream destination)
+        {
+            ArgumentNullException.ThrowIfNull(destination);
+            PreparedWorldComposition composition = _composition ??
+                throw new InvalidOperationException("The canonical World capture was already consumed.");
+            _composition = null;
+            using var writer = new BinaryWriter(destination, Encoding.UTF8, leaveOpen: true);
+            writer.Write(Magic);
+            writer.Write(CompositionFormatVersion);
+            writer.Write((ushort)0);
+            writer.Write(_sequence);
+            writer.Write(_worldId.Value);
+            writer.Write(composition.Space.Value);
+            writer.Write(composition.Revision.Value);
+            Span<byte> fingerprint = stackalloc byte[32];
+            composition.ManifestFingerprint.CopyTo(fingerprint);
+            writer.Write(fingerprint);
+            int count = 0;
+            for (int index = 0; index < composition.PreparedPackCount; index++)
+            {
+                composition.TryGetPreparedPackAt(index, out PreparedWorldPack pack);
+                if (IsDurable(pack.View.Overlay)) count++;
+            }
+            writer.Write(count);
+            for (int index = 0; index < composition.PreparedPackCount; index++)
+            {
+                composition.TryGetPreparedPackAt(index, out PreparedWorldPack pack);
+                if (!IsDurable(pack.View.Overlay)) continue;
+                using var rowStream = new MemoryStream();
+                using (var row = new Captured(Key, _sequence, _worldId,
+                           pack.View.BaseWorld, pack.View.Overlay))
+                    row.WriteArtifact(rowStream);
+                writer.Write(pack.Coord.X);
+                writer.Write(pack.Coord.Z);
+                writer.Write(checked((int)rowStream.Length));
+                writer.Write(rowStream.GetBuffer().AsSpan(0, checked((int)rowStream.Length)));
+            }
+            writer.Flush();
+        }
+
+        private static bool IsDurable(WorldMutableOverlay overlay) =>
+            overlay.Revision.IsValid || overlay.ChangedChunkCount != 0 || overlay.ReplacesMultiInstances;
+
+        public void Dispose() => _composition = null;
+    }
+
     internal sealed record Parsed(
         PersistentWorldId DurableWorldId,
         bool HasBaseWorld,
@@ -370,6 +503,14 @@ public sealed class WorldSaveSetParticipant : ISaveSetParticipant
         WorldMutableOverlay.ChunkReplacement[] Chunks,
         WorldMultiInstanceRecord[]? MultiInstances,
         WorldMutableOverlayLimits Limits);
+
+    internal sealed record ParsedCompositionRow(WorldPackCoord Coord, Parsed Overlay);
+    internal sealed record ParsedComposition(
+        PersistentWorldId DurableWorldId,
+        SpatialSpaceId Space,
+        WorldCompositionRevision Revision,
+        WorldStructuralManifestFingerprint ManifestFingerprint,
+        ParsedCompositionRow[] Rows);
 
     private ref struct WorldArtifactReader
     {
@@ -417,24 +558,31 @@ public sealed class WorldSaveSetParticipant : ISaveSetParticipant
 /// <summary>Resolved private current-world state awaiting whole-generation publication.</summary>
 public sealed class PreparedWorldParticipant : IPreparedLoadParticipant
 {
-    private readonly WorldSaveSetParticipant.Parsed _parsed;
+    private readonly WorldSaveSetParticipant.Parsed? _parsed;
+    private readonly WorldSaveSetParticipant.ParsedComposition? _composition;
+    private readonly Func<WorldStructuralManifestFingerprint, WorldStructuralManifest?>? _manifestResolver;
     private readonly Func<WorldPackFingerprint, BoundWorldPack?>? _packResolver;
     private bool _resolved;
 
     internal PreparedWorldParticipant(
         string key,
-        WorldSaveSetParticipant.Parsed parsed,
+        WorldSaveSetParticipant.Parsed? parsed,
+        WorldSaveSetParticipant.ParsedComposition? composition,
+        Func<WorldStructuralManifestFingerprint, WorldStructuralManifest?>? manifestResolver,
         Func<WorldPackFingerprint, BoundWorldPack?>? packResolver)
     {
         Key = key;
         _parsed = parsed;
+        _composition = composition;
+        _manifestResolver = manifestResolver;
         _packResolver = packResolver;
     }
 
     public string Key { get; }
-    public PersistentWorldId DurableWorldId => _parsed.DurableWorldId;
+    public PersistentWorldId DurableWorldId => _composition?.DurableWorldId ?? _parsed!.DurableWorldId;
     public BoundWorldPack? BaseWorld { get; private set; }
     public WorldMutableOverlay? Overlay { get; private set; }
+    public PreparedWorldComposition? PreparedComposition { get; private set; }
 
     public void Resolve(IPersistentEntityResolver resolver)
     {
@@ -442,16 +590,65 @@ public sealed class PreparedWorldParticipant : IPreparedLoadParticipant
         if (_resolved)
             throw new InvalidOperationException("The current-world participant was already resolved.");
         _resolved = true;
-        if (!_parsed.HasBaseWorld) return;
-        BoundWorldPack baseWorld = _packResolver?.Invoke(_parsed.PackFingerprint) ??
+        if (_composition is not null)
+        {
+            ResolveComposition(_composition);
+            return;
+        }
+        WorldSaveSetParticipant.Parsed parsed = _parsed!;
+        if (!parsed.HasBaseWorld) return;
+        BoundWorldPack baseWorld = _packResolver?.Invoke(parsed.PackFingerprint) ??
             throw new PersistenceCompatibilityException(
-                $"The exact WorldPack '{_parsed.PackFingerprint}' is unavailable.");
-        if (baseWorld.Fingerprint != _parsed.PackFingerprint || baseWorld.Space != _parsed.Space ||
-            baseWorld.Content.Fingerprint != _parsed.ContentFingerprint)
+                $"The exact WorldPack '{parsed.PackFingerprint}' is unavailable.");
+        if (baseWorld.Fingerprint != parsed.PackFingerprint || baseWorld.Space != parsed.Space ||
+            baseWorld.Content.Fingerprint != parsed.ContentFingerprint)
             throw new PersistenceCompatibilityException("The resolved WorldPack identity or content binding disagrees with the save.");
 
-        var builder = new WorldMutableOverlayBuilder(baseWorld, _parsed.Limits);
-        foreach (WorldMutableOverlay.ChunkReplacement chunk in _parsed.Chunks)
+        BaseWorld = baseWorld;
+        Overlay = ResolveOverlay(parsed, baseWorld);
+    }
+
+    private void ResolveComposition(WorldSaveSetParticipant.ParsedComposition composition)
+    {
+        WorldStructuralManifest manifest = _manifestResolver?.Invoke(composition.ManifestFingerprint) ??
+            throw new PersistenceCompatibilityException("The exact structural manifest is unavailable.");
+        if (manifest.Fingerprint != composition.ManifestFingerprint)
+            throw new PersistenceCompatibilityException("The resolved structural manifest identity disagrees with the save.");
+        var prepared = new PreparedWorldPack[manifest.EntryCount];
+        int rowIndex = 0;
+        for (int index = 0; index < manifest.EntryCount; index++)
+        {
+            if (!manifest.TryGetEntry(index, out WorldStructuralManifestEntry entry))
+                throw new PersistenceValidationException("The structural manifest lost an entry.");
+            BoundWorldPack baseWorld = _packResolver?.Invoke(entry.Fingerprint) ??
+                throw new PersistenceCompatibilityException($"The exact WorldPack '{entry.Fingerprint}' is unavailable.");
+            if (baseWorld.Fingerprint != entry.Fingerprint || baseWorld.Space != composition.Space ||
+                !baseWorld.Pack.TryValidateSpatialWindow(entry.Coord, out _, out _))
+                throw new PersistenceCompatibilityException("A resolved Pack disagrees with its structural manifest.");
+            WorldMutableOverlay? overlay = null;
+            if (rowIndex < composition.Rows.Length && composition.Rows[rowIndex].Coord == entry.Coord)
+            {
+                WorldSaveSetParticipant.Parsed row = composition.Rows[rowIndex++].Overlay;
+                if (row.PackFingerprint != entry.Fingerprint || row.Space != composition.Space ||
+                    row.ContentFingerprint != baseWorld.Content.Fingerprint)
+                    throw new PersistenceCompatibilityException("A Pack overlay row disagrees with its exact base identity.");
+                overlay = ResolveOverlay(row, baseWorld);
+            }
+            prepared[index] = new PreparedWorldPack(entry.Coord, new WorldPreparedView(baseWorld, overlay));
+        }
+        if (rowIndex != composition.Rows.Length ||
+            !PreparedWorldComposition.TryCreate(composition.Space, composition.Revision, manifest,
+                prepared, out PreparedWorldComposition? candidate, out _) ||
+            !candidate!.TryValidateComplete(out _))
+            throw new PersistenceValidationException("The restored complete World composition is invalid.");
+        PreparedComposition = candidate;
+    }
+
+    private static WorldMutableOverlay ResolveOverlay(WorldSaveSetParticipant.Parsed parsed, BoundWorldPack baseWorld)
+    {
+
+        var builder = new WorldMutableOverlayBuilder(baseWorld, parsed.Limits);
+        foreach (WorldMutableOverlay.ChunkReplacement chunk in parsed.Chunks)
         {
             if (chunk.TerrainMaterials is not null)
             {
@@ -475,29 +672,30 @@ public sealed class PreparedWorldParticipant : IPreparedLoadParticipant
                 !builder.TryReplaceMultiFragments(chunk.Key, chunk.MultiFragments))
                 throw new PersistenceValidationException("A persisted Multi replacement is invalid for its base world.");
         }
-        if (_parsed.MultiInstances is not null && !builder.TryReplaceMultiInstances(_parsed.MultiInstances))
+        if (parsed.MultiInstances is not null && !builder.TryReplaceMultiInstances(parsed.MultiInstances))
             throw new PersistenceValidationException("The persisted Multi-root replacement is invalid for its base world.");
         if (!builder.TryBuild(out WorldMutableOverlay? validated) || validated is null)
             throw new PersistenceValidationException("The persisted current-world overlay violates a world invariant.");
-        for (int index = 0; index < _parsed.Chunks.Length; index++)
+        for (int index = 0; index < parsed.Chunks.Length; index++)
         {
-            if (!validated.TryGetChunkRevision(_parsed.Chunks[index].Key, out _, out WorldChunkContentHash hash) ||
-                hash != _parsed.Chunks[index].Hash)
+            if (!validated.TryGetChunkRevision(parsed.Chunks[index].Key, out _, out WorldChunkContentHash hash) ||
+                hash != parsed.Chunks[index].Hash)
                 throw new PersistenceValidationException("A persisted changed-chunk content hash is invalid.");
         }
         var overlay = new WorldMutableOverlay(
-            baseWorld.Fingerprint, baseWorld.Space, _parsed.OverlayRevision,
-            validated.Limits, _parsed.Chunks, _parsed.MultiInstances);
+            baseWorld.Fingerprint, baseWorld.Space, parsed.OverlayRevision,
+            validated.Limits, parsed.Chunks, parsed.MultiInstances);
         if (overlay.ReservedBytes > validated.Limits.MaximumRetainedBytes)
             throw new PersistenceValidationException("The persisted current-world overlay exceeds its retained-byte bound.");
-        BaseWorld = baseWorld;
-        Overlay = overlay;
+        return overlay;
     }
 
     public void Validate()
     {
-        if (!_resolved || _parsed.HasBaseWorld != (BaseWorld is not null) ||
-            _parsed.HasBaseWorld != (Overlay is not null))
+        if (!_resolved || (_composition is not null
+                ? PreparedComposition is null
+                : _parsed!.HasBaseWorld != (BaseWorld is not null) ||
+                  _parsed.HasBaseWorld != (Overlay is not null)))
             throw new PersistenceValidationException("The prepared current-world state is incomplete.");
     }
 
@@ -505,5 +703,6 @@ public sealed class PreparedWorldParticipant : IPreparedLoadParticipant
     {
         BaseWorld = null;
         Overlay = null;
+        PreparedComposition = null;
     }
 }

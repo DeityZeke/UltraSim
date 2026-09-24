@@ -10,6 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="../UltraSim.World.Testing/W5TwoPackFixture.cs" Link="W5TwoPackFixture.cs" />
     <ProjectReference Include="../../Server/Hosting/UltraSim.Server.Hosting.csproj" />
     <ProjectReference Include="../../Game/Admission/UltraSim.Game.Admission.csproj" />
     <ProjectReference Include="../../Game/Composition/UltraSim.Game.Composition.csproj" />

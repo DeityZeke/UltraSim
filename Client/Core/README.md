@@ -76,8 +76,9 @@ lifecycle remain outside Core.
 
 The world cache is owner-thread bound and fixed-capacity. Its limits describe
 client-resident chunks and rows rather than the server's ECS/public address
-space. It copies immutable base terrain/statics/Multi fragments from a bound
-`WorldPack`, then transactionally applies chunk-bound publication
+space. It copies immutable base terrain/statics/Multi fragments from either a
+legacy bound `WorldPack` or W5's canonical `PreparedWorldComposition`, then
+transactionally applies chunk-bound publication
 snapshot/delta semantics. Client-local handles are generation fenced; public
 generation/version knowledge is global across resident chunk pages.
 Actual snapshots require valid chunk-bound cursors; a default cursor is admitted
@@ -159,7 +160,7 @@ desired membership. This is a portability seam, not a renderer interface or mod
 API.
 
 Concept Demo D0.1 adds `ClientStructuralResidency` immediately before that presentation seam. The
-bound WorldPack is the authored/source catalog, not the resident set. The controller retains only
+bound structural source is the authored/prepared catalog, not the resident set. The controller retains only
 the presentation neighborhood plus one bounded structural fringe, transactionally stages all
 entrants, and retires exits after presentation admission. Its fixed arrays and semantic-cache
 capacity bound the operation; cancellation rolls back newly staged chunks. Dynamic-public debt may
@@ -174,11 +175,21 @@ This preserves applied dynamic-public rows and their delivery/proof lineage. A r
 generation remains the boundary that earns a fresh semantic cache.
 
 D0.2 admits noncontiguous authored geography. Valid presentation centers are derived from actual
-sorted WorldPack keys rather than a global bounding rectangle; fringe planning skips unauthored
+sorted structural chunk keys rather than a global bounding rectangle; fringe planning skips unauthored
 coordinates instead of synthesizing blank chunks. A disjoint transition can first commit an empty
 desired structural set, allowing the old renderer/native window and structural-only semantics to
 retire before the distant set is admitted. The permanent sparse-cluster canary is `162/25/9` at
 radius 1 in either cluster and performs exact central → far → central resets without capacity growth.
+
+W5 generalizes that same bounded cache/residency path to a canonical prepared
+composition. Sparse authored/prepared chunk enumeration and global structural
+queries cross Pack addresses without allocating capacity for the manifest's
+total geography. The canonical snapshot exposes manifest fingerprint, composition
+revision, and Space; it does not substitute an arbitrary Pack fingerprint for
+World identity. A native W5 window retains seam chunks from Packs `(0,0)` and
+`(1,0)` together and crosses between them without a cache, renderer, or session
+restart. Existing one-Pack client callers remain on the compatibility path
+until W5R migrates the Concept Demo.
 
 F0.4 adds the bounded renderer-neutral actor-presentation projection above those already-resident
 chunks. `ClientActorDefinitionCatalog` maps finite public prefab vocabulary to presentation kind,

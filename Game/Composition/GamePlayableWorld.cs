@@ -497,12 +497,12 @@ public sealed class GameWorldActions
                         current.YMillimeters,
                         update.DestinationZMillimeters,
                         out WorldPosition candidate) ||
-                    worldState.PreparedWorld is null)
+                    worldState.PreparedWorld is null && worldState.PreparedComposition is null)
                 {
                     return GameWorldActionStatus.OutsidePreparedWorld;
                 }
                 WorldTerrainColumnQueryStatus terrain =
-                    worldState.PreparedWorld.TryFindNearestSupport(
+                    worldState.TryFindNearestSupport(
                         candidate, current.YMillimeters, out WorldTerrainColumnSurface support);
                 if (terrain == WorldTerrainColumnQueryStatus.Unavailable)
                     return GameWorldActionStatus.OutsidePreparedWorld;

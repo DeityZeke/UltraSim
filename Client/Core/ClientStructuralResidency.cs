@@ -94,18 +94,18 @@ public sealed class ClientStructuralResidency
         ArgumentOutOfRangeException.ThrowIfNegative(structuralFringeChunks);
         _renderRadius = renderRadiusChunks;
         _fringe = structuralFringeChunks;
-        _space = cache.BaseWorld.Space;
-        _authoredChunks = cache.BaseWorld.ChunkCount;
+        _space = cache.StructuralSpace;
+        _authoredChunks = cache.PreparedStructuralChunkCount;
         if (_authoredChunks <= 0)
             throw new ArgumentException("The structural source must contain authored chunks.", nameof(cache));
         _validCenters = new SpatialChunkKey[_authoredChunks];
         for (int index = 0; index < _authoredChunks; index++)
         {
-            if (!cache.BaseWorld.TryGetChunkKey(index, out SpatialChunkKey key) ||
+            if (!cache.TryGetPreparedStructuralChunkKey(index, out SpatialChunkKey key) ||
                 key.Space != _space)
                 throw new ArgumentException(
                     "The structural source contains an invalid authored chunk key.", nameof(cache));
-            if (IsCompletePresentationCenter(cache.BaseWorld, key, renderRadiusChunks))
+            if (IsCompletePresentationCenter(cache, key, renderRadiusChunks))
                 _validCenters[_validCenterCount++] = key;
         }
         if (_validCenterCount == 0)
@@ -195,13 +195,13 @@ public sealed class ClientStructuralResidency
         for (long z = minimumZ; z <= maximumZ; z++)
         {
             var key = new SpatialChunkKey(_space, checked((int)x), checked((int)z));
-            if (!_cache.PreparedWorld.TryGetBaseTerrain(key, out _))
+            if (!_cache.TryGetStructuralTerrain(key, out _))
                 continue;
             if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle))
             {
                 if (!_cache.TryRequest(key, out handle, out _) ||
                     !RememberNewlyStaged(handle) ||
-                    !_cache.TryStageFromBaseWorld(handle, [], default, out _) ||
+                    !_cache.TryStageFromStructuralWorld(handle, [], default, out _) ||
                     !_cache.TryPublish(handle, out _))
                 {
                     RollbackNewlyStaged();
@@ -421,7 +421,7 @@ public sealed class ClientStructuralResidency
     }
 
     private static bool IsCompletePresentationCenter(
-        BoundWorldPack world,
+        ClientWorldSemanticCache world,
         SpatialChunkKey center,
         int radius)
     {
@@ -434,8 +434,8 @@ public sealed class ClientStructuralResidency
         for (long x = minimumX; x <= maximumX; x++)
         for (long z = minimumZ; z <= maximumZ; z++)
         {
-            if (!world.TryGetBaseTerrain(
-                    new SpatialChunkKey(world.Space, checked((int)x), checked((int)z)), out _))
+            if (!world.TryGetStructuralTerrain(
+                    new SpatialChunkKey(world.StructuralSpace, checked((int)x), checked((int)z)), out _))
                 return false;
         }
         return true;
