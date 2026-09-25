@@ -288,6 +288,24 @@ public sealed class RemoteContentClient : IRemoteGameProtocolHandler, IRemoteGam
             out world, out result, limits);
     }
 
+    /// <summary>Content authorizes bytes; World independently validates exact structural identity.</summary>
+    public bool TryResolveStructuralManifest(
+        LogicalContentId definitionId,
+        WorldStructuralManifestFingerprint expectedFingerprint,
+        out WorldStructuralManifest? manifest,
+        out ContentWorldStructuralManifestResolutionStatus status)
+    {
+        EnsureOperational();
+        manifest = null;
+        if (_state != RemoteContentClientState.Applied || _catalog is null)
+        {
+            status = ContentWorldStructuralManifestResolutionStatus.InvalidRequest;
+            return false;
+        }
+        return ContentWorldStructuralManifestResolver.TryResolve(
+            _catalog, definitionId, expectedFingerprint, out manifest, out status);
+    }
+
     public bool TryProcess(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
     {
         EnsureOperational();

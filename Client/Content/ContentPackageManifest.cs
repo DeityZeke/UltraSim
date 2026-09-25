@@ -179,6 +179,8 @@ public sealed class ContentPackageManifest
                     ContentDefinitionKind.Texture or ContentDefinitionKind.Icon =>
                         file.Kind is ContentFileKind.PngTexture or ContentFileKind.WebpTexture,
                     ContentDefinitionKind.WorldPack => file.Kind == ContentFileKind.WorldPack,
+                    ContentDefinitionKind.WorldStructuralManifest =>
+                        file.Kind == ContentFileKind.WorldStructuralManifest,
                     ContentDefinitionKind.ActorPresentation =>
                         file.Kind == ContentFileKind.ActorGltfBinary,
                     _ => false,
@@ -304,6 +306,8 @@ public static class ContentPackageValidator
         ContentFileKind.PngTexture or ContentFileKind.WebpTexture =>
             ContentRasterArtifact.TryInspect(descriptor.Kind, bytes, out _),
         ContentFileKind.WorldPack => ValidateCompleteWorldPack(bytes),
+        ContentFileKind.WorldStructuralManifest =>
+            WorldStructuralManifest.TryOpen(bytes, out _, out _),
         ContentFileKind.UiDefinition => ValidateUiDefinition(descriptor.Path, bytes),
         ContentFileKind.ActorGltfBinary =>
             ActorPresentationArtifact.TryInspect(bytes, out _, out _),

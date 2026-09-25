@@ -59,9 +59,10 @@ public sealed class ClientStructuralResidency
     private readonly SpatialSpaceId _space;
     private readonly int _renderRadius;
     private readonly int _fringe;
-    private readonly int _authoredChunks;
-    private readonly SpatialChunkKey[] _validCenters;
-    private readonly int _validCenterCount;
+    private int _authoredChunks;
+    private SpatialChunkKey[] _validCenters;
+    private int _validCenterCount;
+    private PreparedWorldComposition? _observedComposition;
     private readonly Entry[] _active;
     private readonly Entry[] _candidate;
     private readonly ClientSemanticChunkHandle[] _newlyStaged;
@@ -95,23 +96,16 @@ public sealed class ClientStructuralResidency
         _renderRadius = renderRadiusChunks;
         _fringe = structuralFringeChunks;
         _space = cache.StructuralSpace;
-        _authoredChunks = cache.PreparedStructuralChunkCount;
-        if (_authoredChunks <= 0)
-            throw new ArgumentException("The structural source must contain authored chunks.", nameof(cache));
-        _validCenters = new SpatialChunkKey[_authoredChunks];
-        for (int index = 0; index < _authoredChunks; index++)
-        {
-            if (!cache.TryGetPreparedStructuralChunkKey(index, out SpatialChunkKey key) ||
-                key.Space != _space)
-                throw new ArgumentException(
-                    "The structural source contains an invalid authored chunk key.", nameof(cache));
-            if (IsCompletePresentationCenter(cache, key, renderRadiusChunks))
-                _validCenters[_validCenterCount++] = key;
-        }
-        if (_validCenterCount == 0)
+        _validCenters = [];
+        if (!TryBuildValidCenters(out SpatialChunkKey[] centers, out int validCount,
+                out int authoredCount))
             throw new ArgumentException(
                 "The authored structural source cannot contain the requested presentation window.",
                 nameof(cache));
+        _validCenters = centers;
+        _validCenterCount = validCount;
+        _authoredChunks = authoredCount;
+        _observedComposition = cache.PreparedComposition;
         int residentRadius = checked(renderRadiusChunks + structuralFringeChunks);
         int diameter = checked(residentRadius * 2 + 1);
         int maximumDesired = checked(diameter * diameter);
@@ -130,6 +124,45 @@ public sealed class ClientStructuralResidency
     public int ConfiguredRenderRadiusChunks => _renderRadius;
     public int StructuralFringeChunks => _fringe;
     public int AuthoredChunkCount => _authoredChunks;
+
+    /// <summary>
+    /// Refreshes the bounded authored-center index after a client-local prepared subset change.
+    /// The semantic cache and active handles are never replaced. An active transition must finish
+    /// before this cold-path refresh; the old index remains valid if construction fails.
+    /// </summary>
+    public bool TryRefreshPreparedSource()
+    {
+        EnsureOwner();
+        if (_pendingToken != 0) return false;
+        if (ReferenceEquals(_observedComposition, _cache.PreparedComposition)) return true;
+        if (!TryBuildValidCenters(out SpatialChunkKey[] centers, out int validCount,
+                out int authoredCount)) return false;
+        _validCenters = centers;
+        _validCenterCount = validCount;
+        _authoredChunks = authoredCount;
+        _observedComposition = _cache.PreparedComposition;
+        return true;
+    }
+
+    private bool TryBuildValidCenters(
+        out SpatialChunkKey[] centers, out int validCount, out int authoredCount)
+    {
+        authoredCount = _cache.PreparedStructuralChunkCount;
+        centers = [];
+        validCount = 0;
+        if (authoredCount <= 0) return false;
+        var candidate = new SpatialChunkKey[authoredCount];
+        for (int index = 0; index < authoredCount; index++)
+        {
+            if (!_cache.TryGetPreparedStructuralChunkKey(index, out SpatialChunkKey key) ||
+                key.Space != _space) return false;
+            if (IsCompletePresentationCenter(_cache, key, _renderRadius))
+                candidate[validCount++] = key;
+        }
+        if (validCount == 0) return false;
+        centers = candidate;
+        return true;
+    }
 
     /// <summary>
     /// Selects the nearest complete authored presentation neighborhood. Missing authored chunks

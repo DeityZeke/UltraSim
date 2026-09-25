@@ -654,6 +654,10 @@ and additional structural surfaces can coexist. W7 still owns acquisition.
 
 Authenticate exact structural composition, acquire/prepare required Packs on demand, and preserve client residency across Pack seams without expanding semantic disclosure.
 
+The client-side prepared-subset publication seam and Content's independently verified passive
+structural-manifest kind are implemented as W7 groundwork. Remote product delivery, authenticated
+advertisement, per-Pack grants/proofs, and demand acquisition remain open; this does not close W7.
+
 ### W8 — atomic Add/Replace/Remove Pack composition
 
 Publish complete prepared composition revisions atomically and prove cross-Pack edit all-or-nothing behavior.

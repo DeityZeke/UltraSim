@@ -318,3 +318,10 @@ contracts respectively.
 See [`ASSET_STREAMING.md`](../../Docs/Plans/ASSET_STREAMING.md) for the owning plan. A0.8 now
 consumes this resolver in the native Online product; Client Content still does not own structural
 publication or Godot realization.
+
+W7 groundwork adds a distinct passive `WorldStructuralManifest` file/definition kind and
+`ContentWorldStructuralManifestResolver`. A live selected scope catalog authorizes the exact CAS
+blob; World then opens `WorldStructuralManifest/v1` and checks the independently advertised
+structural fingerprint. This is an available resolver seam, not yet the Remote product acquisition
+path: current Remote delivery remains the pre-W7 combined-Pack route until the authenticated
+advertisement, demand authorization, and native acceptance gates are completed.

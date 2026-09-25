@@ -177,7 +177,7 @@ public sealed class ClientWorldSemanticCache
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private readonly BoundWorldPack? _baseWorld;
     private readonly WorldPreparedView? _preparedWorld;
-    private readonly PreparedWorldComposition? _preparedComposition;
+    private readonly ClientPreparedStructuralWorld? _structuralSource;
     private readonly SpatialSpaceId _structuralSpace;
     private readonly ClientWorldSemanticCacheLimits _limits;
     private readonly ChunkSlot[] _slots;
@@ -225,17 +225,24 @@ public sealed class ClientWorldSemanticCache
     public ClientWorldSemanticCache(
         PreparedWorldComposition preparedComposition,
         ClientWorldSemanticCacheLimits limits = default)
-        : this(null, preparedComposition ?? throw new ArgumentNullException(nameof(preparedComposition)), limits) { }
+        : this(null, new ClientPreparedStructuralWorld(
+            preparedComposition ?? throw new ArgumentNullException(nameof(preparedComposition)),
+            Math.Max(8, preparedComposition.PreparedPackCount)), limits) { }
+
+    public ClientWorldSemanticCache(
+        ClientPreparedStructuralWorld structuralSource,
+        ClientWorldSemanticCacheLimits limits = default)
+        : this(null, structuralSource ?? throw new ArgumentNullException(nameof(structuralSource)), limits) { }
 
     private ClientWorldSemanticCache(
         WorldPreparedView? preparedWorld,
-        PreparedWorldComposition? preparedComposition,
+        ClientPreparedStructuralWorld? structuralSource,
         ClientWorldSemanticCacheLimits limits)
     {
         _preparedWorld = preparedWorld;
         _baseWorld = preparedWorld?.BaseWorld;
-        _preparedComposition = preparedComposition;
-        _structuralSpace = preparedWorld?.Space ?? preparedComposition!.Space;
+        _structuralSource = structuralSource;
+        _structuralSpace = preparedWorld?.Space ?? structuralSource!.Space;
         if (limits == default) limits = ClientWorldSemanticCacheLimits.Default;
         limits.Validate();
         int knowledgeBucketCapacity = SpatialStorageCapacity.DoubleAndRoundUpPowerOfTwo(
@@ -278,48 +285,74 @@ public sealed class ClientWorldSemanticCache
         throw new InvalidOperationException("A canonical structural composition is not one BaseWorld.");
     public WorldPreparedView PreparedWorld => _preparedWorld ??
         throw new InvalidOperationException("A canonical structural composition is not one prepared Pack.");
-    public PreparedWorldComposition? PreparedComposition => _preparedComposition;
+    public PreparedWorldComposition? PreparedComposition => _structuralSource?.Current;
+    public ClientPreparedStructuralWorld? StructuralSource => _structuralSource;
     public SpatialSpaceId StructuralSpace => _structuralSpace;
+
+    /// <summary>
+    /// Publishes a different prepared subset without replacing this cache or its semantic handles.
+    /// A Pack cannot leave the prepared subset while any client semantic slot still names it.
+    /// </summary>
+    public bool TryPublishPreparedComposition(PreparedWorldComposition candidate)
+    {
+        EnsureOwner();
+        ArgumentNullException.ThrowIfNull(candidate);
+        if (_structuralSource is null) return false;
+        PreparedWorldComposition previous = _structuralSource.Current;
+        for (int index = 0; index < previous.PreparedPackCount; index++)
+        {
+            if (!previous.TryGetPreparedPackAt(index, out PreparedWorldPack pack))
+                throw new InvalidOperationException("A validated prepared Pack disappeared.");
+            if (candidate.TryGetPreparedPack(pack.Coord, out _)) continue;
+            for (int slot = 0; slot < _slots.Length; slot++)
+            {
+                if (_slots[slot].State == ClientSemanticChunkState.Absent) continue;
+                WorldPackAddressing.ToPackLocal(_slots[slot].Key.Coord, out WorldPackCoord owner, out _);
+                if (owner == pack.Coord) return false;
+            }
+        }
+        return _structuralSource.TryPublish(candidate);
+    }
 
     /// <summary>Read-only canonical source status; legacy one-Pack sources have no manifest truth.</summary>
     public bool TryProbeStructuralChunk(SpatialChunkKey key, out WorldStructuralChunkProbe probe)
     {
-        if (_preparedComposition is not null)
-            return _preparedComposition.TryProbeStructuralChunk(key, out probe);
+        if (PreparedComposition is { } composition)
+            return composition.TryProbeStructuralChunk(key, out probe);
         probe = default;
         return false;
     }
-    internal int PreparedStructuralChunkCount => _preparedComposition?.PreparedChunkCount ?? _baseWorld!.ChunkCount;
+    internal int PreparedStructuralChunkCount => PreparedComposition?.PreparedChunkCount ?? _baseWorld!.ChunkCount;
 
     internal bool TryGetPreparedStructuralChunkKey(int index, out SpatialChunkKey key) =>
-        _preparedComposition is not null
-            ? _preparedComposition.TryGetPreparedChunkKey(index, out key)
+        PreparedComposition is { } composition
+            ? composition.TryGetPreparedChunkKey(index, out key)
             : _baseWorld!.TryGetChunkKey(index, out key);
 
     internal bool TryGetStructuralTerrain(SpatialChunkKey key, out WorldTerrainChunkView terrain) =>
-        _preparedComposition is not null
-            ? _preparedComposition.TryGetBaseTerrain(key, out terrain)
+        PreparedComposition is { } composition
+            ? composition.TryGetBaseTerrain(key, out terrain)
             : _preparedWorld!.TryGetBaseTerrain(key, out terrain);
 
     internal bool TryGetStructuralStatics(SpatialChunkKey key, out WorldFrozenStaticChunkView statics) =>
-        _preparedComposition is not null
-            ? _preparedComposition.TryGetFrozenStatics(key, out statics)
+        PreparedComposition is { } composition
+            ? composition.TryGetFrozenStatics(key, out statics)
             : _preparedWorld!.TryGetFrozenStatics(key, out statics);
 
     internal bool TryGetStructuralMultiFragments(SpatialChunkKey key, out WorldMultiFragmentChunkView fragments) =>
-        _preparedComposition is not null
-            ? _preparedComposition.TryGetMultiFragments(key, out fragments)
+        PreparedComposition is { } composition
+            ? composition.TryGetMultiFragments(key, out fragments)
             : _preparedWorld!.TryGetMultiFragments(key, out fragments);
 
     internal bool TryGetStructuralSurfaceBands(SpatialChunkKey key, out WorldTerrainSurfaceBandChunkView bands) =>
-        _preparedComposition is not null
-            ? _preparedComposition.TryGetAdditionalTerrainSurfaceBands(key, out bands)
+        PreparedComposition is { } composition
+            ? composition.TryGetAdditionalTerrainSurfaceBands(key, out bands)
             : _preparedWorld!.TryGetAdditionalTerrainSurfaceBands(key, out bands);
 
     internal bool TryGetStructuralReplacementIdentity(SpatialChunkKey key,
         out WorldChunkContentRevision revision, out WorldChunkContentHash hash) =>
-        _preparedComposition is not null
-            ? _preparedComposition.TryGetReplacementIdentity(key, out revision, out hash)
+        PreparedComposition is { } composition
+            ? composition.TryGetReplacementIdentity(key, out revision, out hash)
             : _preparedWorld!.TryGetReplacementIdentity(key, out revision, out hash);
 
     public bool TryRequest(
@@ -851,8 +884,9 @@ public sealed class ClientWorldSemanticCache
             meshError = TerrainBaseMeshBuildError.None;
             return false;
         }
-        bool built = _preparedComposition is not null
-            ? _preparedComposition.TryBuildBaseTerrainMesh(
+        PreparedWorldComposition? composition = PreparedComposition;
+        bool built = composition is not null
+            ? composition.TryBuildBaseTerrainMesh(
                 _slots[slot].Key, vertices, indices, triangleMaterials, out summary, out meshError)
             : _preparedWorld!.TryBuildBaseTerrainMesh(
                 _slots[slot].Key, vertices, indices, triangleMaterials, out summary, out meshError);
@@ -958,9 +992,9 @@ public sealed class ClientWorldSemanticCache
             ComputeWorldHash(),
             CalculateReservedBytes())
         {
-            HasCanonicalComposition = _preparedComposition is not null,
-            StructuralManifestFingerprint = _preparedComposition?.ManifestFingerprint ?? default,
-            CompositionRevision = _preparedComposition?.Revision ?? default,
+            HasCanonicalComposition = PreparedComposition is not null,
+            StructuralManifestFingerprint = PreparedComposition?.ManifestFingerprint ?? default,
+            CompositionRevision = PreparedComposition?.Revision ?? default,
         };
     }
 

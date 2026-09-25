@@ -18,6 +18,7 @@ internal static class ContentCanonicalHash
             case ContentDefinitionKind.Icon:
             case ContentDefinitionKind.WorldPack:
             case ContentDefinitionKind.ActorPresentation:
+            case ContentDefinitionKind.WorldStructuralManifest:
                 AppendString(hash, definition.PrimaryFile.Value!);
                 break;
             case ContentDefinitionKind.Material:

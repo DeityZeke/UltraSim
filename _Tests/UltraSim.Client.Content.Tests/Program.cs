@@ -40,6 +40,7 @@ var tests = new (string Name, Action Body)[]
     ("ResolvedPrivateDnsTargetIsRejectedAtConnectTime", ResolvedPrivateDnsTargetIsRejectedAtConnectTime),
     ("UiDefinitionArtifactResolvesOnlyThroughAppliedRealmCatalog", UiDefinitionArtifactResolvesOnlyThroughAppliedRealmCatalog),
     ("WorldPackResolvesThroughAppliedCatalogAndWorldBinding", WorldPackResolvesThroughAppliedCatalogAndWorldBinding),
+    ("StructuralManifestRequiresCatalogAuthorizationAndWorldFingerprint", StructuralManifestRequiresCatalogAuthorizationAndWorldFingerprint),
     ("ActorPresentationGlbIsBoundedPassiveAndCatalogResolved", ActorPresentationGlbIsBoundedPassiveAndCatalogResolved),
     ("PresentationGenerationSelectsRealmLocalPrimitiveAndRetainsOldLeases", PresentationGenerationSelectsRealmLocalPrimitiveAndRetainsOldLeases),
     ("UserResourcePackPolicyIsStrictAndSeparate", UserResourcePackPolicyIsStrictAndSeparate),
@@ -2235,6 +2236,62 @@ static void WorldPackResolvesThroughAppliedCatalogAndWorldBinding()
     finally
     {
         if (Directory.Exists(defaultRoot)) Directory.Delete(defaultRoot, recursive: true);
+    }
+}
+
+static void StructuralManifestRequiresCatalogAuthorizationAndWorldFingerprint()
+{
+    byte[] packBytes = WorldPackBytes();
+    True(WorldPack.TryOpen(packBytes, WorldPackLimits.Default,
+        new WorldContentFingerprint(2, 3), out WorldPack? pack, out _));
+    True(WorldStructuralManifest.TryCreate(
+        [new WorldStructuralManifestEntry(new WorldPackCoord(0, 0), pack!.Fingerprint)],
+        out WorldStructuralManifest? structural, out _));
+    byte[] bytes = new byte[structural!.Length];
+    structural.CopyTo(bytes);
+    ContentFilePath path = FilePath("world/structure.usworldmanifest");
+    ContentPackageManifest package = Manifest(
+        "server.world.structure", "server-world", ContentTrustClass.ServerAuthorizedPassive,
+        [File(path, ContentFileKind.WorldStructuralManifest, bytes)],
+        [FileDefinition("server-world:world/structure", ContentDefinitionKind.WorldStructuralManifest,
+            ContentDefinitionOperation.Add, path.Value!)]);
+    var realm = new ApplicationRealmId(81, 1);
+    ContentActivationPlan plan = Plan(realm, new ContentActivationId(81, 1),
+        ContentBaseCatalog.Empty.Fingerprint, [Required(package)]);
+    string root = NewCacheRoot();
+    try
+    {
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out _));
+        using (cache)
+        {
+            True(cache!.TryInstallPackage(realm, package,
+                [new ContentFilePayload(path, bytes)], out _, out _));
+            False(cache.TryOpenPackage(new ApplicationRealmId(81, 2),
+                package.PackageId, package.ManifestHash, out _, out _));
+            True(cache.TryPublishCatalog(ContentBaseCatalog.Empty, plan, false,
+                out ContentCatalogLease? lease, out _));
+            using (lease)
+            {
+                LogicalContentId id = Logical("server-world:world/structure");
+                True(ContentWorldStructuralManifestResolver.TryResolve(
+                    lease!, id, structural.Fingerprint,
+                    out WorldStructuralManifest? opened,
+                    out ContentWorldStructuralManifestResolutionStatus status));
+                Equal(ContentWorldStructuralManifestResolutionStatus.None, status);
+                Equal(structural.Fingerprint, opened!.Fingerprint);
+                Span<byte> differentBytes = stackalloc byte[WorldStructuralManifestFormat.FingerprintBytes];
+                differentBytes.Fill(0xA5);
+                True(WorldStructuralManifestFingerprint.TryRead(differentBytes,
+                    out WorldStructuralManifestFingerprint wrong));
+                False(ContentWorldStructuralManifestResolver.TryResolve(
+                    lease!, id, wrong, out _, out status));
+                Equal(ContentWorldStructuralManifestResolutionStatus.FingerprintMismatch, status);
+            }
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
     }
 }
 

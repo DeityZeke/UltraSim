@@ -14,6 +14,7 @@ internal static class ClientWorldSemanticCacheTests
         StructuralOverlayIdentityIsRetained(world);
         BaseSurfaceTopologyIsResidentAndHashed();
         CanonicalStructuralProbeDoesNotFabricateMissingResidency();
+        PreparedSubsetPublicationPreservesSemanticCache();
         AdditionalTerrainSurfaceResidencyIsBoundedAndRenderable();
         LifecycleAndDeterministicHash(world);
         CapacityFailureIsTransactional(world);
@@ -59,6 +60,75 @@ internal static class ClientWorldSemanticCacheTests
         }
         var legacy = new ClientWorldSemanticCache(authored, new(1, 0, 0, 1, 1));
         False(legacy.TryProbeStructuralChunk(present, out _));
+    }
+
+    private static void PreparedSubsetPublicationPreservesSemanticCache()
+    {
+        BoundWorldPack center = CreateTopologyWorld(withVoid: false);
+        BoundWorldPack east = CreateTopologyWorld(withVoid: false, chunkX: 128);
+        var centerCoord = new WorldPackCoord(0, 0);
+        var eastCoord = new WorldPackCoord(1, 0);
+        True(WorldStructuralManifest.TryCreate(
+            [new(centerCoord, center.Fingerprint), new(eastCoord, east.Fingerprint)],
+            out WorldStructuralManifest? manifest, out _));
+        var centerPack = new PreparedWorldPack(centerCoord, new WorldPreparedView(center));
+        var eastPack = new PreparedWorldPack(eastCoord, new WorldPreparedView(east));
+        WorldCompositionRevision revision = new(31);
+        True(PreparedWorldComposition.TryCreate(Space, revision, manifest, [],
+            out PreparedWorldComposition? empty, out _));
+        True(PreparedWorldComposition.TryCreate(Space, revision, manifest, [centerPack],
+            out PreparedWorldComposition? initial, out _));
+        True(PreparedWorldComposition.TryCreate(Space, revision, manifest, [centerPack, eastPack],
+            out PreparedWorldComposition? expanded, out _));
+        True(PreparedWorldComposition.TryCreate(Space, revision, manifest, [eastPack],
+            out PreparedWorldComposition? withoutCenter, out _));
+        True(PreparedWorldComposition.TryCreate(Space, new WorldCompositionRevision(32),
+            manifest, [centerPack, eastPack], out PreparedWorldComposition? wrongRevision, out _));
+        byte[] manifestBytes = new byte[manifest!.Length];
+        manifest.CopyTo(manifestBytes);
+        True(WorldStructuralManifest.TryOpen(manifestBytes,
+            out WorldStructuralManifest? equivalentButDifferentManifest, out _));
+        True(PreparedWorldComposition.TryCreate(Space, revision,
+            equivalentButDifferentManifest, [centerPack, eastPack],
+            out PreparedWorldComposition? differentManifestObject, out _));
+        var emptyCache = new ClientWorldSemanticCache(
+            new ClientPreparedStructuralWorld(empty!, maximumPreparedPacks: 2),
+            new(2, 0, 0, 1, 1));
+        True(emptyCache.TryProbeStructuralChunk(Key(0, 0), out WorldStructuralChunkProbe emptyProbe));
+        Equal(WorldStructuralChunkStatus.KnownPackButNotPrepared, emptyProbe.Status);
+        True(emptyCache.TryPublishPreparedComposition(initial!));
+        True(emptyCache.TryProbeStructuralChunk(Key(0, 0), out WorldStructuralChunkProbe firstProbe));
+        Equal(WorldStructuralChunkStatus.PreparedChunk, firstProbe.Status);
+        var source = new ClientPreparedStructuralWorld(initial!, maximumPreparedPacks: 2);
+        var cache = new ClientWorldSemanticCache(source, new(2, 0, 0, 1, 1));
+        False(cache.TryPublishPreparedComposition(wrongRevision!));
+        False(cache.TryPublishPreparedComposition(differentManifestObject!));
+        var capacityBound = new ClientWorldSemanticCache(
+            new ClientPreparedStructuralWorld(initial!, maximumPreparedPacks: 1),
+            new(2, 0, 0, 1, 1));
+        False(capacityBound.TryPublishPreparedComposition(expanded!));
+        SpatialChunkKey centerKey = Key(0, 0);
+        SpatialChunkKey eastKey = Key(128, 0);
+        ClientSemanticChunkHandle centerHandle = Publish(cache, centerKey, PublicationEpoch.Create(), 1, []);
+        True(cache.TryProbeStructuralChunk(eastKey, out WorldStructuralChunkProbe before));
+        Equal(WorldStructuralChunkStatus.KnownPackButNotPrepared, before.Status);
+        True(cache.TryPublishPreparedComposition(expanded!));
+        Equal(revision, cache.GetSnapshot().CompositionRevision);
+        Equal(manifest!.Fingerprint, cache.GetSnapshot().StructuralManifestFingerprint);
+        True(cache.TryProbeStructuralChunk(eastKey, out WorldStructuralChunkProbe after));
+        Equal(WorldStructuralChunkStatus.PreparedChunk, after.Status);
+        Equal(ClientSemanticChunkState.Resident, Info(cache, centerHandle).State);
+        False(cache.TryPublishPreparedComposition(withoutCenter!));
+        True(cache.BeginRetire(centerHandle));
+        False(cache.TryPublishPreparedComposition(withoutCenter!));
+        True(cache.CompleteRetire(centerHandle));
+        True(cache.TryPublishPreparedComposition(withoutCenter!));
+        True(cache.TryProbeStructuralChunk(centerKey, out WorldStructuralChunkProbe retired));
+        Equal(WorldStructuralChunkStatus.KnownPackButNotPrepared, retired.Status);
+        True(cache.TryRequest(eastKey, out ClientSemanticChunkHandle eastHandle, out _));
+        True(cache.TryStageFromBaseWorld(eastHandle, [], default, out _));
+        True(cache.TryPublish(eastHandle, out _));
+        Equal(ClientSemanticChunkState.Resident, Info(cache, eastHandle).State);
     }
 
     private static void BaseSurfaceTopologyIsResidentAndHashed()
@@ -706,7 +776,7 @@ internal static class ClientWorldSemanticCacheTests
         return bound!;
     }
 
-    private static BoundWorldPack CreateTopologyWorld(bool withVoid)
+    private static BoundWorldPack CreateTopologyWorld(bool withVoid, int chunkX = 0)
     {
         var builder = new WorldPackBuilder(
             Space, Content, new WorldPackLimits(256 * 1024, 1, 3, 0, 0, 0));
@@ -718,7 +788,7 @@ internal static class ClientWorldSemanticCacheTests
         if (withVoid)
             TerrainSurfacePresence.SetPresent(presence, new TerrainCellCoord(3, 4), present: false);
         True(TerrainHeightPlaneBase.TryCreate(0, out TerrainHeightPlaneBase heightBase));
-        True(builder.TryAddBaseTerrain(Key(0, 0), materials, heightBase, offsets, presence, out _));
+        True(builder.TryAddBaseTerrain(Key(chunkX, 0), materials, heightBase, offsets, presence, out _));
         True(builder.TryBuild(out WorldPackArtifact? artifact, out _));
         WorldPack pack = artifact!.Open();
         True(pack.TryBind(new WorldContentBinding(Content, [1], []), out BoundWorldPack? bound, out _));

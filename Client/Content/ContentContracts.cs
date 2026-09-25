@@ -66,6 +66,8 @@ public enum ContentFileKind : byte
     UiDefinition = 4,
     /// <summary>Self-contained, bounded glTF 2.0 binary actor presentation data.</summary>
     ActorGltfBinary = 5,
+    /// <summary>Canonical WorldStructuralManifest/v1 bytes; World performs final identity validation.</summary>
+    WorldStructuralManifest = 6,
 }
 
 public enum ContentDefinitionKind : byte
@@ -76,6 +78,7 @@ public enum ContentDefinitionKind : byte
     WorldPack = 4,
     /// <summary>Passive actor model, skeleton, and finite animation presentation.</summary>
     ActorPresentation = 5,
+    WorldStructuralManifest = 6,
 }
 
 public enum ContentDefinitionOperation : byte
@@ -118,7 +121,7 @@ public readonly record struct ContentFileDescriptor(
     long SizeBytes,
     ContentHash Sha256)
 {
-    public bool IsValid => Path.IsValid && Kind is >= ContentFileKind.PngTexture and <= ContentFileKind.ActorGltfBinary &&
+    public bool IsValid => Path.IsValid && Kind is >= ContentFileKind.PngTexture and <= ContentFileKind.WorldStructuralManifest &&
         SizeBytes >= 0 && Sha256.IsValid && ExtensionMatches(Path, Kind);
 
     public static bool TryCreate(
@@ -143,6 +146,8 @@ public readonly record struct ContentFileDescriptor(
         ContentFileKind.WorldPack => path.Value!.EndsWith(".usworldpack", StringComparison.Ordinal),
         ContentFileKind.UiDefinition => path.Value!.EndsWith(".usui", StringComparison.Ordinal),
         ContentFileKind.ActorGltfBinary => path.Value!.EndsWith(".glb", StringComparison.Ordinal),
+        ContentFileKind.WorldStructuralManifest =>
+            path.Value!.EndsWith(".usworldmanifest", StringComparison.Ordinal),
         _ => false,
     };
 }
@@ -210,7 +215,8 @@ public sealed class ContentDefinitionDescriptor
     {
         definition = null;
         if (!id.IsValid || kind is not (ContentDefinitionKind.Texture or ContentDefinitionKind.Icon or
-                ContentDefinitionKind.WorldPack or ContentDefinitionKind.ActorPresentation) ||
+                ContentDefinitionKind.WorldPack or ContentDefinitionKind.ActorPresentation or
+                ContentDefinitionKind.WorldStructuralManifest) ||
             operation is not (ContentDefinitionOperation.Add or ContentDefinitionOperation.Replace) ||
             !primaryFile.IsValid) return false;
         definition = new ContentDefinitionDescriptor(id, kind, operation, primaryFile, default);

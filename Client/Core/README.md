@@ -50,6 +50,13 @@ public relocation beyond the 3D discontinuity threshold snaps rather than becomi
 The original motion measurements remain historical; the corrective case and lingering rapid-
 reversal quality tail are recorded in the F1.8A-R1 baseline.
 
+W7 groundwork adds `ClientPreparedStructuralWorld`, an owner-thread source for publishing a
+different immutable prepared-Pack subset under the same manifest object, Space, and composition
+revision. `ClientWorldSemanticCache` can adopt that subset without replacing its semantic handles;
+it refuses to retire a Pack with an active semantic slot. `ClientStructuralResidency` can rebuild
+its bounded authored-center index after the publication. These are client-local preparation seams,
+not authoritative composition mutation or a completed Remote demand-acquisition flow.
+
 `ClientSettingsDocument` is a bounded, versioned, engine-neutral user document. Resolution layers
 built-in defaults, global user choices, an explicitly accepted declarative server recommendation,
 and a scoped user override. Server recommendations are deliberately absent from persistence, cannot

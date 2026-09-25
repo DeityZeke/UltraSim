@@ -9,6 +9,7 @@ internal static class ClientStructuralResidencyTests
 
     internal static void Run()
     {
+        PreparedSubsetRefreshFindsNewCentersWithoutReplacingCache();
         BoundWorldPack world = CreateWorld();
         var cache = new ClientWorldSemanticCache(world, new(41, 0, 0, 1, 1));
         var residency = new ClientStructuralResidency(cache, renderRadiusChunks: 1);
@@ -154,7 +155,48 @@ internal static class ClientStructuralResidencyTests
             new WorldPosition(104, 4, 15_000, 0, 15_000)));
     }
 
-    private static BoundWorldPack CreateWorld()
+    private static void PreparedSubsetRefreshFindsNewCentersWithoutReplacingCache()
+    {
+        BoundWorldPack center = CreateWorld();
+        BoundWorldPack far = CreateWorld(centerX: 132);
+        var centerCoord = new WorldPackCoord(0, 0);
+        var farCoord = new WorldPackCoord(1, 0);
+        True(WorldStructuralManifest.TryCreate(
+            [new(centerCoord, center.Fingerprint), new(farCoord, far.Fingerprint)],
+            out WorldStructuralManifest? manifest, out _));
+        PreparedWorldPack centerPack = new(centerCoord, new WorldPreparedView(center));
+        PreparedWorldPack farPack = new(farCoord, new WorldPreparedView(far));
+        WorldCompositionRevision revision = new(17);
+        True(PreparedWorldComposition.TryCreate(Space, revision, manifest, [centerPack],
+            out PreparedWorldComposition? initial, out _));
+        True(PreparedWorldComposition.TryCreate(Space, revision, manifest, [centerPack, farPack],
+            out PreparedWorldComposition? expanded, out _));
+        var cache = new ClientWorldSemanticCache(
+            new ClientPreparedStructuralWorld(initial!, maximumPreparedPacks: 2),
+            new(41, 0, 0, 1, 1));
+        var residency = new ClientStructuralResidency(cache, 1);
+        SpatialChunkKey centerKey = Key(0, 0);
+        SpatialChunkKey farKey = Key(132, 0);
+        True(residency.TryPrepare(centerKey, false, out ClientStructuralResidencyPlan first,
+            out _, out _));
+        residency.Commit(first);
+        True(cache.TryGetResidentHandle(centerKey, out ClientSemanticChunkHandle centerHandle));
+        Equal(81, residency.GetSnapshot().AuthoredChunks);
+        True(cache.TryPublishPreparedComposition(expanded!));
+        True(residency.TryRefreshPreparedSource());
+        Equal(162, residency.GetSnapshot().AuthoredChunks);
+        True(cache.TryGetResidentHandle(centerKey, out ClientSemanticChunkHandle sameHandle));
+        Equal(centerHandle, sameHandle);
+        True(residency.TryPrepareReset(out ClientStructuralResidencyPlan clear, out _, out _));
+        residency.Commit(clear);
+        True(residency.TryPrepare(farKey, false, out ClientStructuralResidencyPlan next,
+            out ClientStructuralResidencyTransition entered, out _));
+        Equal(25, entered.EnteredChunks);
+        residency.Commit(next);
+        True(cache.TryGetResidentHandle(farKey, out _));
+    }
+
+    private static BoundWorldPack CreateWorld(int centerX = 0)
     {
         var builder = new WorldPackBuilder(
             Space, Content, new WorldPackLimits(2 * 1024 * 1024, 81, 2, 0, 0, 0));
@@ -163,7 +205,7 @@ internal static class ClientStructuralResidencyTests
         True(TerrainHeightPlaneBase.TryCreate(0, out TerrainHeightPlaneBase heightBase));
         for (int x = -4; x <= 4; x++)
         for (int z = -4; z <= 4; z++)
-            True(builder.TryAddBaseTerrain(Key(x, z), materials, heightBase, offsets, out _));
+            True(builder.TryAddBaseTerrain(Key(x + centerX, z), materials, heightBase, offsets, out _));
         True(builder.TryBuild(out WorldPackArtifact? artifact, out _));
         True(artifact!.Open().TryBind(
             new WorldContentBinding(Content, [1]), out BoundWorldPack? bound, out _));
