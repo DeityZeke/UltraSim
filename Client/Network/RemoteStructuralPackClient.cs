@@ -177,8 +177,7 @@ public sealed class RemoteStructuralPackClient :
             if ((_pendingRetirement is null ||
                  !ReferenceEquals(_pending[index], _pendingRetirement)) &&
                 (_pending[index] is null ||
-                _pending[index]!.State is RemoteStructuralPackClientState.Applied or
-                    RemoteStructuralPackClientState.Rejected or
+                _pending[index]!.State is RemoteStructuralPackClientState.Rejected or
                     RemoteStructuralPackClientState.Retired))
             {
                 slot = index;
@@ -449,7 +448,9 @@ public sealed class RemoteStructuralPackClient :
             pending.State = RemoteStructuralPackClientState.ProofPending;
             return;
         }
-        if (pending.Coord == _manifest.InitialPack && !_initialReady)
+        if (!_initialReady &&
+            _cache.PreparedComposition!.TryGetPreparedPack(_manifest.InitialPack, out _) &&
+            !HasMissingInitialNeighborhoodPack())
         {
             ClientStructuralResidency initial;
             try { initial = new ClientStructuralResidency(_cache, renderRadiusChunks: 1); }
@@ -476,6 +477,31 @@ public sealed class RemoteStructuralPackClient :
         }
         pending.Status = RemoteStructuralApplyStatus.Applied;
         pending.State = RemoteStructuralPackClientState.ProofPending;
+    }
+
+    /// <summary>The first window may span up to four Packs at an edge/corner.</summary>
+    public void RequestInitialNeighborhood()
+    {
+        EnsureOperational();
+        RequestMissingPacksAround(_manifest.InitialCenter);
+    }
+
+    private bool HasMissingInitialNeighborhoodPack()
+    {
+        SpatialChunkKey center = _manifest.InitialCenter;
+        for (int dx = -2; dx <= 2; dx++)
+        for (int dz = -2; dz <= 2; dz++)
+        {
+            long x = (long)center.Coord.X + dx;
+            long z = (long)center.Coord.Z + dz;
+            if (x is < int.MinValue or > int.MaxValue ||
+                z is < int.MinValue or > int.MaxValue) continue;
+            var key = new SpatialChunkKey(center.Space, (int)x, (int)z);
+            if (_cache.TryProbeStructuralChunk(key, out WorldStructuralChunkProbe probe) &&
+                probe.Status == WorldStructuralChunkStatus.KnownPackButNotPrepared)
+                return true;
+        }
+        return false;
     }
 
     private void RollBackPreparedCandidate(PreparedWorldComposition previous)

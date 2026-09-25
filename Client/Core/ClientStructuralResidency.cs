@@ -160,6 +160,9 @@ public sealed class ClientStructuralResidency
                 candidate[validCount++] = key;
         }
         if (validCount == 0) return false;
+        // Pack traversal is canonical by Pack coordinate, not necessarily by global chunk
+        // key. Contains() binary-searches this index across seam/corner Pack boundaries.
+        Array.Sort(candidate, 0, validCount);
         centers = candidate;
         return true;
     }

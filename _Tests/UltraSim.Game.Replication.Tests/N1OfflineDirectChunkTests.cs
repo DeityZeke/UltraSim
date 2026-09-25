@@ -4604,6 +4604,66 @@ internal static class N1OfflineDirectChunkTests
         Interest,
         new OfflineDirectChunkCadence(1, 1, 1));
 
+    internal static void W7InterestRetirementFencesResidentGenerationsNotTravelHistory()
+    {
+        using var fixture = new Fixture(historyCapacity: 8);
+        using ProtocolLoopback loopback = CreateLoopback(default);
+        ClientWorldSemanticCache cache = Cache(fixture, maximumPublicRecords: 4);
+        SpatialChunkKey retiredKey = Key(0, 0);
+        SpatialChunkKey unrelatedKey = Key(1, 0);
+        Stage(retiredKey);
+        Stage(unrelatedKey);
+        const ulong session = 0x5707_0001;
+        ulong epoch = fixture.Store.Epoch.Value;
+        var client = new RemoteChunkWorldStateClient(loopback.Client, cache, session,
+            maximumDeltaRecords: 4);
+
+        DeliverAbsence(client, session, epoch, 10, retiredKey);
+        Equal(1UL, client.GetSnapshot().AppliedAbsences);
+        DeliverRetirement(retiredKey, 10);
+        for (int index = 0; index < 1_100; index++)
+            DeliverRetirement(Key(1_000 + index, 0), checked((ulong)(20 + index)));
+        Equal(1_101UL, client.GetSnapshot().InterestRetirementsProcessed);
+        True(client.GetSnapshot().RetiredInterestCount <= 2);
+
+        // An unrelated resident predates those retirements and retains its own floor.
+        DeliverAbsence(client, session, epoch, 11, unrelatedKey);
+        Equal(2UL, client.GetSnapshot().AppliedAbsences);
+        True(cache.TryGetResidentHandle(retiredKey, out ClientSemanticChunkHandle old));
+        True(cache.BeginRetire(old));
+        True(cache.CompleteRetire(old));
+        Stage(retiredKey);
+        ulong applied = client.GetSnapshot().AppliedAbsences;
+        DeliverAbsence(client, session, epoch, 10, retiredKey);
+        Equal(applied, client.GetSnapshot().AppliedAbsences);
+        DeliverAbsence(client, session, epoch, 2_000, retiredKey);
+        Equal(applied + 1, client.GetSnapshot().AppliedAbsences);
+
+        void Stage(SpatialChunkKey key)
+        {
+            True(cache.TryRequest(key, out ClientSemanticChunkHandle handle, out _));
+            True(cache.TryStageFromBaseWorld(handle, [], default, out _));
+            True(cache.TryPublish(handle, out _));
+        }
+
+        void DeliverRetirement(SpatialChunkKey key, ulong cutoff)
+        {
+            var retired = new RemoteChunkInterestRetiredMessage
+            {
+                ApplicationSessionEpoch = session,
+                PublicationEpoch = epoch,
+                DeliveryCutoff = cutoff,
+                SpatialSpaceId = key.Space.Value,
+                ChunkX = key.Coord.X,
+                ChunkZ = key.Coord.Z,
+            };
+            Span<byte> bytes = stackalloc byte[RemoteChunkInterestRetiredMessageCodec.EncodedSize];
+            True(RemoteChunkInterestRetiredMessageCodec.TryWriteExact(bytes, in retired));
+            Deliver(client, NetworkLane.Control,
+                RemoteChunkInterestRetiredMessageCodec.Descriptor, bytes);
+        }
+    }
+
     private static ClientWorldSemanticCache Cache(Fixture fixture, int maximumPublicRecords) => new(
         fixture.Bound,
         new ClientWorldSemanticCacheLimits(64, 32, 16, maximumPublicRecords, 128));

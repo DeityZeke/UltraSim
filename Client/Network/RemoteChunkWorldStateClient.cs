@@ -28,6 +28,7 @@ public readonly record struct RemoteChunkWorldStateClientSnapshot(
     RemoteChunkWorldStateClientTimingSnapshot Timing)
 {
     public int RetiredInterestCount { get; init; }
+    public ulong InterestRetirementsProcessed { get; init; }
     public ulong MissingResidentDeliveryAttempts { get; init; }
     public ulong MissingResidentPreparedChunkAttempts { get; init; }
 }
@@ -51,8 +52,13 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
     private readonly byte[] _snapshotSegmentScratch;
     private readonly bool[] _snapshotSegments;
     private readonly DeliveryLineage[] _deliveryLineage;
-    private readonly Dictionary<SpatialChunkKey, RetiredInterest> _retiredInterest =
-        new(1_024);
+    // A fence belongs to a live semantic slot generation, not every chunk ever visited.
+    // The session-wide cutoff initializes later residents without retaining travel history.
+    private readonly ResidentInterestFence[] _residentInterestFences;
+    private readonly ClientSemanticChunkInfo[] _residentFenceScratch;
+    private PublicationEpoch _retirementEpoch;
+    private ulong _retirementCutoff;
+    private ulong _interestRetirementsProcessed;
     private readonly PendingProof[] _proofs;
     private readonly RemoteChunkAppliedEnvelopeEntry[] _proofEnvelopeEntries;
     private readonly byte[] _proofScratch;
@@ -150,6 +156,8 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         _snapshotSegmentScratch = new byte[segmentPayload];
         _snapshotSegments = new bool[UltraSimGameProtocol.MaximumChunkSnapshotSegments];
         _deliveryLineage = new DeliveryLineage[cache.Limits.MaximumResidentChunks];
+        _residentInterestFences = new ResidentInterestFence[cache.Limits.MaximumResidentChunks];
+        _residentFenceScratch = new ClientSemanticChunkInfo[cache.Limits.MaximumResidentChunks];
         _proofs = new PendingProof[maximumPendingProofs];
         int maximumEnvelopeEntries = UltraSimGameProtocol.
             GetMaximumChunkAppliedEnvelopeEntriesForPayload(peer.MaximumUnfragmentedMessageBytes);
@@ -330,13 +338,16 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
                 _snapshotPayload.Length + _snapshotSegmentScratch.Length +
                 _snapshotSegments.Length +
                 (long)_deliveryLineage.Length * Unsafe.SizeOf<DeliveryLineage>() +
+                (long)_residentInterestFences.Length * Unsafe.SizeOf<ResidentInterestFence>() +
+                (long)_residentFenceScratch.Length * Unsafe.SizeOf<ClientSemanticChunkInfo>() +
                 (long)_proofs.Length * Unsafe.SizeOf<PendingProof>() +
                 (long)_proofEnvelopeEntries.Length *
                     Unsafe.SizeOf<RemoteChunkAppliedEnvelopeEntry>() +
                 _proofScratch.Length),
             GetTimingSnapshot())
         {
-            RetiredInterestCount = _retiredInterest.Count,
+            RetiredInterestCount = CountResidentInterestFences(),
+            InterestRetirementsProcessed = _interestRetirementsProcessed,
             MissingResidentDeliveryAttempts = _missingResidentDeliveryAttempts,
             MissingResidentPreparedChunkAttempts = _missingResidentPreparedChunkAttempts,
         };
@@ -445,7 +456,8 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         0,
         default)
     {
-        RetiredInterestCount = _retiredInterest.Count,
+        RetiredInterestCount = CountResidentInterestFences(),
+        InterestRetirementsProcessed = _interestRetirementsProcessed,
         MissingResidentDeliveryAttempts = _missingResidentDeliveryAttempts,
         MissingResidentPreparedChunkAttempts = _missingResidentPreparedChunkAttempts,
     };
@@ -467,13 +479,24 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
             retired.ChunkX, retired.ChunkZ);
         PublicationEpoch cacheEpoch = _cache.GetSnapshot().PublicationEpoch;
         if (cacheEpoch.IsValid && cacheEpoch != epoch) return;
-        if (_retiredInterest.TryGetValue(key, out RetiredInterest prior) &&
-            prior.Epoch == epoch && prior.Cutoff >= retired.DeliveryCutoff)
-            return;
-        if (!_retiredInterest.ContainsKey(key) && _retiredInterest.Count == 1_024)
-            throw new InvalidOperationException(
-                "The bounded public-interest retirement fence is exhausted.");
-        _retiredInterest[key] = new RetiredInterest(epoch, retired.DeliveryCutoff);
+        if (_retirementEpoch != epoch)
+        {
+            Array.Clear(_residentInterestFences);
+            _retirementEpoch = epoch;
+            _retirementCutoff = 0;
+        }
+        // Existing residents keep the floor from their own admission. Capture them before
+        // advancing the global floor, which applies only to future slot generations.
+        SynchronizeResidentInterestFences(epoch);
+        if (_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle retiredHandle))
+        {
+            ref ResidentInterestFence fence = ref _residentInterestFences[checked((int)retiredHandle.Index)];
+            if (fence.Cutoff >= retired.DeliveryCutoff) return;
+            fence = fence with { Cutoff = retired.DeliveryCutoff };
+        }
+        if (retired.DeliveryCutoff > _retirementCutoff)
+            _retirementCutoff = retired.DeliveryCutoff;
+        SaturatingIncrement(ref _interestRetirementsProcessed);
 
         if (_snapshotBegin.DeliveryId != 0 &&
             _snapshotBegin.PublicationEpoch == retired.PublicationEpoch &&
@@ -493,9 +516,49 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
                 "An authenticated public-interest retirement could not clear client knowledge.");
     }
 
-    private bool IsRetiredDelivery(SpatialChunkKey key, PublicationEpoch epoch, ulong deliveryId) =>
-        _retiredInterest.TryGetValue(key, out RetiredInterest retired) &&
-        retired.Epoch == epoch && deliveryId <= retired.Cutoff;
+    private bool IsRetiredDelivery(SpatialChunkKey key, PublicationEpoch epoch, ulong deliveryId)
+    {
+        if (_retirementEpoch != epoch) return false;
+        if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle))
+            return false; // Keep the ordinary explicit rejection/proof path for absent residency.
+        ref ResidentInterestFence fence = ref EnsureResidentInterestFence(handle, key, epoch);
+        return deliveryId <= fence.Cutoff;
+    }
+
+    private ref ResidentInterestFence EnsureResidentInterestFence(
+        ClientSemanticChunkHandle handle, SpatialChunkKey key, PublicationEpoch epoch)
+    {
+        ref ResidentInterestFence fence = ref _residentInterestFences[checked((int)handle.Index)];
+        if (fence.HandleGeneration != handle.Generation || fence.Key != key ||
+            fence.Epoch != epoch)
+            fence = new ResidentInterestFence(key, handle.Generation, epoch, _retirementCutoff);
+        return ref fence;
+    }
+
+    private void SynchronizeResidentInterestFences(PublicationEpoch epoch)
+    {
+        if (!_cache.TryCopyResidentInfo(_residentFenceScratch, out int count, out _))
+            throw new InvalidOperationException("The resident interest fence scratch is undersized.");
+        for (int index = 0; index < count; index++)
+        {
+            ClientSemanticChunkInfo info = _residentFenceScratch[index];
+            _ = EnsureResidentInterestFence(info.Handle, info.Key, epoch);
+        }
+    }
+
+    private int CountResidentInterestFences()
+    {
+        int count = 0;
+        for (int index = 0; index < _residentInterestFences.Length; index++)
+        {
+            ref readonly ResidentInterestFence fence = ref _residentInterestFences[index];
+            if (fence.Cutoff != 0 &&
+                _cache.TryGetResidentHandle(fence.Key, out ClientSemanticChunkHandle handle) &&
+                handle.Index == index && handle.Generation == fence.HandleGeneration)
+                count++;
+        }
+        return count;
+    }
 
     private void ProcessDirtyChunkBundle(ReadOnlySpan<byte> payload)
     {
@@ -1452,5 +1515,6 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
             DeliveryId != 0;
     }
 
-    private readonly record struct RetiredInterest(PublicationEpoch Epoch, ulong Cutoff);
+    private readonly record struct ResidentInterestFence(
+        SpatialChunkKey Key, uint HandleGeneration, PublicationEpoch Epoch, ulong Cutoff);
 }

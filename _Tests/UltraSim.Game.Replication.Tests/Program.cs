@@ -179,6 +179,7 @@ var tests = new (string Name, Action Body)[]
     ("PF4FIndependentCompressedMessagesConvergeThroughImpairment", N1OfflineDirectChunkTests.IndependentCompressedMessagesConvergeThroughImpairment),
     ("PF4CR1SingletonMtuBoundaryRetainsCanonicalStandalone", N1OfflineDirectChunkTests.SingletonMtuBoundaryRetainsCanonicalStandalone),
     ("N12RemoteRemovalDeltaUsesCanonicalEmptyCurrent", N1OfflineDirectChunkTests.RemoteRemovalDeltaUsesCanonicalEmptyCurrent),
+    ("W7InterestRetirementFencesResidentGenerationsNotTravelHistory", N1OfflineDirectChunkTests.W7InterestRetirementFencesResidentGenerationsNotTravelHistory),
     ("N12CoalescedDeltaOverlapsLocallyAppliedUnprovedTruth", N1OfflineDirectChunkTests.CoalescedDeltaOverlapsLocallyAppliedUnprovedTruth),
     ("PF4BLaterExactProofAdvancesAndRetiresOnlySubsumedPositiveDebt", N1OfflineDirectChunkTests.LaterExactProofAdvancesAndRetiresOnlySubsumedPositiveDebt),
     ("N12ImpairmentAndSubscriptionReentryFenceDeliveryKnowledge", N1OfflineDirectChunkTests.ImpairmentAndSubscriptionReentryFenceDeliveryKnowledge),

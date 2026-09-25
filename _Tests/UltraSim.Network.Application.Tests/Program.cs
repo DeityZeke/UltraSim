@@ -29,6 +29,11 @@ internal static class Program
             M00SharedAuthorityTests.RunAll();
             return;
         }
+        if (args.Contains("--w7-r1-only", StringComparer.Ordinal))
+        {
+            F03bRemotePlayableTests.RunW7R1Only();
+            return;
+        }
         var tests = new (string Name, Action Body)[]
         {
             ("W7StructuralProtocolV33IsCanonicalAndBounded", W7StructuralProtocolV33IsCanonicalAndBounded),

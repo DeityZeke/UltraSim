@@ -597,6 +597,7 @@ public sealed class RemotePlayableSession : IDisposable
         _protocol.Add(_structuralPacks);
         if (!_structuralPacks.TryRequest(_structuralManifest.InitialPack))
             throw new InvalidOperationException("The advertised initial structural Pack was unavailable.");
+        _structuralPacks.RequestInitialNeighborhood();
     }
 
     private void ActivateWorld(ClientWorldSemanticCache cache)
