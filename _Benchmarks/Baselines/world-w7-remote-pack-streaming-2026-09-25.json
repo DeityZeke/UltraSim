@@ -1,0 +1,115 @@
+{
+  "checkpoint": "W7",
+  "date": "2026-09-25",
+  "status": "closed",
+  "startingHead": "854d58526714cf4eb68b4f9456d56f81b8241e0e",
+  "foundationHead": "dfce6f1ab19da3114792b444dc781ee7f18348dc",
+  "acceptedRepairHead": "854d58526714cf4eb68b4f9456d56f81b8241e0e",
+  "testedImplementationHead": "e30a541025ccdaf4c13986fbb6f659781aa95537",
+  "evidenceCommit": "resolve with git log -- _Benchmarks/Baselines/world-w7-remote-pack-streaming-2026-09-25.json",
+  "commitsSinceStartingHead": [
+    "0d715ce4 W7 structural control and independent acquisition groundwork",
+    "dfc154bb authenticate structural manifest before remote admission",
+    "da86f663 complete remote manifest and demand-driven Pack path",
+    "663fd19c classify bounded in-flight public delivery",
+    "b0a46bd8 hostile-grant and canceled-acquisition tests",
+    "e47f89f7 focused seam-tail classification",
+    "222fe749 preserve Pack obligation on contradictory duplicate grant",
+    "e30a5410 test stale and contradictory manifest advertisements"
+  ],
+  "environment": {
+    "os": "Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D",
+    "logicalCpuCount": 16,
+    "dotnetSdk": "8.0.131",
+    "dotnetRuntime": "8.0.31",
+    "godot": "4.7.1.stable.mono.official.a13da4feb",
+    "configuration": "Release"
+  },
+  "protocol": {
+    "gameManifestVersion": 33,
+    "networkTransportRevision": 2,
+    "lane": "Control",
+    "messageIds": {
+      "StructuralWorldAdvertisement": 150,
+      "StructuralManifestApplied": 151,
+      "StructuralPackRequest": 152,
+      "StructuralPackGrant": 153,
+      "StructuralPackApplied": 154,
+      "StructuralWindowApplied": 155,
+      "StructuralPackRetired": 156,
+      "ChunkInterestRetired": 157
+    },
+    "worldPackFormat": 1,
+    "worldStructuralManifestFormat": 1,
+    "conceptDemoSaveFormat": "worldview/v2"
+  },
+  "structuralArtifacts": {
+    "manifest": {
+      "entries": 2,
+      "rawBytes": 144,
+      "fingerprint": "41DB6F68C26AC85DF5ABEB60BEDA3F3F07DD1E76CF30A5164874446D902B6B53"
+    },
+    "pack0": {
+      "coord": [0, 0],
+      "authoredChunks": 117,
+      "rawBytes": 531138,
+      "fingerprint": "A76FAE182AA566BE91D312E26FCE29EA6E2854E84402D50579A6C5C2009553CB"
+    },
+    "pack1": {
+      "coord": [1, 0],
+      "authoredChunks": 45,
+      "rawBytes": 199910,
+      "fingerprint": "CE9F0CCDB591F3C3E592B8105E43C1AEB8323A5CB686533FC4735A8AA15D7B1D"
+    },
+    "historicalCombinedRegressionFingerprint": "323141A827CD25ECC5BC144CE860FECF717F472E1C0ED57626BCC89EC29CF795"
+  },
+  "productObservations": {
+    "coldCentralJoin": {
+      "manifestEntries": 2,
+      "preparedPacks": 1,
+      "semanticResidentChunks": 25,
+      "renderedChunks": 9,
+      "pack0PayloadBytesFetched": 531138,
+      "pack1PayloadBytesFetched": 0,
+      "guestAdmittedAfterStructuralProof": true
+    },
+    "farGateAndSeam": {
+      "farGate": "pass",
+      "ordinaryChunkSequence": [127, 128, 127],
+      "pack1FirstDemandRawBytes": 199910,
+      "sameSessionCacheRendererManifestRevisionAndPublicActor": true,
+      "boundedStaleInFlightPublicationLimit": 4,
+      "focusedFinalRunStaleInFlightPublications": 1,
+      "focusedFinalRunAllWereMissingResidentStillPrepared": true
+    },
+    "retirementAndReentry": {
+      "borrowerGuard": "pass",
+      "postRetirementW6State": "KnownPackButNotPrepared",
+      "warmPackPayloadBytesFetched": 0,
+      "retainedPack0ViewIdentity": "unchanged"
+    },
+    "sparseManifest": {
+      "entryCount": 10000,
+      "preparedPackCount": 1,
+      "eagerOtherPackDownloads": 0
+    },
+    "unsupportedNonemptyOverlay": "fail closed",
+    "normalRemoteCombinedPackDelivery": false,
+    "rendererPackAware": false
+  },
+  "verification": {
+    "focusedNetworkApplication": "pass; 11 W7 tests",
+    "architectureOnly": "pass",
+    "canonicalReleaseOnTestedImplementation": "pass uninterrupted; PASS repository verification",
+    "nativeOnlineW7Journey": "pass",
+    "exportedEditions": ["SinglePlayer", "Online", "Complete"],
+    "completeHostAndMixedLifecycle": "pass",
+    "previousFailedAttempts": [
+      "da86f663: native zero-tail assertion failed; bounded in-flight retirement diagnosed",
+      "b0a46bd8: previously observed F1.8A sparse-public InterpolatedFrames=0 assertion",
+      "b0a46bd8: focused W7 seam assertion <=1 failed; native bound was <=4"
+    ]
+  },
+  "next": "W8 atomic Add/Replace/Remove Pack composition; not implemented in W7"
+}

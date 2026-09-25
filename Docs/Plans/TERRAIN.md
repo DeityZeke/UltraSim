@@ -84,7 +84,8 @@ static/Multi identities; real movement/Physics, local semantic residency, native
 Godot traversal, and `worldview/v2` save/restore cross chunks 127/128. Legacy
 `worldview/v1` remains intact for Cabin. W5R migrates the production Concept Demo
 to canonical declared Packs `(0,0)`/`(1,0)` and `worldview/v2`; W6 closes the
-read-only structural-state probes and W7 is next.
+read-only structural-state probes; W7 Remote manifest and demand-based Pack acquisition is
+closed with native/export verification. W8 atomic composition editing is next.
 WorldPack/v1 is unchanged.
 
 W6's detailed probe first resolves manifest Pack authorship, then runtime Pack

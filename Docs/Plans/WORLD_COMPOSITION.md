@@ -1,8 +1,8 @@
 # UltraSim World / WorldPack Structural Composition
 
-**Status:** canonical World/Terrain direction; W1-W6 closed, W7 active/open. W8-W10 remain planned.
+**Status:** canonical World/Terrain direction; W1-W7 closed. W8 is next; W9-W10 remain planned.
 **Accepted:** 2026-09-23.
-**Current implementation:** W5R moves the Concept Demo Game authority and Local client to declared Packs `(0,0)` and `(1,0)` under one validated manifest. W7 implementation now advertises that manifest to Remote clients and acquires the two Packs independently on demand; final Release closure remains pending. The frozen combined Pack is retained as a historical regression/save identity, not normal product Remote delivery. New Concept Demo saves use `worldview/v2`; historical Cabin keeps `worldview/v1`. Neither WorldPack/v1 nor WorldStructuralManifest/v1 bytes changed.
+**Current implementation:** W5R moves the Concept Demo Game authority and Local client to declared Packs `(0,0)` and `(1,0)` under one validated manifest. W7 advertises that manifest to Remote clients and acquires the two Packs independently on demand; its [Release/export closure evidence](../../_Benchmarks/Baselines/world-w7-remote-pack-streaming-2026-09-25.md) is accepted. The frozen combined Pack is retained as a historical regression/save identity, not normal product Remote delivery. New Concept Demo saves use `worldview/v2`; historical Cabin keeps `worldview/v1`. Neither WorldPack/v1 nor WorldStructuralManifest/v1 bytes changed.
 **Related:** [TERRAIN.md](TERRAIN.md), [ASSET_STREAMING.md](ASSET_STREAMING.md), [../README.md](../README.md), [../../Game/World/README.md](../../Game/World/README.md).
 
 ## 1. Core model
@@ -664,12 +664,14 @@ the Pack, its spatial window, binding and prepared-subset compatibility before p
 Guest admission waits for initial Pack readiness and a bounded semantic presentation window.
 Pack-applied/window proofs gate recipient public delivery; Game authority does not await downloads.
 The client can demand Pack `(1,0)` at the real Far Gate, cross 127/128, safely retire it after
-borrowers leave, and reprepare it from CAS. The renderer remains Pack-blind. The full canonical
-Release/export verification on the final implementation commit is still required for W7 closure.
+borrowers leave, and reprepare it from CAS. The renderer remains Pack-blind. Full canonical
+Release/export verification passed on the tested W7 implementation commit.
 During rapid 127/128 semantic-window movement, an already-in-flight publication for a just-retired
 semantic chunk may receive an explicit rejected proof. Native W7 acceptance distinguishes those
 bounded, still-prepared-Pack window crossings from structural-acquisition rejection; it does not
 silently equate an absent semantic handle with applied knowledge or suppress debt accounting.
+Contradictory duplicate grants are rejected without poisoning a previously accepted Pack's
+publication, proof, or retirement obligation.
 
 ### W8 — atomic Add/Replace/Remove Pack composition
 

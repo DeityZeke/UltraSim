@@ -95,8 +95,8 @@ migrated Concept Demo authority and Local presentation to a complete two-Pack co
 W7 Remote product delivery authenticates the manifest and acquires the two independent Packs on
 demand through the shared Content CAS, without a catalog activation per Pack. W6 distinguishes
 manifest-known/unprepared residency from hard authored boundaries and drives that demand in
-Remote orchestration, not in the network-free semantic residency planner. Final W7 canonical
-Release/export closure is recorded in the W7 evidence artifact.
+Remote orchestration, not in the network-free semantic residency planner. W7 canonical
+Release/export closure is recorded in the [W7 evidence artifact](../../_Benchmarks/Baselines/world-w7-remote-pack-streaming-2026-09-25.md).
 
 ---
 
