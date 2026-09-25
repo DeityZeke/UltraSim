@@ -31,7 +31,7 @@ internal static class F03bRemotePlayableTests
     internal const int A06TestCount = 2;
     internal const int A07TestCount = 2;
     internal const int F12TestCount = 1;
-    internal const int W7TestCount = 10;
+    internal const int W7TestCount = 11;
     internal const int F15TestCount = 1;
     internal const int F04TestCount = 2;
     internal const int F05TestCount = 1;
@@ -57,6 +57,8 @@ internal static class F03bRemotePlayableTests
             W7ConceptDemoPacksAreIndependentExactPackagesOutsideBootstrap);
         Run("W7AuthenticatedManifestProofRetainsZeroPackComposition",
             W7AuthenticatedManifestProofRetainsZeroPackComposition);
+        Run("W7ClientRejectsStaleContradictoryAndWrongManifestAdvertisements",
+            W7ClientRejectsStaleContradictoryAndWrongManifestAdvertisements);
         Run("W7CrossLaneAdmissionWaitsForStructuralProof",
             W7CrossLaneAdmissionWaitsForStructuralProof);
         Run("W7PackGrantFollowsManifestAndExactRequestLineage",
@@ -967,6 +969,68 @@ internal static class F03bRemotePlayableTests
         fixture.DriveUntil(() => fixture.TryFindPublic(
             GameWorldPublicPrefabIds.CharacterMale, out _));
         Equal(0UL, fixture.World.GetSnapshot().RejectedDeliveries);
+    }
+
+    private static void W7ClientRejectsStaleContradictoryAndWrongManifestAdvertisements()
+    {
+        ApplicationRealmId realm = new(0x5707, 0x206);
+        using ConceptDemoContentDeployment deployment = ConceptDemoContentDeployment.Create(
+            realm, new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()));
+        using var source = new HttpContentPackageSource(
+            FixtureHttpLimits(deployment.Snapshot.ArchiveBytes, allowInsecureHttp: true));
+        using var fixture = RemotePlayableFixture.CreateWithConceptDeployment(
+            realm, deployment, source);
+        fixture.DriveUntil(() => fixture.SessionSnapshot.StructuralPacks.InitialReady);
+        ulong epoch = fixture.SessionSnapshot.StructuralManifest.ApplicationSessionEpoch;
+        var advertisement = deployment.StructuralAuthorization.CreateAdvertisement(epoch, 1);
+        var client = new RemoteStructuralManifestClient(
+            fixture.ClientPeer, fixture.Content!, epoch);
+
+        Deliver(client, advertisement with
+        {
+            Header = advertisement.Header with { ApplicationSessionEpoch = epoch + 1 }
+        });
+        Equal(RemoteStructuralManifestClientState.AwaitingAdvertisement,
+            client.GetSnapshot().State);
+        Equal(1UL, client.GetSnapshot().RejectedAdvertisements);
+        True(client.Composition is null);
+
+        Deliver(client, advertisement);
+        Equal(RemoteStructuralManifestClientState.AwaitingContent,
+            client.GetSnapshot().State);
+        Deliver(client, advertisement with
+        {
+            Header = advertisement.Header with
+            { ManifestHash0 = advertisement.Header.ManifestHash0 ^ 1 }
+        });
+        Equal(RemoteStructuralManifestClientState.Rejected, client.GetSnapshot().State);
+        Equal(2UL, client.GetSnapshot().RejectedAdvertisements);
+        True(client.Composition is null);
+
+        var wrongFingerprint = new RemoteStructuralManifestClient(
+            fixture.ClientPeer, fixture.Content!, epoch);
+        Deliver(wrongFingerprint, advertisement with
+        {
+            Header = advertisement.Header with
+            { ManifestHash0 = advertisement.Header.ManifestHash0 ^ 1 }
+        });
+        False(wrongFingerprint.TryProgress());
+        Equal(ContentWorldStructuralManifestResolutionStatus.FingerprintMismatch,
+            wrongFingerprint.GetSnapshot().Resolution);
+        True(wrongFingerprint.Composition is null);
+
+        static void Deliver(RemoteStructuralManifestClient target,
+            RemoteStructuralWorldAdvertisement candidate)
+        {
+            byte[] payload = new byte[UltraSimGameProtocol.MaximumStructuralAdvertisementBytes];
+            True(UltraSimGameProtocol.TryWriteStructuralAdvertisement(payload, in candidate,
+                out int written));
+            var delivered = new NetworkDeliveredMessage(NetworkLane.Control,
+                RemoteStructuralWorldAdvertisementHeaderCodec.Descriptor.Id,
+                RemoteStructuralWorldAdvertisementHeaderCodec.Descriptor.Version,
+                default, written);
+            True(target.TryProcess(in delivered, payload.AsSpan(0, written)));
+        }
     }
 
     private static void W7FarIslandDemandRetainsWestPreparedView()
@@ -3382,6 +3446,8 @@ internal static class F03bRemotePlayableTests
         internal ClientWorldSemanticCache Cache => _session.WorldCache;
         internal RemoteStructuralPackClient StructuralPacks =>
             _session.StructuralPacks ?? throw new InvalidOperationException("No structural Packs.");
+        internal NetworkProtocolPeer ClientPeer => _direct.Peer ??
+            throw new InvalidOperationException("The authenticated client peer is unavailable.");
         internal RemotePlayableSessionSnapshot SessionSnapshot => _session.GetSnapshot();
         internal RemoteGuestPlayableServerSnapshot ServerSnapshot =>
             _applicationCapture?.Application?.GetSnapshot() ??
