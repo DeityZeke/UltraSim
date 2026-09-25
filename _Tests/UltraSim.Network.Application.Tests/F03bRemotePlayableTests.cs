@@ -31,7 +31,7 @@ internal static class F03bRemotePlayableTests
     internal const int A06TestCount = 2;
     internal const int A07TestCount = 2;
     internal const int F12TestCount = 1;
-    internal const int W7TestCount = 8;
+    internal const int W7TestCount = 10;
     internal const int F15TestCount = 1;
     internal const int F04TestCount = 2;
     internal const int F05TestCount = 1;
@@ -63,6 +63,10 @@ internal static class F03bRemotePlayableTests
             W7PackGrantFollowsManifestAndExactRequestLineage);
         Run("W7FarIslandDemandRetainsWestPreparedView",
             W7FarIslandDemandRetainsWestPreparedView);
+        Run("W7ClientRejectsStaleAndContradictoryPackGrants",
+            W7ClientRejectsStaleAndContradictoryPackGrants);
+        Run("W7PendingPackAcquisitionCancelsWithSession",
+            W7PendingPackAcquisitionCancelsWithSession);
         Run("W7FailedFarPackAcquisitionRollsBackWithoutFalseKnowledge",
             W7FailedFarPackAcquisitionRollsBackWithoutFalseKnowledge);
         Run("W7ActualFarGateAndSeamTraversal",
@@ -1040,6 +1044,104 @@ internal static class F03bRemotePlayableTests
         True(ReferenceEquals(west.View, warmedWest.View));
         Equal(initial.Manifest.Fingerprint, warmed.Manifest.Fingerprint);
         Equal(initial.Revision, warmed.Revision);
+    }
+
+    private static void W7ClientRejectsStaleAndContradictoryPackGrants()
+    {
+        ApplicationRealmId realm = new(0x5707, 0x204);
+        using ConceptDemoContentDeployment deployment = ConceptDemoContentDeployment.Create(
+            realm, new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()));
+        using var source = new HttpContentPackageSource(
+            FixtureHttpLimits(deployment.Snapshot.ArchiveBytes, allowInsecureHttp: true));
+        using var fixture = RemotePlayableFixture.CreateWithConceptDeployment(
+            realm, deployment, source);
+        fixture.DriveUntil(() => fixture.SessionSnapshot.StructuralPacks.InitialReady);
+        RemoteStructuralPackClient packs = fixture.StructuralPacks;
+        ClientWorldSemanticCache cache = fixture.Cache;
+        PreparedWorldComposition initial = cache.PreparedComposition!;
+        True(packs.TryRequest(ConceptDemoStructuralSource.EastCoord));
+        True(packs.TryProgress());
+        Equal(2UL, packs.GetSnapshot().RequestsQueued);
+        RemoteStructuralManifestClientSnapshot manifest =
+            fixture.SessionSnapshot.StructuralManifest;
+        var request = new RemoteStructuralPackRequestMessage
+        {
+            ApplicationSessionEpoch = manifest.ApplicationSessionEpoch,
+            StructuralSequence = manifest.StructuralSequence,
+            PackRequestSequence = 2,
+            PackX = ConceptDemoStructuralSource.EastCoord.X,
+            PackZ = ConceptDemoStructuralSource.EastCoord.Z,
+        };
+        True(deployment.StructuralAuthorization.TryCreateGrant(in request,
+            out RemoteStructuralPackGrant? exact));
+        ulong rejected = packs.GetSnapshot().RejectedGrants;
+
+        RemoteStructuralPackGrantHeader header = exact!.Header;
+        header.ApplicationSessionEpoch++;
+        Reject(header);
+        header = exact.Header;
+        header.StructuralSequence++;
+        Reject(header);
+        header = exact.Header;
+        header.PackRequestSequence++;
+        Reject(header);
+        header = exact.Header;
+        header.PackX = ConceptDemoStructuralSource.WestCoord.X;
+        Reject(header);
+        header = exact.Header;
+        header.PackHash0 ^= 1;
+        Reject(header);
+        Equal(1, cache.PreparedComposition!.PreparedPackCount);
+        True(ReferenceEquals(initial, cache.PreparedComposition));
+        fixture.DriveUntil(() => packs.GetSnapshot().PreparedPackCount == 2);
+        Equal(rejected, packs.GetSnapshot().RejectedGrants);
+        Equal(2UL, packs.GetSnapshot().GrantsAccepted);
+        Equal(initial.Manifest.Fingerprint,
+            cache.PreparedComposition!.Manifest.Fingerprint);
+
+        void Reject(RemoteStructuralPackGrantHeader forgedHeader)
+        {
+            var forged = new RemoteStructuralPackGrant(forgedHeader,
+                exact!.PackageId, exact.Sources);
+            byte[] payload = new byte[UltraSimGameProtocol.MaximumStructuralGrantBytes];
+            True(UltraSimGameProtocol.TryWriteStructuralPackGrant(payload, forged,
+                out int written));
+            var delivered = new NetworkDeliveredMessage(NetworkLane.Control,
+                RemoteStructuralPackGrantHeaderCodec.Descriptor.Id,
+                RemoteStructuralPackGrantHeaderCodec.Descriptor.Version, default, written);
+            True(packs.TryProcess(in delivered, payload.AsSpan(0, written)));
+            Equal(++rejected, packs.GetSnapshot().RejectedGrants);
+            Equal(1, cache.PreparedComposition!.PreparedPackCount);
+        }
+    }
+
+    private static void W7PendingPackAcquisitionCancelsWithSession()
+    {
+        ApplicationRealmId realm = new(0x5707, 0x205);
+        using ConceptDemoContentDeployment deployment = ConceptDemoContentDeployment.Create(
+            realm, new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()));
+        using var http = new HttpContentPackageSource(
+            FixtureHttpLimits(deployment.Snapshot.ArchiveBytes, allowInsecureHttp: true));
+        using var source = new CancellableEastPackSource(
+            http, deployment.Structural.East.Package);
+        var fixture = RemotePlayableFixture.CreateWithConceptDeployment(
+            realm, deployment, source);
+        try
+        {
+            fixture.DriveUntil(() => fixture.SessionSnapshot.StructuralPacks.InitialReady);
+            ClientWorldSemanticCache cache = fixture.Cache;
+            PreparedWorldComposition initial = cache.PreparedComposition!;
+            True(fixture.StructuralPacks.TryPreparePresentation(
+                GamePlayableWorld.FarGateDestination,
+                out _, out ClientStructuralResidencyPlan provisional));
+            fixture.StructuralPacks.CancelPresentation(provisional);
+            fixture.DriveUntil(() => source.EastFetchStarted);
+            Equal(1, cache.PreparedComposition!.PreparedPackCount);
+            True(ReferenceEquals(initial, cache.PreparedComposition));
+        }
+        finally { fixture.Dispose(); }
+        True(source.CancellationObserved);
+        False(source.EastFetchCompleted);
     }
 
     private static void W7FailedFarPackAcquisitionRollsBackWithoutFalseKnowledge()
@@ -2990,6 +3092,56 @@ internal static class F03bRemotePlayableTests
                 return false;
             }
             return _http.TryFetch(in request, cancellationToken, out package, out error);
+        }
+    }
+
+    private sealed class CancellableEastPackSource : IContentPackageSource, IDisposable
+    {
+        private readonly HttpContentPackageSource _http;
+        private readonly ContentPackageId _east;
+        private readonly ManualResetEventSlim _started = new(false);
+        private readonly ManualResetEventSlim _release = new(false);
+        private int _cancellationObserved;
+        private int _eastFetchCompleted;
+
+        internal CancellableEastPackSource(HttpContentPackageSource http, ContentPackageId east)
+        {
+            _http = http;
+            _east = east;
+        }
+
+        internal bool EastFetchStarted => _started.IsSet;
+        internal bool CancellationObserved => Volatile.Read(ref _cancellationObserved) != 0;
+        internal bool EastFetchCompleted => Volatile.Read(ref _eastFetchCompleted) != 0;
+        public bool CanFetch(ContentSourceKind kind) => _http.CanFetch(kind);
+
+        public bool TryFetch(in ContentPackageFetchRequest request,
+            out FetchedContentPackage? package, out ContentSourceFetchError error) =>
+            TryFetch(in request, CancellationToken.None, out package, out error);
+
+        public bool TryFetch(in ContentPackageFetchRequest request,
+            CancellationToken cancellationToken,
+            out FetchedContentPackage? package, out ContentSourceFetchError error)
+        {
+            if (request.PackageId == _east)
+            {
+                _started.Set();
+                try { _release.Wait(cancellationToken); }
+                catch (OperationCanceledException)
+                {
+                    Volatile.Write(ref _cancellationObserved, 1);
+                    throw;
+                }
+                Interlocked.Exchange(ref _eastFetchCompleted, 1);
+            }
+            return _http.TryFetch(in request, cancellationToken, out package, out error);
+        }
+
+        public void Dispose()
+        {
+            _release.Set();
+            _started.Dispose();
+            _release.Dispose();
         }
     }
 
