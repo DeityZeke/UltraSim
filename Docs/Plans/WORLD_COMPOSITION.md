@@ -666,6 +666,10 @@ Pack-applied/window proofs gate recipient public delivery; Game authority does n
 The client can demand Pack `(1,0)` at the real Far Gate, cross 127/128, safely retire it after
 borrowers leave, and reprepare it from CAS. The renderer remains Pack-blind. The full canonical
 Release/export verification on the final implementation commit is still required for W7 closure.
+During rapid 127/128 semantic-window movement, an already-in-flight publication for a just-retired
+semantic chunk may receive an explicit rejected proof. Native W7 acceptance distinguishes those
+bounded, still-prepared-Pack window crossings from structural-acquisition rejection; it does not
+silently equate an absent semantic handle with applied knowledge or suppress debt accounting.
 
 ### W8 — atomic Add/Replace/Remove Pack composition
 

@@ -3509,15 +3509,28 @@ static void VerifyContentlessOnlineNative(
                     $"--w7-native-gate-trigger-file={w7Trigger}",
                     "--expect-edition=Online",
                 ]), 90_000);
-            if (!journey.Contains("W7 NATIVE PACK JOURNEY PASS gate=real " +
+            string? passLine = journey.Split('\n').FirstOrDefault(line =>
+                line.StartsWith("W7 NATIVE PACK JOURNEY PASS", StringComparison.Ordinal));
+            // A bounded number of already-in-flight publications can address semantic chunks
+            // retired while walking 127/128/127. They must all name still-prepared Pack truth;
+            // none may be caused by the Far Pack's acquisition/readiness interval.
+            if (passLine is null ||
+                !journey.Contains("W7 NATIVE DELIVERY CHECK farArrivalRejected=0 " +
+                    "farReadyRejected=0", StringComparison.Ordinal) ||
+                !journey.Contains("W7 NATIVE PACK JOURNEY PASS gate=real " +
                     "seam=127/128/127 retirement=guarded warmBytes=0 " +
                     "totalPackBytes=731048", StringComparison.Ordinal) ||
-                !journey.Contains("rejectedPublic=0", StringComparison.Ordinal) ||
+                !passLine.Contains("rejectedAtFar=0", StringComparison.Ordinal) ||
+                !TryReadNamedCount(passLine, "rejectedPublic=", out ulong rejected) ||
+                !TryReadNamedCount(passLine, "missingResident=", out ulong missing) ||
+                !TryReadNamedCount(passLine, "missingPrepared=", out ulong prepared) ||
+                rejected > 4 || rejected != missing || rejected != prepared ||
                 !ContainsPositiveNamedCount(journey, "rendererChunks=") ||
                 !journey.Contains(" actors=1 publicActor=", StringComparison.Ordinal))
                 throw new InvalidOperationException(
                     $"The exported W7 journey did not complete:\n{Tail(journey, 8_000)}");
-            Console.WriteLine("PASS W7_ExportedOnlinePackJourney");
+            Console.WriteLine($"PASS W7_ExportedOnlinePackJourney " +
+                $"stalePreparedWindowDeliveries={rejected}");
         }
         finally { StopOwnedProcess(w7Server); }
     }
@@ -5418,6 +5431,18 @@ static bool ContainsPositiveNamedCount(string output, string marker)
         search = firstDigit;
     }
     return false;
+}
+
+static bool TryReadNamedCount(string line, string marker, out ulong count)
+{
+    count = 0;
+    int markerIndex = line.IndexOf(marker, StringComparison.Ordinal);
+    if (markerIndex < 0) return false;
+    int firstDigit = markerIndex + marker.Length;
+    int end = firstDigit;
+    while (end < line.Length && line[end] is >= '0' and <= '9') end++;
+    return end > firstDigit && ulong.TryParse(line.AsSpan(firstDigit, end - firstDigit),
+        out count);
 }
 
 static string RunCaptured(

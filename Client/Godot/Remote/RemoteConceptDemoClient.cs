@@ -160,6 +160,9 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private int _smokePhase;
     private int _w7JourneyPhase;
     private long _w7FirstEastBytes;
+    private ulong _w7RejectedAtFarArrival;
+    private ulong _w7RejectedBeforeReturn;
+    private ulong _w7RejectedAfterReturn;
     private string? _w7GateTriggerFile;
     private ulong _w7LastDiagnosticMilliseconds;
     private ClientWorldSemanticCache? _w7OriginalCache;
@@ -1111,7 +1114,9 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 $"bytes={packs.GetSnapshot().BytesFetched} " +
                 $"retirements={packs.GetSnapshot().RetirementsQueued} " +
                 $"centralGate={centralGateVisible} returnGate={returnGateVisible} " +
-                $"worldRejected={snapshot.World.RejectedDeliveries}");
+                $"worldRejected={snapshot.World.RejectedDeliveries} " +
+                $"missingResident={snapshot.World.MissingResidentDeliveryAttempts} " +
+                $"missingPrepared={snapshot.World.MissingResidentPreparedChunkAttempts}");
         }
         if (!ReferenceEquals(cache, _w7OriginalCache) ||
             cache.PreparedComposition?.Manifest.Fingerprint != _w7Manifest ||
@@ -1126,7 +1131,10 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 GameLocomotionUpdate.Stop, GamePlayerActions.Interact, true), centralGate))
             _w7JourneyPhase = 2;
         else if (_w7JourneyPhase == 2 && snapshot.Playable.Position.Chunk.X == farChunk)
+        {
+            _w7RejectedAtFarArrival = snapshot.World.RejectedDeliveries;
             _w7JourneyPhase = 3;
+        }
         else if (_w7JourneyPhase == 3 &&
             packs.GetSnapshot().PreparedPackCount == 2 &&
             cache.TryProbeStructuralChunk(snapshot.Playable.Position.ToChunkKey(cache.StructuralSpace),
@@ -1138,6 +1146,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             _w7FirstEastBytes = packs.GetSnapshot().BytesFetched;
             if (_w7FirstEastBytes <= 531_138)
                 throw new InvalidOperationException("W7 native cold East Pack transferred no bytes.");
+            GD.Print($"W7 NATIVE DELIVERY CHECK farArrivalRejected={_w7RejectedAtFarArrival} " +
+                $"farReadyRejected={snapshot.World.RejectedDeliveries}");
             _w7JourneyPhase = 4;
         }
         else if (_w7JourneyPhase == 4 && snapshot.Playable.Position.Chunk.X == 127 &&
@@ -1156,9 +1166,15 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             !snapshot.Playable.CommandRetainedLocally &&
             TrySubmitObservedCommand(new ClientWorldCommandIntent(
                 GameLocomotionUpdate.Stop, GamePlayerActions.Interact, true), returnGate))
+        {
+            _w7RejectedBeforeReturn = snapshot.World.RejectedDeliveries;
             _w7JourneyPhase = 8;
+        }
         else if (_w7JourneyPhase == 8 && snapshot.Playable.Position.Chunk.X == 0)
+        {
+            _w7RejectedAfterReturn = snapshot.World.RejectedDeliveries;
             _w7JourneyPhase = 9;
+        }
         else if (_w7JourneyPhase == 9 &&
             packs.GetSnapshot().PreparedPackCount == 1 &&
             packs.GetSnapshot().RetirementsQueued != 0)
@@ -1194,6 +1210,11 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 $"cache=continuous rendererChunks={_renderer.GetSnapshot().ActiveRenderChunks} " +
                 $"actors={_actorPresenter.GetSnapshot().ActiveActors} " +
                 $"publicActor={_w7OriginalActor} " +
+                $"rejectedAtFar={_w7RejectedAtFarArrival} " +
+                $"rejectedBeforeReturn={_w7RejectedBeforeReturn} " +
+                $"rejectedAfterReturn={_w7RejectedAfterReturn} " +
+                $"missingResident={snapshot.World.MissingResidentDeliveryAttempts} " +
+                $"missingPrepared={snapshot.World.MissingResidentPreparedChunkAttempts} " +
                 $"rejectedPublic={snapshot.World.RejectedDeliveries}");
         }
     }

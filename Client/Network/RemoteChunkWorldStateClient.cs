@@ -28,6 +28,8 @@ public readonly record struct RemoteChunkWorldStateClientSnapshot(
     RemoteChunkWorldStateClientTimingSnapshot Timing)
 {
     public int RetiredInterestCount { get; init; }
+    public ulong MissingResidentDeliveryAttempts { get; init; }
+    public ulong MissingResidentPreparedChunkAttempts { get; init; }
 }
 
 /// <summary>
@@ -61,6 +63,8 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
     private ulong _appliedAbsences;
     private ulong _duplicateDeliveries;
     private ulong _rejectedDeliveries;
+    private ulong _missingResidentDeliveryAttempts;
+    private ulong _missingResidentPreparedChunkAttempts;
     private ulong _capacityFailures;
     private ulong _contradictoryDeliveries;
     private ulong _malformedDeliveries;
@@ -330,7 +334,12 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
                 (long)_proofEnvelopeEntries.Length *
                     Unsafe.SizeOf<RemoteChunkAppliedEnvelopeEntry>() +
                 _proofScratch.Length),
-            GetTimingSnapshot()) { RetiredInterestCount = _retiredInterest.Count };
+            GetTimingSnapshot())
+        {
+            RetiredInterestCount = _retiredInterest.Count,
+            MissingResidentDeliveryAttempts = _missingResidentDeliveryAttempts,
+            MissingResidentPreparedChunkAttempts = _missingResidentPreparedChunkAttempts,
+        };
     }
 
     public void ConfigureTelemetry(NetworkTelemetryLevel level)
@@ -434,7 +443,12 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         _rejectedSnapshots,
         _supersededDeliveries,
         0,
-        default) { RetiredInterestCount = _retiredInterest.Count };
+        default)
+    {
+        RetiredInterestCount = _retiredInterest.Count,
+        MissingResidentDeliveryAttempts = _missingResidentDeliveryAttempts,
+        MissingResidentPreparedChunkAttempts = _missingResidentPreparedChunkAttempts,
+    };
 
     private static ulong Difference(ulong before, ulong after) =>
         after >= before ? after - before : 0;
@@ -568,7 +582,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         RemoteChunkPublicationApplyStatus status;
         bool duplicate = false;
         DeliveryLineageDecision lineage = DeliveryLineageDecision.New;
-        if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle) ||
+        if (!TryGetPublicationHandle(key, out ClientSemanticChunkHandle handle) ||
             !_cache.TryGetInfo(handle, out ClientSemanticChunkInfo info) ||
             !info.PublicationCursor.IsValid || info.PublicationCursor.Epoch != epoch)
             status = RemoteChunkPublicationApplyStatus.Rejected;
@@ -639,7 +653,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         if (IsRetiredDelivery(key, epoch, entry.DeliveryId)) return;
         RemoteChunkPublicationApplyStatus status;
         DeliveryLineageDecision lineage = DeliveryLineageDecision.New;
-        if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle)
+        if (!TryGetPublicationHandle(key, out ClientSemanticChunkHandle handle)
             || !_cache.TryGetInfo(handle, out ClientSemanticChunkInfo info) || info.Key != key)
             status = RemoteChunkPublicationApplyStatus.Rejected;
         else if ((lineage = CompareLineage(handle, key, epoch, entry.DeliveryId,
@@ -696,7 +710,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         if (IsRetiredDelivery(key, epoch, entry.DeliveryId)) return;
         RemoteChunkPublicationApplyStatus status;
         DeliveryLineageDecision lineage = DeliveryLineageDecision.New;
-        if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle))
+        if (!TryGetPublicationHandle(key, out ClientSemanticChunkHandle handle))
             status = RemoteChunkPublicationApplyStatus.Rejected;
         else if ((lineage = CompareLineage(handle, key, epoch, entry.DeliveryId,
                 RemoteChunkPublicationKind.Absence, 0, 0)) is
@@ -763,7 +777,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         RemoteChunkPublicationApplyStatus status;
         bool duplicate = false;
         DeliveryLineageDecision lineage = DeliveryLineageDecision.New;
-        if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle) ||
+        if (!TryGetPublicationHandle(key, out ClientSemanticChunkHandle handle) ||
             !_cache.TryGetInfo(handle, out ClientSemanticChunkInfo info) ||
             !info.PublicationCursor.IsValid || info.PublicationCursor.Epoch != epoch)
         {
@@ -852,7 +866,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         if (IsRetiredDelivery(key, epoch, message.DeliveryId)) return;
         RemoteChunkPublicationApplyStatus status;
         DeliveryLineageDecision lineage = DeliveryLineageDecision.New;
-        if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle))
+        if (!TryGetPublicationHandle(key, out ClientSemanticChunkHandle handle))
         {
             status = RemoteChunkPublicationApplyStatus.Rejected;
         }
@@ -930,7 +944,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         var key = new SpatialChunkKey(
             new SpatialSpaceId(begin.SpatialSpaceId), begin.ChunkX, begin.ChunkZ);
         if (IsRetiredDelivery(key, epoch, begin.DeliveryId)) return;
-        if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle))
+        if (!TryGetPublicationHandle(key, out ClientSemanticChunkHandle handle))
         {
             QueueSnapshotProof(in begin, RemoteChunkPublicationApplyStatus.Rejected);
             SaturatingIncrement(ref _rejectedSnapshots);
@@ -1368,6 +1382,17 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
             RemoteChunkPublicationApplyStatus.Contradictory,
         _ => RemoteChunkPublicationApplyStatus.Rejected,
     };
+
+    private bool TryGetPublicationHandle(SpatialChunkKey key,
+        out ClientSemanticChunkHandle handle)
+    {
+        if (_cache.TryGetResidentHandle(key, out handle)) return true;
+        SaturatingIncrement(ref _missingResidentDeliveryAttempts);
+        if (_cache.TryProbeStructuralChunk(key, out WorldStructuralChunkProbe probe) &&
+            probe.Status == WorldStructuralChunkStatus.PreparedChunk)
+            SaturatingIncrement(ref _missingResidentPreparedChunkAttempts);
+        return false;
+    }
 
     private void RecordFailure(RemoteChunkPublicationApplyStatus status)
     {
