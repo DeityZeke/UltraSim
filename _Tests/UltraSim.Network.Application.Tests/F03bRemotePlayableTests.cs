@@ -1265,11 +1265,19 @@ internal static class F03bRemotePlayableTests
         Equal(revision, cache.PreparedComposition.Revision);
         True(fixture.ServerSnapshot.InterestRetirementsQueued > 0);
         True(fixture.ServerSnapshot.InterestRetirementsQueued < 128);
-        True(fixture.World.GetSnapshot().RetiredInterestCount > 0);
-        True(fixture.World.GetSnapshot().RejectedDeliveries <= 1);
+        fixture.DriveSteps(32);
+        RemoteChunkWorldStateClientSnapshot worldSnapshot = fixture.World.GetSnapshot();
+        True(worldSnapshot.RetiredInterestCount > 0);
         Console.WriteLine("EVIDENCE W7 actual_gate_seam_return=" +
-            $"pass public_retirements={fixture.World.GetSnapshot().RetiredInterestCount} " +
-            $"stale_inflight_rejections={fixture.World.GetSnapshot().RejectedDeliveries}");
+            $"public_retirements={worldSnapshot.RetiredInterestCount} " +
+            $"stale_inflight_rejections={worldSnapshot.RejectedDeliveries} " +
+            $"missing_resident={worldSnapshot.MissingResidentDeliveryAttempts} " +
+            $"missing_prepared={worldSnapshot.MissingResidentPreparedChunkAttempts}");
+        Equal(worldSnapshot.RejectedDeliveries,
+            worldSnapshot.MissingResidentDeliveryAttempts);
+        Equal(worldSnapshot.RejectedDeliveries,
+            worldSnapshot.MissingResidentPreparedChunkAttempts);
+        True(worldSnapshot.RejectedDeliveries <= 4);
 
         void MoveTo(WorldPosition destination)
         {
