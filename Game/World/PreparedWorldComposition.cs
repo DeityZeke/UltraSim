@@ -90,6 +90,15 @@ public sealed class PreparedWorldComposition
             error = PreparedWorldCompositionError.IncompleteComposition;
             return false;
         }
+        return TryValidatePreparedSubset(out error);
+    }
+
+    /// <summary>
+    /// Validates identities and seams among the currently prepared Packs. Missing manifest Packs
+    /// are permitted, but cannot be used to excuse conflicts between Packs already present.
+    /// </summary>
+    public bool TryValidatePreparedSubset(out PreparedWorldCompositionError error)
+    {
         var staticIds = new HashSet<WorldStaticId>();
         var multiIds = new HashSet<MultiInstanceId>();
         foreach (PreparedWorldPack pack in _packs)

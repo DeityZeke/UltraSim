@@ -72,6 +72,8 @@ public sealed class GameWorldState : IDisposable
             throw new ArgumentException("Legacy and canonical structural roots are mutually exclusive.", nameof(preparedComposition));
         if (preparedComposition is not null && preparedComposition.Space != DefaultSpace)
             throw new ArgumentException("The prepared composition belongs to a different Game space.", nameof(preparedComposition));
+        if (preparedComposition is not null && !preparedComposition.TryValidatePreparedSubset(out _))
+            throw new ArgumentException("The prepared composition has conflicting Packs.", nameof(preparedComposition));
         if (world.Options.LifecycleRecordCapacity <= 0)
             throw new ArgumentException("Spatial-enabled worlds require retained ECS lifecycle history.", nameof(world));
         _worldId = world.Id;
@@ -136,7 +138,8 @@ public sealed class GameWorldState : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(candidate);
         if (_initialized || BaseWorld is not null || PreparedWorld is not null ||
-            PreparedComposition is not null || candidate.Space != DefaultSpace)
+            PreparedComposition is not null || candidate.Space != DefaultSpace ||
+            !candidate.TryValidatePreparedSubset(out _))
             return false;
         PreparedComposition = candidate;
         return true;

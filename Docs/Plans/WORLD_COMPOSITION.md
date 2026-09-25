@@ -516,7 +516,7 @@ SpatialSpaceId remains reserved for genuinely distinct spatial worlds/facets/dim
 
 ## 22. Current implementation evolution
 
-Current V3 runtime remains one-Pack:
+Historical V3 compatibility path (still used by legacy one-Pack consumers):
 
 ```text
 GameWorldState
@@ -528,26 +528,25 @@ WorldPreparedView
     Overlay
 ```
 
-The canonical eventual shape is:
+The current canonical Game and Local structural path is already composed:
 
 ```text
 GameWorldState
-    StructuralWorld
-
-StructuralWorld
-    SpatialSpaceId
-    WorldCompositionRevision
-    StructuralManifestFingerprint
-    PreparedWorldComposition
+    PreparedComposition : PreparedWorldComposition
 
 PreparedWorldComposition
     sparse Pack index / prepared subset
 
 PreparedWorldPack
     WorldPackCoord
-    BoundWorldPack
-    WorldMutableOverlay
+    WorldPreparedView (BoundWorldPack + WorldMutableOverlay)
 ```
+
+The client semantic cache retains one canonical prepared structural source and may publish a
+validated residency-only prepared subset without replacing live Pack views. Game rejects
+conflicting prepared seams and durable IDs among present Packs. Remote Concept Demo activation
+still transfers the historical combined Pack; W7 demand-driven Remote Pack preparation is not
+complete. This section describes current ownership, not W7 closure or W8 edit publication.
 
 Terrain/static/Multi/surface queries remain global SpatialChunkKey APIs and resolve the backing Pack internally. Ordinary consumers should not need to know which Pack owns a chunk.
 

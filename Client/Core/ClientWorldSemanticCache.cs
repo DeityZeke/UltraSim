@@ -278,6 +278,7 @@ public sealed class ClientWorldSemanticCache
         for (int index = 0; index < _freeSlots.Length; index++)
             _freeSlots[index] = _freeSlots.Length - index - 1;
         _freeSlotCount = _freeSlots.Length;
+        _structuralSource?.Attach(this);
     }
 
     public ClientWorldSemanticCacheLimits Limits => _limits;
@@ -303,7 +304,13 @@ public sealed class ClientWorldSemanticCache
         {
             if (!previous.TryGetPreparedPackAt(index, out PreparedWorldPack pack))
                 throw new InvalidOperationException("A validated prepared Pack disappeared.");
-            if (candidate.TryGetPreparedPack(pack.Coord, out _)) continue;
+            if (candidate.TryGetPreparedPack(pack.Coord, out PreparedWorldPack retained))
+            {
+                // This is residency-only publication. An edited View needs the W8 semantic
+                // replacement transaction, not a new structural pointer over cached chunks.
+                if (!ReferenceEquals(pack.View, retained.View)) return false;
+                continue;
+            }
             for (int slot = 0; slot < _slots.Length; slot++)
             {
                 if (_slots[slot].State == ClientSemanticChunkState.Absent) continue;
@@ -311,7 +318,7 @@ public sealed class ClientWorldSemanticCache
                 if (owner == pack.Coord) return false;
             }
         }
-        return _structuralSource.TryPublish(candidate);
+        return _structuralSource.TryPublish(this, candidate);
     }
 
     /// <summary>Read-only canonical source status; legacy one-Pack sources have no manifest truth.</summary>

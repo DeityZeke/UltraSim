@@ -509,9 +509,9 @@ public sealed class GameItemGenerationState : IInventoryItemInspectionProvider
                 actorPosition.GlobalXMillimeters + 1_000,
                 actorPosition.YMillimeters,
                 actorPosition.GlobalZMillimeters,
-                out WorldPosition candidate) || worldState.PreparedWorld is null)
+                out WorldPosition candidate))
             return actorPosition;
-        WorldTerrainColumnQueryStatus query = worldState.PreparedWorld.TryFindNearestSupport(
+        WorldTerrainColumnQueryStatus query = worldState.TryFindNearestSupport(
             candidate, actorPosition.YMillimeters, out WorldTerrainColumnSurface support);
         return query == WorldTerrainColumnQueryStatus.Complete && support.IsSupport &&
             WorldPosition.TryFromGlobalMillimeters(

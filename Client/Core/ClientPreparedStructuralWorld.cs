@@ -13,6 +13,7 @@ public sealed class ClientPreparedStructuralWorld
     private readonly WorldStructuralManifest _manifest;
     private readonly int _maximumPreparedPacks;
     private PreparedWorldComposition _current;
+    private ClientWorldSemanticCache? _owner;
 
     public ClientPreparedStructuralWorld(
         PreparedWorldComposition initial,
@@ -22,6 +23,8 @@ public sealed class ClientPreparedStructuralWorld
         if (maximumPreparedPacks <= 0 || maximumPreparedPacks > WorldStructuralManifestFormat.MaximumPacks ||
             initial.PreparedPackCount > maximumPreparedPacks)
             throw new ArgumentOutOfRangeException(nameof(maximumPreparedPacks));
+        if (!initial.TryValidatePreparedSubset(out _))
+            throw new ArgumentException("The prepared subset has conflicting Packs.", nameof(initial));
         _manifest = initial.Manifest;
         _maximumPreparedPacks = maximumPreparedPacks;
     }
@@ -36,13 +39,24 @@ public sealed class ClientPreparedStructuralWorld
     }
 
     /// <summary>Refuses any authored-identity change, over-capacity subset, or invalid candidate.</summary>
-    internal bool TryPublish(PreparedWorldComposition candidate)
+    internal void Attach(ClientWorldSemanticCache owner)
+    {
+        EnsureOwner();
+        ArgumentNullException.ThrowIfNull(owner);
+        if (_owner is not null)
+            throw new InvalidOperationException("A prepared structural source already has a semantic cache owner.");
+        _owner = owner;
+    }
+
+    internal bool TryPublish(ClientWorldSemanticCache owner, PreparedWorldComposition candidate)
     {
         EnsureOwner();
         ArgumentNullException.ThrowIfNull(candidate);
-        if (candidate.Space != _current.Space || candidate.Revision != _current.Revision ||
+        if (!ReferenceEquals(_owner, owner) ||
+            candidate.Space != _current.Space || candidate.Revision != _current.Revision ||
             !ReferenceEquals(candidate.Manifest, _manifest) ||
-            candidate.PreparedPackCount > _maximumPreparedPacks)
+            candidate.PreparedPackCount > _maximumPreparedPacks ||
+            !candidate.TryValidatePreparedSubset(out _))
             return false;
         _current = candidate;
         return true;

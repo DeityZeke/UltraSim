@@ -193,6 +193,15 @@ internal static class M00SharedPlayableAuthorityTests
                 Check.True(game.WorldState.Publications.TryResolvePublicEntity(sword.Id, out Entity item));
                 Check.Equal(GameWorldActionStatus.Accepted,
                     game.Items.TryDrop(world, game.WorldState, game.Inventory, actor, item));
+                PreparedWorldComposition composition = game.WorldState.PreparedComposition ??
+                    throw new InvalidOperationException("The shared authority lost its canonical composition.");
+                Check.True(game.WorldState.TryReadPosition(world, actor, out WorldPosition actorPosition));
+                Check.True(game.WorldState.TryReadPosition(world, item, out WorldPosition itemPosition));
+                Check.Equal(actorPosition.GlobalXMillimeters + 1_000, itemPosition.GlobalXMillimeters);
+                Check.Equal(actorPosition.GlobalZMillimeters, itemPosition.GlobalZMillimeters);
+                Check.Equal(GameWorldState.DefaultSpace, composition.Space);
+                Check.True(game.WorldState.TrySampleBaseTerrainHeight(itemPosition, out int groundHeight));
+                Check.Equal(groundHeight, itemPosition.YMillimeters);
                 return true;
             }, out bool dropped) && dropped);
         authority.ObservePublicItemPresentationMutation();

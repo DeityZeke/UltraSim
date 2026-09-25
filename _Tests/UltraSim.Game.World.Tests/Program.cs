@@ -1588,18 +1588,43 @@ static void W5CompleteTwoPackValidationAndIdentityCollisions()
     Equal((ushort)34, eastIndices[2]);
 
     var (broken, _, _) = W5TwoPackFixture.Create(brokenSeam: true);
+    False(broken.TryValidatePreparedSubset(out PreparedWorldCompositionError subsetSeamError));
+    Equal(PreparedWorldCompositionError.TerrainSeamMismatch, subsetSeamError);
     False(broken.TryValidateComplete(out PreparedWorldCompositionError seamError));
     Equal(PreparedWorldCompositionError.TerrainSeamMismatch, seamError);
     var (duplicateStatic, _, _) = W5TwoPackFixture.Create(duplicateStaticId: true);
+    False(duplicateStatic.TryValidatePreparedSubset(out PreparedWorldCompositionError subsetStaticError));
+    Equal(PreparedWorldCompositionError.DuplicateWorldStaticId, subsetStaticError);
     False(duplicateStatic.TryValidateComplete(out PreparedWorldCompositionError staticError));
     Equal(PreparedWorldCompositionError.DuplicateWorldStaticId, staticError);
     var (duplicateMulti, _, _) = W5TwoPackFixture.Create(duplicateMultiId: true);
+    False(duplicateMulti.TryValidatePreparedSubset(out PreparedWorldCompositionError subsetMultiError));
+    Equal(PreparedWorldCompositionError.DuplicateMultiInstanceId, subsetMultiError);
     False(duplicateMulti.TryValidateComplete(out PreparedWorldCompositionError multiError));
     Equal(PreparedWorldCompositionError.DuplicateMultiInstanceId, multiError);
     var subset = W4Composition(valid.Space, valid.Manifest, valid.Revision,
         new PreparedWorldPack(W5TwoPackFixture.WestCoord, new WorldPreparedView(west)));
+    True(subset.TryValidatePreparedSubset(out PreparedWorldCompositionError subsetError));
+    Equal(PreparedWorldCompositionError.None, subsetError);
     False(subset.TryValidateComplete(out PreparedWorldCompositionError incomplete));
     Equal(PreparedWorldCompositionError.IncompleteComposition, incomplete);
+    using var world = new EcsWorld(GameSchema.CreateSchema(), UltraSimGameComposition.CreateWorldOptions(64));
+    Throws<ArgumentException>(() => _ = new GameWorldState(world, preparedComposition: broken));
+    Throws<ArgumentException>(() => _ = new GameWorldState(world, preparedComposition: duplicateStatic));
+    Throws<ArgumentException>(() => _ = new GameWorldState(world, preparedComposition: duplicateMulti));
+    using var shell = new GameWorldState(world);
+    False(shell.TryInstallPreparedComposition(broken));
+    False(shell.TryInstallPreparedComposition(duplicateStatic));
+    False(shell.TryInstallPreparedComposition(duplicateMulti));
+    True(shell.TryInstallPreparedComposition(subset));
+    var seamStart = new WorldPosition(127, 0, 15_500, 1_000, 0);
+    var seamCandidate = new WorldPosition(128, 0, 500, 1_000, 0);
+    using var completeState = new GameWorldState(world, preparedComposition: valid);
+    Equal(WorldTerrainColumnQueryStatus.Complete,
+        completeState.TryFindNearestSupport(seamCandidate, seamStart.YMillimeters,
+            out WorldTerrainColumnSurface crossPackSupport));
+    True(crossPackSupport.IsSupport);
+    Equal(0, crossPackSupport.HeightMillimeters);
     Console.WriteLine($"W5 TWO PACK west={west.Fingerprint} east={east.Fingerprint} " +
         $"manifest={valid.ManifestFingerprint} chunks={valid.PreparedChunkCount} static_hits={count}");
 }

@@ -15,6 +15,7 @@ internal static class ClientWorldSemanticCacheTests
         BaseSurfaceTopologyIsResidentAndHashed();
         CanonicalStructuralProbeDoesNotFabricateMissingResidency();
         PreparedSubsetPublicationPreservesSemanticCache();
+        PreparedSubsetRejectsConflictsAndViewReplacement();
         AdditionalTerrainSurfaceResidencyIsBoundedAndRenderable();
         LifecycleAndDeterministicHash(world);
         CapacityFailureIsTransactional(world);
@@ -101,6 +102,11 @@ internal static class ClientWorldSemanticCacheTests
         Equal(WorldStructuralChunkStatus.PreparedChunk, firstProbe.Status);
         var source = new ClientPreparedStructuralWorld(initial!, maximumPreparedPacks: 2);
         var cache = new ClientWorldSemanticCache(source, new(2, 0, 0, 1, 1));
+        bool secondOwnerRejected = false;
+        try { _ = new ClientWorldSemanticCache(source, new(2, 0, 0, 1, 1)); }
+        catch (InvalidOperationException) { secondOwnerRejected = true; }
+        True(secondOwnerRejected);
+        True(ReferenceEquals(initial, cache.PreparedComposition));
         False(cache.TryPublishPreparedComposition(wrongRevision!));
         False(cache.TryPublishPreparedComposition(differentManifestObject!));
         var capacityBound = new ClientWorldSemanticCache(
@@ -129,6 +135,73 @@ internal static class ClientWorldSemanticCacheTests
         True(cache.TryStageFromBaseWorld(eastHandle, [], default, out _));
         True(cache.TryPublish(eastHandle, out _));
         Equal(ClientSemanticChunkState.Resident, Info(cache, eastHandle).State);
+    }
+
+    private static void PreparedSubsetRejectsConflictsAndViewReplacement()
+    {
+        BoundWorldPack west = CreateTopologyWorld(withVoid: false, chunkX: 127);
+        BoundWorldPack east = CreateTopologyWorld(withVoid: false, chunkX: 128);
+        BoundWorldPack brokenEast = CreateTopologyWorld(withVoid: false, chunkX: 128,
+            heightMillimeters: 10_000);
+        var westCoord = new WorldPackCoord(0, 0);
+        var eastCoord = new WorldPackCoord(1, 0);
+        True(WorldStructuralManifest.TryCreate(
+            [new(westCoord, west.Fingerprint), new(eastCoord, brokenEast.Fingerprint)],
+            out WorldStructuralManifest? brokenManifest, out _));
+        var westPack = new PreparedWorldPack(westCoord, new WorldPreparedView(west));
+        var brokenPack = new PreparedWorldPack(eastCoord, new WorldPreparedView(brokenEast));
+        True(PreparedWorldComposition.TryCreate(Space, new WorldCompositionRevision(1),
+            brokenManifest, [westPack], out PreparedWorldComposition? initial, out _));
+        True(PreparedWorldComposition.TryCreate(Space, new WorldCompositionRevision(1),
+            brokenManifest, [westPack, brokenPack], out PreparedWorldComposition? broken, out _));
+        bool invalidInitialRejected = false;
+        try { _ = new ClientPreparedStructuralWorld(broken!, 2); }
+        catch (ArgumentException) { invalidInitialRejected = true; }
+        True(invalidInitialRejected);
+        var source = new ClientPreparedStructuralWorld(initial!, 2);
+        var cache = new ClientWorldSemanticCache(source, new(2, 0, 0, 1, 1));
+        False(cache.TryPublishPreparedComposition(broken!));
+        True(ReferenceEquals(initial, source.Current));
+
+        // A residency-only publication cannot replace a retained Pack's overlay/view while
+        // semantic chunks and their structural hashes still refer to the old immutable source.
+        True(WorldStructuralManifest.TryCreate(
+            [new(westCoord, west.Fingerprint), new(eastCoord, east.Fingerprint)],
+            out WorldStructuralManifest? manifest, out _));
+        True(PreparedWorldComposition.TryCreate(Space, new WorldCompositionRevision(2),
+            manifest, [westPack], out PreparedWorldComposition? unchanged, out _));
+        var currentCache = new ClientWorldSemanticCache(unchanged!, new(2, 0, 0, 1, 1));
+        ClientSemanticChunkHandle handle = Publish(currentCache, Key(127, 0), PublicationEpoch.Create(), 1, []);
+        ClientSemanticChunkInfo before = Info(currentCache, handle);
+        True(currentCache.TryGetResidentView(handle, out ClientSemanticChunkView resident));
+        ushort oldMaterial = resident.TerrainMaterials[0];
+        True(west.TryGetBaseTerrain(Key(127, 0), out WorldTerrainChunkView terrain));
+        var materials = new ushort[TerrainChunkFormat.MaterialCellCount];
+        var offsets = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+        terrain.CopyMaterials(materials);
+        for (int i = 0; i < offsets.Length; i++) offsets[i] = terrain.GetHeightOffset(i);
+        int changedVertex = TerrainChunkFormat.GetHeightIndex(new TerrainVertexCoord(16, 16));
+        offsets[changedVertex] = new TerrainHeightOffset(
+            checked((ushort)(offsets[changedVertex].Units + 1)));
+        var builder = new WorldMutableOverlayBuilder(west);
+        True(builder.TryReplaceTerrain(Key(127, 0), materials, terrain.HeightBase, offsets));
+        True(builder.TryBuild(out WorldMutableOverlay? overlay));
+        True(PreparedWorldComposition.TryCreate(Space, unchanged!.Revision, manifest,
+            [new PreparedWorldPack(westCoord, new WorldPreparedView(west, overlay))],
+            out PreparedWorldComposition? replacement, out _));
+        False(currentCache.TryPublishPreparedComposition(replacement!));
+        True(ReferenceEquals(unchanged, currentCache.PreparedComposition));
+        Equal(before.StructuralContentHash, Info(currentCache, handle).StructuralContentHash);
+        True(currentCache.TryGetResidentView(handle, out resident));
+        Equal(oldMaterial, resident.TerrainMaterials[0]);
+        var vertices = new TerrainBaseMeshVertex[TerrainChunkFormat.HeightVertexCount];
+        var indices = new ushort[TerrainChunkFormat.TriangleIndexCount];
+        var triangleMaterials = new ushort[TerrainChunkFormat.TriangleCount];
+        True(currentCache.TryBuildResidentTerrainMesh(handle, vertices, indices, triangleMaterials,
+            out _, out _, out _));
+        Equal(oldMaterial, triangleMaterials[0]);
+        Equal(terrain.GetAbsoluteHeightMillimeters(changedVertex),
+            vertices[changedVertex].AbsoluteYMillimeters);
     }
 
     private static void BaseSurfaceTopologyIsResidentAndHashed()
@@ -776,7 +849,8 @@ internal static class ClientWorldSemanticCacheTests
         return bound!;
     }
 
-    private static BoundWorldPack CreateTopologyWorld(bool withVoid, int chunkX = 0)
+    private static BoundWorldPack CreateTopologyWorld(bool withVoid, int chunkX = 0,
+        int heightMillimeters = 0)
     {
         var builder = new WorldPackBuilder(
             Space, Content, new WorldPackLimits(256 * 1024, 1, 3, 0, 0, 0));
@@ -787,7 +861,7 @@ internal static class ClientWorldSemanticCacheTests
         TerrainSurfacePresence.FillPresent(presence);
         if (withVoid)
             TerrainSurfacePresence.SetPresent(presence, new TerrainCellCoord(3, 4), present: false);
-        True(TerrainHeightPlaneBase.TryCreate(0, out TerrainHeightPlaneBase heightBase));
+        True(TerrainHeightPlaneBase.TryCreate(heightMillimeters, out TerrainHeightPlaneBase heightBase));
         True(builder.TryAddBaseTerrain(Key(chunkX, 0), materials, heightBase, offsets, presence, out _));
         True(builder.TryBuild(out WorldPackArtifact? artifact, out _));
         WorldPack pack = artifact!.Open();
