@@ -41,7 +41,7 @@ One WorldPack is a fixed 256×256 SpatialChunk / 4.096×4.096 km structural addr
 globally centered Pack mapping makes Pack (0,0) own chunk coordinates -128..127 on each axis.
 WorldPack boundaries do not change World/SpatialSpace identity and must remain semantically boring.
 
-W1-W5R are closed; W6 is next. `WorldPackAddressing.ToPackLocal` partitions every
+W1-W6 are closed; W7 is next. `WorldPackAddressing.ToPackLocal` partitions every
 signed-32-bit global `SpatialChunkCoord` into an 8-byte `WorldPackCoord` and a
 2-byte bounded `WorldPackLocalChunkCoord`. `TryToGlobal` rejects an arbitrary
 Pack/local pair if either reconstructed global axis is outside signed 32-bit
@@ -76,10 +76,17 @@ static/Multi identities. Partial prepared compositions remain legal for queries;
 they cannot establish complete-world validity. Logical Multi continuation and
 additional-surface continuation across Packs remain unimplemented.
 
-The future World layer distinguishes authoritatively unauthored Pack, manifest-known but
+The W6 World layer distinguishes authoritatively unauthored Pack, manifest-known but
 unprepared Pack, missing chunk inside a prepared Pack, intentional Absent terrain cell, and
 present structural surface. Known-but-unprepared is residency state and must never be reported as
-a hard World boundary.
+a hard World boundary. W6 now exposes this as allocation-free
+`PreparedWorldComposition.TryProbeStructuralChunk` and
+`TryProbeBaseTerrainResolution`. The first three statuses concern Pack/chunk
+authorship and prepared residency; `IntentionalVoid`/`Present` concern one base
+cell. Wrong-Space queries fail rather than claiming another Space is unauthored.
+Expected fingerprints come only from manifest-known Packs. The Sky Island proves
+base void can coexist with T1.1 surfaces in the same vertical column. Existing
+bool and `BaseTerrainSurfaceStatus` queries remain intentionally lossy.
 
 `PreparedWorldComposition` is one immutable runtime root with a valid Space and
 revision, the complete unchanged manifest, and a private canonically sorted
@@ -129,8 +136,8 @@ bytes/fingerprint; affected packs store one 128-byte plane per sorted chunk.
 
 `ProbeBaseTerrainSurface` returns `Present`, `Absent`, or `Unavailable`. Only a
 Present result carries effective height/material. The legacy height/material
-`Try...` APIs return false for either non-present state; callers needing residency
-semantics use the explicit probe. Mesh generation omits both triangles of absent
+`Try...` APIs return false for either non-present state; callers needing the exact
+manifest/prepared/chunk reason use W6's detailed composition probe. Mesh generation omits both triangles of absent
 cells. Current terrain replacements preserve the authored topology plane rather
 than silently filling holes. T1.1 additional shells remain independent immutable
 WorldPack structure; mutable topology and support/gravity behavior remain later

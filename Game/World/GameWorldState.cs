@@ -187,6 +187,27 @@ public sealed class GameWorldState : IDisposable
         return PreparedWorld?.ProbeBaseTerrainSurface(location) ?? BaseTerrainSurfaceSample.Unavailable;
     }
 
+    /// <summary>Detailed canonical authorship/residency; unavailable for legacy one-Pack worlds.</summary>
+    public bool TryProbeStructuralChunk(SpatialChunkKey key, out WorldStructuralChunkProbe probe)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (PreparedComposition is not null)
+            return PreparedComposition.TryProbeStructuralChunk(key, out probe);
+        probe = default;
+        return false;
+    }
+
+    /// <summary>Detailed canonical base-cell state; unavailable for legacy one-Pack worlds.</summary>
+    public bool TryProbeBaseTerrainResolution(
+        in WorldPosition location, out WorldBaseTerrainResolution resolution)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (PreparedComposition is not null)
+            return PreparedComposition.TryProbeBaseTerrainResolution(location, out resolution);
+        resolution = default;
+        return false;
+    }
+
     /// <summary>
     /// Resolves authoritative current base-terrain material through the prepared base-plus-overlay view.
     /// </summary>

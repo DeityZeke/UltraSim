@@ -1,6 +1,6 @@
 # UltraSim World / WorldPack Structural Composition
 
-**Status:** canonical World/Terrain direction; W1-W5R closed, W6 next. W7-W10 remain planned.
+**Status:** canonical World/Terrain direction; W1-W6 closed, W7 next. W8-W10 remain planned.
 **Accepted:** 2026-09-23.
 **Current implementation:** W5 proves connected two-Pack authority in a dedicated fixture. W5R moves the actual Concept Demo Game authority and Local client to declared Packs `(0,0)` and `(1,0)` under one completely validated manifest. The frozen combined Pack remains solely for pre-W7 remote structural delivery and as a historical save identity. New Concept Demo saves use `worldview/v2`; historical Cabin keeps `worldview/v1`. Neither WorldPack/v1 nor WorldStructuralManifest/v1 bytes changed.
 **Related:** [TERRAIN.md](TERRAIN.md), [ASSET_STREAMING.md](ASSET_STREAMING.md), [../README.md](../README.md), [../../Game/World/README.md](../../Game/World/README.md).
@@ -154,9 +154,10 @@ Meaning: this 16 m × 16 m area is authoritatively unauthored. This is a hard st
 
 The existing T1.0 semantics remain: the chunk is authored World space, but that base-surface cell intentionally does not exist. This is known physical void/hole, not missing data.
 
-### 5.5 Structural surface Present
+### 5.5 Base surface Present
 
-Normal present base terrain and/or T1.1 sparse structural surfaces exist.
+The requested base-terrain cell is present and carries an authoritative height/material.
+T1.1 additional surfaces are independent of this base-cell result.
 
 The permanent distinction is therefore:
 
@@ -167,6 +168,21 @@ NotAuthoredPack
 != IntentionalVoid
 != Present
 ```
+
+W6 exposes this hierarchy through `PreparedWorldComposition.TryProbeStructuralChunk`
+(`NotAuthoredPack`, `KnownPackButNotPrepared`, `AuthoredPackMissingChunk`,
+`PreparedChunk`) and `TryProbeBaseTerrainResolution` (the five detailed base-cell
+outcomes). The first three classify Pack/chunk authorship and residency; the last
+two classify base topology *inside* a prepared authored chunk. A wrong Space
+rejects the chunk probe rather than fabricating an unauthored Pack. Expected
+Pack fingerprints are returned only when the manifest declares the Pack.
+
+An `IntentionalVoid` base cell can coexist with T1.1 additional surfaces in the
+same vertical column, as the Concept Demo Sky Island does. Existing bool and
+`BaseTerrainSurfaceStatus` APIs remain deliberate lossy projections: the first
+three detailed states map to `Unavailable`, while `IntentionalVoid` maps to
+`Absent`. A caller requiring the exact reason probes structural state first;
+W6 does not force every typed query to return five states or trigger acquisition.
 
 ## 6. World creation and growth
 
@@ -625,9 +641,14 @@ fails closed with an explicit compatibility error under canonical authority; it 
 not silently rebased or stripped. Cabin v1 restore remains supported. W7 owns
 remote manifest/Pack acquisition; W6 owns explicit structural absence vocabulary.
 
-### W6 — explicit absence/residency states
+### W6 — explicit absence/residency states (CLOSED)
 
-Prove NotAuthoredPack, KnownPackButNotPrepared, AuthoredPackMissingChunk, IntentionalVoid, and Present remain distinguishable.
+Canonical immutable composition probes now distinguish authored Pack absence,
+manifest-known but unprepared Pack, missing chunk inside a prepared Pack, authored
+base void, and present base cell. Game and composition-backed Client Core expose
+the detailed status; legacy one-Pack sources do not invent manifest truth.
+Warmed probes allocate zero; the exact Concept Demo Sky Island proves base void
+and additional structural surfaces can coexist. W7 still owns acquisition.
 
 ### W7 — remote manifest and demand-based Pack acquisition
 

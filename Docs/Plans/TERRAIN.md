@@ -83,8 +83,18 @@ two-Pack fixture: complete validation checks exact base seams and global
 static/Multi identities; real movement/Physics, local semantic residency, native
 Godot traversal, and `worldview/v2` save/restore cross chunks 127/128. Legacy
 `worldview/v1` remains intact for Cabin. W5R migrates the production Concept Demo
-to canonical declared Packs `(0,0)`/`(1,0)` and `worldview/v2`; W6 is next.
+to canonical declared Packs `(0,0)`/`(1,0)` and `worldview/v2`; W6 closes the
+read-only structural-state probes and W7 is next.
 WorldPack/v1 is unchanged.
+
+W6's detailed probe first resolves manifest Pack authorship, then runtime Pack
+preparation, then effective chunk authorship, and only then the base-cell
+presence bit. `KnownPackButNotPrepared` is residency state, not a World edge;
+`NotAuthoredPack` and `AuthoredPackMissingChunk` are hard authored boundaries.
+`IntentionalVoid` describes one base cell, not the whole vertical column: the
+Concept Demo Sky Island has an absent base under a present T1.1 shell. Existing
+bool/`Unavailable` APIs remain compatible projections; exact reasons require
+the composition's detailed probe.
 
 The Pack byte-cap correction is 512 MiB in W2: the existing 65,536-chunk bound exactly matches
 the fixed 256×256 envelope, while a fully populated dense terrain foundation alone is already

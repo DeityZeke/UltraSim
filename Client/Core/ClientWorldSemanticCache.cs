@@ -280,6 +280,15 @@ public sealed class ClientWorldSemanticCache
         throw new InvalidOperationException("A canonical structural composition is not one prepared Pack.");
     public PreparedWorldComposition? PreparedComposition => _preparedComposition;
     public SpatialSpaceId StructuralSpace => _structuralSpace;
+
+    /// <summary>Read-only canonical source status; legacy one-Pack sources have no manifest truth.</summary>
+    public bool TryProbeStructuralChunk(SpatialChunkKey key, out WorldStructuralChunkProbe probe)
+    {
+        if (_preparedComposition is not null)
+            return _preparedComposition.TryProbeStructuralChunk(key, out probe);
+        probe = default;
+        return false;
+    }
     internal int PreparedStructuralChunkCount => _preparedComposition?.PreparedChunkCount ?? _baseWorld!.ChunkCount;
 
     internal bool TryGetPreparedStructuralChunkKey(int index, out SpatialChunkKey key) =>

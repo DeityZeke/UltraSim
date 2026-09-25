@@ -39,6 +39,8 @@ var tests = new (string Name, Action Body)[]
     ("StructuralManifestOpenRejectsMalformedBytes", StructuralManifestOpenRejectsMalformedBytes),
     ("StructuralManifestSparseAndCapacityBoundsAreExact", StructuralManifestSparseAndCapacityBoundsAreExact),
     ("PreparedCompositionValidatesCompleteCandidateAndSparseSubset", PreparedCompositionValidatesCompleteCandidateAndSparseSubset),
+    ("W6StructuralStateHierarchyAndCompatibility", W6StructuralStateHierarchyAndCompatibility),
+    ("W6ConceptDemoStructuralStatesAreCanonical", W6ConceptDemoStructuralStatesAreCanonical),
     ("PreparedCompositionMatchesOnePackQueriesAndOverlay", PreparedCompositionMatchesOnePackQueriesAndOverlay),
     ("PreparedCompositionRoutesDistantAndCrossPackStatics", PreparedCompositionRoutesDistantAndCrossPackStatics),
     ("PreparedCompositionTerrainMeshHaloReadsNeighborPack", PreparedCompositionTerrainMeshHaloReadsNeighborPack),
@@ -976,6 +978,209 @@ static PreparedWorldComposition W4Composition(
         out PreparedWorldComposition? composition, out PreparedWorldCompositionError error));
     Equal(PreparedWorldCompositionError.None, error);
     return composition!;
+}
+
+static void W6StructuralStateHierarchyAndCompatibility()
+{
+    SpatialSpaceId space = WorldPackTestProfile.Space;
+    WorldPack pack = CreatePresenceWorldPackArtifact(withVoid: true, explicitAllPresent: false).Open();
+    True(pack.TryBind(new WorldContentBinding(WorldPackTestProfile.Content, [1, 2, 3, 4, 5]),
+        out BoundWorldPack? bound, out _));
+    var origin = new WorldPackCoord(0, 0);
+    var east = new WorldPackCoord(1, 0);
+    WorldPackFingerprint eastFingerprint = StructuralTestFingerprint(77);
+    WorldStructuralManifest manifest = StructuralManifest(
+        new(origin, pack.Fingerprint), new(east, eastFingerprint));
+    PreparedWorldComposition composition = W4Composition(space, manifest, new(1),
+        new PreparedWorldPack(origin, new WorldPreparedView(bound!)));
+    var absentPack = new SpatialChunkKey(space, 512, 0);
+    var unprepared = new SpatialChunkKey(space, 128, 0);
+    var missingChunk = new SpatialChunkKey(space, 20, 0);
+    var authored = new SpatialChunkKey(space, 0, 0);
+    var present = new WorldPosition(0, 0, 1_000, 1_000, int.MaxValue);
+    var voidCell = new WorldPosition(0, 0, 1_750, 2_250, int.MinValue);
+    var missingPoint = new WorldPosition(20, 0, 1_750, 2_250, 0);
+    var unpreparedPoint = new WorldPosition(128, 0, 1_750, 2_250, 0);
+    var absentPackPoint = new WorldPosition(512, 0, 1_750, 2_250, 0);
+
+    (SpatialChunkKey Key, WorldStructuralChunkStatus Expected, WorldPackFingerprint Fingerprint)[] chunks =
+    [
+        (absentPack, WorldStructuralChunkStatus.NotAuthoredPack, default),
+        (unprepared, WorldStructuralChunkStatus.KnownPackButNotPrepared, eastFingerprint),
+        (missingChunk, WorldStructuralChunkStatus.AuthoredPackMissingChunk, pack.Fingerprint),
+        (authored, WorldStructuralChunkStatus.PreparedChunk, pack.Fingerprint),
+    ];
+    for (int repeat = 0; repeat < 3; repeat++)
+        for (int index = chunks.Length - 1; index >= 0; index--)
+        {
+            var row = chunks[(index + repeat) % chunks.Length];
+            True(composition.TryProbeStructuralChunk(row.Key, out WorldStructuralChunkProbe probe));
+            Equal(row.Expected, probe.Status);
+            Equal(row.Fingerprint, probe.ExpectedPackFingerprint);
+            WorldPackAddressing.ToPackLocal(row.Key.Coord, out WorldPackCoord owner, out _);
+            Equal(owner, probe.OwnerPack);
+        }
+    False(composition.TryProbeStructuralChunk(new SpatialChunkKey(new SpatialSpaceId(902), 512, 0),
+        out WorldStructuralChunkProbe wrongSpace));
+    Equal(default(WorldStructuralChunkProbe), wrongSpace);
+
+    (WorldPosition Point, WorldBaseTerrainResolutionStatus Detailed, BaseTerrainSurfaceStatus Legacy)[] cells =
+    [
+        (absentPackPoint, WorldBaseTerrainResolutionStatus.NotAuthoredPack, BaseTerrainSurfaceStatus.Unavailable),
+        (unpreparedPoint, WorldBaseTerrainResolutionStatus.KnownPackButNotPrepared, BaseTerrainSurfaceStatus.Unavailable),
+        (missingPoint, WorldBaseTerrainResolutionStatus.AuthoredPackMissingChunk, BaseTerrainSurfaceStatus.Unavailable),
+        (voidCell, WorldBaseTerrainResolutionStatus.IntentionalVoid, BaseTerrainSurfaceStatus.Absent),
+        (present, WorldBaseTerrainResolutionStatus.Present, BaseTerrainSurfaceStatus.Present),
+    ];
+    Span<WorldTerrainColumnSurface> column = stackalloc WorldTerrainColumnSurface[8];
+    for (int index = 0; index < cells.Length; index++)
+    {
+        var row = cells[index];
+        True(composition.TryProbeBaseTerrainResolution(row.Point, out WorldBaseTerrainResolution resolution));
+        Equal(row.Detailed, resolution.Status);
+        Equal(row.Legacy, composition.ProbeBaseTerrainSurface(row.Point).Status);
+        Equal(index < 3 ? WorldTerrainColumnQueryStatus.Unavailable : WorldTerrainColumnQueryStatus.Complete,
+            composition.TryCopyTerrainColumnSurfaces(row.Point, column, out int count, out _));
+        Equal(index == 4 ? 1 : 0, count);
+        Equal(index == 4, composition.TrySampleBaseTerrainHeight(row.Point, out _));
+        Equal(index == 4, composition.TryResolveBaseTerrainMaterial(row.Point, out _));
+        if (index == 4)
+        {
+            True(resolution.MaterialId != 0);
+            Equal(composition.ProbeBaseTerrainSurface(row.Point).HeightMillimeters, resolution.HeightMillimeters);
+        }
+        else
+        {
+            Equal(0, resolution.HeightMillimeters);
+            Equal((ushort)0, resolution.MaterialId);
+        }
+    }
+    True(composition.TryGetBaseTerrain(authored, out _)); // Absent cell does not remove the chunk.
+    True(composition.TryProbeBaseTerrainResolution(
+        new WorldPosition(0, 0, 1_750, 2_250, int.MaxValue), out WorldBaseTerrainResolution yChanged));
+    Equal(WorldBaseTerrainResolutionStatus.IntentionalVoid, yChanged.Status);
+
+    WorldStructuralManifest emptyManifest = StructuralManifest();
+    PreparedWorldComposition empty = W4Composition(space, emptyManifest, new(1));
+    True(empty.TryProbeStructuralChunk(new SpatialChunkKey(space, int.MinValue, int.MaxValue),
+        out WorldStructuralChunkProbe extreme));
+    Equal(WorldStructuralChunkStatus.NotAuthoredPack, extreme.Status);
+    True(empty.TryProbeStructuralChunk(authored, out WorldStructuralChunkProbe emptyResult));
+    Equal(WorldStructuralChunkStatus.NotAuthoredPack, emptyResult.Status);
+
+    // The manifest identity is authored truth; a different immutable prepared subset changes only residency.
+    WorldPreparedView eastView = W4Shard(east, 0, 128, space: space);
+    WorldStructuralManifest transitionManifest = StructuralManifest(
+        new(origin, pack.Fingerprint), new(east, eastView.BaseWorldFingerprint));
+    PreparedWorldComposition before = W4Composition(space, transitionManifest, new(1),
+        new PreparedWorldPack(origin, new WorldPreparedView(bound!)));
+    PreparedWorldComposition after = W4Composition(space, transitionManifest, new(1),
+        new PreparedWorldPack(origin, new WorldPreparedView(bound!)), new PreparedWorldPack(east, eastView));
+    Equal(before.ManifestFingerprint, after.ManifestFingerprint);
+    True(before.TryProbeStructuralChunk(unprepared, out WorldStructuralChunkProbe beforeProbe));
+    True(after.TryProbeStructuralChunk(unprepared, out WorldStructuralChunkProbe afterProbe));
+    Equal(WorldStructuralChunkStatus.KnownPackButNotPrepared, beforeProbe.Status);
+    Equal(WorldStructuralChunkStatus.PreparedChunk, afterProbe.Status);
+    Equal(beforeProbe.ExpectedPackFingerprint, afterProbe.ExpectedPackFingerprint);
+
+    // A large sparse manifest must stay indexed by entries, not by coordinate span.
+    var entries = new WorldStructuralManifestEntry[10_000];
+    for (int index = 0; index < entries.Length; index++)
+        entries[index] = new(new WorldPackCoord(index + 1_000, 0), eastFingerprint);
+    entries[0] = new(origin, pack.Fingerprint);
+    PreparedWorldComposition sparse = W4Composition(space, StructuralManifest(entries), new(1),
+        new PreparedWorldPack(origin, new WorldPreparedView(bound!)));
+    var sparseKnown = new SpatialChunkKey(space, 1_005 * 256, 0);
+    var sparseAbsent = new SpatialChunkKey(space, 20_000 * 256, 0);
+    _ = sparse.TryProbeStructuralChunk(sparseKnown, out _);
+    _ = composition.TryProbeBaseTerrainResolution(present, out _);
+    long allocationBefore = GC.GetAllocatedBytesForCurrentThread();
+    long started = Stopwatch.GetTimestamp();
+    int checksum = 0;
+    for (int index = 0; index < 100_000; index++)
+    {
+        SpatialChunkKey key = index % 3 == 0 ? sparseKnown : index % 3 == 1 ? sparseAbsent : authored;
+        if (!sparse.TryProbeStructuralChunk(key, out WorldStructuralChunkProbe probe)) throw new Exception();
+        checksum += (int)probe.Status;
+        if (!composition.TryProbeBaseTerrainResolution(cells[index % cells.Length].Point,
+                out WorldBaseTerrainResolution baseResult)) throw new Exception();
+        checksum += (int)baseResult.Status;
+    }
+    long ticks = Stopwatch.GetTimestamp() - started;
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - allocationBefore;
+    Equal(0L, allocated);
+    True(checksum != 0);
+    Console.WriteLine($"W6 MATRIX states=5 sparse_manifest=10000 probes=100000 ticks={ticks} allocated={allocated}");
+}
+
+static void W6ConceptDemoStructuralStatesAreCanonical()
+{
+    ConceptDemoStructuralSource source = GamePlayableWorld.CreateConceptDemoStructuralSource();
+    PreparedWorldComposition complete = source.Prepare(ConceptDemoStructuralSource.CreateBinding());
+    Equal(162, complete.PreparedChunkCount);
+    True(complete.TryValidateComplete(out _));
+    Equal("A76FAE182AA566BE91D312E26FCE29EA6E2854E84402D50579A6C5C2009553CB",
+        source.West.Fingerprint.ToString());
+    Equal("CE9F0CCDB591F3C3E592B8105E43C1AEB8323A5CB686533FC4735A8AA15D7B1D",
+        source.East.Fingerprint.ToString());
+    Equal("41DB6F68C26AC85DF5ABEB60BEDA3F3F07DD1E76CF30A5164874446D902B6B53",
+        source.Manifest.Fingerprint.ToString());
+    Equal("323141A827CD25ECC5BC144CE860FECF717F472E1C0ED57626BCC89EC29CF795",
+        ConceptDemoStructuralSource.LegacyCombinedFingerprint.ToString());
+    SpatialSpaceId space = complete.Space;
+    var notAuthored = new SpatialChunkKey(space, 384, 0); // Pack (2,0).
+    var missingChunk = new SpatialChunkKey(space, 40, 40); // Inside prepared Pack (0,0), outside both clusters.
+    WorldPosition sky = GamePlayableWorld.SkyTelepadDestination;
+    WorldPosition ground = GamePlayableWorld.PlayerStart;
+    True(complete.TryProbeStructuralChunk(notAuthored, out WorldStructuralChunkProbe outside));
+    Equal(WorldStructuralChunkStatus.NotAuthoredPack, outside.Status);
+    Equal(new WorldPackCoord(2, 0), outside.OwnerPack);
+    False(outside.ExpectedPackFingerprint.IsValid);
+    True(complete.TryProbeStructuralChunk(missingChunk, out WorldStructuralChunkProbe gap));
+    Equal(WorldStructuralChunkStatus.AuthoredPackMissingChunk, gap.Status);
+    Equal(ConceptDemoStructuralSource.WestCoord, gap.OwnerPack);
+    Equal(source.West.Fingerprint, gap.ExpectedPackFingerprint);
+    True(complete.TryProbeBaseTerrainResolution(sky, out WorldBaseTerrainResolution skyBase));
+    Equal(WorldBaseTerrainResolutionStatus.IntentionalVoid, skyBase.Status);
+    Equal(BaseTerrainSurfaceStatus.Absent, complete.ProbeBaseTerrainSurface(sky).Status);
+    Span<WorldTerrainColumnSurface> surfaces = stackalloc WorldTerrainColumnSurface[8];
+    Equal(WorldTerrainColumnQueryStatus.Complete,
+        complete.TryCopyTerrainColumnSurfaces(sky, surfaces, out int skyCount, out _));
+    True(skyCount > 0);
+    bool skySurface = false;
+    for (int index = 0; index < skyCount; index++)
+        skySurface |= surfaces[index].SurfaceId == GamePlayableWorld.SkyIslandSurface;
+    True(skySurface);
+    True(complete.TryProbeBaseTerrainResolution(ground, out WorldBaseTerrainResolution groundBase));
+    Equal(WorldBaseTerrainResolutionStatus.Present, groundBase.Status);
+    True(groundBase.MaterialId != 0);
+    Equal(BaseTerrainSurfaceStatus.Present, complete.ProbeBaseTerrainSurface(ground).Status);
+
+    True(complete.TryGetPreparedPack(ConceptDemoStructuralSource.WestCoord, out PreparedWorldPack west));
+    PreparedWorldComposition partial = W4Composition(space, source.Manifest, complete.Revision, west);
+    var farEast = new SpatialChunkKey(space, 128, 0);
+    True(partial.TryProbeStructuralChunk(farEast, out WorldStructuralChunkProbe pending));
+    Equal(WorldStructuralChunkStatus.KnownPackButNotPrepared, pending.Status);
+    Equal(source.East.Fingerprint, pending.ExpectedPackFingerprint);
+    True(complete.TryProbeStructuralChunk(farEast, out WorldStructuralChunkProbe ready));
+    Equal(WorldStructuralChunkStatus.PreparedChunk, ready.Status);
+    Equal(partial.ManifestFingerprint, complete.ManifestFingerprint);
+    Equal(pending.ExpectedPackFingerprint, ready.ExpectedPackFingerprint);
+
+    using var ecs = new EcsWorld(GameSchema.CreateSchema(), UltraSimGameComposition.CreateWorldOptions(64));
+    using var state = new GameWorldState(ecs, preparedComposition: complete);
+    True(state.PreparedWorld is null && state.PreparedComposition is not null);
+    True(state.TryProbeStructuralChunk(missingChunk, out WorldStructuralChunkProbe gameGap));
+    Equal(gap, gameGap);
+    True(state.TryProbeBaseTerrainResolution(sky, out WorldBaseTerrainResolution gameSky));
+    Equal(skyBase, gameSky);
+    using var legacyEcs = new EcsWorld(GameSchema.CreateSchema(), UltraSimGameComposition.CreateWorldOptions(64));
+    using var legacy = new GameWorldState(legacyEcs, baseWorld: west.View.BaseWorld);
+    False(legacy.TryProbeStructuralChunk(missingChunk, out _));
+    False(legacy.TryProbeBaseTerrainResolution(sky, out _));
+    Equal(BaseTerrainSurfaceStatus.Absent, legacy.ProbeBaseTerrainSurface(sky).Status);
+    Console.WriteLine($"W6 CONCEPT not_authored={notAuthored} missing={missingChunk} " +
+        $"sky={skyBase.Status}+T1.1({skyCount}) ground={groundBase.Status} far={pending.Status}->{ready.Status}");
 }
 
 static void PreparedCompositionValidatesCompleteCandidateAndSparseSubset()

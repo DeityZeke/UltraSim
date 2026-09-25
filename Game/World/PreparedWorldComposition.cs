@@ -272,6 +272,70 @@ public sealed class PreparedWorldComposition
         return false;
     }
 
+    /// <summary>Separates immutable Pack/chunk authorship from this snapshot's prepared residency.</summary>
+    public bool TryProbeStructuralChunk(SpatialChunkKey key, out WorldStructuralChunkProbe probe)
+    {
+        if (key.Space != Space)
+        {
+            probe = default;
+            return false;
+        }
+        WorldPackAddressing.ToPackLocal(key.Coord, out WorldPackCoord owner, out _);
+        if (!Manifest.TryGetPack(owner, out WorldPackFingerprint expected))
+        {
+            probe = new(WorldStructuralChunkStatus.NotAuthoredPack, owner, default);
+            return true;
+        }
+        if (!TryGetPreparedPack(owner, out PreparedWorldPack prepared))
+        {
+            probe = new(WorldStructuralChunkStatus.KnownPackButNotPrepared, owner, expected);
+            return true;
+        }
+        probe = new(prepared.View.TryGetBaseTerrain(key, out _)
+            ? WorldStructuralChunkStatus.PreparedChunk
+            : WorldStructuralChunkStatus.AuthoredPackMissingChunk, owner, expected);
+        return true;
+    }
+
+    /// <summary>Resolves one X/Z base cell; Y is ignored. Additional vertical surfaces are orthogonal.</summary>
+    public bool TryProbeBaseTerrainResolution(
+        in WorldPosition location, out WorldBaseTerrainResolution resolution)
+    {
+        if (!TryProbeStructuralChunk(location.ToChunkKey(Space), out WorldStructuralChunkProbe chunk))
+        {
+            resolution = default;
+            return false;
+        }
+        WorldBaseTerrainResolutionStatus status;
+        int height = 0;
+        ushort material = 0;
+        switch (chunk.Status)
+        {
+            case WorldStructuralChunkStatus.NotAuthoredPack:
+                status = WorldBaseTerrainResolutionStatus.NotAuthoredPack;
+                break;
+            case WorldStructuralChunkStatus.KnownPackButNotPrepared:
+                status = WorldBaseTerrainResolutionStatus.KnownPackButNotPrepared;
+                break;
+            case WorldStructuralChunkStatus.AuthoredPackMissingChunk:
+                status = WorldBaseTerrainResolutionStatus.AuthoredPackMissingChunk;
+                break;
+            default:
+                BaseTerrainSurfaceSample baseSample = this.ProbeBaseTerrainSurface(location);
+                status = baseSample.IsPresent
+                    ? WorldBaseTerrainResolutionStatus.Present
+                    : WorldBaseTerrainResolutionStatus.IntentionalVoid;
+                if (baseSample.IsPresent)
+                {
+                    height = baseSample.HeightMillimeters;
+                    material = baseSample.MaterialId;
+                }
+                break;
+        }
+        resolution = new(status, chunk.OwnerPack, chunk.ExpectedPackFingerprint, height, material);
+        return true;
+    }
+
     private bool TryResolve(SpatialChunkKey key, out WorldPreparedView view)
     {
         if (key.Space == Space)

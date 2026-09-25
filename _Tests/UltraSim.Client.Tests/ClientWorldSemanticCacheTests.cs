@@ -13,6 +13,7 @@ internal static class ClientWorldSemanticCacheTests
         BoundWorldPack world = CreateWorld();
         StructuralOverlayIdentityIsRetained(world);
         BaseSurfaceTopologyIsResidentAndHashed();
+        CanonicalStructuralProbeDoesNotFabricateMissingResidency();
         AdditionalTerrainSurfaceResidencyIsBoundedAndRenderable();
         LifecycleAndDeterministicHash(world);
         CapacityFailureIsTransactional(world);
@@ -22,6 +23,42 @@ internal static class ClientWorldSemanticCacheTests
         PublicationEpochReplacementIsExplicit(world);
         DeterministicClientCacheChurnMatchesReference(world);
         ChunkKeyTurnoverDoesNotRetainHistoricalProbeChains(world);
+    }
+
+    private static void CanonicalStructuralProbeDoesNotFabricateMissingResidency()
+    {
+        BoundWorldPack authored = CreateTopologyWorld(withVoid: true);
+        var owner = new WorldPackCoord(0, 0);
+        var unpreparedOwner = new WorldPackCoord(1, 0);
+        True(WorldStructuralManifest.TryCreate(
+            [new(owner, authored.Fingerprint), new(unpreparedOwner, authored.Fingerprint)],
+            out WorldStructuralManifest? manifest, out _));
+        True(PreparedWorldComposition.TryCreate(Space, new WorldCompositionRevision(1), manifest,
+            [new PreparedWorldPack(owner, new WorldPreparedView(authored))],
+            out PreparedWorldComposition? composition, out _));
+        var cache = new ClientWorldSemanticCache(composition!, new(3, 0, 0, 1, 1));
+        SpatialChunkKey present = Key(0, 0);
+        SpatialChunkKey knownUnprepared = Key(128, 0);
+        SpatialChunkKey missingChunk = Key(20, 0);
+        SpatialChunkKey unauthored = Key(384, 0);
+        True(cache.TryProbeStructuralChunk(present, out WorldStructuralChunkProbe ready));
+        Equal(WorldStructuralChunkStatus.PreparedChunk, ready.Status);
+        True(cache.TryProbeStructuralChunk(knownUnprepared, out WorldStructuralChunkProbe pending));
+        Equal(WorldStructuralChunkStatus.KnownPackButNotPrepared, pending.Status);
+        True(cache.TryProbeStructuralChunk(missingChunk, out WorldStructuralChunkProbe missing));
+        Equal(WorldStructuralChunkStatus.AuthoredPackMissingChunk, missing.Status);
+        True(cache.TryProbeStructuralChunk(unauthored, out WorldStructuralChunkProbe outside));
+        Equal(WorldStructuralChunkStatus.NotAuthoredPack, outside.Status);
+        False(cache.TryProbeStructuralChunk(new SpatialChunkKey(new SpatialSpaceId(72), 384, 0), out _));
+        foreach (SpatialChunkKey key in new[] { knownUnprepared, missingChunk, unauthored })
+        {
+            True(cache.TryRequest(key, out ClientSemanticChunkHandle handle, out _));
+            False(cache.TryStageFromBaseWorld(handle, [], default, out ClientSemanticChunkError error));
+            Equal(ClientSemanticChunkError.MissingTerrain, error);
+            Equal(ClientSemanticChunkState.Requested, Info(cache, handle).State);
+        }
+        var legacy = new ClientWorldSemanticCache(authored, new(1, 0, 0, 1, 1));
+        False(legacy.TryProbeStructuralChunk(present, out _));
     }
 
     private static void BaseSurfaceTopologyIsResidentAndHashed()

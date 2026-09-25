@@ -78,6 +78,10 @@ The world cache is owner-thread bound and fixed-capacity. Its limits describe
 client-resident chunks and rows rather than the server's ECS/public address
 space. It copies immutable base terrain/statics/Multi fragments from either a
 legacy bound `WorldPack` or W5's canonical `PreparedWorldComposition`, then
+exposes W6's read-only detailed chunk status only for composition-backed sources.
+Legacy one-Pack sources cannot claim manifest authorship/residency state; staging
+still rejects missing or unprepared chunks instead of synthesizing empty pages.
+The cache then
 transactionally applies chunk-bound publication
 snapshot/delta semantics. Client-local handles are generation fenced; public
 generation/version knowledge is global across resident chunk pages.
