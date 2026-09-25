@@ -1,8 +1,8 @@
 # UltraSim World / WorldPack Structural Composition
 
-**Status:** canonical World/Terrain direction; W1-W7 closed. W8 is next; W9-W10 remain planned.
+**Status:** canonical World/Terrain direction; W1-W7 and W7-R1 closed. W8 is next; W9-W10 remain planned.
 **Accepted:** 2026-09-23.
-**Current implementation:** W5R moves the Concept Demo Game authority and Local client to declared Packs `(0,0)` and `(1,0)` under one validated manifest. W7 advertises that manifest to Remote clients and acquires the two Packs independently on demand; its [Release/export closure evidence](../../_Benchmarks/Baselines/world-w7-remote-pack-streaming-2026-09-25.md) is accepted. The frozen combined Pack is retained as a historical regression/save identity, not normal product Remote delivery. New Concept Demo saves use `worldview/v2`; historical Cabin keeps `worldview/v1`. Neither WorldPack/v1 nor WorldStructuralManifest/v1 bytes changed.
+**Current implementation:** W5R moves the Concept Demo Game authority and Local client to declared Packs `(0,0)` and `(1,0)` under one validated manifest. W7 advertises that manifest to Remote clients and acquires the two Packs independently on demand; its [original Release/export evidence](../../_Benchmarks/Baselines/world-w7-remote-pack-streaming-2026-09-25.md) and [W7-R1 multi-Pack lifecycle repair evidence](../../_Benchmarks/Baselines/world-w7-r1-multipack-lifecycle-repair-2026-09-25.md) are retained separately. The frozen combined Pack is retained as a historical regression/save identity, not normal product Remote delivery. New Concept Demo saves use `worldview/v2`; historical Cabin keeps `worldview/v1`. Neither WorldPack/v1 nor WorldStructuralManifest/v1 bytes changed.
 **Related:** [TERRAIN.md](TERRAIN.md), [ASSET_STREAMING.md](ASSET_STREAMING.md), [../README.md](../README.md), [../../Game/World/README.md](../../Game/World/README.md).
 
 ## 1. Core model
@@ -546,8 +546,9 @@ The client semantic cache retains one canonical prepared structural source and m
 validated residency-only prepared subset without replacing live Pack views. Game rejects
 conflicting prepared seams and durable IDs among present Packs. W7 Remote activation now
 authenticates the manifest, then acquires independently granted Packs through the existing CAS;
-only the central Pack is required for initial admission. This is prepared-subset residency, not
-W8 edit publication.
+initial admission requires every manifest-known Pack needed by the bounded starting semantic
+window (one to four at the tested center/seam/corner positions). This is prepared-subset
+residency, not W8 edit publication.
 
 Terrain/static/Multi/surface queries remain global SpatialChunkKey APIs and resolve the backing Pack internally. Ordinary consumers should not need to know which Pack owns a chunk.
 
@@ -658,10 +659,11 @@ The client-side prepared-subset publication seam and Content's independently ver
 structural-manifest kind are in use. Game protocol v33 has bounded structural control messages.
 The bootstrap contains the exact manifest and required UI but no Pack. After World validates the
 authenticated manifest, the client proves it, creates a zero-Pack structural source, and requests
-the server-owned initial Pack. Each Pack grant binds a manifest coordinate to an exact fingerprint
+the server-owned initial Pack and any neighboring Packs needed by its starting 5×5 semantic
+window. Each Pack grant binds a manifest coordinate to an exact fingerprint
 and package; Content verifies and installs it without another catalog activation. World validates
 the Pack, its spatial window, binding and prepared-subset compatibility before publishing it.
-Guest admission waits for initial Pack readiness and a bounded semantic presentation window.
+Guest admission waits for all required starting Packs and a bounded semantic presentation window.
 Pack-applied/window proofs gate recipient public delivery; Game authority does not await downloads.
 The client can demand Pack `(1,0)` at the real Far Gate, cross 127/128, safely retire it after
 borrowers leave, and reprepare it from CAS. The renderer remains Pack-blind. Full canonical
@@ -672,6 +674,16 @@ bounded, still-prepared-Pack window crossings from structural-acquisition reject
 silently equate an absent semantic handle with applied knowledge or suppress debt accounting.
 Contradictory duplicate grants are rejected without poisoning a previously accepted Pack's
 publication, proof, or retirement obligation.
+
+W7-R1 closes three multi-Pack lifecycle defects found after the original two-Pack journey:
+an accepted grant occupies its bounded request slot until Pack retirement, rather than being
+reused by a later request; public-interest retirement fences are tied to live resident-slot
+generations with a monotonic per-session cutoff, rather than accumulated travel history; and
+starting at a seam or four-Pack corner requests all Packs needed by the initial window before
+readiness. The four-Pack control also exposed and repaired an unsorted global valid-center index
+in client structural residency. The existing exact proof, public absence, source/session fencing,
+and prepared-subset validation remain in place. W7-R1 does not implement W8 live composition
+replacement.
 
 ### W8 — atomic Add/Replace/Remove Pack composition
 

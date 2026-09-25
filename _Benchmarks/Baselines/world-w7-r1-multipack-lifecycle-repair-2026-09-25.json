@@ -1,0 +1,87 @@
+{
+  "checkpoint": "W7-R1",
+  "date": "2026-09-25",
+  "status": "closed",
+  "startingHead": "a964148c61052823d6a544d7f4c20a575f9598a8",
+  "testedImplementationHead": "518bf75cfeefec7933765d3ed0274452a288b757",
+  "evidenceCommit": "resolve with git log -- _Benchmarks/Baselines/world-w7-r1-multipack-lifecycle-repair-2026-09-25.json",
+  "integratedCorrectnessCandidate": "518bf75cfeefec7933765d3ed0274452a288b757",
+  "gameAuthoritySemanticsChanged": false,
+  "worldPackFormatChanged": false,
+  "structuralManifestFormatChanged": false,
+  "wireProtocolChanged": false,
+  "w8Started": false,
+  "environment": {
+    "os": "Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D",
+    "logicalCpuCount": 16,
+    "dotnetSdk": "8.0.131",
+    "dotnetRuntime": "8.0.31",
+    "godot": "4.7.1.stable.mono.official.a13da4feb",
+    "configuration": "Release"
+  },
+  "repairs": [
+    {
+      "defect": "Applied Pack request slot reused before prepared Pack retirement",
+      "method": "RemoteStructuralPackClient.TryRequest",
+      "control": "W7ThirdPackRequestRetainsEarlierRetirementObligation",
+      "result": "third request queued; earlier East Pack retired; retirement message queued"
+    },
+    {
+      "defect": "interest-retirement history exhausted at 1025 distinct retired chunks",
+      "method": "RemoteChunkWorldStateClient.ProcessInterestRetired",
+      "control": "W7InterestRetirementFencesResidentGenerationsNotTravelHistory",
+      "result": {
+        "distinctRetirementsProcessed": 1101,
+        "maximumActiveResidentFencesObserved": 2,
+        "unrelatedOlderResidentDelivery": "applied",
+        "oldDeliveryAfterReentry": "rejected by fence",
+        "newerDeliveryAfterReentry": "applied"
+      }
+    },
+    {
+      "defect": "seam-start initial window required neighbor Pack after initial readiness",
+      "methods": ["RemotePlayableSession.TryInitializeStructuralPacks", "RemoteStructuralPackClient.CompleteAcquisition"],
+      "control": "W7SeamStartAcquiresBothPacksBeforeInitialWindow",
+      "result": {
+        "startingChunk": [127, 0],
+        "preparedPacks": 2,
+        "residentChunks": 25,
+        "windowProof": "queued",
+        "guest": "active"
+      }
+    },
+    {
+      "defect": "four-Pack valid-center index was not globally sorted for binary search",
+      "method": "ClientStructuralResidency.TryBuildValidCenters",
+      "control": "W7FourPackCornerAcquiresAndProvesCompleteWindow",
+      "result": {
+        "startingChunk": [127, 127],
+        "requestsQueued": 4,
+        "preparedPacks": 4,
+        "packProofsQueued": 4,
+        "residentChunks": 25,
+        "windowProof": "queued",
+        "preinstalledFixtureNetworkPackageBytes": 0
+      }
+    }
+  ],
+  "verification": {
+    "gameReplicationTests": "pass; 181",
+    "networkApplicationTests": "pass; 15 W7 tests within full suite",
+    "focusedW7R1": "pass; seam, third Pack, corner requests, corner acquisition, Far Gate, actual seam",
+    "architectureOnly": "pass",
+    "canonicalRelease": "pass; PASS repository verification",
+    "nativeW7": "pass; Far Gate, seam, retirement, warm reentry",
+    "exports": "pass; SinglePlayer, Online, Complete",
+    "completeExportFirstAttempt": "Godot managed publish reported failure; existing incomplete-export detector retried and canonical gate passed",
+    "isolatedCompleteExport": "pass on first attempt in fresh directory; native executable and managed dependency manifest nonempty",
+    "contentlessOnline": "pass; cold and warm",
+    "mixedLifecycle": "pass",
+    "previousNonFinalFailures": [
+      "existing F1.8A sparse-public timing assertion on one development run",
+      "overstrict W7 zero-rejection assertion for in-flight still-prepared semantic window crossing; replaced with bounded classification"
+    ]
+  },
+  "next": "W8 atomic Add/Replace/Remove Pack composition; not implemented here"
+}
