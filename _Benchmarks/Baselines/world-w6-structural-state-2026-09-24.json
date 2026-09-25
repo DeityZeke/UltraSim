@@ -1,0 +1,60 @@
+{
+  "checkpoint": "W6 explicit structural authorship, residency, and base-surface state",
+  "date": "2026-09-24",
+  "startingHead": "4acbfc101fded0df1bc12b695ed5d3391d0545c7",
+  "testedImplementationHead": "72fcfacd209a7c2c79ea6e20ab8a235bdd098372",
+  "finalEvidenceHead": "commit containing this immutable artifact; see git history",
+  "environment": {
+    "os": "Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "logicalProcessors": 16,
+    "dotnetSdk": "8.0.131",
+    "dotnetRuntime": "8.0.31",
+    "godot": "4.7.1-stable Mono",
+    "configuration": "Release"
+  },
+  "apis": {
+    "chunk": "PreparedWorldComposition.TryProbeStructuralChunk; forwarded by GameWorldState and composition-backed ClientWorldSemanticCache",
+    "base": "PreparedWorldComposition.TryProbeBaseTerrainResolution; forwarded by GameWorldState",
+    "wrongSpace": "false, default probe; never NotAuthoredPack",
+    "legacyOnePack": "detailed manifest-dependent probe unsupported; old terrain APIs retained",
+    "expectedFingerprint": "invalid for NotAuthoredPack; exact manifest Pack fingerprint for all manifest-known statuses"
+  },
+  "stateMatrix": [
+    {"status": "NotAuthoredPack", "chunk": [384, 0], "ownerPack": [2, 0], "legacyBase": "Unavailable", "column": "Unavailable"},
+    {"status": "KnownPackButNotPrepared", "chunk": [128, 0], "ownerPack": [1, 0], "fixture": "Concept Demo manifest; west prepared only", "legacyBase": "Unavailable", "column": "Unavailable"},
+    {"status": "AuthoredPackMissingChunk", "chunk": [40, 40], "ownerPack": [0, 0], "legacyBase": "Unavailable", "column": "Unavailable"},
+    {"status": "IntentionalVoid", "point": "GamePlayableWorld.SkyTelepadDestination", "ownerPack": [0, 0], "legacyBase": "Absent", "column": "Complete; two Sky Island T1.1 faces"},
+    {"status": "Present", "point": "GamePlayableWorld.PlayerStart", "ownerPack": [0, 0], "legacyBase": "Present", "column": "Complete; base face"}
+  ],
+  "invariants": {
+    "emptyManifest": "NotAuthoredPack",
+    "sparsePreparedPack": "authored chunk PreparedChunk; absent chunk AuthoredPackMissingChunk",
+    "sameChunkPresentAndVoid": "pass",
+    "sameXZDifferentY": "same base status",
+    "sameManifestPreparedSubsetTransition": "KnownPackButNotPrepared to PreparedChunk; manifest and expected Pack fingerprint unchanged",
+    "extremeSignedCoordinates": "NotAuthoredPack without overflow",
+    "queryOrderAndMutation": "repeated/reordered probes stable; no preparation",
+    "clientStaging": "non-prepared/unauthored keys reject MissingTerrain and remain Requested",
+    "skyIslandBaseAndAdditionalSurface": "IntentionalVoid base plus Complete column with SkyIslandSurface"
+  },
+  "diagnostic": {"sparseManifestEntries": 10000, "warmedMixedProbes": 100000, "elapsedStopwatchTicks": 94624589, "managedAllocatedBytes": 0, "performanceRating": false},
+  "conceptDemo": {
+    "authoredChunks": 162,
+    "pack0Fingerprint": "A76FAE182AA566BE91D312E26FCE29EA6E2854E84402D50579A6C5C2009553CB",
+    "pack1Fingerprint": "CE9F0CCDB591F3C3E592B8105E43C1AEB8323A5CB686533FC4735A8AA15D7B1D",
+    "manifestFingerprint": "41DB6F68C26AC85DF5ABEB60BEDA3F3F07DD1E76CF30A5164874446D902B6B53",
+    "combinedRemoteCompatibilityFingerprint": "323141A827CD25ECC5BC144CE860FECF717F472E1C0ED57626BCC89EC29CF795"
+  },
+  "formats": {"worldPack": "v1 unchanged", "structuralManifest": "v1 unchanged", "worldview": "v2 unchanged", "gameManifest": 32, "networkTransportRevision": 2, "preparedResidencyPersisted": false},
+  "verification": {
+    "worldRelease": "pass; 115 tests",
+    "w2FullPack": "pass; 65536 chunks, 280363264 bytes",
+    "clientCoreRelease": "pass; 34 tests",
+    "architectureOnly": "pass",
+    "canonicalRelease": "pass; one uninterrupted run on testedImplementationHead, including exports and native/online gates"
+  },
+  "next": "W7",
+  "w7Started": false,
+  "w8Started": false
+}
