@@ -13,6 +13,8 @@ namespace UltraSim.Server.ConceptDemo;
 public sealed class ConceptDemoContentDeployment : IDisposable
 {
     private const string ArchiveRoute = "/content/concept-demo.uspkg";
+    private const string WestPackArchiveRoute = "/content/concept-demo-pack-west.uspkg";
+    private const string EastPackArchiveRoute = "/content/concept-demo-pack-east.uspkg";
     private const string ActorArchiveRoute = "/content/concept-demo-actors.uspkg";
     private const string ActorReplaceArchiveRoute = "/content/concept-demo-actor-replace.uspkg";
     private readonly StaticContentHttpHost _host;
@@ -21,16 +23,19 @@ public sealed class ConceptDemoContentDeployment : IDisposable
         StaticContentHttpHost host,
         RemoteContentAuthorization authorization,
         RemoteContentAuthorization presentationAuthorization,
+        ConceptDemoStructuralContent structural,
         ContentDeploymentSnapshot snapshot)
     {
         _host = host;
         Authorization = authorization;
         PresentationAuthorization = presentationAuthorization;
+        Structural = structural;
         Snapshot = snapshot;
     }
 
     public RemoteContentAuthorization Authorization { get; }
     public RemoteContentAuthorization PresentationAuthorization { get; }
+    public ConceptDemoStructuralContent Structural { get; }
     public ContentDeploymentSnapshot Snapshot { get; }
 
     /// <summary>
@@ -46,6 +51,7 @@ public sealed class ConceptDemoContentDeployment : IDisposable
     {
         ArgumentNullException.ThrowIfNull(endpoint);
         WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
+        ConceptDemoStructuralSource structuralSource = GamePlayableWorld.CreateConceptDemoStructuralSource();
         if (!WorldPackFingerprint.TryParse(
                 GameWorldContentProfile.ConceptDemoPackFingerprint, out WorldPackFingerprint expected) ||
             pack.Fingerprint != expected)
@@ -54,6 +60,8 @@ public sealed class ConceptDemoContentDeployment : IDisposable
 
         var worldBytes = new byte[pack.Length];
         pack.CopyTo(worldBytes);
+        var structuralBytes = new byte[structuralSource.Manifest.Length];
+        structuralSource.Manifest.CopyTo(structuralBytes);
         if (!ContentFilePath.TryCreate(
                 "world/concept-demo.usworldpack", out ContentFilePath worldPath) ||
             !ContentFileDescriptor.TryCreate(
@@ -65,6 +73,20 @@ public sealed class ConceptDemoContentDeployment : IDisposable
                 worldId, ContentDefinitionKind.WorldPack, ContentDefinitionOperation.Add,
                 worldPath, out ContentDefinitionDescriptor? worldDefinition))
             throw new InvalidOperationException("The Concept Demo World content descriptor is invalid.");
+        if (!ContentFilePath.TryCreate(
+                "world/concept-demo.usworldmanifest", out ContentFilePath structuralPath) ||
+            !ContentFileDescriptor.TryCreate(
+                structuralPath, ContentFileKind.WorldStructuralManifest, structuralBytes.Length,
+                ContentHash.Compute(structuralBytes), default,
+                out ContentFileDescriptor structuralFile) ||
+            !LogicalContentId.TryCreate(
+                ConceptDemoStructuralContent.ManifestDefinitionValue,
+                out LogicalContentId structuralId) ||
+            !ContentDefinitionDescriptor.TryCreateFileDefinition(
+                structuralId, ContentDefinitionKind.WorldStructuralManifest,
+                ContentDefinitionOperation.Add, structuralPath,
+                out ContentDefinitionDescriptor? structuralDefinition))
+            throw new InvalidOperationException("The Concept Demo structural manifest descriptor is invalid.");
 
         CompiledUiDefinition inventory = InventoryUi.Definition;
         if (!UiDefinitionArtifactCodec.TryEncodeCanonical(inventory, out byte[] uiBytes) ||
@@ -92,7 +114,8 @@ public sealed class ConceptDemoContentDeployment : IDisposable
                 1, 1, packageId, contentNamespace,
                 "Concept Demo world and standard UI", "1.0.0",
                 ContentTrustClass.ServerAuthorizedPassive,
-                [worldFile, uiFile, monitorUiFile], [worldDefinition!],
+                [worldFile, structuralFile, uiFile, monitorUiFile],
+                [worldDefinition!, structuralDefinition!],
                 out ContentPackageManifest? manifest, out manifestError))
             throw new InvalidOperationException(
                 $"The Concept Demo content manifest is invalid: {manifestError}");
@@ -100,10 +123,17 @@ public sealed class ConceptDemoContentDeployment : IDisposable
         ContentFilePayload[] payloads =
         [
             new ContentFilePayload(worldPath, worldBytes),
+            new ContentFilePayload(structuralPath, structuralBytes),
             new ContentFilePayload(uiPath, uiBytes),
             new ContentFilePayload(monitorUiPath, monitorUiBytes),
         ];
         VerifiedContentPackage bootstrap = ValidatePackage(manifest!, payloads);
+        ContentPackageFixture westPack = CreateStructuralPackPackage(
+            "server.concept-demo.pack-west", "world/concept-demo-west.usworldpack",
+            "server-world:world/pack-west", structuralSource.West);
+        ContentPackageFixture eastPack = CreateStructuralPackPackage(
+            "server.concept-demo.pack-east", "world/concept-demo-east.usworldpack",
+            "server-world:world/pack-east", structuralSource.East);
         (byte[] actorX, byte[] actorY) =
             ConceptDemoActorContent.LoadOfficialActors(officialContentRoot);
         byte[] actorXReplacement = ConceptDemoActorContent.CreateXReplacement(actorX);
@@ -149,6 +179,10 @@ public sealed class ConceptDemoContentDeployment : IDisposable
                 out ResolvedContentCatalog? presentationCatalog, out catalogError) ||
             !ContentPackageArchive.TryEncodeCanonical(manifest!, payloads, out byte[] archive) ||
             !ContentPackageArchive.TryEncodeCanonical(
+                westPack.Manifest, westPack.Payloads, out byte[] westPackArchive) ||
+            !ContentPackageArchive.TryEncodeCanonical(
+                eastPack.Manifest, eastPack.Payloads, out byte[] eastPackArchive) ||
+            !ContentPackageArchive.TryEncodeCanonical(
                 actors.Manifest, actors.Payloads, out byte[] actorArchive) ||
             !ContentPackageArchive.TryEncodeCanonical(
                 actorReplacement.Manifest, actorReplacement.Payloads, out byte[] actorReplaceArchive))
@@ -167,6 +201,8 @@ public sealed class ConceptDemoContentDeployment : IDisposable
             endpoint,
             [
                 new StaticContentHttpResource(ArchiveRoute, archive),
+                new StaticContentHttpResource(WestPackArchiveRoute, westPackArchive),
+                new StaticContentHttpResource(EastPackArchiveRoute, eastPackArchive),
                 new StaticContentHttpResource(ActorArchiveRoute, actorArchive),
                 new StaticContentHttpResource(ActorReplaceArchiveRoute, actorReplaceArchive),
             ]);
@@ -183,10 +219,15 @@ public sealed class ConceptDemoContentDeployment : IDisposable
             RemoteContentAuthorization presentationAuthorization = ProjectAuthorization(
                 presentationPlan!, resolvedCatalog.Fingerprint,
                 [acquisitions[1], acquisitions[2]]);
+            var structural = new ConceptDemoStructuralContent(
+                structuralSource.Manifest,
+                Acquisition(westPack.Manifest, host.GetUri(WestPackArchiveRoute)),
+                Acquisition(eastPack.Manifest, host.GetUri(EastPackArchiveRoute)));
             return new ConceptDemoContentDeployment(
                 host,
                 authorization,
                 presentationAuthorization,
+                structural,
                 new ContentDeploymentSnapshot(
                     host.GetUri(ArchiveRoute),
                     checked(archive.Length + actorArchive.Length + actorReplaceArchive.Length),
@@ -198,6 +239,12 @@ public sealed class ConceptDemoContentDeployment : IDisposable
                 {
                     PresentationPlanHash = presentationPlan!.PlanHash,
                     PresentationCatalogFingerprint = resolvedCatalog.Fingerprint,
+                    StructuralManifestFingerprint = structuralSource.Manifest.Fingerprint,
+                    StructuralManifestBytes = structuralBytes.Length,
+                    WestPackRawBytes = structuralSource.West.Length,
+                    EastPackRawBytes = structuralSource.East.Length,
+                    WestPackArchiveBytes = westPackArchive.Length,
+                    EastPackArchiveBytes = eastPackArchive.Length,
                 });
         }
         catch
@@ -208,6 +255,32 @@ public sealed class ConceptDemoContentDeployment : IDisposable
     }
 
     public void Dispose() => _host.Dispose();
+
+    private static ContentPackageFixture CreateStructuralPackPackage(
+        string packageValue, string pathValue, string definitionValue, WorldPack pack)
+    {
+        var bytes = new byte[pack.Length];
+        pack.CopyTo(bytes);
+        string? error = null;
+        if (!ContentFilePath.TryCreate(pathValue, out ContentFilePath path) ||
+            !ContentFileDescriptor.TryCreate(path, ContentFileKind.WorldPack,
+                bytes.Length, ContentHash.Compute(bytes), default, out ContentFileDescriptor file) ||
+            !LogicalContentId.TryCreate(definitionValue, out LogicalContentId logicalId) ||
+            !ContentDefinitionDescriptor.TryCreateFileDefinition(
+                logicalId, ContentDefinitionKind.WorldPack, ContentDefinitionOperation.Add,
+                path, out ContentDefinitionDescriptor? definition) ||
+            !ContentPackageId.TryCreate(packageValue, out ContentPackageId packageId) ||
+            !ContentNamespaceId.TryCreate("server-world", out ContentNamespaceId contentNamespace) ||
+            !ContentPackageManifest.TryCreate(
+                1, 1, packageId, contentNamespace, packageValue, "1.0.0",
+                ContentTrustClass.ServerAuthorizedPassive,
+                [file], [definition!], out ContentPackageManifest? manifest, out error))
+            throw new InvalidOperationException(
+                $"The Concept Demo structural Pack package '{packageValue}' is invalid: {error}");
+        ContentFilePayload[] payloads = [new(path, bytes)];
+        return new ContentPackageFixture(manifest!, payloads,
+            ValidatePackage(manifest!, payloads));
+    }
 
     private static ContentPackageFixture CreateActorPackage(
         string packageValue,
@@ -343,4 +416,45 @@ public readonly record struct ContentDeploymentSnapshot(
 {
     public ContentHash PresentationPlanHash { get; init; }
     public ContentHash PresentationCatalogFingerprint { get; init; }
+    public WorldStructuralManifestFingerprint StructuralManifestFingerprint { get; init; }
+    public int StructuralManifestBytes { get; init; }
+    public int WestPackRawBytes { get; init; }
+    public int EastPackRawBytes { get; init; }
+    public int WestPackArchiveBytes { get; init; }
+    public int EastPackArchiveBytes { get; init; }
+}
+
+/// <summary>
+/// Independently acquirable authored Pack packages. Neither package is part of the required
+/// application activation; an authenticated structural grant chooses one exact package later.
+/// </summary>
+public sealed class ConceptDemoStructuralContent
+{
+    public const string ManifestDefinitionValue = "server-world:world/structural-manifest";
+
+    public ConceptDemoStructuralContent(
+        WorldStructuralManifest manifest,
+        ContentPackageAcquisition west,
+        ContentPackageAcquisition east)
+    {
+        Manifest = manifest ?? throw new ArgumentNullException(nameof(manifest));
+        West = west ?? throw new ArgumentNullException(nameof(west));
+        East = east ?? throw new ArgumentNullException(nameof(east));
+        if (manifest.EntryCount != 2 ||
+            !manifest.TryGetPack(ConceptDemoStructuralSource.WestCoord, out _) ||
+            !manifest.TryGetPack(ConceptDemoStructuralSource.EastCoord, out _))
+            throw new ArgumentException("The Concept Demo structural package table is incomplete.",
+                nameof(manifest));
+    }
+
+    public WorldStructuralManifest Manifest { get; }
+    public ContentPackageAcquisition West { get; }
+    public ContentPackageAcquisition East { get; }
+
+    public bool TryGetPackage(WorldPackCoord coord, out ContentPackageAcquisition? package)
+    {
+        package = coord == ConceptDemoStructuralSource.WestCoord ? West :
+            coord == ConceptDemoStructuralSource.EastCoord ? East : null;
+        return package is not null;
+    }
 }

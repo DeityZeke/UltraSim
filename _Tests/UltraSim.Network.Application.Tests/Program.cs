@@ -31,6 +31,7 @@ internal static class Program
         }
         var tests = new (string Name, Action Body)[]
         {
+            ("W7StructuralProtocolV33IsCanonicalAndBounded", W7StructuralProtocolV33IsCanonicalAndBounded),
             ("GameTrafficClassificationCoversEveryProductionMessage", GameTrafficClassificationCoversEveryProductionMessage),
             ("GameProtocolReservationEstimateMatchesConstructedPeers", GameProtocolReservationEstimateMatchesConstructedPeers),
             ("RemoteWorkflowMatchesOfflineDirect", RemoteWorkflowMatchesOfflineDirect),
@@ -141,6 +142,110 @@ internal static class Program
             RunBenchmark(args);
 }
 
+static void W7StructuralProtocolV33IsCanonicalAndBounded()
+{
+    Equal((ushort)33, UltraSimGameProtocol.Manifest.Version);
+    var header = new RemoteStructuralWorldAdvertisementHeader
+    {
+        ApplicationSessionEpoch = 17,
+        StructuralSequence = 2,
+        SpatialSpace = 1,
+        WorldCompositionRevision = 9,
+        ManifestHash0 = 0xA56FAE18,
+        AnchorPackX = 0,
+        AnchorPackZ = 0,
+    };
+    var advertisement = new RemoteStructuralWorldAdvertisement(
+        header, "server-world:concept-demo-structural-manifest");
+    byte[] buffer = new byte[UltraSimGameProtocol.MaximumMessageBytes + 1];
+    True(UltraSimGameProtocol.TryWriteStructuralAdvertisement(buffer, in advertisement,
+        out int advertisementBytes));
+    True(UltraSimGameProtocol.TryReadStructuralAdvertisement(buffer.AsSpan(0, advertisementBytes),
+        out RemoteStructuralWorldAdvertisement reopened));
+    Equal(advertisement, reopened);
+    False(UltraSimGameProtocol.TryReadStructuralAdvertisement(buffer.AsSpan(0, advertisementBytes + 1),
+        out _));
+    False(UltraSimGameProtocol.TryWriteStructuralAdvertisement(buffer,
+        new RemoteStructuralWorldAdvertisement(header with { StructuralSequence = 0 },
+            advertisement.ManifestDefinitionId), out _));
+
+    var manifestProof = new RemoteStructuralManifestAppliedMessage
+    {
+        ApplicationSessionEpoch = 17,
+        StructuralSequence = 2,
+        ManifestHash0 = header.ManifestHash0,
+        Status = RemoteStructuralApplyStatus.Applied,
+    };
+    True(UltraSimGameProtocol.IsValidStructuralManifestApplied(in manifestProof));
+    True(RemoteStructuralManifestAppliedMessageCodec.TryWriteExact(
+        buffer.AsSpan(0, RemoteStructuralManifestAppliedMessageCodec.EncodedSize), in manifestProof));
+    True(RemoteStructuralManifestAppliedMessageCodec.TryReadExact(
+        buffer.AsSpan(0, RemoteStructuralManifestAppliedMessageCodec.EncodedSize), out var openedManifestProof));
+    Equal(manifestProof, openedManifestProof);
+    False(UltraSimGameProtocol.IsValidStructuralManifestApplied(
+        manifestProof with { Status = 0 }));
+
+    var request = new RemoteStructuralPackRequestMessage
+    {
+        ApplicationSessionEpoch = 17,
+        StructuralSequence = 2,
+        PackRequestSequence = 5,
+        PackX = 1,
+        PackZ = 0,
+    };
+    True(UltraSimGameProtocol.IsValidStructuralPackRequest(in request));
+    True(RemoteStructuralPackRequestMessageCodec.TryWriteExact(
+        buffer.AsSpan(0, RemoteStructuralPackRequestMessageCodec.EncodedSize), in request));
+    True(RemoteStructuralPackRequestMessageCodec.TryReadExact(
+        buffer.AsSpan(0, RemoteStructuralPackRequestMessageCodec.EncodedSize), out var openedRequest));
+    Equal(request, openedRequest);
+    False(UltraSimGameProtocol.IsValidStructuralPackRequest(
+        request with { PackRequestSequence = 0 }));
+
+    var grantHeader = new RemoteStructuralPackGrantHeader
+    {
+        ApplicationSessionEpoch = 17,
+        StructuralSequence = 2,
+        PackRequestSequence = 5,
+        PackX = 1,
+        PackZ = 0,
+        PackHash0 = 0xCE9F0CCD,
+        PackageManifestHash0 = 0x12345678,
+        SourceCount = 1,
+    };
+    var grant = new RemoteStructuralPackGrant(grantHeader,
+        "server.concept-demo.pack-east",
+        [new RemoteContentSource(RemoteContentSourceKind.ServerHostedStatic,
+            "http://127.0.0.1:8080/content/pack-east.uspkg")]);
+    True(UltraSimGameProtocol.TryWriteStructuralPackGrant(buffer, grant, out int grantBytes));
+    True(UltraSimGameProtocol.TryReadStructuralPackGrant(buffer.AsSpan(0, grantBytes),
+        out RemoteStructuralPackGrant? openedGrant));
+    True(openedGrant is not null);
+    Equal(grant.Header, openedGrant!.Header);
+    Equal(grant.PackageId, openedGrant.PackageId);
+    Equal(grant.Sources[0], openedGrant.Sources[0]);
+    False(UltraSimGameProtocol.TryReadStructuralPackGrant(buffer.AsSpan(0, grantBytes - 1), out _));
+    False(UltraSimGameProtocol.TryReadStructuralPackGrant(buffer.AsSpan(0, grantBytes + 1), out _));
+
+    var packProof = new RemoteStructuralPackAppliedMessage
+    {
+        ApplicationSessionEpoch = 17,
+        StructuralSequence = 2,
+        PackRequestSequence = 5,
+        PackX = 1,
+        PackZ = 0,
+        PackHash0 = grantHeader.PackHash0,
+        Status = RemoteStructuralApplyStatus.Applied,
+    };
+    True(UltraSimGameProtocol.IsValidStructuralPackApplied(in packProof));
+    True(RemoteStructuralPackAppliedMessageCodec.TryWriteExact(
+        buffer.AsSpan(0, RemoteStructuralPackAppliedMessageCodec.EncodedSize), in packProof));
+    True(RemoteStructuralPackAppliedMessageCodec.TryReadExact(
+        buffer.AsSpan(0, RemoteStructuralPackAppliedMessageCodec.EncodedSize), out var openedPackProof));
+    Equal(packProof, openedPackProof);
+    False(UltraSimGameProtocol.IsValidStructuralPackApplied(packProof with { Status = 0 }));
+}
+
 static void GameProtocolReservationEstimateMatchesConstructedPeers()
 {
     NetworkProtocolLimits limits = NetworkProtocolLimits.Default;
@@ -182,7 +287,7 @@ static void GameTrafficClassificationCoversEveryProductionMessage()
     True(seen.All(static value => value));
     False(GameProtocolTrafficClassification.TryClassify(
         new NetworkMessageId(ushort.MaxValue), out _));
-    Equal(50, UltraSimGameProtocol.Manifest.Count);
+    Equal(55, UltraSimGameProtocol.Manifest.Count);
 }
 
 static void RemoteWorkflowMatchesOfflineDirect()

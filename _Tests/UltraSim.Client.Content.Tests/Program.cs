@@ -35,6 +35,7 @@ var tests = new (string Name, Action Body)[]
     ("CacheRejectsReparsePointStorage", CacheRejectsReparsePointStorage),
     ("ManifestEnvelopeIsCanonicalAndExact", ManifestEnvelopeIsCanonicalAndExact),
     ("MirrorsAndHashDeltaConvergeWithBoundedParallelism", MirrorsAndHashDeltaConvergeWithBoundedParallelism),
+    ("ExactPackageAcquisitionReusesCasWithoutCatalogActivation", ExactPackageAcquisitionReusesCasWithoutCatalogActivation),
     ("CorruptAndInterruptedAcquisitionRepairTransactionally", CorruptAndInterruptedAcquisitionRepairTransactionally),
     ("OptionalAcquisitionFallsBackThenHotUpgradesExplicitly", OptionalAcquisitionFallsBackThenHotUpgradesExplicitly),
     ("ResolvedPrivateDnsTargetIsRejectedAtConnectTime", ResolvedPrivateDnsTargetIsRejectedAtConnectTime),
@@ -1910,6 +1911,46 @@ static void MirrorsAndHashDeltaConvergeWithBoundedParallelism()
             Equal(2, bounded.SourceAttempts);
             Equal(2, bounded.SourcesRejected);
             Equal(0, cache!.GetSnapshot().RealmManifestCount);
+        }
+    });
+}
+
+static void ExactPackageAcquisitionReusesCasWithoutCatalogActivation()
+{
+    WithCacheRoot(root =>
+    {
+        ApplicationRealmId realm = new(0x771, 1);
+        PackageFixture package = CreateDeltaPackage(0x79);
+        ContentPackageAcquisition acquisition = Acquisition(package.Manifest,
+            "https://good.example/package/");
+        using var source = new GranularFixtureSource([package],
+            new Dictionary<string, GranularSourceBehavior>
+            {
+                ["https://good.example/package/"] = GranularSourceBehavior.Valid,
+            });
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out var openError),
+            openError.ToString());
+        using (cache)
+        {
+            ContentScopeKey scope = ContentScopeKey.ForRealm(realm);
+            True(ContentActivationAcquirer.TryAcquireExactPackage(cache!, scope,
+                acquisition, source, out VerifiedContentPackage? first,
+                out ContentActivationAcquisitionResult cold));
+            Equal(package.Manifest.ManifestHash, first!.ManifestHash);
+            Equal(1, cold.PackagesFetched);
+            True(cold.BytesFetched > 0);
+            Equal(0, cache!.GetSnapshot().RealmActivationCount);
+
+            True(ContentActivationAcquirer.TryAcquireExactPackage(cache, scope,
+                acquisition, source, out VerifiedContentPackage? second,
+                out ContentActivationAcquisitionResult warm));
+            Equal(package.Manifest.ManifestHash, second!.ManifestHash);
+            Equal(1, warm.PackagesReused);
+            Equal(0L, warm.BytesFetched);
+            Equal(0, warm.SourceAttempts);
+            Equal(0, cache.GetSnapshot().RealmActivationCount);
+            False(cache.TryOpenPackage(ContentScopeKey.ForRealm(new ApplicationRealmId(0x771, 2)),
+                package.Manifest.PackageId, package.Manifest.ManifestHash, out _, out _));
         }
     });
 }

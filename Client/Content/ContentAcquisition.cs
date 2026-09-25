@@ -233,82 +233,10 @@ public static class ContentActivationAcquirer
             if (acquisition is null)
                 return Fail(ContentActivationAcquisitionStatus.InvalidRequirement, progress, out result);
             if (requirement.Requirement == ContentRequirementPolicy.Required) progress.Required++;
-
-            if (cache.TryOpenPackage(plan.Scope, requirement.PackageId, requirement.ManifestHash,
-                    out VerifiedContentPackage? installed, out ContentCacheError openError))
-            {
-                progress.PackagesReused++;
-                progress.FilesReused += installed!.Manifest.Files.Select(static value => value.Sha256).Distinct().Count();
-                continue;
-            }
-            if (openError is not (ContentCacheError.MissingManifest or ContentCacheError.MissingBlob or
-                    ContentCacheError.CorruptManifest or ContentCacheError.CorruptBlob))
-                return Fail(ContentActivationAcquisitionStatus.CacheFailure, progress, out result,
-                    cacheError: openError);
-
-            ContentPackageManifest? cachedManifest = null;
-            _ = cache.TryOpenPackageManifest(plan.Scope, requirement.PackageId, requirement.ManifestHash,
-                out cachedManifest, out ContentCacheError manifestOpenError);
-            if (manifestOpenError is not (ContentCacheError.None or ContentCacheError.MissingManifest or
-                    ContentCacheError.CorruptManifest))
-                return Fail(ContentActivationAcquisitionStatus.CacheFailure, progress, out result,
-                    cacheError: manifestOpenError);
-
-            bool installedFromSource = false;
-            bool anySupported = false;
-            int packageSourceAttempts = 0;
-            ContentSourceFetchError lastSourceError = ContentSourceFetchError.UnsupportedSource;
-            foreach (ContentSourceDescriptor candidate in acquisition.Sources)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (packageSourceAttempts == limits.MaximumSourceAttemptsPerPackage) break;
-                bool granular = source is IContentPackageFileSource files && files.CanFetchFiles(in candidate);
-                if (!granular && !source.CanFetch(candidate.Kind)) continue;
-                anySupported = true;
-                packageSourceAttempts++;
-                progress.SourceAttempts++;
-                progress.Selected = candidate;
-
-                bool success;
-                ContentCacheError installError;
-                if (granular)
-                {
-                    success = TryAcquireGranular(cache, plan.Scope, requirement, candidate,
-                        (IContentPackageFileSource)source, cachedManifest, limits,
-                        progress, cancellationToken, out installError, out lastSourceError);
-                }
-                else
-                {
-                    success = TryAcquireArchive(cache, plan.Scope, requirement, candidate, source,
-                        progress, cancellationToken, out installError, out lastSourceError);
-                }
-                if (success)
-                {
-                    installedFromSource = true;
-                    progress.PackagesFetched++;
-                    break;
-                }
-                if (installError != ContentCacheError.None)
-                    return Fail(ContentActivationAcquisitionStatus.InstallFailure, progress, out result,
-                        cacheError: installError, sourceError: lastSourceError);
-                progress.SourcesRejected++;
-            }
-
-            if (!installedFromSource)
-            {
-                if (requirement.Requirement == ContentRequirementPolicy.Optional)
-                {
-                    progress.OptionalDeferred++;
-                    continue;
-                }
-                ContentActivationAcquisitionStatus failureStatus = !anySupported
-                    ? ContentActivationAcquisitionStatus.SourceUnavailable
-                    : lastSourceError == ContentSourceFetchError.CandidateMismatch
-                        ? ContentActivationAcquisitionStatus.CandidateMismatch
-                        : ContentActivationAcquisitionStatus.SourceFailure;
-                return Fail(failureStatus,
-                    progress, out result, sourceError: lastSourceError);
-            }
+            if (!TryAcquirePackageCore(cache, plan.Scope, requirement, acquisition, source,
+                    limits, progress, cancellationToken, out ContentActivationAcquisitionStatus status,
+                    out ContentCacheError cacheError, out ContentSourceFetchError sourceError))
+                return Fail(status, progress, out result, cacheError, sourceError);
         }
 
         if (!cache.TryPublishCatalog(baseCatalog, plan, persistentlyPinned,
@@ -318,6 +246,138 @@ public static class ContentActivationAcquirer
         result = progress.ToResult(ContentActivationAcquisitionStatus.Applied,
             ContentCacheError.None, ContentSourceFetchError.None);
         return true;
+    }
+
+    /// <summary>
+    /// Acquires one exact scope-authorized passive package without publishing a Content catalog.
+    /// The same cache-repair, granular/archive, retry, mirror, and cancellation path is used by
+    /// ordinary activation. Authorization must come from the caller's authenticated grant.
+    /// </summary>
+    public static bool TryAcquireExactPackage(
+        ContentCache cache,
+        ContentScopeKey scope,
+        ContentPackageAcquisition acquisition,
+        IContentPackageSource source,
+        out VerifiedContentPackage? package,
+        out ContentActivationAcquisitionResult result,
+        ContentActivationAcquirerLimits limits = default,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(cache);
+        ArgumentNullException.ThrowIfNull(acquisition);
+        ArgumentNullException.ThrowIfNull(source);
+        package = null;
+        if (!scope.IsValid || !acquisition.Package.IsValid || !acquisition.ManifestHash.IsValid)
+            return Fail(ContentActivationAcquisitionStatus.InvalidRequirement, out result);
+        limits = ContentActivationAcquirerLimits.Resolve(limits);
+        cancellationToken.ThrowIfCancellationRequested();
+        var progress = new AcquisitionProgress { Required = 1 };
+        var requirement = new ContentActivationPackage(
+            acquisition.Package, acquisition.ManifestHash, ContentRequirementPolicy.Required);
+        if (!TryAcquirePackageCore(cache, scope, requirement, acquisition, source,
+                limits, progress, cancellationToken, out ContentActivationAcquisitionStatus status,
+                out ContentCacheError cacheError, out ContentSourceFetchError sourceError))
+            return Fail(status, progress, out result, cacheError, sourceError);
+        if (!cache.TryOpenPackage(scope, acquisition.Package, acquisition.ManifestHash,
+                out package, out cacheError))
+            return Fail(ContentActivationAcquisitionStatus.CacheFailure, progress,
+                out result, cacheError: cacheError);
+        result = progress.ToResult(ContentActivationAcquisitionStatus.Applied,
+            ContentCacheError.None, ContentSourceFetchError.None);
+        return true;
+    }
+
+    private static bool TryAcquirePackageCore(
+        ContentCache cache,
+        ContentScopeKey scope,
+        ContentActivationPackage requirement,
+        ContentPackageAcquisition acquisition,
+        IContentPackageSource source,
+        ContentActivationAcquirerLimits limits,
+        AcquisitionProgress progress,
+        CancellationToken cancellationToken,
+        out ContentActivationAcquisitionStatus status,
+        out ContentCacheError cacheError,
+        out ContentSourceFetchError sourceError)
+    {
+        status = ContentActivationAcquisitionStatus.Applied;
+        cacheError = ContentCacheError.None;
+        sourceError = ContentSourceFetchError.None;
+        if (cache.TryOpenPackage(scope, requirement.PackageId, requirement.ManifestHash,
+                out VerifiedContentPackage? installed, out ContentCacheError openError))
+        {
+            progress.PackagesReused++;
+            progress.FilesReused += installed!.Manifest.Files.Select(static value => value.Sha256).Distinct().Count();
+            return true;
+        }
+        if (openError is not (ContentCacheError.MissingManifest or ContentCacheError.MissingBlob or
+                ContentCacheError.CorruptManifest or ContentCacheError.CorruptBlob))
+        {
+            status = ContentActivationAcquisitionStatus.CacheFailure;
+            cacheError = openError;
+            return false;
+        }
+
+        ContentPackageManifest? cachedManifest = null;
+        _ = cache.TryOpenPackageManifest(scope, requirement.PackageId, requirement.ManifestHash,
+            out cachedManifest, out ContentCacheError manifestOpenError);
+        if (manifestOpenError is not (ContentCacheError.None or ContentCacheError.MissingManifest or
+                ContentCacheError.CorruptManifest))
+        {
+            status = ContentActivationAcquisitionStatus.CacheFailure;
+            cacheError = manifestOpenError;
+            return false;
+        }
+
+        bool anySupported = false;
+        int packageSourceAttempts = 0;
+        ContentSourceFetchError lastSourceError = ContentSourceFetchError.UnsupportedSource;
+        foreach (ContentSourceDescriptor candidate in acquisition.Sources)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (packageSourceAttempts == limits.MaximumSourceAttemptsPerPackage) break;
+            bool granular = source is IContentPackageFileSource files && files.CanFetchFiles(in candidate);
+            if (!granular && !source.CanFetch(candidate.Kind)) continue;
+            anySupported = true;
+            packageSourceAttempts++;
+            progress.SourceAttempts++;
+            progress.Selected = candidate;
+
+            bool success;
+            ContentCacheError installError;
+            if (granular)
+                success = TryAcquireGranular(cache, scope, requirement, candidate,
+                    (IContentPackageFileSource)source, cachedManifest, limits,
+                    progress, cancellationToken, out installError, out lastSourceError);
+            else
+                success = TryAcquireArchive(cache, scope, requirement, candidate, source,
+                    progress, cancellationToken, out installError, out lastSourceError);
+            if (success)
+            {
+                progress.PackagesFetched++;
+                return true;
+            }
+            if (installError != ContentCacheError.None)
+            {
+                status = ContentActivationAcquisitionStatus.InstallFailure;
+                cacheError = installError;
+                sourceError = lastSourceError;
+                return false;
+            }
+            progress.SourcesRejected++;
+        }
+
+        if (requirement.Requirement == ContentRequirementPolicy.Optional)
+        {
+            progress.OptionalDeferred++;
+            return true;
+        }
+        status = !anySupported ? ContentActivationAcquisitionStatus.SourceUnavailable
+            : lastSourceError == ContentSourceFetchError.CandidateMismatch
+                ? ContentActivationAcquisitionStatus.CandidateMismatch
+                : ContentActivationAcquisitionStatus.SourceFailure;
+        sourceError = lastSourceError;
+        return false;
     }
 
     private static bool TryAcquireArchive(

@@ -2685,6 +2685,8 @@ public sealed class NetworkProtocolPeer : IDisposable
         internal bool ReceiveSequenceInitialized;
     }
 
+    internal static int UnreliableStreamMetadataBytes => Unsafe.SizeOf<UnreliableStreamState>();
+
     private readonly record struct SentPacketRecord(
         ulong PacketNumber,
         ulong SentStep,

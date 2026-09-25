@@ -29,11 +29,13 @@ internal static class F03bRemotePlayableTests
     internal const int A06TestCount = 2;
     internal const int A07TestCount = 2;
     internal const int F12TestCount = 1;
+    internal const int W7TestCount = 1;
     internal const int F15TestCount = 1;
     internal const int F04TestCount = 2;
     internal const int F05TestCount = 1;
     internal const int TestCount = F03bTestCount + A03TestCount + A04TestCount + A05TestCount +
-        A06TestCount + A07TestCount + F04TestCount + F05TestCount + F12TestCount + F15TestCount + 1;
+        A06TestCount + A07TestCount + F04TestCount + F05TestCount + F12TestCount +
+        F15TestCount + W7TestCount + 1;
 
     internal static void RunAll()
     {
@@ -49,6 +51,8 @@ internal static class F03bRemotePlayableTests
             OneShotUiRequestSurvivesClientQueueBackpressure);
         Run("RequiredContentProtocolIsCanonicalAndBounded",
             RequiredContentProtocolIsCanonicalAndBounded);
+        Run("W7ConceptDemoPacksAreIndependentExactPackagesOutsideBootstrap",
+            W7ConceptDemoPacksAreIndependentExactPackagesOutsideBootstrap);
         Run("F12SemanticEntryPrecedesOptionalActorPresentation",
             F12SemanticEntryPrecedesOptionalActorPresentation);
         Run("F15UserPresentationChangesNeverChangeSemanticActivation",
@@ -883,7 +887,7 @@ internal static class F03bRemotePlayableTests
         True(UltraSimGameProtocol.IsValidContentApplied(in proof));
         Equal(NetworkLane.Event, RemoteContentRequirementHeaderCodec.Descriptor.Lane);
         Equal(NetworkLane.Control, RemoteContentSetAppliedMessageCodec.Descriptor.Lane);
-        Equal((ushort)32, UltraSimGameProtocol.Manifest.Version);
+        Equal((ushort)33, UltraSimGameProtocol.Manifest.Version);
 
         True(ContentActivationPlan.TryCreate(
             ContentScopeKey.Local, oracle.Replace.Plan.Activation,
@@ -900,6 +904,89 @@ internal static class F03bRemotePlayableTests
             localRejected = true;
         }
         True(localRejected);
+    }
+
+    private static void W7ConceptDemoPacksAreIndependentExactPackagesOutsideBootstrap()
+    {
+        ApplicationRealmId realm = new(0x5707, 0x100);
+        using ConceptDemoContentDeployment deployment = ConceptDemoContentDeployment.Create(
+            realm, new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()));
+        ConceptDemoStructuralSource authored = GamePlayableWorld.CreateConceptDemoStructuralSource();
+        Equal(authored.Manifest.Fingerprint, deployment.Structural.Manifest.Fingerprint);
+        Equal(authored.West.Fingerprint,
+            GetPackFingerprint(deployment.Structural.Manifest, ConceptDemoStructuralSource.WestCoord));
+        Equal(authored.East.Fingerprint,
+            GetPackFingerprint(deployment.Structural.Manifest, ConceptDemoStructuralSource.EastCoord));
+        Equal(1, deployment.Authorization.Packages.Count);
+        False(deployment.Authorization.Packages.Any(package =>
+            package.PackageId == deployment.Structural.West.Package.Value ||
+            package.PackageId == deployment.Structural.East.Package.Value));
+
+        string root = TemporaryDirectory("ultrasim-w7-independent-packs");
+        try
+        {
+            True(ContentCache.TryOpen(root, out ContentCache? cache, out _));
+            using (cache)
+            using (var source = new HttpContentPackageSource(
+                FixtureHttpLimits(deployment.Snapshot.ArchiveBytes, allowInsecureHttp: true)))
+            {
+                ContentScopeKey scope = ContentScopeKey.ForRealm(realm);
+                AcquireAndVerify(deployment.Structural.West, authored.West,
+                    ConceptDemoStructuralSource.WestCoord);
+                AcquireAndVerify(deployment.Structural.East, authored.East,
+                    ConceptDemoStructuralSource.EastCoord);
+                ContentCacheSnapshot cold = cache!.GetSnapshot();
+                Equal(2, cold.RealmManifestCount);
+                Equal(0, cold.ActivationCount);
+                Equal(2, cold.BlobCount);
+                AcquireAndVerify(deployment.Structural.West, authored.West,
+                    ConceptDemoStructuralSource.WestCoord, warm: true);
+                AcquireAndVerify(deployment.Structural.East, authored.East,
+                    ConceptDemoStructuralSource.EastCoord, warm: true);
+                Equal(0, cache.GetSnapshot().ActivationCount);
+
+                void AcquireAndVerify(ContentPackageAcquisition acquisition,
+                    WorldPack expected, WorldPackCoord coord, bool warm = false)
+                {
+                    True(ContentActivationAcquirer.TryAcquireExactPackage(
+                        cache!, scope, acquisition, source, out VerifiedContentPackage? package,
+                        out ContentActivationAcquisitionResult result));
+                    True(result.Applied);
+                    if (warm)
+                    {
+                        Equal(0L, result.BytesFetched);
+                        Equal(1, result.PackagesReused);
+                    }
+                    else
+                    {
+                        True(result.BytesFetched > 0);
+                        Equal(1, result.PackagesFetched);
+                    }
+                    Equal(1, package!.Manifest.Files.Count);
+                    ContentFileDescriptor file = package.Manifest.Files[0];
+                    Equal(ContentFileKind.WorldPack, file.Kind);
+                    True(cache!.TryOpenBlob(file, out ContentBlobLease? blob, out _));
+                    using (blob)
+                    {
+                        True(WorldPack.TryOpen(blob!.Stream, WorldPackLimits.Default,
+                            expected.ContentFingerprint, out WorldPack? opened, out _));
+                        Equal(expected.Fingerprint, opened!.Fingerprint);
+                        True(opened.TryValidateSpatialWindow(coord, out _, out _));
+                    }
+                }
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+
+        static WorldPackFingerprint GetPackFingerprint(
+            WorldStructuralManifest manifest, WorldPackCoord coord)
+        {
+            True(manifest.TryGetPack(coord, out WorldPackFingerprint fingerprint));
+            return fingerprint;
+        }
     }
 
     private static void F12SemanticEntryPrecedesOptionalActorPresentation()

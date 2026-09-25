@@ -265,7 +265,9 @@ internal static class NetworkReadySelectionMetadata
 
 internal static class NetworkUnreliableStreamMetadata
 {
-    internal const int EstimatedBytes = 56;
+    // Use the actual private peer layout. A fixed 56-byte estimate ceased to be conservative
+    // when the Game manifest grew, even though no per-stream production behavior changed.
+    internal static int EstimatedBytes => NetworkProtocolPeer.UnreliableStreamMetadataBytes;
 }
 
 internal static class NetworkTrafficCounterMetadata
