@@ -1098,11 +1098,24 @@ internal static class F03bRemotePlayableTests
         Equal(2UL, packs.GetSnapshot().GrantsAccepted);
         Equal(initial.Manifest.Fingerprint,
             cache.PreparedComposition!.Manifest.Fingerprint);
+        Deliver(exact);
+        Equal(rejected, packs.GetSnapshot().RejectedGrants);
+        Deliver(new RemoteStructuralPackGrant(exact.Header,
+            "server.concept-demo.pack-east-contradictory", exact.Sources));
+        Equal(++rejected, packs.GetSnapshot().RejectedGrants);
+        True(packs.TryRetirePack(ConceptDemoStructuralSource.EastCoord));
 
         void Reject(RemoteStructuralPackGrantHeader forgedHeader)
         {
             var forged = new RemoteStructuralPackGrant(forgedHeader,
                 exact!.PackageId, exact.Sources);
+            Deliver(forged);
+            Equal(++rejected, packs.GetSnapshot().RejectedGrants);
+            Equal(1, cache.PreparedComposition!.PreparedPackCount);
+        }
+
+        void Deliver(RemoteStructuralPackGrant forged)
+        {
             byte[] payload = new byte[UltraSimGameProtocol.MaximumStructuralGrantBytes];
             True(UltraSimGameProtocol.TryWriteStructuralPackGrant(payload, forged,
                 out int written));
@@ -1110,8 +1123,6 @@ internal static class F03bRemotePlayableTests
                 RemoteStructuralPackGrantHeaderCodec.Descriptor.Id,
                 RemoteStructuralPackGrantHeaderCodec.Descriptor.Version, default, written);
             True(packs.TryProcess(in delivered, payload.AsSpan(0, written)));
-            Equal(++rejected, packs.GetSnapshot().RejectedGrants);
-            Equal(1, cache.PreparedComposition!.PreparedPackCount);
         }
     }
 

@@ -299,7 +299,9 @@ public sealed class RemoteStructuralPackClient :
             {
                 if (!GrantsEqual(pending.Grant, grant))
                 {
-                    pending.State = RemoteStructuralPackClientState.Rejected;
+                    // A contradictory duplicate is not authority to replace an already
+                    // accepted grant or poison its publication/proof/retirement lifecycle.
+                    // The original grant must still finish exact package and World validation.
                     Increment(ref _rejectedGrants);
                 }
                 return true;
