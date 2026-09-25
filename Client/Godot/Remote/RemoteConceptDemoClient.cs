@@ -223,7 +223,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 RemoteConceptDemoWorldProfile.CreateRequiredBinding(),
                 _uiRenderer,
                 new ClientChatLimits(64, 256, 128),
-                standardUiDefinitionResolver: ClientStandardUiLibrary.Resolve);
+                standardUiDefinitionResolver: ClientStandardUiLibrary.Resolve,
+                requireStructuralManifest: true);
             _session.ConfigureTelemetry(telemetryLevel);
             _nativeTelemetry.Configure(telemetryLevel);
             _telemetryLevel = telemetryLevel;
@@ -300,7 +301,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             _ = _session!.ProcessReceived();
             RemotePlayableSessionSnapshot snapshot = _session.GetSnapshot();
             ReportSmokeProgress(in snapshot);
-            if (snapshot.StructuralWorld.State == RemoteStructuralWorldState.Rejected ||
+            if (snapshot.StructuralManifest.State == RemoteStructuralManifestClientState.Rejected ||
+                snapshot.StructuralWorld.State == RemoteStructuralWorldState.Rejected ||
                 snapshot.Content.State == RemoteContentClientState.Rejected ||
                 snapshot.Playable.State is RemotePlayableClientState.Rejected or
                     RemotePlayableClientState.Faulted)
@@ -311,7 +313,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 return;
             }
             if (_state == RemoteConceptDemoClientState.AwaitingContent &&
-                snapshot.StructuralWorld.State == RemoteStructuralWorldState.Ready)
+                snapshot.StructuralWorld.State == RemoteStructuralWorldState.Ready &&
+                snapshot.StructuralManifest.State == RemoteStructuralManifestClientState.Applied)
             {
                 _contentCacheObserved = _cache!.GetSnapshot();
                 _state = RemoteConceptDemoClientState.AwaitingGuest;

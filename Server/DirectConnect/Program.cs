@@ -65,7 +65,8 @@ using HostedUdpAdmissionHost host = CreateHost(
     options.MaximumParticipants, options.AdmissionBurstPerAddress,
     options.PublicationPolicy, options.UnreliableFrameCap,
     options.UnreliableAggregationScope,
-    content.PresentationAuthorization);
+    content.PresentationAuthorization,
+    content.StructuralAuthorization);
 host.ConfigureTelemetry(options.TelemetryLevel);
 authority.ConfigureTelemetry(options.TelemetryLevel == NetworkTelemetryLevel.Off
     ? GameTelemetryLevel.Off
@@ -231,7 +232,8 @@ static HostedUdpAdmissionHost CreateHost(
     int unreliableFrameCap = 1,
     NetworkUnreliableAggregationScope unreliableAggregationScope =
         NetworkUnreliableAggregationScope.CrossLane,
-    RemoteContentAuthorization? presentationAuthorization = null)
+    RemoteContentAuthorization? presentationAuthorization = null,
+    RemoteStructuralWorldAuthorization? structuralAuthorization = null)
 {
     if (publicationPolicy == default)
         publicationPolicy = RemoteChunkPublicationPolicy.CurrentBundled;
@@ -245,7 +247,8 @@ static HostedUdpAdmissionHost CreateHost(
         authority, realm, contentAuthorization, contentBackedUiDefinitions, clientProfile,
         serverPerformanceProfile: serverPerformanceProfile,
         publicationPolicy: publicationPolicy,
-        presentationAuthorization: presentationAuthorization);
+        presentationAuthorization: presentationAuthorization,
+        structuralAuthorization: structuralAuthorization);
     return new HostedUdpAdmissionHost(
         endpoint,
         identity,

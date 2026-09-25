@@ -58,7 +58,13 @@ public readonly record struct RemoteGuestPlayableServerSnapshot(
     RemotePresentationSchedulingSnapshot PresentationScheduling,
     RemoteChunkWorldStateServerSnapshot World,
     RemoteChatDeliveryServiceSnapshot Chat,
-    RemoteGuestApplicationTimingSnapshot Timing);
+    RemoteGuestApplicationTimingSnapshot Timing)
+{
+    public bool StructuralManifestRequired { get; init; }
+    public bool StructuralManifestApplied { get; init; }
+    public ulong StructuralAdvertisementsQueued { get; init; }
+    public ulong RejectedStructuralManifestProofs { get; init; }
+}
 
 /// <summary>Owner-local evidence for shared actor-presentation reconciliation.</summary>
 internal readonly record struct RemoteSharedPresentationCensus(
@@ -173,6 +179,7 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
     private readonly ApplicationRealmId _realm;
     private readonly RemoteContentAuthorization? _contentAuthorization;
     private readonly RemoteContentAuthorization? _presentationAuthorization;
+    private readonly RemoteStructuralWorldAuthorization? _structuralAuthorization;
     private readonly UiDefinitionIdentity[] _contentBackedUiDefinitions;
     private readonly UiDefinitionIdentity[] _standardUiDefinitions;
     private readonly RemoteClientProfileAdvertisement? _clientProfile;
@@ -188,7 +195,8 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
         IEnumerable<UiDefinitionIdentity>? standardUiDefinitions = null,
         RemoteServerPerformanceProfile? serverPerformanceProfile = null,
         RemoteChunkPublicationPolicy publicationPolicy = default,
-        RemoteContentAuthorization? presentationAuthorization = null)
+        RemoteContentAuthorization? presentationAuthorization = null,
+        RemoteStructuralWorldAuthorization? structuralAuthorization = null)
     {
         if (!realm.IsValid) throw new ArgumentOutOfRangeException(nameof(realm));
         if (contentAuthorization is not null &&
@@ -205,6 +213,11 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
             throw new ArgumentException("Presentation authorization must belong to this realm.",
                 nameof(presentationAuthorization));
         _presentationAuthorization = presentationAuthorization;
+        if (structuralAuthorization is not null && contentAuthorization is null)
+            throw new ArgumentException(
+                "Structural World authorization requires exact application Content authorization.",
+                nameof(structuralAuthorization));
+        _structuralAuthorization = structuralAuthorization;
         _contentBackedUiDefinitions = CopyUiDefinitions(
             contentBackedUiDefinitions, nameof(contentBackedUiDefinitions));
         _standardUiDefinitions = CopyUiDefinitions(
@@ -235,7 +248,8 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
             _contentAuthorization, _contentBackedUiDefinitions, _clientProfile,
             _standardUiDefinitions, serverPerformanceProfile: _serverPerformanceProfile,
             publicationPolicy: _publicationPolicy,
-            presentationAuthorization: _presentationAuthorization);
+            presentationAuthorization: _presentationAuthorization,
+            structuralAuthorization: _structuralAuthorization);
     }
 
     private static ulong CreateEpoch()
@@ -301,6 +315,7 @@ public sealed class RemoteGuestPlayableApplication :
     private readonly ApplicationRealmId _realm;
     private readonly RemoteContentAuthorization? _contentAuthorization;
     private readonly RemoteContentAuthorization? _presentationAuthorization;
+    private readonly RemoteStructuralWorldAuthorization? _structuralAuthorization;
     private readonly UiDefinitionIdentity[] _contentBackedUiDefinitions;
     private readonly UiDefinitionIdentity[] _standardUiDefinitions;
     private readonly RemoteClientProfileAdvertisement? _clientProfile;
@@ -333,7 +348,14 @@ public sealed class RemoteGuestPlayableApplication :
     private ulong _duplicateContentProofs;
     private ulong _rejectedContentProofs;
     private ulong _rejectedPreContentMessages;
+    private bool _structuralManifestApplied;
+    private long _lastStructuralAdvertisementQueue;
+    private ulong _structuralAdvertisementsQueued;
+    private ulong _rejectedStructuralManifestProofs;
     private ulong _admissionAttempt;
+    private bool _admissionDeferredForStructuralProof;
+    private RemoteGuestAdmissionRequestHeader _deferredAdmissionHeader;
+    private GameGuestAdmissionRequest _deferredAdmissionRequest;
     private RemoteGuestAdmissionResultHeader _admissionResult;
     private string? _admissionResultText;
     private bool _admissionResultApplied;
@@ -492,7 +514,8 @@ public sealed class RemoteGuestPlayableApplication :
         SharedPlayableAuthority? sharedAuthority = null,
         RemoteServerPerformanceProfile? serverPerformanceProfile = null,
         RemoteChunkPublicationPolicy publicationPolicy = default,
-        RemoteContentAuthorization? presentationAuthorization = null)
+        RemoteContentAuthorization? presentationAuthorization = null,
+        RemoteStructuralWorldAuthorization? structuralAuthorization = null)
     {
         _peer = peer ?? throw new ArgumentNullException(nameof(peer));
         _capturePublicWorldDriveOperation = CapturePublicWorldDrive;
@@ -515,6 +538,12 @@ public sealed class RemoteGuestPlayableApplication :
             throw new ArgumentException("Presentation authorization must belong to this realm.",
                 nameof(presentationAuthorization));
         _presentationAuthorization = presentationAuthorization;
+        if (structuralAuthorization is not null && contentAuthorization is null)
+            throw new ArgumentException(
+                "Structural World authorization requires exact application Content authorization.",
+                nameof(structuralAuthorization));
+        _structuralAuthorization = structuralAuthorization;
+        _structuralManifestApplied = structuralAuthorization is null;
         _sharedAuthority = sharedAuthority;
         if (sharedAuthority is not null)
         {
@@ -604,6 +633,11 @@ public sealed class RemoteGuestPlayableApplication :
             ProcessContentProof(payload);
             return true;
         }
+        if (message.MessageId == RemoteStructuralManifestAppliedMessageCodec.Descriptor.Id)
+        {
+            ProcessStructuralManifestProof(payload);
+            return true;
+        }
         if (message.MessageId == RemoteGuestAdmissionRequestHeaderCodec.Descriptor.Id)
         {
             ProcessGuestRequest(payload);
@@ -677,6 +711,11 @@ public sealed class RemoteGuestPlayableApplication :
         if (!_contentApplied)
         {
             complete &= QueueContentRequirement(force: false);
+            return complete;
+        }
+        if (!_structuralManifestApplied)
+        {
+            complete &= QueueStructuralAdvertisement(force: false);
             return complete;
         }
         // Presentation authorization is independent of the required-content proof and guest
@@ -762,7 +801,13 @@ public sealed class RemoteGuestPlayableApplication :
             GetPresentationSchedulingSnapshot(),
             _worldDelivery?.GetSnapshot() ?? default,
             _chatDelivery?.GetSnapshot() ?? default,
-            GetTimingSnapshot());
+            GetTimingSnapshot())
+        {
+            StructuralManifestRequired = _structuralAuthorization is not null,
+            StructuralManifestApplied = _structuralManifestApplied,
+            StructuralAdvertisementsQueued = _structuralAdvertisementsQueued,
+            RejectedStructuralManifestProofs = _rejectedStructuralManifestProofs,
+        };
     }
 
     /// <summary>Selects bounded diagnostics without changing application semantics.</summary>
@@ -986,6 +1031,26 @@ public sealed class RemoteGuestPlayableApplication :
         return true;
     }
 
+    private bool QueueStructuralAdvertisement(bool force)
+    {
+        if (_structuralManifestApplied || _structuralAuthorization is null) return true;
+        long now = Environment.TickCount64;
+        if (!force && _lastStructuralAdvertisementQueue != 0 &&
+            now - _lastStructuralAdvertisementQueue < AdmissionRetryMilliseconds)
+            return true;
+        RemoteStructuralWorldAdvertisement advertisement =
+            _structuralAuthorization.CreateAdvertisement(_applicationSessionEpoch, 1);
+        if (!UltraSimGameProtocol.TryWriteStructuralAdvertisement(
+                _messageScratch, in advertisement, out int written))
+            throw new InvalidOperationException("The structural advertisement did not encode.");
+        if (_peer.TryQueue(RemoteStructuralWorldAdvertisementHeaderCodec.Descriptor.Id,
+                _messageScratch.AsSpan(0, written)) != NetworkQueueStatus.Accepted)
+            return false;
+        _lastStructuralAdvertisementQueue = now;
+        SaturatingIncrement(ref _structuralAdvertisementsQueued);
+        return true;
+    }
+
     private bool QueuePresentationAdvertisement()
     {
         if (_presentationAdvertisementQueued || _presentationAuthorization is null) return true;
@@ -1148,6 +1213,41 @@ public sealed class RemoteGuestPlayableApplication :
         _contentApplied = true;
     }
 
+    private void ProcessStructuralManifestProof(ReadOnlySpan<byte> payload)
+    {
+        if (!_contentApplied || _structuralAuthorization is null ||
+            !RemoteStructuralManifestAppliedMessageCodec.TryReadExact(payload, out var proof) ||
+            !UltraSimGameProtocol.IsValidStructuralManifestApplied(in proof) ||
+            proof.ApplicationSessionEpoch != _applicationSessionEpoch ||
+            proof.StructuralSequence != 1)
+        {
+            SaturatingIncrement(ref _rejectedStructuralManifestProofs);
+            return;
+        }
+        RemoteStructuralWorldAdvertisement expected =
+            _structuralAuthorization.CreateAdvertisement(_applicationSessionEpoch, 1);
+        if (proof.ManifestHash0 != expected.Header.ManifestHash0 ||
+            proof.ManifestHash1 != expected.Header.ManifestHash1 ||
+            proof.ManifestHash2 != expected.Header.ManifestHash2 ||
+            proof.ManifestHash3 != expected.Header.ManifestHash3)
+        {
+            SaturatingIncrement(ref _rejectedStructuralManifestProofs);
+            return;
+        }
+        if (proof.Status == RemoteStructuralApplyStatus.Rejected)
+        {
+            _applicationFaulted = true;
+            return;
+        }
+        _structuralManifestApplied = true;
+        if (_admissionDeferredForStructuralProof)
+        {
+            _admissionDeferredForStructuralProof = false;
+            ProcessValidatedGuestRequest(_deferredAdmissionHeader, in _deferredAdmissionRequest);
+            _deferredAdmissionRequest = default;
+        }
+    }
+
     private void ProcessGuestRequest(ReadOnlySpan<byte> payload)
     {
         if (!_contentApplied)
@@ -1160,6 +1260,28 @@ public sealed class RemoteGuestPlayableApplication :
                 out GameGuestAdmissionRequest request) ||
             header.ApplicationSessionEpoch != _applicationSessionEpoch)
             return;
+        if (!_structuralManifestApplied)
+        {
+            // Event-lane admission can arrive before the Control-lane structural proof.
+            // Retain one bounded, already-decoded request without admitting or mutating Game.
+            if (_admissionDeferredForStructuralProof)
+            {
+                if (_deferredAdmissionHeader.AttemptSequence != header.AttemptSequence ||
+                    _deferredAdmissionRequest != request)
+                    _applicationFaulted = true;
+                return;
+            }
+            _admissionDeferredForStructuralProof = true;
+            _deferredAdmissionHeader = header;
+            _deferredAdmissionRequest = request;
+            return;
+        }
+        ProcessValidatedGuestRequest(header, in request);
+    }
+
+    private void ProcessValidatedGuestRequest(
+        RemoteGuestAdmissionRequestHeader header, in GameGuestAdmissionRequest request)
+    {
         if (_admissionAttempt != 0)
         {
             if (header.AttemptSequence == _admissionAttempt)
@@ -2823,6 +2945,7 @@ public sealed class RemoteGuestPlayableApplication :
         messageId == RemoteClientProfileAppliedMessageCodec.Descriptor.Id ||
         messageId == RemoteServerPerformanceProfileAppliedMessageCodec.Descriptor.Id ||
         messageId == RemoteContentSetAppliedMessageCodec.Descriptor.Id ||
+        messageId == RemoteStructuralManifestAppliedMessageCodec.Descriptor.Id ||
         messageId == RemoteGuestAdmissionAppliedMessageCodec.Descriptor.Id ||
         messageId == RemotePublicPresentationAppliedMessageCodec.Descriptor.Id ||
         messageId == RemoteChunkAppliedMessageCodec.Descriptor.Id ||

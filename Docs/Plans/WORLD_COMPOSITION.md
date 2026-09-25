@@ -1,6 +1,6 @@
 # UltraSim World / WorldPack Structural Composition
 
-**Status:** canonical World/Terrain direction; W1-W6 closed, W7 next. W8-W10 remain planned.
+**Status:** canonical World/Terrain direction; W1-W6 closed, W7 active/open. W8-W10 remain planned.
 **Accepted:** 2026-09-23.
 **Current implementation:** W5 proves connected two-Pack authority in a dedicated fixture. W5R moves the actual Concept Demo Game authority and Local client to declared Packs `(0,0)` and `(1,0)` under one completely validated manifest. The frozen combined Pack remains solely for pre-W7 remote structural delivery and as a historical save identity. New Concept Demo saves use `worldview/v2`; historical Cabin keeps `worldview/v1`. Neither WorldPack/v1 nor WorldStructuralManifest/v1 bytes changed.
 **Related:** [TERRAIN.md](TERRAIN.md), [ASSET_STREAMING.md](ASSET_STREAMING.md), [../README.md](../README.md), [../../Game/World/README.md](../../Game/World/README.md).
@@ -654,8 +654,13 @@ and additional structural surfaces can coexist. W7 still owns acquisition.
 Authenticate exact structural composition, acquire/prepare required Packs on demand, and preserve client residency across Pack seams without expanding semantic disclosure.
 
 The client-side prepared-subset publication seam and Content's independently verified passive
-structural-manifest kind are implemented as W7 groundwork. Remote product delivery, authenticated
-advertisement, per-Pack grants/proofs, and demand acquisition remain open; this does not close W7.
+structural-manifest kind are implemented as W7 groundwork. Game protocol v33 now has bounded
+structural control messages; the product bootstrap includes the exact manifest, independent Pack
+packages can be fetched without another catalog activation, and the authenticated manifest is
+World-validated with an explicit proof before guest admission. Product Remote presentation still
+uses the historical combined Pack. Per-Pack grants/proofs, demand acquisition, bounded initial
+semantic residency, delivery readiness, retirement, and seam acceptance remain open. This does
+not close W7.
 
 ### W8 — atomic Add/Replace/Remove Pack composition
 

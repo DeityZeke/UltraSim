@@ -29,7 +29,7 @@ internal static class F03bRemotePlayableTests
     internal const int A06TestCount = 2;
     internal const int A07TestCount = 2;
     internal const int F12TestCount = 1;
-    internal const int W7TestCount = 1;
+    internal const int W7TestCount = 3;
     internal const int F15TestCount = 1;
     internal const int F04TestCount = 2;
     internal const int F05TestCount = 1;
@@ -53,6 +53,10 @@ internal static class F03bRemotePlayableTests
             RequiredContentProtocolIsCanonicalAndBounded);
         Run("W7ConceptDemoPacksAreIndependentExactPackagesOutsideBootstrap",
             W7ConceptDemoPacksAreIndependentExactPackagesOutsideBootstrap);
+        Run("W7AuthenticatedManifestProofRetainsZeroPackComposition",
+            W7AuthenticatedManifestProofRetainsZeroPackComposition);
+        Run("W7CrossLaneAdmissionWaitsForStructuralProof",
+            W7CrossLaneAdmissionWaitsForStructuralProof);
         Run("F12SemanticEntryPrecedesOptionalActorPresentation",
             F12SemanticEntryPrecedesOptionalActorPresentation);
         Run("F15UserPresentationChangesNeverChangeSemanticActivation",
@@ -904,6 +908,100 @@ internal static class F03bRemotePlayableTests
             localRejected = true;
         }
         True(localRejected);
+    }
+
+    private static void W7AuthenticatedManifestProofRetainsZeroPackComposition()
+    {
+        ApplicationRealmId realm = new(0x5707, 0x200);
+        using ConceptDemoContentDeployment deployment = ConceptDemoContentDeployment.Create(
+            realm, new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()));
+        using var source = new HttpContentPackageSource(
+            FixtureHttpLimits(deployment.Snapshot.ArchiveBytes, allowInsecureHttp: true));
+        using var fixture = RemotePlayableFixture.CreateWithConceptDeployment(
+            realm, deployment, source);
+        fixture.DriveUntil(() => fixture.SessionSnapshot.StructuralManifest.State ==
+            RemoteStructuralManifestClientState.Applied);
+        RemotePlayableSessionSnapshot session = fixture.SessionSnapshot;
+        True(session.StructuralManifestRequired);
+        Equal(deployment.Structural.Manifest.Fingerprint,
+            session.StructuralManifest.ManifestFingerprint);
+        Equal(new WorldCompositionRevision(1), session.StructuralManifest.Revision);
+        Equal(2, session.StructuralManifest.ManifestEntryCount);
+        Equal(0, session.StructuralManifest.PreparedPackCount);
+        Equal(ConceptDemoStructuralSource.WestCoord, session.StructuralManifest.InitialPack);
+        True(session.StructuralManifest.ProofsQueued >= 1);
+        Equal(RemotePlayableClientState.AwaitingAdmission, session.Playable.State);
+        fixture.Admit("Manifest Proof", GameGuestBody.HumanMale);
+        Equal(RemotePlayableClientState.Active, fixture.Playable.GetSnapshot().State);
+    }
+
+    private static void W7CrossLaneAdmissionWaitsForStructuralProof()
+    {
+        CabinContentOracle oracle = CabinContentOracle.Create();
+        RemoteContentAuthorization content = RemoteContentAuthorizationProjection.Create(
+            oracle.Replace.Plan, oracle.Replace.Catalog.Fingerprint,
+            [RemoteReplaceAcquisition(oracle)]);
+        ConceptDemoStructuralSource source = GamePlayableWorld.CreateConceptDemoStructuralSource();
+        var structural = new RemoteStructuralWorldAuthorization(
+            source.Manifest, ConceptDemoStructuralContent.ManifestDefinitionValue,
+            GameWorldState.DefaultSpace, new WorldCompositionRevision(1),
+            ConceptDemoStructuralSource.WestCoord);
+        True(ProtocolLoopback.TryCreate(
+            NetworkProtocolLimits.Default, new DeterministicDatagramLimits(2_048, 1_200),
+            default, out ProtocolLoopback? loop, out _, UltraSimGameProtocol.Manifest));
+        using (loop)
+        using (var server = new RemoteGuestPlayableApplication(
+            loop!.Server, CabinContentOracle.FixtureRealm, new ParticipantId(1), 77,
+            contentAuthorization: content, structuralAuthorization: structural))
+        {
+            RemoteContentSetAppliedMessage contentProof = CreateAppliedProof(oracle, 77);
+            Span<byte> contentBytes = stackalloc byte[RemoteContentSetAppliedMessageCodec.EncodedSize];
+            True(RemoteContentSetAppliedMessageCodec.TryWriteExact(contentBytes, in contentProof));
+            True(server.TryProcess(new NetworkDeliveredMessage(
+                NetworkLane.Control, RemoteContentSetAppliedMessageCodec.Descriptor.Id,
+                RemoteContentSetAppliedMessageCodec.Descriptor.Version, default,
+                contentBytes.Length), contentBytes));
+            True(server.GetSnapshot().ContentApplied);
+
+            var guest = new GameGuestAdmissionRequest(GameGuestBody.HumanMale, "Cross Lane");
+            Span<byte> guestBytes = stackalloc byte[UltraSimGameProtocol.MaximumGuestAdmissionMessageBytes];
+            True(UltraSimGameProtocol.TryWriteGuestAdmissionRequest(
+                guestBytes, 77, 1, in guest, out int guestLength));
+            var guestMessage = new NetworkDeliveredMessage(
+                NetworkLane.Event, RemoteGuestAdmissionRequestHeaderCodec.Descriptor.Id,
+                RemoteGuestAdmissionRequestHeaderCodec.Descriptor.Version, default, guestLength);
+            True(server.TryProcess(in guestMessage, guestBytes[..guestLength]));
+            False(server.GetSnapshot().GuestAdmitted);
+            // Repeated Event delivery must not create a second attempt or mutate Game.
+            True(server.TryProcess(in guestMessage, guestBytes[..guestLength]));
+            False(server.GetSnapshot().GuestAdmitted);
+
+            RemoteStructuralWorldAdvertisement advertisement =
+                structural.CreateAdvertisement(77, 1);
+            RemoteStructuralWorldAdvertisementHeader header = advertisement.Header;
+            var structuralProof = new RemoteStructuralManifestAppliedMessage
+            {
+                ApplicationSessionEpoch = 77,
+                StructuralSequence = 1,
+                ManifestHash0 = header.ManifestHash0,
+                ManifestHash1 = header.ManifestHash1,
+                ManifestHash2 = header.ManifestHash2,
+                ManifestHash3 = header.ManifestHash3,
+                Status = RemoteStructuralApplyStatus.Applied,
+            };
+            Span<byte> structuralBytes = stackalloc byte[
+                RemoteStructuralManifestAppliedMessageCodec.EncodedSize];
+            True(RemoteStructuralManifestAppliedMessageCodec.TryWriteExact(
+                structuralBytes, in structuralProof));
+            True(server.TryProcess(new NetworkDeliveredMessage(
+                NetworkLane.Control, RemoteStructuralManifestAppliedMessageCodec.Descriptor.Id,
+                RemoteStructuralManifestAppliedMessageCodec.Descriptor.Version, default,
+                structuralBytes.Length), structuralBytes));
+            True(server.GetSnapshot().StructuralManifestApplied);
+            True(server.GetSnapshot().GuestAdmitted);
+            True(server.TryProcess(in guestMessage, guestBytes[..guestLength]));
+            True(server.GetSnapshot().GuestAdmitted);
+        }
     }
 
     private static void W7ConceptDemoPacksAreIndependentExactPackagesOutsideBootstrap()
@@ -2495,7 +2593,8 @@ internal static class F03bRemotePlayableTests
                     [UiDefinitionIdentity.From(InventoryUi.Definition),
                      UiDefinitionIdentity.From(ServerMonitorUi.Definition)],
                     requiredWorld: RemoteConceptDemoWorldProfile.CreateRequiredBinding(),
-                    presentationAuthorization: deployment.PresentationAuthorization);
+                    presentationAuthorization: deployment.PresentationAuthorization,
+                    structuralAuthorization: deployment.StructuralAuthorization);
             }
             catch
             {
@@ -2620,6 +2719,7 @@ internal static class F03bRemotePlayableTests
             IEnumerable<UiDefinitionIdentity>? standardUiDefinitions = null,
             Func<UiDefinitionCacheKey, CompiledUiDefinition?>? standardUiDefinitionResolver = null,
             RemoteContentAuthorization? presentationAuthorization = null,
+            RemoteStructuralWorldAuthorization? structuralAuthorization = null,
             int motionDelayMilliseconds = -1,
             int motionJitterMilliseconds = 0,
             int motionDropPeriod = 0)
@@ -2641,7 +2741,8 @@ internal static class F03bRemotePlayableTests
                     new RemoteGuestPlayableApplicationFactory(
                         realm, contentAuthorization, contentBackedUiDefinitions,
                         standardUiDefinitions: standardUiDefinitions,
-                        presentationAuthorization: presentationAuthorization),
+                        presentationAuthorization: presentationAuthorization,
+                        structuralAuthorization: structuralAuthorization),
                     UltraSimGameProtocol.Manifest);
                 try
                 {
@@ -2691,7 +2792,8 @@ internal static class F03bRemotePlayableTests
                                 new ClientChatLimits(16, 256, 128),
                                 new UiClientLimits(8, 8),
                                 maximumPendingWorldProofs: 256,
-                                standardUiDefinitionResolver: standardUiDefinitionResolver);
+                                standardUiDefinitionResolver: standardUiDefinitionResolver,
+                                requireStructuralManifest: structuralAuthorization is not null);
                         }
                         return new RemotePlayableFixture(
                             trustDirectory, identity, host, direct, session,
@@ -2721,6 +2823,9 @@ internal static class F03bRemotePlayableTests
 
         internal void Admit(string name, GameGuestBody body)
         {
+            if (_session.GetSnapshot().StructuralManifestRequired)
+                DriveUntil(() => _session.GetSnapshot().StructuralManifest.State ==
+                    RemoteStructuralManifestClientState.Applied);
             True(TrySubmitGuest(name, body));
             DriveUntil(() => Playable.GetSnapshot().State == RemotePlayableClientState.Active);
         }

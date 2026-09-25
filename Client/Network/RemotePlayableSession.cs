@@ -97,6 +97,8 @@ public readonly record struct RemotePlayableSessionSnapshot(
     RemotePlayableSessionTimingSnapshot Timing)
 {
     public RemotePresentationClientSnapshot Presentation { get; init; }
+    public RemoteStructuralManifestClientSnapshot StructuralManifest { get; init; }
+    public bool StructuralManifestRequired { get; init; }
 }
 
 /// <summary>
@@ -116,6 +118,8 @@ public sealed class RemotePlayableSession : IDisposable
     private readonly RemoteUiClientBridge _ui;
     private readonly RemoteContentClient? _content;
     private readonly RemotePresentationClient? _presentation;
+    private readonly RemoteStructuralManifestClient? _structuralManifest;
+    private readonly bool _requireStructuralManifest;
     private readonly RemoteRequiredWorldBinding? _requiredWorld;
     private readonly ulong _applicationSessionEpoch;
     private readonly int _maximumPendingWorldProofs;
@@ -141,7 +145,8 @@ public sealed class RemotePlayableSession : IDisposable
         RemoteRequiredContentBinding? requiredContent = null,
         Func<UiDefinitionCacheKey, CompiledUiDefinition?>? standardUiDefinitionResolver = null)
         : this(peer, applicationSessionEpoch, worldCache, requiredContent, null, uiRenderer,
-            chatLimits, uiLimits, maximumPendingWorldProofs, standardUiDefinitionResolver)
+            chatLimits, uiLimits, maximumPendingWorldProofs, standardUiDefinitionResolver,
+            requireStructuralManifest: false)
     {
     }
 
@@ -154,9 +159,11 @@ public sealed class RemotePlayableSession : IDisposable
         ClientChatLimits chatLimits = default,
         UiClientLimits uiLimits = default,
         int maximumPendingWorldProofs = 256,
-        Func<UiDefinitionCacheKey, CompiledUiDefinition?>? standardUiDefinitionResolver = null)
+        Func<UiDefinitionCacheKey, CompiledUiDefinition?>? standardUiDefinitionResolver = null,
+        bool requireStructuralManifest = false)
         : this(peer, applicationSessionEpoch, null, requiredContent, requiredWorld, uiRenderer,
-            chatLimits, uiLimits, maximumPendingWorldProofs, standardUiDefinitionResolver)
+            chatLimits, uiLimits, maximumPendingWorldProofs, standardUiDefinitionResolver,
+            requireStructuralManifest)
     {
     }
 
@@ -170,7 +177,8 @@ public sealed class RemotePlayableSession : IDisposable
         ClientChatLimits chatLimits,
         UiClientLimits uiLimits,
         int maximumPendingWorldProofs,
-        Func<UiDefinitionCacheKey, CompiledUiDefinition?>? standardUiDefinitionResolver)
+        Func<UiDefinitionCacheKey, CompiledUiDefinition?>? standardUiDefinitionResolver,
+        bool requireStructuralManifest)
     {
         _peer = peer ?? throw new ArgumentNullException(nameof(peer));
         ArgumentOutOfRangeException.ThrowIfZero(applicationSessionEpoch);
@@ -181,6 +189,10 @@ public sealed class RemotePlayableSession : IDisposable
         if (requiredWorld is not null && requiredContent is null)
             throw new ArgumentException(
                 "A required WorldPack needs an authenticated content binding.", nameof(requiredWorld));
+        if (requireStructuralManifest && requiredContent is null)
+            throw new ArgumentException(
+                "Structural manifest proof requires an authenticated Content binding.",
+                nameof(requiredContent));
         if (maximumPendingWorldProofs <= 0)
             throw new ArgumentOutOfRangeException(nameof(maximumPendingWorldProofs));
         if (chatLimits == default) chatLimits = ClientChatLimits.Default;
@@ -189,6 +201,7 @@ public sealed class RemotePlayableSession : IDisposable
         _applicationSessionEpoch = applicationSessionEpoch;
         _maximumPendingWorldProofs = maximumPendingWorldProofs;
         _requiredWorld = requiredWorld;
+        _requireStructuralManifest = requireStructuralManifest;
         Performance = new RemoteServerPerformanceClient(peer, applicationSessionEpoch);
         Playable = new RemotePlayableClient(peer, applicationSessionEpoch);
         if (requiredContent is not null)
@@ -199,6 +212,8 @@ public sealed class RemotePlayableSession : IDisposable
             _presentation = new RemotePresentationClient(
                 applicationSessionEpoch, requiredContent.Realm, requiredContent.Cache,
                 requiredContent.Source, _content, requiredContent.LocalPresentationKey);
+            _structuralManifest = new RemoteStructuralManifestClient(
+                peer, _content, applicationSessionEpoch);
         }
         ChatState = new ClientChatState(applicationSessionEpoch, chatLimits);
         Chat = new RemoteChatClient(peer, applicationSessionEpoch, ChatState);
@@ -214,10 +229,11 @@ public sealed class RemotePlayableSession : IDisposable
         PublicPresentationState = new ClientPublicPresentationMetadataState(256);
         PublicPresentation = new RemotePublicPresentationMetadataClient(
             peer, applicationSessionEpoch, PublicPresentationState);
-        _protocol = new RemoteGameProtocolComposition(7);
+        _protocol = new RemoteGameProtocolComposition(8);
         _protocol.Add(Performance);
         if (_content is not null) _protocol.Add(_content);
         if (_presentation is not null) _protocol.Add(_presentation);
+        if (_structuralManifest is not null) _protocol.Add(_structuralManifest);
         _protocol.Add(Playable);
         _protocol.Add(PublicPresentation);
         if (worldCache is not null)
@@ -272,6 +288,7 @@ public sealed class RemotePlayableSession : IDisposable
     {
         EnsureOperational();
         if (_content is not null && !_content.Applied) return false;
+        if (_requireStructuralManifest && _structuralManifest?.Applied != true) return false;
         if (!TryPublishRequiredWorld()) return false;
         return Playable.TrySubmitGuest(in request);
     }
@@ -307,6 +324,7 @@ public sealed class RemotePlayableSession : IDisposable
                 claimed = Performance.TryProcess(in message, payload) ||
                     _content?.TryProcess(in message, payload) == true ||
                     _presentation?.TryProcess(in message, payload) == true ||
+                    _structuralManifest?.TryProcess(in message, payload) == true ||
                     Playable.TryProcess(in message, payload) ||
                     PublicPresentation.TryProcess(in message, payload);
             }
@@ -329,6 +347,7 @@ public sealed class RemotePlayableSession : IDisposable
         _ = Performance.TryProgress();
         _ = _content?.TryProgress();
         _ = _presentation?.TryProgress();
+        _ = _structuralManifest?.TryProgress();
         _ = TryPublishRequiredWorld();
         _ = Playable.TryProgress();
         if (Playable.GetSnapshot().State == RemotePlayableClientState.Active)
@@ -354,6 +373,8 @@ public sealed class RemotePlayableSession : IDisposable
             GetTimingSnapshot())
         {
             Presentation = _presentation?.GetSnapshot() ?? default,
+            StructuralManifest = _structuralManifest?.GetSnapshot() ?? default,
+            StructuralManifestRequired = _requireStructuralManifest,
         };
     }
 

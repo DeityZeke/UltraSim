@@ -3,6 +3,7 @@ using UltraSim.Client.Content;
 using UltraSim.Game.Application;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Protocol;
+using UltraSim.Game.Replication;
 using UltraSim.Game.UI;
 using UltraSim.Game.World;
 using UltraSim.Server.Hosting;
@@ -36,6 +37,8 @@ public sealed class ConceptDemoContentDeployment : IDisposable
     public RemoteContentAuthorization Authorization { get; }
     public RemoteContentAuthorization PresentationAuthorization { get; }
     public ConceptDemoStructuralContent Structural { get; }
+    public RemoteStructuralWorldAuthorization StructuralAuthorization =>
+        Structural.CreateAuthorization();
     public ContentDeploymentSnapshot Snapshot { get; }
 
     /// <summary>
@@ -457,4 +460,8 @@ public sealed class ConceptDemoStructuralContent
             coord == ConceptDemoStructuralSource.EastCoord ? East : null;
         return package is not null;
     }
+
+    public RemoteStructuralWorldAuthorization CreateAuthorization() => new(
+        Manifest, ManifestDefinitionValue, GameWorldState.DefaultSpace,
+        new WorldCompositionRevision(1), ConceptDemoStructuralSource.WestCoord);
 }

@@ -1469,6 +1469,7 @@ public sealed class SharedRemoteGuestPlayableApplicationFactory : IHostedUdpSess
     private readonly ApplicationRealmId _realm;
     private readonly RemoteContentAuthorization? _contentAuthorization;
     private readonly RemoteContentAuthorization? _presentationAuthorization;
+    private readonly RemoteStructuralWorldAuthorization? _structuralAuthorization;
     private readonly UiDefinitionIdentity[] _contentBackedUiDefinitions;
     private readonly UiDefinitionIdentity[] _standardUiDefinitions;
     private readonly RemoteClientProfileAdvertisement? _clientProfile;
@@ -1486,7 +1487,8 @@ public sealed class SharedRemoteGuestPlayableApplicationFactory : IHostedUdpSess
         RemoteServerPerformanceProfile? serverPerformanceProfile = null,
         RemoteChunkPublicationPolicy publicationPolicy = default,
         ulong firstParticipantId = 1,
-        RemoteContentAuthorization? presentationAuthorization = null)
+        RemoteContentAuthorization? presentationAuthorization = null,
+        RemoteStructuralWorldAuthorization? structuralAuthorization = null)
     {
         _authority = authority ?? throw new ArgumentNullException(nameof(authority));
         if (!realm.IsValid) throw new ArgumentOutOfRangeException(nameof(realm));
@@ -1507,6 +1509,11 @@ public sealed class SharedRemoteGuestPlayableApplicationFactory : IHostedUdpSess
             throw new ArgumentException("Presentation authorization must belong to this realm.",
                 nameof(presentationAuthorization));
         _presentationAuthorization = presentationAuthorization;
+        if (structuralAuthorization is not null && contentAuthorization is null)
+            throw new ArgumentException(
+                "Structural World authorization requires exact application Content authorization.",
+                nameof(structuralAuthorization));
+        _structuralAuthorization = structuralAuthorization;
         _contentBackedUiDefinitions = CopyDefinitions(
             contentBackedUiDefinitions, nameof(contentBackedUiDefinitions));
         _standardUiDefinitions = CopyDefinitions(
@@ -1548,7 +1555,8 @@ public sealed class SharedRemoteGuestPlayableApplicationFactory : IHostedUdpSess
             _authority,
             _serverPerformanceProfile,
             _publicationPolicy,
-            _presentationAuthorization);
+            _presentationAuthorization,
+            _structuralAuthorization);
         try
         {
             _authority.RegisterRemoteApplication(application);
