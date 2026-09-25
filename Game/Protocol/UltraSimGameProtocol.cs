@@ -496,6 +496,9 @@ public static partial class UltraSimGameProtocol
             RemoteStructuralPackGrantHeaderCodec.Descriptor with
                 { MaximumEncodedBytes = MaximumStructuralGrantBytes },
             RemoteStructuralPackAppliedMessageCodec.Descriptor,
+            RemoteStructuralWindowAppliedMessageCodec.Descriptor,
+            RemoteStructuralPackRetiredMessageCodec.Descriptor,
+            RemoteChunkInterestRetiredMessageCodec.Descriptor,
         ],
         maximumUnreliableDataFramesPerDatagram: 8);
 

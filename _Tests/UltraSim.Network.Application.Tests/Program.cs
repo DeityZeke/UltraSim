@@ -128,6 +128,7 @@ internal static class Program
             $"{F03bRemotePlayableTests.F05TestCount} F0.5 compiled-UI convergence plus " +
             $"{F03bRemotePlayableTests.F12TestCount} F1.2 semantic/presentation separation plus " +
             $"{F03bRemotePlayableTests.F15TestCount} F1.5 user-presentation isolation plus " +
+            $"{F03bRemotePlayableTests.W7TestCount} W7 structural-delivery tests plus " +
             $"{F03cClientProfileTests.TestCount} F0.3c client-profile and " +
             $"{M00SharedAuthorityTests.TestCount} M0.0 shared-authority tests passed.");
         if (args.Contains("--benchmark-n09", StringComparer.Ordinal))
@@ -244,6 +245,62 @@ static void W7StructuralProtocolV33IsCanonicalAndBounded()
         buffer.AsSpan(0, RemoteStructuralPackAppliedMessageCodec.EncodedSize), out var openedPackProof));
     Equal(packProof, openedPackProof);
     False(UltraSimGameProtocol.IsValidStructuralPackApplied(packProof with { Status = 0 }));
+
+    var window = new RemoteStructuralWindowAppliedMessage
+    {
+        ApplicationSessionEpoch = 17,
+        StructuralSequence = 2,
+        WindowSequence = 3,
+        CenterChunkX = 128,
+        CenterChunkZ = 0,
+        ResidentRadiusChunks = 2,
+        ResidentMask = (1UL << 25) - 1,
+    };
+    True(UltraSimGameProtocol.IsValidStructuralWindowApplied(in window));
+    True(RemoteStructuralWindowAppliedMessageCodec.TryWriteExact(
+        buffer.AsSpan(0, RemoteStructuralWindowAppliedMessageCodec.EncodedSize), in window));
+    True(RemoteStructuralWindowAppliedMessageCodec.TryReadExact(
+        buffer.AsSpan(0, RemoteStructuralWindowAppliedMessageCodec.EncodedSize), out var reopenedWindow));
+    Equal(window, reopenedWindow);
+    False(UltraSimGameProtocol.IsValidStructuralWindowApplied(
+        window with { ResidentMask = 0 }));
+    False(UltraSimGameProtocol.IsValidStructuralWindowApplied(
+        window with { ResidentMask = window.ResidentMask | (1UL << 25) }));
+
+    var retired = new RemoteStructuralPackRetiredMessage
+    {
+        ApplicationSessionEpoch = packProof.ApplicationSessionEpoch,
+        StructuralSequence = packProof.StructuralSequence,
+        PackRequestSequence = packProof.PackRequestSequence,
+        PackX = packProof.PackX,
+        PackZ = packProof.PackZ,
+        PackHash0 = packProof.PackHash0,
+    };
+    True(UltraSimGameProtocol.IsValidStructuralPackRetired(in retired));
+    True(RemoteStructuralPackRetiredMessageCodec.TryWriteExact(
+        buffer.AsSpan(0, RemoteStructuralPackRetiredMessageCodec.EncodedSize), in retired));
+    True(RemoteStructuralPackRetiredMessageCodec.TryReadExact(
+        buffer.AsSpan(0, RemoteStructuralPackRetiredMessageCodec.EncodedSize), out var reopenedRetired));
+    Equal(retired, reopenedRetired);
+    False(UltraSimGameProtocol.IsValidStructuralPackRetired(
+        retired with { PackRequestSequence = 0 }));
+
+    var interestRetired = new RemoteChunkInterestRetiredMessage
+    {
+        ApplicationSessionEpoch = 17,
+        PublicationEpoch = 23,
+        DeliveryCutoff = 41,
+        SpatialSpaceId = 1,
+        ChunkX = 128,
+        ChunkZ = -1,
+    };
+    True(RemoteChunkInterestRetiredMessageCodec.TryWriteExact(
+        buffer.AsSpan(0, RemoteChunkInterestRetiredMessageCodec.EncodedSize),
+        in interestRetired));
+    True(RemoteChunkInterestRetiredMessageCodec.TryReadExact(
+        buffer.AsSpan(0, RemoteChunkInterestRetiredMessageCodec.EncodedSize),
+        out var reopenedInterestRetired));
+    Equal(interestRetired, reopenedInterestRetired);
 }
 
 static void GameProtocolReservationEstimateMatchesConstructedPeers()
@@ -287,7 +344,7 @@ static void GameTrafficClassificationCoversEveryProductionMessage()
     True(seen.All(static value => value));
     False(GameProtocolTrafficClassification.TryClassify(
         new NetworkMessageId(ushort.MaxValue), out _));
-    Equal(55, UltraSimGameProtocol.Manifest.Count);
+    Equal(58, UltraSimGameProtocol.Manifest.Count);
 }
 
 static void RemoteWorkflowMatchesOfflineDirect()

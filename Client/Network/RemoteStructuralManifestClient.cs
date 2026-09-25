@@ -29,7 +29,10 @@ public readonly record struct RemoteStructuralManifestClientSnapshot(
     ulong DuplicateAdvertisements,
     ulong RejectedAdvertisements,
     ulong ProofsQueued,
-    ContentWorldStructuralManifestResolutionStatus Resolution);
+    ContentWorldStructuralManifestResolutionStatus Resolution)
+{
+    public SpatialChunkKey InitialCenter { get; init; }
+}
 
 /// <summary>
 /// World-level validation of an authenticated structural advertisement. Content authorization
@@ -47,6 +50,7 @@ public sealed class RemoteStructuralManifestClient :
     private RemoteStructuralManifestAppliedMessage _proof;
     private PreparedWorldComposition? _composition;
     private WorldPackCoord _initialPack;
+    private SpatialChunkKey _initialCenter;
     private ContentWorldStructuralManifestResolutionStatus _resolution;
     private RemoteStructuralManifestClientState _state;
     private ulong _advertisements;
@@ -73,17 +77,27 @@ public sealed class RemoteStructuralManifestClient :
         get { EnsureOwner(); return _composition; }
     }
 
+    public WorldPackCoord InitialPack
+    {
+        get { EnsureOwner(); return _initialPack; }
+    }
+
+    public SpatialChunkKey InitialCenter
+    {
+        get { EnsureOwner(); return _initialCenter; }
+    }
+
     public RemoteStructuralManifestClientSnapshot GetSnapshot()
     {
         EnsureOwner();
-        return new(_state, _applicationSessionEpoch,
+        return new RemoteStructuralManifestClientSnapshot(_state, _applicationSessionEpoch,
             _advertisement.Header.StructuralSequence,
             _composition?.ManifestFingerprint ?? default,
             _composition?.Revision ?? default,
             _composition?.ManifestEntryCount ?? 0,
             _composition?.PreparedPackCount ?? 0,
             _initialPack, _advertisements, _duplicates, _rejected, _proofsQueued,
-            _resolution);
+            _resolution) { InitialCenter = _initialCenter };
     }
 
     public bool TryProcess(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
@@ -118,6 +132,9 @@ public sealed class RemoteStructuralManifestClient :
         _advertisement = incoming;
         _initialPack = new WorldPackCoord(
             incoming.Header.AnchorPackX, incoming.Header.AnchorPackZ);
+        _initialCenter = new SpatialChunkKey(
+            new SpatialSpaceId(incoming.Header.SpatialSpace),
+            incoming.Header.AnchorChunkX, incoming.Header.AnchorChunkZ);
         _state = RemoteStructuralManifestClientState.AwaitingContent;
         return true;
     }
@@ -155,6 +172,7 @@ public sealed class RemoteStructuralManifestClient :
             !_content.TryResolveStructuralManifest(definition, fingerprint,
                 out WorldStructuralManifest? manifest, out _resolution) ||
             !manifest!.TryGetPack(_initialPack, out _) ||
+            !WorldPackAddressing.Contains(_initialPack, _initialCenter.Coord) ||
             !PreparedWorldComposition.TryCreate(
                 new SpatialSpaceId(header.SpatialSpace),
                 new WorldCompositionRevision(header.WorldCompositionRevision),

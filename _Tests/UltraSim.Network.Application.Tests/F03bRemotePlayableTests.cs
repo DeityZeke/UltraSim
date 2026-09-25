@@ -18,6 +18,8 @@ using UltraSim.Game.World;
 using UltraSim.Network;
 using UltraSim.Server.Hosting;
 using UltraSim.Server.ConceptDemo;
+using UltraSim.Server.Runtime;
+using UltraSim.Spatial;
 using UltraSim.UI;
 
 internal static class F03bRemotePlayableTests
@@ -29,7 +31,7 @@ internal static class F03bRemotePlayableTests
     internal const int A06TestCount = 2;
     internal const int A07TestCount = 2;
     internal const int F12TestCount = 1;
-    internal const int W7TestCount = 3;
+    internal const int W7TestCount = 8;
     internal const int F15TestCount = 1;
     internal const int F04TestCount = 2;
     internal const int F05TestCount = 1;
@@ -57,6 +59,16 @@ internal static class F03bRemotePlayableTests
             W7AuthenticatedManifestProofRetainsZeroPackComposition);
         Run("W7CrossLaneAdmissionWaitsForStructuralProof",
             W7CrossLaneAdmissionWaitsForStructuralProof);
+        Run("W7PackGrantFollowsManifestAndExactRequestLineage",
+            W7PackGrantFollowsManifestAndExactRequestLineage);
+        Run("W7FarIslandDemandRetainsWestPreparedView",
+            W7FarIslandDemandRetainsWestPreparedView);
+        Run("W7FailedFarPackAcquisitionRollsBackWithoutFalseKnowledge",
+            W7FailedFarPackAcquisitionRollsBackWithoutFalseKnowledge);
+        Run("W7ActualFarGateAndSeamTraversal",
+            W7ActualFarGateAndSeamTraversal);
+        Run("W7UnsupportedStructuralOverlayFailsClosed",
+            W7UnsupportedStructuralOverlayFailsClosed);
         Run("F12SemanticEntryPrecedesOptionalActorPresentation",
             F12SemanticEntryPrecedesOptionalActorPresentation);
         Run("F15UserPresentationChangesNeverChangeSemanticActivation",
@@ -918,7 +930,7 @@ internal static class F03bRemotePlayableTests
         using var source = new HttpContentPackageSource(
             FixtureHttpLimits(deployment.Snapshot.ArchiveBytes, allowInsecureHttp: true));
         using var fixture = RemotePlayableFixture.CreateWithConceptDeployment(
-            realm, deployment, source);
+            realm, deployment, source, canonicalStructural: true);
         fixture.DriveUntil(() => fixture.SessionSnapshot.StructuralManifest.State ==
             RemoteStructuralManifestClientState.Applied);
         RemotePlayableSessionSnapshot session = fixture.SessionSnapshot;
@@ -927,12 +939,302 @@ internal static class F03bRemotePlayableTests
             session.StructuralManifest.ManifestFingerprint);
         Equal(new WorldCompositionRevision(1), session.StructuralManifest.Revision);
         Equal(2, session.StructuralManifest.ManifestEntryCount);
-        Equal(0, session.StructuralManifest.PreparedPackCount);
+        True(session.StructuralManifest.PreparedPackCount is 0 or 1);
         Equal(ConceptDemoStructuralSource.WestCoord, session.StructuralManifest.InitialPack);
         True(session.StructuralManifest.ProofsQueued >= 1);
+        fixture.DriveUntil(() => fixture.SessionSnapshot.StructuralPacks.InitialReady &&
+            fixture.SessionSnapshot.StructuralWorld.State == RemoteStructuralWorldState.Ready);
+        session = fixture.SessionSnapshot;
+        Equal(1, session.StructuralPacks.PreparedPackCount);
+        Equal(deployment.Structural.Manifest.Fingerprint,
+            session.StructuralWorld.ManifestFingerprint);
+        Equal(new WorldCompositionRevision(1),
+            session.StructuralWorld.WorldCompositionRevision);
+        Equal(2, session.StructuralWorld.ManifestEntryCount);
+        Equal(1, session.StructuralWorld.PreparedPackCount);
+        True(session.StructuralWorld.InitialStructuralReady);
+        False(session.StructuralWorld.WorldPackFingerprint.IsValid);
+        True(session.StructuralPacks.SemanticResidentChunks is > 0 and < 117);
+        Equal(1UL, session.StructuralPacks.GrantsAccepted);
+        Equal(1UL, session.StructuralPacks.ProofsQueued);
         Equal(RemotePlayableClientState.AwaitingAdmission, session.Playable.State);
         fixture.Admit("Manifest Proof", GameGuestBody.HumanMale);
         Equal(RemotePlayableClientState.Active, fixture.Playable.GetSnapshot().State);
+        fixture.DriveUntil(() => fixture.TryFindPublic(
+            GameWorldPublicPrefabIds.CharacterMale, out _));
+        Equal(0UL, fixture.World.GetSnapshot().RejectedDeliveries);
+    }
+
+    private static void W7FarIslandDemandRetainsWestPreparedView()
+    {
+        ApplicationRealmId realm = new(0x5707, 0x201);
+        using ConceptDemoContentDeployment deployment = ConceptDemoContentDeployment.Create(
+            realm, new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()));
+        using var source = new HttpContentPackageSource(
+            FixtureHttpLimits(deployment.Snapshot.ArchiveBytes, allowInsecureHttp: true));
+        using var fixture = RemotePlayableFixture.CreateWithConceptDeployment(
+            realm, deployment, source);
+        fixture.DriveUntil(() => fixture.SessionSnapshot.StructuralWorld.State ==
+            RemoteStructuralWorldState.Ready);
+        fixture.Admit("Far Island", GameGuestBody.HumanMale);
+        ClientWorldSemanticCache cache = fixture.Cache;
+        PreparedWorldComposition initial = cache.PreparedComposition!;
+        True(initial.TryGetPreparedPack(ConceptDemoStructuralSource.WestCoord,
+            out PreparedWorldPack west));
+        False(initial.TryGetPreparedPack(ConceptDemoStructuralSource.EastCoord, out _));
+        var far = GamePlayableWorld.FarGateDestination.ToChunkKey(cache.StructuralSpace);
+        True(cache.TryProbeStructuralChunk(far, out WorldStructuralChunkProbe before));
+        Equal(WorldStructuralChunkStatus.KnownPackButNotPrepared, before.Status);
+        Equal((long)deployment.Snapshot.WestPackRawBytes,
+            fixture.SessionSnapshot.StructuralPacks.BytesFetched);
+
+        // A desired Far-Island window names the missing manifest Pack; cancellation of the
+        // provisional clamped plan leaves all old semantic and renderer borrowers untouched.
+        True(fixture.StructuralPacks.TryPreparePresentation(
+            GamePlayableWorld.FarGateDestination,
+            out _, out ClientStructuralResidencyPlan provisional));
+        fixture.StructuralPacks.CancelPresentation(provisional);
+        fixture.DriveUntil(() => fixture.SessionSnapshot.StructuralPacks.PreparedPackCount == 2);
+        True(ReferenceEquals(cache, fixture.Cache));
+        PreparedWorldComposition prepared = cache.PreparedComposition!;
+        True(prepared.TryGetPreparedPack(ConceptDemoStructuralSource.WestCoord,
+            out PreparedWorldPack retained));
+        True(ReferenceEquals(west.View, retained.View));
+        True(prepared.TryGetPreparedPack(ConceptDemoStructuralSource.EastCoord, out _));
+        Equal(initial.Manifest.Fingerprint, prepared.Manifest.Fingerprint);
+        Equal(initial.Revision, prepared.Revision);
+        True(cache.TryProbeStructuralChunk(far, out WorldStructuralChunkProbe after));
+        Equal(WorldStructuralChunkStatus.PreparedChunk, after.Status);
+
+        True(fixture.StructuralPacks.TryPreparePresentation(
+            GamePlayableWorld.FarGateDestination,
+            out SpatialChunkKey center, out ClientStructuralResidencyPlan plan));
+        Equal(GamePlayableWorld.FarIslandCenterChunkX, center.Coord.X);
+        fixture.StructuralPacks.CommitPresentation(plan, center);
+        fixture.DriveUntil(() => fixture.StructuralPacks.WindowProofsQueued >= 2);
+        True(fixture.Cache.GetSnapshot().ResidentChunks < 117 + 45);
+        Equal(0UL, fixture.World.GetSnapshot().RejectedDeliveries);
+
+        long coldBytes = fixture.SessionSnapshot.StructuralPacks.BytesFetched;
+        ulong coldAcquisitions = fixture.SessionSnapshot.StructuralPacks.Acquisitions;
+        True(coldBytes > deployment.Snapshot.WestPackRawBytes);
+        True(fixture.StructuralPacks.TryPreparePresentation(
+            GamePlayableWorld.PlayerStart,
+            out SpatialChunkKey central, out ClientStructuralResidencyPlan centralPlan));
+        fixture.StructuralPacks.CommitPresentation(centralPlan, central);
+        fixture.DriveUntil(() => fixture.StructuralPacks.WindowProofsQueued >= 3);
+        True(fixture.StructuralPacks.TryRetireOutsidePresentation(central));
+        True(cache.TryProbeStructuralChunk(far, out WorldStructuralChunkProbe retired));
+        Equal(WorldStructuralChunkStatus.KnownPackButNotPrepared, retired.Status);
+        fixture.DriveUntil(() => fixture.SessionSnapshot.StructuralPacks.RetirementsQueued == 1);
+        True(fixture.StructuralPacks.TryPreparePresentation(
+            GamePlayableWorld.FarGateDestination,
+            out _, out ClientStructuralResidencyPlan warmPlan));
+        fixture.StructuralPacks.CancelPresentation(warmPlan);
+        fixture.DriveUntil(() => fixture.SessionSnapshot.StructuralPacks.Acquisitions > coldAcquisitions &&
+            fixture.SessionSnapshot.StructuralPacks.PreparedPackCount == 2);
+        Equal(coldBytes, fixture.SessionSnapshot.StructuralPacks.BytesFetched);
+        PreparedWorldComposition warmed = cache.PreparedComposition!;
+        True(warmed.TryGetPreparedPack(ConceptDemoStructuralSource.WestCoord,
+            out PreparedWorldPack warmedWest));
+        True(ReferenceEquals(west.View, warmedWest.View));
+        Equal(initial.Manifest.Fingerprint, warmed.Manifest.Fingerprint);
+        Equal(initial.Revision, warmed.Revision);
+    }
+
+    private static void W7FailedFarPackAcquisitionRollsBackWithoutFalseKnowledge()
+    {
+        ApplicationRealmId realm = new(0x5707, 0x203);
+        using ConceptDemoContentDeployment deployment = ConceptDemoContentDeployment.Create(
+            realm, new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()));
+        using var http = new HttpContentPackageSource(
+            FixtureHttpLimits(deployment.Snapshot.ArchiveBytes, allowInsecureHttp: true));
+        var source = new RejectEastPackSource(http, deployment.Structural.East.Package);
+        using var fixture = RemotePlayableFixture.CreateWithConceptDeployment(
+            realm, deployment, source);
+        fixture.DriveUntil(() => fixture.SessionSnapshot.StructuralPacks.InitialReady);
+        fixture.Admit("Pack Failure", GameGuestBody.HumanFemale);
+        ClientWorldSemanticCache cache = fixture.Cache;
+        PreparedWorldComposition initial = cache.PreparedComposition!;
+        True(initial.TryGetPreparedPack(ConceptDemoStructuralSource.WestCoord,
+            out PreparedWorldPack west));
+        ClientWorldSemanticCacheSnapshot baseline = cache.GetSnapshot();
+        long bytesBefore = fixture.SessionSnapshot.StructuralPacks.BytesFetched;
+        True(fixture.StructuralPacks.TryPreparePresentation(
+            GamePlayableWorld.FarGateDestination,
+            out _, out ClientStructuralResidencyPlan provisional));
+        fixture.StructuralPacks.CancelPresentation(provisional);
+        fixture.DriveUntil(() => fixture.SessionSnapshot.StructuralPacks.Acquisitions >= 2 &&
+            fixture.SessionSnapshot.StructuralPacks.PendingRequests == 0);
+        Equal(1, cache.PreparedComposition!.PreparedPackCount);
+        True(cache.PreparedComposition.TryGetPreparedPack(
+            ConceptDemoStructuralSource.WestCoord, out PreparedWorldPack retained));
+        True(ReferenceEquals(west.View, retained.View));
+        Equal(initial.Manifest.Fingerprint, cache.PreparedComposition.Manifest.Fingerprint);
+        Equal(initial.Revision, cache.PreparedComposition.Revision);
+        Equal(baseline.ResidentChunks, cache.GetSnapshot().ResidentChunks);
+        Equal(bytesBefore, fixture.SessionSnapshot.StructuralPacks.BytesFetched);
+        SpatialChunkKey far = GamePlayableWorld.FarGateDestination
+            .ToChunkKey(cache.StructuralSpace);
+        True(cache.TryProbeStructuralChunk(far, out WorldStructuralChunkProbe probe));
+        Equal(WorldStructuralChunkStatus.KnownPackButNotPrepared, probe.Status);
+        Equal(0UL, fixture.World.GetSnapshot().RejectedDeliveries);
+    }
+
+    private static void W7ActualFarGateAndSeamTraversal()
+    {
+        ApplicationRealmId realm = new(0x5707, 0x202);
+        using ConceptDemoContentDeployment deployment = ConceptDemoContentDeployment.Create(
+            realm, new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()));
+        using var source = new HttpContentPackageSource(
+            FixtureHttpLimits(deployment.Snapshot.ArchiveBytes, allowInsecureHttp: true));
+        using var fixture = RemotePlayableFixture.CreateWithConceptDeployment(
+            realm, deployment, source, sharedAuthority: true);
+        fixture.EnableStructuralTracking();
+        fixture.DriveUntil(() => fixture.SessionSnapshot.StructuralPacks.InitialReady);
+        fixture.Admit("Gate Traveller", GameGuestBody.HumanFemale);
+        ClientWorldSemanticCache cache = fixture.Cache;
+        WorldStructuralManifestFingerprint manifest = cache.PreparedComposition!.Manifest.Fingerprint;
+        WorldCompositionRevision revision = cache.PreparedComposition.Revision;
+
+        // This controlled setup bypasses unrelated woods/cabin route-finding. The Gate
+        // interaction, distant authority relocation, structural demand, and seam walking below
+        // still pass through the real shared Game application and authenticated UDP path.
+        fixture.RelocateForGateSetup(GamePlayableWorld.CentralFarGatePosition);
+        fixture.DriveUntil(() => fixture.Playable.GetSnapshot().Position ==
+            GamePlayableWorld.CentralFarGatePosition);
+        fixture.DriveUntil(() => fixture.TryFindPublic(
+            GameWorldPublicPrefabIds.FarGate, out WorldPublicRecord gate) &&
+            gate.Position == GamePlayableWorld.CentralFarGatePosition);
+        True(fixture.TryFindPublic(GameWorldPublicPrefabIds.FarGate,
+            GamePlayableWorld.CentralFarGatePosition, out WorldPublicRecord centralGate));
+        Interact(centralGate);
+        fixture.DriveUntil(() => fixture.Playable.GetSnapshot().Position.Chunk.X ==
+            GamePlayableWorld.FarIslandCenterChunkX);
+        fixture.DriveUntil(() => fixture.SessionSnapshot.StructuralPacks.PreparedPackCount == 2 &&
+            fixture.StructuralPacks.WindowProofsQueued >= 2);
+        True(ReferenceEquals(cache, fixture.Cache));
+        Equal(manifest, cache.PreparedComposition!.Manifest.Fingerprint);
+        Equal(revision, cache.PreparedComposition.Revision);
+
+        long seam = (long)GamePlayableWorld.FarIslandCenterChunkX *
+            GameWorldSpatialProfile.WorldChunkEdgeUnits;
+        MoveTo(Position(seam - 500, 16_000));
+        fixture.DriveUntil(() => fixture.Playable.GetSnapshot().Position.Chunk.X == 127);
+        MoveTo(Position(seam + 500, 16_000));
+        fixture.DriveUntil(() => fixture.Playable.GetSnapshot().Position.Chunk.X == 128);
+        MoveTo(Position(seam - 500, 16_000));
+        fixture.DriveUntil(() => fixture.Playable.GetSnapshot().Position.Chunk.X == 127);
+
+        MoveTo(GamePlayableWorld.FarReturnGatePosition);
+        fixture.DriveUntil(() => fixture.TryFindPublic(GameWorldPublicPrefabIds.FarGate,
+            GamePlayableWorld.FarReturnGatePosition, out _));
+        True(fixture.TryFindPublic(GameWorldPublicPrefabIds.FarGate,
+            GamePlayableWorld.FarReturnGatePosition, out WorldPublicRecord returnGate));
+        Interact(returnGate);
+        fixture.DriveUntil(() => fixture.Playable.GetSnapshot().Position.Chunk.X == 0);
+        fixture.DriveUntil(() => fixture.ServerSnapshot.StructuralWindowCenter.Coord.X == 0);
+        fixture.DriveUntil(() => fixture.ServerInterestAnchor.Chunk.X == 0);
+        var infos = new ClientSemanticChunkInfo[cache.Limits.MaximumResidentChunks];
+        fixture.DriveUntil(() =>
+        {
+            True(cache.TryCopyResidentInfo(infos, out int count, out _));
+            for (int i = 0; i < count; i++)
+            {
+                WorldPackAddressing.ToPackLocal(infos[i].Key.Coord,
+                    out WorldPackCoord owner, out _);
+                if (owner == ConceptDemoStructuralSource.EastCoord &&
+                    infos[i].PublicRecordCount != 0) return false;
+            }
+            return true;
+        });
+        True(fixture.StructuralPacks.TryPreparePresentation(
+            fixture.Playable.GetSnapshot().Position,
+            out SpatialChunkKey settledCenter, out ClientStructuralResidencyPlan settledPlan));
+        fixture.StructuralPacks.CommitPresentation(settledPlan, settledCenter);
+        fixture.DriveUntil(() => fixture.StructuralPacks.TryRetireOutsidePresentation(
+            settledCenter));
+        fixture.DriveUntil(() => fixture.SessionSnapshot.StructuralPacks.RetirementsQueued != 0);
+        True(cache.TryProbeStructuralChunk(GamePlayableWorld.FarReturnGatePosition
+            .ToChunkKey(cache.StructuralSpace), out WorldStructuralChunkProbe retired));
+        Equal(WorldStructuralChunkStatus.KnownPackButNotPrepared, retired.Status);
+        True(ReferenceEquals(cache, fixture.Cache));
+        Equal(manifest, cache.PreparedComposition!.Manifest.Fingerprint);
+        Equal(revision, cache.PreparedComposition.Revision);
+        True(fixture.ServerSnapshot.InterestRetirementsQueued > 0);
+        True(fixture.ServerSnapshot.InterestRetirementsQueued < 128);
+        True(fixture.World.GetSnapshot().RetiredInterestCount > 0);
+        True(fixture.World.GetSnapshot().RejectedDeliveries <= 1);
+        Console.WriteLine("EVIDENCE W7 actual_gate_seam_return=" +
+            $"pass public_retirements={fixture.World.GetSnapshot().RetiredInterestCount} " +
+            $"stale_inflight_rejections={fixture.World.GetSnapshot().RejectedDeliveries}");
+
+        void MoveTo(WorldPosition destination)
+        {
+            fixture.DriveUntil(() => !fixture.Playable.GetSnapshot().CommandRetainedLocally);
+            True(fixture.Playable.TrySubmitCommand(new ClientWorldCommandIntent(
+                GameLocomotionUpdate.CreateDestination(destination.GlobalXMillimeters,
+                    destination.GlobalZMillimeters), GamePlayerActions.None, true)));
+            fixture.DriveUntil(() =>
+            {
+                WorldPosition current = fixture.Playable.GetSnapshot().Position;
+                long dx = current.GlobalXMillimeters - destination.GlobalXMillimeters;
+                long dz = current.GlobalZMillimeters - destination.GlobalZMillimeters;
+                return dx * dx + dz * dz < 1_000L * 1_000L;
+            });
+        }
+
+        void Interact(in WorldPublicRecord gate)
+        {
+            fixture.DriveUntil(() => !fixture.Playable.GetSnapshot().CommandRetainedLocally);
+            True(fixture.Playable.TrySubmitCommand(new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Stop, GamePlayerActions.Interact, true), gate.Id));
+        }
+
+        static WorldPosition Position(long x, long z)
+        {
+            True(WorldPosition.TryFromGlobalMillimeters(x, 1_000, z,
+                out WorldPosition position));
+            return position;
+        }
+    }
+
+    private static void W7UnsupportedStructuralOverlayFailsClosed()
+    {
+        ConceptDemoStructuralSource source = GamePlayableWorld.CreateConceptDemoStructuralSource();
+        PreparedWorldComposition baseWorld = source.Prepare(ConceptDemoStructuralSource.CreateBinding());
+        var authorization = new RemoteStructuralWorldAuthorization(
+            source.Manifest, ConceptDemoStructuralContent.ManifestDefinitionValue,
+            GameWorldState.DefaultSpace, new WorldCompositionRevision(1),
+            ConceptDemoStructuralSource.WestCoord,
+            GamePlayableWorld.PlayerStart.ToChunkKey(GameWorldState.DefaultSpace));
+        True(authorization.MatchesUnmodifiedAuthority(baseWorld));
+        True(baseWorld.TryGetPreparedPack(ConceptDemoStructuralSource.WestCoord,
+            out PreparedWorldPack west));
+        True(baseWorld.TryGetPreparedPack(ConceptDemoStructuralSource.EastCoord,
+            out PreparedWorldPack east));
+        SpatialChunkKey changedKey = default;
+        for (int index = 0; index < west.View.BaseWorld.ChunkCount; index++)
+        {
+            True(west.View.BaseWorld.TryGetChunkKey(index, out SpatialChunkKey key));
+            if (!west.View.BaseWorld.TryGetFrozenStatics(key,
+                    out WorldFrozenStaticChunkView statics) || statics.Count == 0) continue;
+            changedKey = key;
+            break;
+        }
+        True(changedKey.Space.IsValid);
+        var builder = new WorldMutableOverlayBuilder(west.View.BaseWorld);
+        True(builder.TryReplaceFrozenStatics(changedKey, []));
+        True(builder.TryBuild(out WorldMutableOverlay? overlay));
+        True(overlay!.ChangedChunkCount != 0);
+        True(PreparedWorldComposition.TryCreate(baseWorld.Space, baseWorld.Revision,
+            source.Manifest,
+            [new PreparedWorldPack(ConceptDemoStructuralSource.WestCoord,
+                new WorldPreparedView(west.View.BaseWorld, overlay)), east],
+            out PreparedWorldComposition? changed, out _));
+        True(changed!.TryValidateComplete(out _));
+        False(authorization.MatchesUnmodifiedAuthority(changed));
+        False(authorization.MatchesUnmodifiedAuthority(null));
     }
 
     private static void W7CrossLaneAdmissionWaitsForStructuralProof()
@@ -945,7 +1247,8 @@ internal static class F03bRemotePlayableTests
         var structural = new RemoteStructuralWorldAuthorization(
             source.Manifest, ConceptDemoStructuralContent.ManifestDefinitionValue,
             GameWorldState.DefaultSpace, new WorldCompositionRevision(1),
-            ConceptDemoStructuralSource.WestCoord);
+            ConceptDemoStructuralSource.WestCoord,
+            GamePlayableWorld.PlayerStart.ToChunkKey(GameWorldState.DefaultSpace));
         True(ProtocolLoopback.TryCreate(
             NetworkProtocolLimits.Default, new DeterministicDatagramLimits(2_048, 1_200),
             default, out ProtocolLoopback? loop, out _, UltraSimGameProtocol.Manifest));
@@ -1001,6 +1304,288 @@ internal static class F03bRemotePlayableTests
             True(server.GetSnapshot().GuestAdmitted);
             True(server.TryProcess(in guestMessage, guestBytes[..guestLength]));
             True(server.GetSnapshot().GuestAdmitted);
+        }
+    }
+
+    private static void W7PackGrantFollowsManifestAndExactRequestLineage()
+    {
+        CabinContentOracle oracle = CabinContentOracle.Create();
+        ApplicationRealmId realm = CabinContentOracle.FixtureRealm;
+        using ConceptDemoContentDeployment deployment = ConceptDemoContentDeployment.Create(
+            realm, new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()));
+        RemoteContentAuthorization content = RemoteContentAuthorizationProjection.Create(
+            oracle.Replace.Plan, oracle.Replace.Catalog.Fingerprint,
+            [RemoteReplaceAcquisition(oracle)]);
+        RemoteStructuralWorldAuthorization structural = deployment.StructuralAuthorization;
+        Equal(2, structural.AvailablePackageCount);
+        True(ProtocolLoopback.TryCreate(
+            NetworkProtocolLimits.Default, new DeterministicDatagramLimits(2_048, 1_200),
+            default, out ProtocolLoopback? loop, out _, UltraSimGameProtocol.Manifest));
+        using (loop)
+        using (var server = new RemoteGuestPlayableApplication(
+            loop!.Server, realm, new ParticipantId(1), 77,
+            contentAuthorization: content, structuralAuthorization: structural))
+        {
+            Span<byte> requestBytes = stackalloc byte[RemoteStructuralPackRequestMessageCodec.EncodedSize];
+            var request = new RemoteStructuralPackRequestMessage
+            {
+                ApplicationSessionEpoch = 77,
+                StructuralSequence = 1,
+                PackRequestSequence = 1,
+                PackX = ConceptDemoStructuralSource.WestCoord.X,
+                PackZ = ConceptDemoStructuralSource.WestCoord.Z,
+            };
+            var requestMessage = new NetworkDeliveredMessage(
+                NetworkLane.Control, RemoteStructuralPackRequestMessageCodec.Descriptor.Id,
+                RemoteStructuralPackRequestMessageCodec.Descriptor.Version, default,
+                requestBytes.Length);
+            True(RemoteStructuralPackRequestMessageCodec.TryWriteExact(requestBytes, in request));
+            True(server.TryProcess(in requestMessage, requestBytes));
+            Equal(0UL, server.GetSnapshot().StructuralPackRequests);
+            Equal(1UL, server.GetSnapshot().RejectedStructuralPackMessages);
+
+            RemoteContentSetAppliedMessage contentProof = CreateAppliedProof(oracle, 77);
+            Span<byte> contentBytes = stackalloc byte[RemoteContentSetAppliedMessageCodec.EncodedSize];
+            True(RemoteContentSetAppliedMessageCodec.TryWriteExact(contentBytes, in contentProof));
+            True(server.TryProcess(new NetworkDeliveredMessage(
+                NetworkLane.Control, RemoteContentSetAppliedMessageCodec.Descriptor.Id,
+                RemoteContentSetAppliedMessageCodec.Descriptor.Version, default,
+                contentBytes.Length), contentBytes));
+            RemoteStructuralWorldAdvertisementHeader header =
+                structural.CreateAdvertisement(77, 1).Header;
+            var manifestProof = new RemoteStructuralManifestAppliedMessage
+            {
+                ApplicationSessionEpoch = 77,
+                StructuralSequence = 1,
+                ManifestHash0 = header.ManifestHash0,
+                ManifestHash1 = header.ManifestHash1,
+                ManifestHash2 = header.ManifestHash2,
+                ManifestHash3 = header.ManifestHash3,
+                Status = RemoteStructuralApplyStatus.Applied,
+            };
+            Span<byte> manifestBytes = stackalloc byte[
+                RemoteStructuralManifestAppliedMessageCodec.EncodedSize];
+            True(RemoteStructuralManifestAppliedMessageCodec.TryWriteExact(
+                manifestBytes, in manifestProof));
+            True(server.TryProcess(new NetworkDeliveredMessage(
+                NetworkLane.Control, RemoteStructuralManifestAppliedMessageCodec.Descriptor.Id,
+                RemoteStructuralManifestAppliedMessageCodec.Descriptor.Version, default,
+                manifestBytes.Length), manifestBytes));
+
+            True(server.TryProcess(in requestMessage, requestBytes));
+            True(server.TryProcess(in requestMessage, requestBytes));
+            Equal(1UL, server.GetSnapshot().StructuralPackRequests);
+            Equal(0UL, server.GetSnapshot().StructuralPackGrantsQueued);
+            True(server.TryProgress());
+            Equal(1UL, server.GetSnapshot().StructuralPackGrantsQueued);
+            RemoteStructuralPackGrant? grant = null;
+            for (int step = 0; step < 256 && grant is null; step++)
+            {
+                loop.Pump();
+                while (loop.Client.TryPeekReceived(
+                           out NetworkDeliveredMessage delivered, out ReadOnlySpan<byte> payload))
+                {
+                    try
+                    {
+                        if (delivered.MessageId == RemoteStructuralPackGrantHeaderCodec.Descriptor.Id)
+                            True(UltraSimGameProtocol.TryReadStructuralPackGrant(payload, out grant));
+                    }
+                    finally { _ = loop.Client.TryConsumeReceived(); }
+                }
+            }
+            True(grant is not null);
+            Equal(deployment.Structural.West.Package.Value!, grant!.PackageId);
+            Equal(ConceptDemoStructuralSource.WestCoord.X, grant.Header.PackX);
+            Equal(ConceptDemoStructuralSource.WestCoord.Z, grant.Header.PackZ);
+            Equal(deployment.Structural.West.ManifestHash.Part0,
+                grant.Header.PackageManifestHash0);
+            True(deployment.Structural.Manifest.TryGetPack(
+                ConceptDemoStructuralSource.WestCoord, out WorldPackFingerprint west));
+            Equal(west.Part0, grant.Header.PackHash0);
+            SpatialChunkKey initialCenter = structural.InitialCenter;
+            var windowProof = new RemoteStructuralWindowAppliedMessage
+            {
+                ApplicationSessionEpoch = 77,
+                StructuralSequence = 1,
+                WindowSequence = 1,
+                CenterChunkX = initialCenter.Coord.X,
+                CenterChunkZ = initialCenter.Coord.Z,
+                ResidentRadiusChunks = 2,
+                ResidentMask = (1UL << 25) - 1,
+            };
+            Span<byte> windowBytes = stackalloc byte[
+                RemoteStructuralWindowAppliedMessageCodec.EncodedSize];
+            True(RemoteStructuralWindowAppliedMessageCodec.TryWriteExact(
+                windowBytes, in windowProof));
+            var windowMessage = new NetworkDeliveredMessage(
+                NetworkLane.Control, RemoteStructuralWindowAppliedMessageCodec.Descriptor.Id,
+                RemoteStructuralWindowAppliedMessageCodec.Descriptor.Version, default,
+                windowBytes.Length);
+            True(server.TryProcess(in windowMessage, windowBytes));
+            Equal(0UL, server.GetSnapshot().StructuralWindowSequence);
+            Equal(1UL, server.GetSnapshot().RejectedStructuralWindowProofs);
+            var packProof = new RemoteStructuralPackAppliedMessage
+            {
+                ApplicationSessionEpoch = 77,
+                StructuralSequence = 1,
+                PackRequestSequence = 1,
+                PackX = grant.Header.PackX,
+                PackZ = grant.Header.PackZ,
+                PackHash0 = grant.Header.PackHash0,
+                PackHash1 = grant.Header.PackHash1,
+                PackHash2 = grant.Header.PackHash2,
+                PackHash3 = grant.Header.PackHash3,
+                Status = RemoteStructuralApplyStatus.Applied,
+            };
+            Span<byte> proofBytes = stackalloc byte[RemoteStructuralPackAppliedMessageCodec.EncodedSize];
+            True(RemoteStructuralPackAppliedMessageCodec.TryWriteExact(proofBytes, in packProof));
+            var proofMessage = new NetworkDeliveredMessage(
+                NetworkLane.Control, RemoteStructuralPackAppliedMessageCodec.Descriptor.Id,
+                RemoteStructuralPackAppliedMessageCodec.Descriptor.Version, default,
+                proofBytes.Length);
+            True(server.TryProcess(in proofMessage, proofBytes));
+            True(server.TryProcess(in proofMessage, proofBytes));
+            Equal(1UL, server.GetSnapshot().StructuralPackProofsAccepted);
+            True(server.TryProcess(in windowMessage, windowBytes));
+            True(server.TryProcess(in windowMessage, windowBytes));
+            Equal(1UL, server.GetSnapshot().StructuralWindowSequence);
+            Equal(initialCenter, server.GetSnapshot().StructuralWindowCenter);
+            windowProof.ResidentRadiusChunks = 8;
+            True(RemoteStructuralWindowAppliedMessageCodec.TryWriteExact(
+                windowBytes, in windowProof));
+            True(server.TryProcess(in windowMessage, windowBytes));
+            Equal(2UL, server.GetSnapshot().RejectedStructuralWindowProofs);
+
+            request.PackRequestSequence = 2;
+            request.PackX = 100;
+            True(RemoteStructuralPackRequestMessageCodec.TryWriteExact(requestBytes, in request));
+            True(server.TryProcess(in requestMessage, requestBytes));
+            Equal(2UL, server.GetSnapshot().RejectedStructuralPackMessages);
+            request.PackX = ConceptDemoStructuralSource.EastCoord.X;
+            True(RemoteStructuralPackRequestMessageCodec.TryWriteExact(requestBytes, in request));
+            True(server.TryProcess(in requestMessage, requestBytes));
+            Equal(2UL, server.GetSnapshot().StructuralPackRequests);
+            packProof.PackRequestSequence = 2;
+            packProof.PackX = ConceptDemoStructuralSource.EastCoord.X;
+            True(RemoteStructuralPackAppliedMessageCodec.TryWriteExact(proofBytes, in packProof));
+            True(server.TryProcess(in proofMessage, proofBytes));
+            Equal(3UL, server.GetSnapshot().RejectedStructuralPackMessages);
+
+            True(server.TryProgress());
+            RemoteStructuralPackGrant? eastGrant = null;
+            for (int step = 0; step < 256 && eastGrant is null; step++)
+            {
+                loop.Pump();
+                while (loop.Client.TryPeekReceived(
+                           out NetworkDeliveredMessage delivered, out ReadOnlySpan<byte> payload))
+                {
+                    try
+                    {
+                        if (delivered.MessageId == RemoteStructuralPackGrantHeaderCodec.Descriptor.Id &&
+                            UltraSimGameProtocol.TryReadStructuralPackGrant(payload,
+                                out RemoteStructuralPackGrant? candidate) &&
+                            candidate!.Header.PackRequestSequence == 2)
+                            eastGrant = candidate;
+                    }
+                    finally { _ = loop.Client.TryConsumeReceived(); }
+                }
+            }
+            True(eastGrant is not null);
+            packProof.PackHash0 = eastGrant!.Header.PackHash0;
+            packProof.PackHash1 = eastGrant.Header.PackHash1;
+            packProof.PackHash2 = eastGrant.Header.PackHash2;
+            packProof.PackHash3 = eastGrant.Header.PackHash3;
+            True(RemoteStructuralPackAppliedMessageCodec.TryWriteExact(proofBytes, in packProof));
+            True(server.TryProcess(in proofMessage, proofBytes));
+            Equal(2UL, server.GetSnapshot().StructuralPackProofsAccepted);
+            var retired = new RemoteStructuralPackRetiredMessage
+            {
+                ApplicationSessionEpoch = 77,
+                StructuralSequence = 1,
+                PackRequestSequence = 2,
+                PackX = packProof.PackX,
+                PackZ = packProof.PackZ,
+                PackHash0 = packProof.PackHash0,
+                PackHash1 = packProof.PackHash1,
+                PackHash2 = packProof.PackHash2,
+                PackHash3 = packProof.PackHash3,
+            };
+            Span<byte> retiredBytes = stackalloc byte[
+                RemoteStructuralPackRetiredMessageCodec.EncodedSize];
+            True(RemoteStructuralPackRetiredMessageCodec.TryWriteExact(
+                retiredBytes, in retired));
+            var retiredMessage = new NetworkDeliveredMessage(
+                NetworkLane.Control, RemoteStructuralPackRetiredMessageCodec.Descriptor.Id,
+                RemoteStructuralPackRetiredMessageCodec.Descriptor.Version, default,
+                retiredBytes.Length);
+            True(server.TryProcess(in retiredMessage, retiredBytes));
+            True(server.TryProcess(in retiredMessage, retiredBytes));
+            Equal(1UL, server.GetSnapshot().StructuralPackRetirements);
+            retired.PackHash0++;
+            True(RemoteStructuralPackRetiredMessageCodec.TryWriteExact(
+                retiredBytes, in retired));
+            True(server.TryProcess(in retiredMessage, retiredBytes));
+            Equal(4UL, server.GetSnapshot().RejectedStructuralPackMessages);
+
+            // Authenticated but stale/contradictory controls cannot reopen knowledge from a
+            // previous lifetime or claim a different Pack under one request identity.
+            ulong rejectedManifest = server.GetSnapshot().RejectedStructuralManifestProofs;
+            manifestProof.ApplicationSessionEpoch = 76;
+            True(RemoteStructuralManifestAppliedMessageCodec.TryWriteExact(
+                manifestBytes, in manifestProof));
+            True(server.TryProcess(new NetworkDeliveredMessage(
+                NetworkLane.Control, RemoteStructuralManifestAppliedMessageCodec.Descriptor.Id,
+                RemoteStructuralManifestAppliedMessageCodec.Descriptor.Version, default,
+                manifestBytes.Length), manifestBytes));
+            Equal(rejectedManifest + 1, server.GetSnapshot().RejectedStructuralManifestProofs);
+            manifestProof.ApplicationSessionEpoch = 77;
+            manifestProof.ManifestHash0 ^= 1;
+            True(RemoteStructuralManifestAppliedMessageCodec.TryWriteExact(
+                manifestBytes, in manifestProof));
+            True(server.TryProcess(new NetworkDeliveredMessage(
+                NetworkLane.Control, RemoteStructuralManifestAppliedMessageCodec.Descriptor.Id,
+                RemoteStructuralManifestAppliedMessageCodec.Descriptor.Version, default,
+                manifestBytes.Length), manifestBytes));
+            Equal(rejectedManifest + 2, server.GetSnapshot().RejectedStructuralManifestProofs);
+            True(server.GetSnapshot().StructuralManifestApplied);
+
+            ulong rejectedPacks = server.GetSnapshot().RejectedStructuralPackMessages;
+            request.ApplicationSessionEpoch = 76;
+            request.PackRequestSequence = 3;
+            request.PackX = ConceptDemoStructuralSource.WestCoord.X;
+            True(RemoteStructuralPackRequestMessageCodec.TryWriteExact(requestBytes, in request));
+            True(server.TryProcess(in requestMessage, requestBytes));
+            Equal(rejectedPacks + 1, server.GetSnapshot().RejectedStructuralPackMessages);
+            Equal(2UL, server.GetSnapshot().StructuralPackRequests);
+
+            packProof.ApplicationSessionEpoch = 76;
+            True(RemoteStructuralPackAppliedMessageCodec.TryWriteExact(proofBytes, in packProof));
+            True(server.TryProcess(in proofMessage, proofBytes));
+            packProof.ApplicationSessionEpoch = 77;
+            packProof.PackHash0 ^= 1;
+            True(RemoteStructuralPackAppliedMessageCodec.TryWriteExact(proofBytes, in packProof));
+            True(server.TryProcess(in proofMessage, proofBytes));
+            Equal(rejectedPacks + 3, server.GetSnapshot().RejectedStructuralPackMessages);
+            Equal(2UL, server.GetSnapshot().StructuralPackProofsAccepted);
+
+            ulong rejectedWindows = server.GetSnapshot().RejectedStructuralWindowProofs;
+            windowProof.ApplicationSessionEpoch = 76;
+            True(RemoteStructuralWindowAppliedMessageCodec.TryWriteExact(
+                windowBytes, in windowProof));
+            True(server.TryProcess(in windowMessage, windowBytes));
+            Equal(rejectedWindows + 1, server.GetSnapshot().RejectedStructuralWindowProofs);
+            Equal(1UL, server.GetSnapshot().StructuralWindowSequence);
+
+            // A contradictory same-lineage request faults this application. Run it last:
+            // it is stronger than a soft rejection and must stop grant progression.
+            request.ApplicationSessionEpoch = 77;
+            request.PackRequestSequence = 2;
+            True(RemoteStructuralPackRequestMessageCodec.TryWriteExact(requestBytes, in request));
+            True(server.TryProcess(in requestMessage, requestBytes));
+            Equal(2UL, server.GetSnapshot().StructuralPackRequests);
+            ulong grantsBeforeFault = server.GetSnapshot().StructuralPackGrantsQueued;
+            True(server.TryProgress());
+            Equal(grantsBeforeFault, server.GetSnapshot().StructuralPackGrantsQueued);
         }
     }
 
@@ -1071,6 +1656,43 @@ internal static class F03bRemotePlayableTests
                         Equal(expected.Fingerprint, opened!.Fingerprint);
                         True(opened.TryValidateSpatialWindow(coord, out _, out _));
                     }
+                    WorldContentBinding binding =
+                        RemoteConceptDemoWorldProfile.CreateRequiredBinding().ContentBinding;
+                    True(ContentWorldPackResolver.TryResolveExactPackage(
+                        cache, scope, acquisition.Package, acquisition.ManifestHash,
+                        expected.Fingerprint, coord, GameWorldState.DefaultSpace, binding,
+                        out BoundWorldPack? bound, out ContentWorldPackResolutionResult resolution));
+                    True(resolution.IsResolved);
+                    Equal(expected.Fingerprint, bound!.Fingerprint);
+                    WorldPackFingerprint otherFingerprint = expected.Fingerprint ==
+                        authored.West.Fingerprint
+                        ? authored.East.Fingerprint : authored.West.Fingerprint;
+                    False(ContentWorldPackResolver.TryResolveExactPackage(
+                        cache, scope, acquisition.Package, acquisition.ManifestHash,
+                        otherFingerprint, coord, GameWorldState.DefaultSpace, binding,
+                        out _, out resolution));
+                    Equal(ContentWorldPackResolutionStatus.PackFingerprintMismatch,
+                        resolution.Status);
+                    False(ContentWorldPackResolver.TryResolveExactPackage(
+                        cache, scope, acquisition.Package, acquisition.ManifestHash,
+                        expected.Fingerprint, coord, new SpatialSpaceId(2), binding,
+                        out _, out resolution));
+                    Equal(ContentWorldPackResolutionStatus.PackSpaceMismatch,
+                        resolution.Status);
+                    var incompleteBinding = new WorldContentBinding(
+                        binding.Fingerprint, [GameTerrainMaterialIds.Grass]);
+                    False(ContentWorldPackResolver.TryResolveExactPackage(
+                        cache, scope, acquisition.Package, acquisition.ManifestHash,
+                        expected.Fingerprint, coord, GameWorldState.DefaultSpace,
+                        incompleteBinding, out _, out resolution));
+                    Equal(ContentWorldPackResolutionStatus.ContentBindingFailure,
+                        resolution.Status);
+                    False(ContentWorldPackResolver.TryResolveExactPackage(
+                        cache, scope, acquisition.Package, acquisition.ManifestHash,
+                        expected.Fingerprint, new WorldPackCoord(99, 99),
+                        GameWorldState.DefaultSpace, binding,
+                        out _, out resolution));
+                    Equal(ContentWorldPackResolutionStatus.PackWindowMismatch, resolution.Status);
                 }
             }
         }
@@ -1128,8 +1750,8 @@ internal static class F03bRemotePlayableTests
         fixture.DriveUntil(() => fixture.SessionSnapshot.Presentation.Generation.RealmSelections == 2);
         RemotePlayableSessionSnapshot after = fixture.SessionSnapshot;
         Equal(semanticBefore, fixture.Content.SemanticActivation);
-        Equal(before.StructuralWorld.WorldPackFingerprint,
-            after.StructuralWorld.WorldPackFingerprint);
+        Equal(before.StructuralManifest.ManifestFingerprint,
+            after.StructuralManifest.ManifestFingerprint);
         Equal(before.Playable.Participant, after.Playable.Participant);
         True(before.Presentation.Generation.Generation !=
             after.Presentation.Generation.Generation);
@@ -1222,7 +1844,8 @@ internal static class F03bRemotePlayableTests
             fixture.SessionSnapshot.Presentation.Generation.RealmSelections == 2);
 
         AuthorizedSemanticActivation semantic = fixture.Content!.SemanticActivation;
-        WorldPackFingerprint world = fixture.SessionSnapshot.StructuralWorld.WorldPackFingerprint;
+        WorldStructuralManifestFingerprint world =
+            fixture.SessionSnapshot.StructuralManifest.ManifestFingerprint;
         var participant = fixture.Playable.GetSnapshot().Participant;
         (ContentPackageManifest manifest, ContentFilePayload[] payloads) =
             CreateF15UserActorPack();
@@ -1240,7 +1863,7 @@ internal static class F03bRemotePlayableTests
         PresentationGenerationSnapshot enabled =
             fixture.SessionSnapshot.Presentation.Generation;
         Equal(semantic, fixture.Content.SemanticActivation);
-        Equal(world, fixture.SessionSnapshot.StructuralWorld.WorldPackFingerprint);
+        Equal(world, fixture.SessionSnapshot.StructuralManifest.ManifestFingerprint);
         Equal(participant, fixture.Playable.GetSnapshot().Participant);
 
         True(fixture.ContentStore.TryInstallUserResourcePack(
@@ -1264,7 +1887,7 @@ internal static class F03bRemotePlayableTests
             fixture.SessionSnapshot.Presentation.Generation;
         True(enabled.Generation != disabled.Generation);
         Equal(semantic, fixture.Content.SemanticActivation);
-        Equal(world, fixture.SessionSnapshot.StructuralWorld.WorldPackFingerprint);
+        Equal(world, fixture.SessionSnapshot.StructuralManifest.ManifestFingerprint);
         Equal(participant, fixture.Playable.GetSnapshot().Participant);
         Console.WriteLine(
             $"EVIDENCE F1.5 remote_semantic_plan={semantic.PlanHash} " +
@@ -2339,6 +2962,37 @@ internal static class F03bRemotePlayableTests
         }
     }
 
+    private sealed class RejectEastPackSource : IContentPackageSource
+    {
+        private readonly HttpContentPackageSource _http;
+        private readonly ContentPackageId _east;
+
+        internal RejectEastPackSource(HttpContentPackageSource http, ContentPackageId east)
+        {
+            _http = http;
+            _east = east;
+        }
+
+        public bool CanFetch(ContentSourceKind kind) => _http.CanFetch(kind);
+
+        public bool TryFetch(in ContentPackageFetchRequest request,
+            out FetchedContentPackage? package, out ContentSourceFetchError error) =>
+            TryFetch(in request, CancellationToken.None, out package, out error);
+
+        public bool TryFetch(in ContentPackageFetchRequest request,
+            CancellationToken cancellationToken,
+            out FetchedContentPackage? package, out ContentSourceFetchError error)
+        {
+            if (request.PackageId == _east)
+            {
+                package = null;
+                error = ContentSourceFetchError.Unavailable;
+                return false;
+            }
+            return _http.TryFetch(in request, cancellationToken, out package, out error);
+        }
+    }
+
     private sealed class BlockedActorPackageSource : IContentPackageSource, IDisposable
     {
         private readonly HttpContentPackageSource _http;
@@ -2372,7 +3026,10 @@ internal static class F03bRemotePlayableTests
             CancellationToken cancellationToken,
             out FetchedContentPackage? package, out ContentSourceFetchError error)
         {
-            if (request.PackageId.Value != _semanticPackage)
+            bool actorPackage = request.PackageId.Value != _semanticPackage &&
+                !request.PackageId.Value!.StartsWith(
+                    "server.concept-demo.pack-", StringComparison.Ordinal);
+            if (actorPackage)
             {
                 _artStarted.Set();
                 if (_rejectArt)
@@ -2385,7 +3042,7 @@ internal static class F03bRemotePlayableTests
             }
             if (!_http.TryFetch(in request, cancellationToken, out package, out error))
                 return false;
-            if (_corruptArt && request.PackageId.Value != _semanticPackage)
+            if (_corruptArt && actorPackage)
             {
                 ContentFilePayload[] payloads = package!.Payloads.ToArray();
                 byte[] bytes = payloads[0].Bytes.ToArray();
@@ -2451,6 +3108,21 @@ internal static class F03bRemotePlayableTests
         }
     }
 
+    private sealed class CapturingApplicationFactory(
+        IHostedUdpSessionApplicationFactory inner) : IHostedUdpSessionApplicationFactory
+    {
+        internal RemoteGuestPlayableApplication? Application { get; private set; }
+
+        public IHostedUdpSessionApplication Create(
+            ConnectionId connection, NetworkProtocolPeer peer)
+        {
+            IHostedUdpSessionApplication application = inner.Create(connection, peer);
+            Application = application as RemoteGuestPlayableApplication ??
+                throw new InvalidOperationException("The shared Game application was not captured.");
+            return application;
+        }
+    }
+
     private sealed class RemotePlayableFixture : IDisposable
     {
         private static readonly NetworkProtocolLimits Protocol = NetworkProtocolLimits.Default;
@@ -2486,12 +3158,17 @@ internal static class F03bRemotePlayableTests
         private readonly string _trustDirectory;
         private readonly NetworkServerIdentity _identity;
         private readonly HostedUdpAdmissionHost _host;
+        private readonly SharedPlayableAuthority? _authority;
+        private readonly CapturingApplicationFactory? _applicationCapture;
         private readonly ClientDirectConnectSession _direct;
         private readonly RemotePlayableSession _session;
         private readonly F18aUdpMotionProxy? _motionProxy;
         private readonly ContentCache? _contentCache;
         private readonly string? _contentRoot;
         private readonly bool _preserveContentRoot;
+        private bool _trackStructuralPresentation;
+        private ulong _trackedOwnerStateSequence;
+        private int _trackedPreparedPackCount;
         private bool _disposed;
 
         private RemotePlayableFixture(
@@ -2503,11 +3180,15 @@ internal static class F03bRemotePlayableTests
             ContentCache? contentCache = null,
             string? contentRoot = null,
             bool preserveContentRoot = false,
-            F18aUdpMotionProxy? motionProxy = null)
+            F18aUdpMotionProxy? motionProxy = null,
+            SharedPlayableAuthority? authority = null,
+            CapturingApplicationFactory? applicationCapture = null)
         {
             _trustDirectory = trustDirectory;
             _identity = identity;
             _host = host;
+            _authority = authority;
+            _applicationCapture = applicationCapture;
             _direct = direct;
             _session = session;
             _motionProxy = motionProxy;
@@ -2528,9 +3209,52 @@ internal static class F03bRemotePlayableTests
         internal ClientDirectConnectState DirectState => _direct.State;
         internal ContentCache? ContentStore => _contentCache;
         internal ClientWorldSemanticCache Cache => _session.WorldCache;
+        internal RemoteStructuralPackClient StructuralPacks =>
+            _session.StructuralPacks ?? throw new InvalidOperationException("No structural Packs.");
         internal RemotePlayableSessionSnapshot SessionSnapshot => _session.GetSnapshot();
+        internal RemoteGuestPlayableServerSnapshot ServerSnapshot =>
+            _applicationCapture?.Application?.GetSnapshot() ??
+            throw new InvalidOperationException("No captured shared application exists.");
+        internal bool ServerSubscribedTo(SpatialChunkKey key) =>
+            _applicationCapture?.Application?.IsSubscribedTo(key) ?? false;
+        internal WorldPosition ServerInterestAnchor =>
+            _applicationCapture?.Application is { } application &&
+            application.TryGetPublicInterestAnchor(out WorldPosition anchor)
+                ? anchor : default;
+        internal int AuthoritativePublicCount(SpatialChunkKey key)
+        {
+            SharedPlayableAuthority authority = _authority ??
+                throw new InvalidOperationException("No shared authority exists.");
+            var rows = new WorldPublicRecord[64];
+            True(authority.Runtime.Game.TryUseActiveGeneration<
+                IGameGenerationStateProvider, int>(
+                (world, generation, game) =>
+                {
+                    ChunkPublicationReadStatus status = game.WorldState.Publications
+                        .TryCopySnapshot(key, rows, out ChunkPublicationBatch batch);
+                    return status == ChunkPublicationReadStatus.Snapshot ? batch.Count : 0;
+                }, out int count));
+            return count;
+        }
         internal long MotionForwarded => _motionProxy?.Forwarded ?? 0;
         internal long MotionDropped => _motionProxy?.Dropped ?? 0;
+
+        internal void EnableStructuralTracking() => _trackStructuralPresentation = true;
+
+        internal void RelocateForGateSetup(in WorldPosition position)
+        {
+            SharedPlayableAuthority authority = _authority ??
+                throw new InvalidOperationException("The gate setup requires shared authority.");
+            var participants = new SharedPlayableParticipant[8];
+            Equal(1, authority.CopyParticipants(participants));
+            WorldPosition requested = position;
+            True(authority.Runtime.Game.TryUseActiveGeneration<
+                IGameGenerationStateProvider, GameWorldActionStatus>(
+                (world, generation, game) => game.WorldActions.RelocateActor(
+                    world, game.WorldState, participants[0].Entities.Player,
+                    requested, out _), out GameWorldActionStatus status));
+            Equal(GameWorldActionStatus.Accepted, status);
+        }
 
         internal static RemotePlayableFixture Create()
             => CreateCore(new UltraSim.Game.Application.ApplicationRealmId(0xF03B, 1));
@@ -2553,7 +3277,9 @@ internal static class F03bRemotePlayableTests
             ApplicationRealmId realm,
             ConceptDemoContentDeployment deployment,
             IContentPackageSource source,
-            bool installLocalPresentation = false)
+            bool installLocalPresentation = false,
+            bool canonicalStructural = true,
+            bool sharedAuthority = false)
         {
             string root = TemporaryDirectory("ultrasim-f12-cache");
             if (!ContentCache.TryOpen(root, out ContentCache? cache, out ContentCacheError error))
@@ -2592,9 +3318,13 @@ internal static class F03bRemotePlayableTests
                     contentBackedUiDefinitions:
                     [UiDefinitionIdentity.From(InventoryUi.Definition),
                      UiDefinitionIdentity.From(ServerMonitorUi.Definition)],
-                    requiredWorld: RemoteConceptDemoWorldProfile.CreateRequiredBinding(),
+                    requiredWorld: canonicalStructural ? null :
+                        RemoteConceptDemoWorldProfile.CreateRequiredBinding(),
+                    canonicalWorld: canonicalStructural ?
+                        RemoteConceptDemoWorldProfile.CreateStructuralBinding() : null,
                     presentationAuthorization: deployment.PresentationAuthorization,
-                    structuralAuthorization: deployment.StructuralAuthorization);
+                    structuralAuthorization: deployment.StructuralAuthorization,
+                    sharedAuthority: sharedAuthority);
             }
             catch
             {
@@ -2716,34 +3446,45 @@ internal static class F03bRemotePlayableTests
             bool preserveContentRoot = false,
             IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null,
             RemoteRequiredWorldBinding? requiredWorld = null,
+            RemoteRequiredStructuralWorldBinding? canonicalWorld = null,
             IEnumerable<UiDefinitionIdentity>? standardUiDefinitions = null,
             Func<UiDefinitionCacheKey, CompiledUiDefinition?>? standardUiDefinitionResolver = null,
             RemoteContentAuthorization? presentationAuthorization = null,
             RemoteStructuralWorldAuthorization? structuralAuthorization = null,
             int motionDelayMilliseconds = -1,
             int motionJitterMilliseconds = 0,
-            int motionDropPeriod = 0)
+            int motionDropPeriod = 0,
+            bool sharedAuthority = false)
         {
             string trustDirectory = Path.Combine(Path.GetTempPath(),
                 $"ultrasim-f03b-{Environment.ProcessId}-{Guid.NewGuid():N}");
             Directory.CreateDirectory(trustDirectory);
             var identity = NetworkServerIdentity.CreateEphemeral();
+            SharedPlayableAuthority? authority = sharedAuthority
+                ? SharedPlayableAuthority.CreateConceptDemo() : null;
             try
             {
-                var host = new HostedUdpAdmissionHost(
-                    new IPEndPoint(IPAddress.Loopback, 0),
-                    identity,
-                    Protocol,
-                    Udp,
-                    Shared,
-                    Admission,
-                    Owners,
-                    new RemoteGuestPlayableApplicationFactory(
+                IHostedUdpSessionApplicationFactory applications = authority is null
+                    ? new RemoteGuestPlayableApplicationFactory(
                         realm, contentAuthorization, contentBackedUiDefinitions,
                         standardUiDefinitions: standardUiDefinitions,
                         presentationAuthorization: presentationAuthorization,
-                        structuralAuthorization: structuralAuthorization),
-                    UltraSimGameProtocol.Manifest);
+                        structuralAuthorization: structuralAuthorization)
+                    : new SharedRemoteGuestPlayableApplicationFactory(
+                        authority, realm, contentAuthorization,
+                        contentBackedUiDefinitions,
+                        standardUiDefinitions: standardUiDefinitions,
+                        presentationAuthorization: presentationAuthorization,
+                        structuralAuthorization: structuralAuthorization);
+                CapturingApplicationFactory? captured = authority is null ? null :
+                    new CapturingApplicationFactory(applications);
+                if (captured is not null) applications = captured;
+                IPEndPoint bind = new(IPAddress.Loopback, 0);
+                var host = authority is null
+                    ? new HostedUdpAdmissionHost(bind, identity, Protocol, Udp, Shared,
+                        Admission, Owners, applications, UltraSimGameProtocol.Manifest)
+                    : new HostedUdpAdmissionHost(bind, identity, Protocol, Udp, Shared,
+                        Admission, applications, UltraSimGameProtocol.Manifest);
                 try
                 {
                     F18aUdpMotionProxy? motionProxy = motionDelayMilliseconds < 0 ? null :
@@ -2766,7 +3507,7 @@ internal static class F03bRemotePlayableTests
                         NetworkProtocolPeer peer = direct.Peer ??
                             throw new InvalidOperationException("The established client peer was absent.");
                         RemotePlayableSession session;
-                        if (requiredWorld is null)
+                        if (requiredWorld is null && canonicalWorld is null)
                         {
                             ClientWorldSemanticCache cache = CreatePreinstalledWorldCache();
                             session = new RemotePlayableSession(
@@ -2780,6 +3521,20 @@ internal static class F03bRemotePlayableTests
                                 requiredContent: requiredContent,
                                 standardUiDefinitionResolver: standardUiDefinitionResolver);
                         }
+                        else if (canonicalWorld is not null)
+                        {
+                            session = new RemotePlayableSession(
+                                peer,
+                                connected.ApplicationSessionEpoch,
+                                requiredContent ?? throw new InvalidOperationException(
+                                    "The canonical World requires a content binding."),
+                                canonicalWorld,
+                                new NullRenderer(),
+                                new ClientChatLimits(16, 256, 128),
+                                new UiClientLimits(8, 8),
+                                maximumPendingWorldProofs: 256,
+                                standardUiDefinitionResolver: standardUiDefinitionResolver);
+                        }
                         else
                         {
                             session = new RemotePlayableSession(
@@ -2787,7 +3542,8 @@ internal static class F03bRemotePlayableTests
                                 connected.ApplicationSessionEpoch,
                                 requiredContent ?? throw new InvalidOperationException(
                                     "The streamed World requires a content binding."),
-                                requiredWorld,
+                                requiredWorld ?? throw new InvalidOperationException(
+                                    "The legacy World binding was absent."),
                                 new NullRenderer(),
                                 new ClientChatLimits(16, 256, 128),
                                 new UiClientLimits(8, 8),
@@ -2797,7 +3553,8 @@ internal static class F03bRemotePlayableTests
                         }
                         return new RemotePlayableFixture(
                             trustDirectory, identity, host, direct, session,
-                            contentCache, contentRoot, preserveContentRoot, motionProxy);
+                            contentCache, contentRoot, preserveContentRoot, motionProxy,
+                            authority, captured);
                     }
                     catch
                     {
@@ -2814,6 +3571,7 @@ internal static class F03bRemotePlayableTests
             }
             catch
             {
+                authority?.Dispose();
                 identity.Dispose();
                 if (Directory.Exists(trustDirectory))
                     Directory.Delete(trustDirectory, recursive: true);
@@ -2841,6 +3599,37 @@ internal static class F03bRemotePlayableTests
                 if (condition()) return;
                 if ((step & 15) == 0) Thread.Sleep(1);
                 else Thread.Yield();
+            }
+            if (_applicationCapture?.Application is { } application)
+            {
+                RemoteGuestPlayableServerSnapshot server = application.GetSnapshot();
+                var resident = new ClientSemanticChunkInfo[Cache.Limits.MaximumResidentChunks];
+                int eastResidents = 0, eastPublic = 0;
+                if (Cache.TryCopyResidentInfo(resident, out int residentCount, out _))
+                    for (int i = 0; i < residentCount; i++)
+                    {
+                        WorldPackAddressing.ToPackLocal(resident[i].Key.Coord,
+                            out WorldPackCoord owner, out _);
+                        if (owner != ConceptDemoStructuralSource.EastCoord) continue;
+                        eastResidents++;
+                        eastPublic += resident[i].PublicRecordCount;
+                        Console.WriteLine($"W7 timeout east={resident[i].Key} " +
+                            $"public={resident[i].PublicRecordCount} " +
+                            $"serverSub={ServerSubscribedTo(resident[i].Key)}");
+                    }
+                Console.WriteLine($"W7 timeout: ticks={server.AuthorityTicks} " +
+                    $"drives={server.Timing.ReplicationReadiness.DrivePasses} " +
+                    $"pending={server.Timing.ReplicationReadiness.Scheduler.PendingWorkCount} " +
+                    $"due={server.Timing.ReplicationReadiness.Scheduler.DueWorkDequeued} " +
+                    $"refresh={server.Timing.ReplicationReadiness.Scheduler.SourceRefreshes} " +
+                    $"outstanding={server.World.OutstandingDeliveries} " +
+                    $"snapshotActive={server.World.SnapshotTransferActive} " +
+                    $"next={server.World.NextDeliveryId} " +
+                    $"window={server.StructuralWindowCenter} " +
+                    $"anchor={ServerInterestAnchor} " +
+                    $"client={Playable.GetSnapshot().Position} " +
+                    $"retired={World.GetSnapshot().RetiredInterestCount} " +
+                    $"east={eastResidents}/{eastPublic}");
             }
             throw new InvalidOperationException(
                 $"Remote playable did not converge. direct={_direct.GetSnapshot()} " +
@@ -2907,6 +3696,24 @@ internal static class F03bRemotePlayableTests
             return false;
         }
 
+        internal bool TryFindPublic(uint prefab, WorldPosition position,
+            out WorldPublicRecord found)
+        {
+            Span<ClientSemanticChunkInfo> chunks = stackalloc ClientSemanticChunkInfo[192];
+            if (Cache.TryCopyResidentInfo(chunks, out int count, out _))
+                for (int chunk = 0; chunk < count; chunk++)
+                    if (Cache.TryGetResidentView(chunks[chunk].Handle,
+                            out ClientSemanticChunkView view))
+                        foreach (WorldPublicRecord record in view.PublicRecords)
+                            if (record.PrefabId == prefab && record.Position == position)
+                            {
+                                found = record;
+                                return true;
+                            }
+            found = default;
+            return false;
+        }
+
         public void Dispose()
         {
             if (_disposed) return;
@@ -2926,6 +3733,7 @@ internal static class F03bRemotePlayableTests
             }
             _direct.Dispose();
             _host.Dispose();
+            _authority?.Dispose();
             _motionProxy?.Dispose();
             _identity.Dispose();
             if (Directory.Exists(_trustDirectory))
@@ -2938,8 +3746,25 @@ internal static class F03bRemotePlayableTests
         {
             _direct.Pump();
             _host.Pump();
+            _ = _authority?.TickDue();
             _direct.Pump();
             _ = _session.ProcessReceived();
+            if (_trackStructuralPresentation &&
+                Playable.GetSnapshot() is { State: RemotePlayableClientState.Active } owner)
+            {
+                RemoteStructuralPackClient packs = StructuralPacks;
+                int prepared = _session.GetSnapshot().StructuralPacks.PreparedPackCount;
+                if (owner.StateSequence != _trackedOwnerStateSequence ||
+                    prepared != _trackedPreparedPackCount)
+                {
+                    _trackedOwnerStateSequence = owner.StateSequence;
+                    _trackedPreparedPackCount = prepared;
+                    if (packs.TryPreparePresentation(owner.Position,
+                            out SpatialChunkKey center,
+                            out ClientStructuralResidencyPlan plan))
+                        packs.CommitPresentation(plan, center);
+                }
+            }
             if (_motionProxy is not null) Thread.Sleep(1);
         }
 

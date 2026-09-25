@@ -22,8 +22,8 @@ Game generation. The immutable Local authority view carries either the historica
 Cabin `PreparedWorld` or the Concept Demo `PreparedComposition`, never both. The
 client cache and native renderer consume that canonical composition without a
 Pack-aware presentation branch. Ordinary Single Player does not construct the
-historical combined Concept Demo Pack; Complete hosting constructs it only for
-pre-W7 remote structural delivery. A pre-W5R Concept Demo `worldview/v1` restore
+historical combined Concept Demo Pack; Complete hosting now grants the two independently
+declared Packs to Remote clients after manifest proof. A pre-W5R Concept Demo `worldview/v1` restore
 fails closed explicitly rather than dropping possible structural overlay state.
 
 The authority thread owns `ServerRuntime`, Admission, mutable ECS/Game state,

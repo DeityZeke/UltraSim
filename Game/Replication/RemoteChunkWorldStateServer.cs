@@ -1023,6 +1023,20 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         return status;
     }
 
+    /// <summary>
+    /// Before AOI reconciliation removes a subscription, determine whether the client may
+    /// possess its state. Applied knowledge and admitted but unproved delivery both require
+    /// an explicit interest-retirement fence; untouched subscriptions do not.
+    /// </summary>
+    internal bool MayHaveDeliveredChunk(SpatialChunkKey key)
+    {
+        EnsureOwner();
+        if (_snapshotTicket.IsValid && _snapshotTicket.Key == key) return true;
+        for (int index = 0; index < _outstandingCount; index++)
+            if (_outstanding[index].Ticket.Key == key) return true;
+        return false;
+    }
+
     public RemoteChunkWorldStateScheduleStatus TrySchedule(int subscriptionIndex, ulong cadenceStep)
     {
         OfflineDirectChunkSubscriptionView subscriptions = _recipient.Subscriptions;

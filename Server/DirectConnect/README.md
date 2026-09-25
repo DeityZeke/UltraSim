@@ -25,9 +25,10 @@ realm, activation, plan, and expected resolved fingerprint.
 
 A0.4 adds a neutral bounded immutable-byte `StaticContentHttpHost` in `Server.Hosting`. It runs
 outside Game/Network progression and knows no realm, manifest, or package semantics. A0.8 now
-composes the development executable with one canonical Concept Demo deployment package containing
-the complete WorldPack plus standard Inventory and read-only Server Monitor UI definitions. The authority publishes the exact
-authenticated requirement while the separate HTTP host only serves its immutable `.uspkg` bytes.
+composes the development executable with a canonical Concept Demo bootstrap package containing
+the structural manifest plus standard Inventory and read-only Server Monitor UI definitions. The
+authority publishes the exact authenticated requirement and later grants the two canonical Packs
+independently by coordinate; the separate HTTP host only serves immutable `.uspkg` bytes.
 The host uses fixed concurrent response workers, a bounded pending queue, and per-response
 deadlines; one stalled download cannot serialize every other client behind it, and overload is
 rejected without unbounded task creation.

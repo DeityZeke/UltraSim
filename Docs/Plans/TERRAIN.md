@@ -100,8 +100,8 @@ The Pack byte-cap correction is 512 MiB in W2: the existing 65,536-chunk bound e
 the fixed 256×256 envelope, while a fully populated dense terrain foundation alone is already
 about 264.4 MiB before directories/statics/Multis/sparse surfaces.
 
-The historical combined Concept Demo artifact remains unaddressed only as a frozen
-pre-W7 remote-delivery compatibility payload. Far Island X=124..132 is authored
+The historical combined Concept Demo artifact remains unaddressed as a frozen
+regression/save-identity artifact, no longer normal Remote delivery. Far Island X=124..132 is authored
 in two independently declared Packs without moving global coordinates.
 
 Pack boundaries must never become gameplay, region, Physics, renderer, AOI, session, or durable

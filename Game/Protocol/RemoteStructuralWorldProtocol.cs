@@ -24,6 +24,8 @@ public partial struct RemoteStructuralWorldAdvertisementHeader
     public ulong ManifestHash3;
     public int AnchorPackX;
     public int AnchorPackZ;
+    public int AnchorChunkX;
+    public int AnchorChunkZ;
 }
 
 /// <summary>Exact World-level proof, distinct from generic ContentSetApplied.</summary>
@@ -84,6 +86,49 @@ public partial struct RemoteStructuralPackAppliedMessage
     public ulong PackHash2;
     public ulong PackHash3;
     public RemoteStructuralApplyStatus Status;
+}
+
+/// <summary>Client semantic structural window, proven only after its bounded pages are staged.</summary>
+[NetworkMessage(155, "ultrasim.game.structural-window-applied", 1, NetworkLane.Control)]
+public partial struct RemoteStructuralWindowAppliedMessage
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong StructuralSequence;
+    public ulong WindowSequence;
+    public int CenterChunkX;
+    public int CenterChunkZ;
+    public int ResidentRadiusChunks;
+    public ulong ResidentMask;
+}
+
+/// <summary>Client has released one previously proven prepared Pack from this session.</summary>
+[NetworkMessage(156, "ultrasim.game.structural-pack-retired", 1, NetworkLane.Control)]
+public partial struct RemoteStructuralPackRetiredMessage
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong StructuralSequence;
+    public ulong PackRequestSequence;
+    public int PackX;
+    public int PackZ;
+    public ulong PackHash0;
+    public ulong PackHash1;
+    public ulong PackHash2;
+    public ulong PackHash3;
+}
+
+/// <summary>
+/// Game AOI has retired one public subscription. The cutoff fences previously admitted
+/// deliveries; it does not claim that any delivery was applied by the recipient.
+/// </summary>
+[NetworkMessage(157, "ultrasim.game.chunk-interest-retired", 1, NetworkLane.Control)]
+public partial struct RemoteChunkInterestRetiredMessage
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong PublicationEpoch;
+    public ulong DeliveryCutoff;
+    public ulong SpatialSpaceId;
+    public int ChunkX;
+    public int ChunkZ;
 }
 
 public readonly record struct RemoteStructuralWorldAdvertisement(
@@ -195,6 +240,19 @@ public static partial class UltraSimGameProtocol
         proof.PackRequestSequence != 0 &&
         (proof.PackHash0 | proof.PackHash1 | proof.PackHash2 | proof.PackHash3) != 0 &&
         proof.Status is RemoteStructuralApplyStatus.Applied or RemoteStructuralApplyStatus.Rejected;
+
+    public static bool IsValidStructuralWindowApplied(
+        in RemoteStructuralWindowAppliedMessage proof) =>
+        proof.ApplicationSessionEpoch != 0 && proof.StructuralSequence != 0 &&
+        proof.WindowSequence != 0 && proof.ResidentRadiusChunks == 2 &&
+        (proof.ResidentMask & (1UL << 12)) != 0 &&
+        (proof.ResidentMask >> 25) == 0;
+
+    public static bool IsValidStructuralPackRetired(in RemoteStructuralPackRetiredMessage retired) =>
+        retired.ApplicationSessionEpoch != 0 && retired.StructuralSequence != 0 &&
+        retired.PackRequestSequence != 0 &&
+        (retired.PackHash0 | retired.PackHash1 |
+         retired.PackHash2 | retired.PackHash3) != 0;
 
     public static bool TryWriteStructuralPackGrant(Span<byte> destination,
         RemoteStructuralPackGrant grant, out int written)

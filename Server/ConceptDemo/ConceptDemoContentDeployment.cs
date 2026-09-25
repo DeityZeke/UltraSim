@@ -61,21 +61,8 @@ public sealed class ConceptDemoContentDeployment : IDisposable
             throw new InvalidOperationException(
                 "The compiled Concept Demo WorldPack no longer matches its compatible-client profile.");
 
-        var worldBytes = new byte[pack.Length];
-        pack.CopyTo(worldBytes);
         var structuralBytes = new byte[structuralSource.Manifest.Length];
         structuralSource.Manifest.CopyTo(structuralBytes);
-        if (!ContentFilePath.TryCreate(
-                "world/concept-demo.usworldpack", out ContentFilePath worldPath) ||
-            !ContentFileDescriptor.TryCreate(
-                worldPath, ContentFileKind.WorldPack, worldBytes.Length,
-                ContentHash.Compute(worldBytes), default, out ContentFileDescriptor worldFile) ||
-            !LogicalContentId.TryCreate(
-                GameWorldContentProfile.ConceptDemoDefinitionId, out LogicalContentId worldId) ||
-            !ContentDefinitionDescriptor.TryCreateFileDefinition(
-                worldId, ContentDefinitionKind.WorldPack, ContentDefinitionOperation.Add,
-                worldPath, out ContentDefinitionDescriptor? worldDefinition))
-            throw new InvalidOperationException("The Concept Demo World content descriptor is invalid.");
         if (!ContentFilePath.TryCreate(
                 "world/concept-demo.usworldmanifest", out ContentFilePath structuralPath) ||
             !ContentFileDescriptor.TryCreate(
@@ -117,15 +104,14 @@ public sealed class ConceptDemoContentDeployment : IDisposable
                 1, 1, packageId, contentNamespace,
                 "Concept Demo world and standard UI", "1.0.0",
                 ContentTrustClass.ServerAuthorizedPassive,
-                [worldFile, structuralFile, uiFile, monitorUiFile],
-                [worldDefinition!, structuralDefinition!],
+                [structuralFile, uiFile, monitorUiFile],
+                [structuralDefinition!],
                 out ContentPackageManifest? manifest, out manifestError))
             throw new InvalidOperationException(
                 $"The Concept Demo content manifest is invalid: {manifestError}");
 
         ContentFilePayload[] payloads =
         [
-            new ContentFilePayload(worldPath, worldBytes),
             new ContentFilePayload(structuralPath, structuralBytes),
             new ContentFilePayload(uiPath, uiBytes),
             new ContentFilePayload(monitorUiPath, monitorUiBytes),
@@ -234,7 +220,7 @@ public sealed class ConceptDemoContentDeployment : IDisposable
                 new ContentDeploymentSnapshot(
                     host.GetUri(ArchiveRoute),
                     checked(archive.Length + actorArchive.Length + actorReplaceArchive.Length),
-                    worldBytes.Length,
+                    pack.Length,
                     checked(uiBytes.Length + monitorUiBytes.Length),
                     checked(actorX.Length + actorY.Length + actorXReplacement.Length),
                     manifest!.ManifestHash, plan!.PlanHash, catalog!.Fingerprint,
@@ -463,5 +449,22 @@ public sealed class ConceptDemoStructuralContent
 
     public RemoteStructuralWorldAuthorization CreateAuthorization() => new(
         Manifest, ManifestDefinitionValue, GameWorldState.DefaultSpace,
-        new WorldCompositionRevision(1), ConceptDemoStructuralSource.WestCoord);
+        new WorldCompositionRevision(1), ConceptDemoStructuralSource.WestCoord,
+        GamePlayableWorld.PlayerStart.ToChunkKey(GameWorldState.DefaultSpace),
+        [
+            new RemoteStructuralPackPackage(
+                ConceptDemoStructuralSource.WestCoord, ProjectPackage(West)),
+            new RemoteStructuralPackPackage(
+                ConceptDemoStructuralSource.EastCoord, ProjectPackage(East)),
+        ]);
+
+    private static RemoteContentPackageRequirement ProjectPackage(
+        ContentPackageAcquisition acquisition) => new(
+            acquisition.Package.Value!,
+            new RemoteContentHash(
+                acquisition.ManifestHash.Part0, acquisition.ManifestHash.Part1,
+                acquisition.ManifestHash.Part2, acquisition.ManifestHash.Part3),
+            RemoteContentRequirementPolicy.Required,
+            acquisition.Sources.Select(static source => new RemoteContentSource(
+                (RemoteContentSourceKind)source.Kind, source.Locator)));
 }

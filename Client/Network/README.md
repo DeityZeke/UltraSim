@@ -169,14 +169,16 @@ compact `HotOpen`, primes Client Core's bounded cache, and sends the ordinary se
 only after the view opens. Game continues to own model values/actions; cache possession alone does
 not authorize a definition.
 
-A0.7 resolves a selected complete WorldPack only after the realm catalog applies. World performs
-canonical open/fingerprint/content binding, then `RemotePlayableSession` constructs and publishes
-the complete initial `ClientWorldSemanticCache` privately before exposing it or permitting guest
-submission. Failure publishes no partial structural state. The existing dynamic-public adapter is
-attached afterward and keeps its independent application-proof lineage. No overlay/chunk artifact
-or new protocol message is introduced. A0.8 supplies the native Godot consumer: its primitive
-substrate can boot before content exists, required World/UI content still fails closed, and a warm
-cache still requires fresh application-session proof.
+A0.7's historical complete-WorldPack path remains a regression fixture. Production W7 instead
+authenticates the exact `WorldStructuralManifest/v1` during bootstrap, proves World validation,
+and creates one zero-Pack `ClientPreparedStructuralWorld`/`ClientWorldSemanticCache`. The server
+grants the central Pack by manifest coordinate; independent exact-package acquisition, WorldPack
+validation, prepared-subset validation, and a bounded semantic window precede guest admission.
+Additional Packs use the same source/cache without a new Content activation. Pack-applied/window
+proofs gate recipient public delivery, while the client retires unborrowed Packs and can reprepare
+them from CAS under fresh grant/proof lineage. No mutable overlay or W8 edit publication is implied.
+The native Godot renderer remains Pack-blind, and a warm cache still requires fresh
+application-session authorization and structural proof.
 
 Client F0.5 adds no remote UI protocol. Its accepted preinstalled-standard canary converges
 with this A0.6 resolver on the same `UiDefinitionCacheKey` and existing `HotOpen`; when a realm

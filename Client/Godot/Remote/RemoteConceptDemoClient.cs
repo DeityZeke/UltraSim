@@ -6,10 +6,12 @@ using UltraSim.Client.Core;
 using UltraSim.Client.Network;
 using UltraSim.Client.StandardUi;
 using UltraSim.Game.Admission;
+using UltraSim.Game.Composition;
 using UltraSim.Game.Input;
 using UltraSim.Game.Protocol;
 using UltraSim.Game.World;
 using UltraSim.Network;
+using UltraSim.Spatial;
 
 namespace UltraSim.Client.Godot;
 
@@ -46,6 +48,7 @@ public readonly record struct RemoteConceptDemoClientSnapshot(
     public ClientControlledMotionSnapshot ControlledMotion { get; init; }
     public ClientRemoteActorInterpolationSnapshot RemoteMotion { get; init; }
     public ClientMotionPose PresentedPlayerPose { get; init; }
+    public bool W7NativeJourneyComplete { get; init; }
 }
 
 /// <summary>
@@ -155,6 +158,14 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private bool _gameplayInputAllowed;
     private bool _gameplayInputAdmittedLastFrame;
     private int _smokePhase;
+    private int _w7JourneyPhase;
+    private long _w7FirstEastBytes;
+    private string? _w7GateTriggerFile;
+    private ulong _w7LastDiagnosticMilliseconds;
+    private ClientWorldSemanticCache? _w7OriginalCache;
+    private WorldPublicEntityId _w7OriginalActor;
+    private WorldStructuralManifestFingerprint _w7Manifest;
+    private WorldCompositionRevision _w7Revision;
     private ulong _lastSmokeDiagnosticMilliseconds;
     private int _terrainTriangles;
     private bool _configured;
@@ -220,11 +231,10 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 new RemoteRequiredContentBinding(
                     realm, _cache!, ContentBaseCatalog.Empty, _source,
                     localPresentationKey),
-                RemoteConceptDemoWorldProfile.CreateRequiredBinding(),
+                RemoteConceptDemoWorldProfile.CreateStructuralBinding(),
                 _uiRenderer,
                 new ClientChatLimits(64, 256, 128),
-                standardUiDefinitionResolver: ClientStandardUiLibrary.Resolve,
-                requireStructuralManifest: true);
+                standardUiDefinitionResolver: ClientStandardUiLibrary.Resolve);
             _session.ConfigureTelemetry(telemetryLevel);
             _nativeTelemetry.Configure(telemetryLevel);
             _telemetryLevel = telemetryLevel;
@@ -373,7 +383,10 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 SubmitPhysicalInput(gameplayInputAdmitted);
             }
             else
+            {
                 ProgressSmoke(snapshot);
+                if (_w7JourneyPhase != 0) ProgressW7Journey(snapshot);
+            }
             UpdateChat();
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -407,7 +420,25 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             ControlledMotion = _controlledMotion.GetSnapshot(),
             RemoteMotion = _remoteMotion.GetSnapshot(),
             PresentedPlayerPose = _presentedPlayer,
+            W7NativeJourneyComplete = _w7JourneyPhase == 11,
         };
+    }
+
+    /// <summary>Bounded exported-product W7 journey; never enabled during ordinary play.</summary>
+    public void BeginW7NativeJourney(string gateTriggerFile)
+    {
+        EnsureOperational();
+        if (_state != RemoteConceptDemoClientState.Active || _smokePhase != 8 ||
+            _w7JourneyPhase != 0 || string.IsNullOrWhiteSpace(gateTriggerFile) ||
+            _session!.StructuralPacks?.GetSnapshot().PreparedPackCount != 1)
+            throw new InvalidOperationException("W7 journey requires a settled one-Pack native client.");
+        _w7GateTriggerFile = gateTriggerFile;
+        _w7OriginalCache = _session.WorldCache;
+        _w7OriginalActor = _session.Playable.GetSnapshot().PublicActor;
+        _w7Manifest = _session.WorldCache.PreparedComposition!.Manifest.Fingerprint;
+        _w7Revision = _session.WorldCache.PreparedComposition.Revision;
+        System.IO.File.WriteAllText(gateTriggerFile, "ready");
+        _w7JourneyPhase = 1;
     }
 
     /// <summary>
@@ -762,13 +793,22 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                     RemotePlayableActionStatus.RateLimited,
                 checked((long)Time.GetTicksUsec()));
         _player = playable.Position;
+        RemoteStructuralPackClient packs = _session!.StructuralPacks ??
+            throw new InvalidOperationException("Remote structural residency is unavailable.");
+        if (!packs.TryPreparePresentation(_player,
+                out SpatialChunkKey presentationCenter,
+                out ClientStructuralResidencyPlan residencyPlan))
+            throw new InvalidOperationException("Remote structural window preparation failed.");
         if (!_window!.TryTrackPlayer(
-                _player, _presentationChanges, out _, out _,
+                _player, presentationCenter, _presentationChanges, out _, out _,
                 out ClientPresentationWindowError windowError,
-                out GodotWorldRenderQueueError rendererError) &&
-            windowError != ClientPresentationWindowError.None)
+                out GodotWorldRenderQueueError rendererError))
+        {
+            packs.CancelPresentation(residencyPlan);
             throw new InvalidOperationException(
                 $"Remote render tracking failed: {windowError}/{rendererError}.");
+        }
+        packs.CommitPresentation(residencyPlan, presentationCenter);
         if (_window.TryCopyBindings(_presentationBindings, out int count, out _))
         {
             for (int index = 0; index < count; index++)
@@ -776,6 +816,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                     _presentationBindings[index].SemanticHandle, out _);
         }
         _renderer!.ProcessFrame(GodotWorldFrameBudget.Default);
+        _ = packs.TryRetireOutsidePresentation(presentationCenter);
         SynchronizeActors(in playable);
         _lastOwnerState = playable.StateSequence;
         UpdateHud(
@@ -1046,6 +1087,139 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 UpdateHud("A0.8 native smoke complete");
                 break;
         }
+    }
+
+    private void ProgressW7Journey(in RemotePlayableSessionSnapshot snapshot)
+    {
+        const int farChunk = 128;
+        long seam = (long)farChunk * GameWorldSpatialProfile.WorldChunkEdgeUnits;
+        RemoteStructuralPackClient packs = _session!.StructuralPacks!;
+        ClientWorldSemanticCache cache = _session.WorldCache;
+        ulong now = Time.GetTicksMsec();
+        if (now - _w7LastDiagnosticMilliseconds >= 2_000)
+        {
+            _w7LastDiagnosticMilliseconds = now;
+            bool centralGateVisible = TryFindW7Gate(0, 20_000, out _);
+            bool returnGateVisible = TryFindW7Gate(
+                (long)128 * GameWorldSpatialProfile.WorldChunkEdgeUnits + 8_000,
+                20_000, out _);
+            System.IO.File.WriteAllText(_w7GateTriggerFile!,
+                $"phase={_w7JourneyPhase} position={snapshot.Playable.Position} " +
+                $"commandRetained={snapshot.Playable.CommandRetainedLocally} " +
+                $"lastCommand={snapshot.Playable.LastProcessedCommandSequence} " +
+                $"packs={packs.GetSnapshot().PreparedPackCount} " +
+                $"bytes={packs.GetSnapshot().BytesFetched} " +
+                $"retirements={packs.GetSnapshot().RetirementsQueued} " +
+                $"centralGate={centralGateVisible} returnGate={returnGateVisible} " +
+                $"worldRejected={snapshot.World.RejectedDeliveries}");
+        }
+        if (!ReferenceEquals(cache, _w7OriginalCache) ||
+            cache.PreparedComposition?.Manifest.Fingerprint != _w7Manifest ||
+            cache.PreparedComposition.Revision != _w7Revision)
+            throw new InvalidOperationException("W7 native journey replaced its semantic World identity.");
+        if (_w7JourneyPhase == 1 &&
+            snapshot.Playable.Position.GlobalXMillimeters == 0 &&
+            snapshot.Playable.Position.GlobalZMillimeters == 20_000 &&
+            TryFindW7Gate(0, 20_000, out WorldPublicEntityId centralGate) &&
+            !snapshot.Playable.CommandRetainedLocally &&
+            TrySubmitObservedCommand(new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Stop, GamePlayerActions.Interact, true), centralGate))
+            _w7JourneyPhase = 2;
+        else if (_w7JourneyPhase == 2 && snapshot.Playable.Position.Chunk.X == farChunk)
+            _w7JourneyPhase = 3;
+        else if (_w7JourneyPhase == 3 &&
+            packs.GetSnapshot().PreparedPackCount == 2 &&
+            cache.TryProbeStructuralChunk(snapshot.Playable.Position.ToChunkKey(cache.StructuralSpace),
+                out WorldStructuralChunkProbe farProbe) &&
+            farProbe.Status == WorldStructuralChunkStatus.PreparedChunk &&
+            _renderer!.GetSnapshot().ActiveRenderChunks > 0 &&
+            TryW7MoveTo(seam - 500, 16_000, snapshot.Playable))
+        {
+            _w7FirstEastBytes = packs.GetSnapshot().BytesFetched;
+            if (_w7FirstEastBytes <= 531_138)
+                throw new InvalidOperationException("W7 native cold East Pack transferred no bytes.");
+            _w7JourneyPhase = 4;
+        }
+        else if (_w7JourneyPhase == 4 && snapshot.Playable.Position.Chunk.X == 127 &&
+            TryW7MoveTo(seam + 500, 16_000, snapshot.Playable))
+            _w7JourneyPhase = 5;
+        else if (_w7JourneyPhase == 5 && snapshot.Playable.Position.Chunk.X == 128 &&
+            TryW7MoveTo(seam - 500, 16_000, snapshot.Playable))
+            _w7JourneyPhase = 6;
+        else if (_w7JourneyPhase == 6 && snapshot.Playable.Position.Chunk.X == 127 &&
+            TryW7MoveTo(seam + 8_000, 20_000, snapshot.Playable))
+            _w7JourneyPhase = 7;
+        else if (_w7JourneyPhase == 7 &&
+            Math.Abs(snapshot.Playable.Position.GlobalXMillimeters - seam - 8_000) < 1_500 &&
+            Math.Abs(snapshot.Playable.Position.GlobalZMillimeters - 20_000) < 1_500 &&
+            TryFindW7Gate(seam + 8_000, 20_000, out WorldPublicEntityId returnGate) &&
+            !snapshot.Playable.CommandRetainedLocally &&
+            TrySubmitObservedCommand(new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Stop, GamePlayerActions.Interact, true), returnGate))
+            _w7JourneyPhase = 8;
+        else if (_w7JourneyPhase == 8 && snapshot.Playable.Position.Chunk.X == 0)
+            _w7JourneyPhase = 9;
+        else if (_w7JourneyPhase == 9 &&
+            packs.GetSnapshot().PreparedPackCount == 1 &&
+            packs.GetSnapshot().RetirementsQueued != 0)
+            _w7JourneyPhase = 10;
+        else if (_w7JourneyPhase == 10 && packs.GetSnapshot().RetirementsQueued != 0 &&
+            TryW7MoveTo(0, 20_000, snapshot.Playable))
+            _w7JourneyPhase = 12;
+        else if (_w7JourneyPhase == 12 &&
+            Math.Abs(snapshot.Playable.Position.GlobalXMillimeters) < 1_500 &&
+            Math.Abs(snapshot.Playable.Position.GlobalZMillimeters - 20_000) < 1_500 &&
+            TryFindW7Gate(0, 20_000, out WorldPublicEntityId repeatGate) &&
+            !snapshot.Playable.CommandRetainedLocally &&
+            TrySubmitObservedCommand(new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Stop, GamePlayerActions.Interact, true), repeatGate))
+            _w7JourneyPhase = 13;
+        else if (_w7JourneyPhase == 13 && snapshot.Playable.Position.Chunk.X == farChunk &&
+            packs.GetSnapshot().PreparedPackCount == 2)
+        {
+            if (packs.GetSnapshot().BytesFetched != _w7FirstEastBytes)
+                throw new InvalidOperationException("W7 native warm Pack reprepare refetched bytes.");
+            _w7JourneyPhase = 14;
+        }
+        else if (_w7JourneyPhase == 14 &&
+            snapshot.Playable.PublicActor == _w7OriginalActor &&
+            packs.GetSnapshot().ProofsQueued >= 3 &&
+            _actorPresenter!.GetSnapshot().ActiveActors >= 1 &&
+            _renderer!.GetSnapshot().ActiveRenderChunks > 0)
+        {
+            _w7JourneyPhase = 11;
+            GD.Print("W7 NATIVE PACK JOURNEY PASS gate=real seam=127/128/127 " +
+                $"retirement=guarded warmBytes=0 totalPackBytes={_w7FirstEastBytes} " +
+                $"manifest={_w7Manifest} revision={_w7Revision.Value} " +
+                $"cache=continuous rendererChunks={_renderer.GetSnapshot().ActiveRenderChunks} " +
+                $"actors={_actorPresenter.GetSnapshot().ActiveActors} " +
+                $"publicActor={_w7OriginalActor} " +
+                $"rejectedPublic={snapshot.World.RejectedDeliveries}");
+        }
+    }
+
+    private bool TryW7MoveTo(long x, long z, in RemotePlayableClientSnapshot playable) =>
+        !playable.CommandRetainedLocally &&
+        TrySubmitObservedCommand(new ClientWorldCommandIntent(
+            GameLocomotionUpdate.CreateDestination(x, z), GamePlayerActions.None, true));
+
+    private bool TryFindW7Gate(long x, long z, out WorldPublicEntityId id)
+    {
+        Span<ClientSemanticChunkInfo> chunks = stackalloc ClientSemanticChunkInfo[192];
+        if (_session!.WorldCache.TryCopyResidentInfo(chunks, out int count, out _))
+            for (int index = 0; index < count; index++)
+                if (_session.WorldCache.TryGetResidentView(chunks[index].Handle,
+                        out ClientSemanticChunkView view))
+                    foreach (WorldPublicRecord record in view.PublicRecords)
+                        if (record.PrefabId == GameWorldPublicPrefabIds.FarGate &&
+                            record.Position.GlobalXMillimeters == x &&
+                            record.Position.GlobalZMillimeters == z)
+                        {
+                            id = record.Id;
+                            return true;
+                        }
+        id = default;
+        return false;
     }
 
     private void ReportSmokeProgress(in RemotePlayableSessionSnapshot snapshot)

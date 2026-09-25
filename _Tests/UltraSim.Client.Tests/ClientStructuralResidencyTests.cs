@@ -10,6 +10,7 @@ internal static class ClientStructuralResidencyTests
     internal static void Run()
     {
         PreparedSubsetRefreshFindsNewCentersWithoutReplacingCache();
+        SparseManifestDoesNotPrepareUnrequestedPacks();
         BoundWorldPack world = CreateWorld();
         var cache = new ClientWorldSemanticCache(world, new(41, 0, 0, 1, 1));
         var residency = new ClientStructuralResidency(cache, renderRadiusChunks: 1);
@@ -194,6 +195,38 @@ internal static class ClientStructuralResidencyTests
         Equal(25, entered.EnteredChunks);
         residency.Commit(next);
         True(cache.TryGetResidentHandle(farKey, out _));
+    }
+
+    private static void SparseManifestDoesNotPrepareUnrequestedPacks()
+    {
+        BoundWorldPack center = CreateWorld();
+        var entries = new WorldStructuralManifestEntry[10_000];
+        var centerCoord = new WorldPackCoord(0, 0);
+        entries[0] = new(centerCoord, center.Fingerprint);
+        for (int index = 1; index < entries.Length; index++)
+            entries[index] = new(new WorldPackCoord(index + 1_000, 0), center.Fingerprint);
+        True(WorldStructuralManifest.TryCreate(entries,
+            out WorldStructuralManifest? manifest, out _));
+        PreparedWorldPack onlyPrepared = new(centerCoord, new WorldPreparedView(center));
+        True(PreparedWorldComposition.TryCreate(Space, new WorldCompositionRevision(18),
+            manifest, [onlyPrepared], out PreparedWorldComposition? subset, out _));
+        var source = new ClientPreparedStructuralWorld(subset!, maximumPreparedPacks: 2);
+        var cache = new ClientWorldSemanticCache(source, new(41, 0, 0, 1, 1));
+        var residency = new ClientStructuralResidency(cache, 1);
+        Equal(10_000, manifest!.EntryCount);
+        Equal(1, source.Current.PreparedPackCount);
+        Equal(81, residency.GetSnapshot().AuthoredChunks);
+        var missingCoord = new WorldPackCoord(1_001, 0);
+        var missingKey = Key(missingCoord.X * WorldPackAddressing.ChunksPerWorldPackEdge, 0);
+        True(cache.TryProbeStructuralChunk(missingKey, out WorldStructuralChunkProbe probe));
+        Equal(WorldStructuralChunkStatus.KnownPackButNotPrepared, probe.Status);
+        True(residency.TryPrepare(Key(0, 0), false,
+            out ClientStructuralResidencyPlan plan, out _, out _));
+        residency.Commit(plan);
+        Equal(1, source.Current.PreparedPackCount);
+        Equal(25, residency.GetSnapshot().SemanticResidentChunks);
+        Console.WriteLine("EVIDENCE W7 sparse_manifest=10000 prepared_packs=1 " +
+            "authored_chunks_opened=81 semantic_resident=25");
     }
 
     private static BoundWorldPack CreateWorld(int centerX = 0)

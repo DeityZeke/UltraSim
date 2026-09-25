@@ -64,6 +64,17 @@ public readonly record struct RemoteGuestPlayableServerSnapshot(
     public bool StructuralManifestApplied { get; init; }
     public ulong StructuralAdvertisementsQueued { get; init; }
     public ulong RejectedStructuralManifestProofs { get; init; }
+    public ulong StructuralPackRequests { get; init; }
+    public ulong StructuralPackGrantsQueued { get; init; }
+    public ulong StructuralPackProofsAccepted { get; init; }
+    public ulong RejectedStructuralPackMessages { get; init; }
+    public ulong StructuralWindowSequence { get; init; }
+    public SpatialChunkKey StructuralWindowCenter { get; init; }
+    public ulong StructuralWindowMask { get; init; }
+    public ulong RejectedStructuralWindowProofs { get; init; }
+    public ulong StructuralPackRetirements { get; init; }
+    public int InterestRetirementsPending { get; init; }
+    public ulong InterestRetirementsQueued { get; init; }
 }
 
 /// <summary>Owner-local evidence for shared actor-presentation reconciliation.</summary>
@@ -305,6 +316,7 @@ public sealed class RemoteGuestPlayableApplication :
     private const int MaximumSubscriptions = 1_024;
     private const int MaximumTopologyChanges = MaximumSubscriptions * 2;
     private const int ReservedReliableControlMessages = 16;
+    private const int StructuralResidentRadiusChunks = 2;
     private const long AdmissionRetryMilliseconds = 1_000;
 
     private readonly NetworkProtocolPeer _peer;
@@ -327,6 +339,12 @@ public sealed class RemoteGuestPlayableApplication :
     private readonly byte[] _messageScratch = new byte[UltraSimGameProtocol.MaximumMessageBytes];
     private readonly OfflineDirectChunkSubscriptionChange[] _subscriptionChanges =
         new OfflineDirectChunkSubscriptionChange[MaximumTopologyChanges];
+    private readonly SpatialChunkKey[] _retirementCandidateKeys =
+        new SpatialChunkKey[MaximumSubscriptions];
+    private readonly RemoteChunkInterestRetiredMessage[] _pendingInterestRetirements =
+        new RemoteChunkInterestRetiredMessage[MaximumSubscriptions];
+    private int _pendingInterestRetirementCount;
+    private ulong _interestRetirementsQueued;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private bool _identityQueued;
     private bool _clientProfileApplied;
@@ -352,6 +370,18 @@ public sealed class RemoteGuestPlayableApplication :
     private long _lastStructuralAdvertisementQueue;
     private ulong _structuralAdvertisementsQueued;
     private ulong _rejectedStructuralManifestProofs;
+    private readonly StructuralPackObligation[] _structuralPackObligations = new StructuralPackObligation[8];
+    private ulong _highestStructuralPackRequestSequence;
+    private ulong _structuralPackRequests;
+    private ulong _structuralPackGrantsQueued;
+    private ulong _structuralPackProofsAccepted;
+    private ulong _rejectedStructuralPackMessages;
+    private ulong _structuralWindowSequence;
+    private SpatialChunkKey _structuralWindowCenter;
+    private int _structuralWindowRadius;
+    private ulong _structuralWindowMask;
+    private ulong _rejectedStructuralWindowProofs;
+    private ulong _structuralPackRetirements;
     private ulong _admissionAttempt;
     private bool _admissionDeferredForStructuralProof;
     private RemoteGuestAdmissionRequestHeader _deferredAdmissionHeader;
@@ -638,6 +668,26 @@ public sealed class RemoteGuestPlayableApplication :
             ProcessStructuralManifestProof(payload);
             return true;
         }
+        if (message.MessageId == RemoteStructuralPackRequestMessageCodec.Descriptor.Id)
+        {
+            ProcessStructuralPackRequest(payload);
+            return true;
+        }
+        if (message.MessageId == RemoteStructuralPackAppliedMessageCodec.Descriptor.Id)
+        {
+            ProcessStructuralPackProof(payload);
+            return true;
+        }
+        if (message.MessageId == RemoteStructuralWindowAppliedMessageCodec.Descriptor.Id)
+        {
+            ProcessStructuralWindowProof(payload);
+            return true;
+        }
+        if (message.MessageId == RemoteStructuralPackRetiredMessageCodec.Descriptor.Id)
+        {
+            ProcessStructuralPackRetired(payload);
+            return true;
+        }
         if (message.MessageId == RemoteGuestAdmissionRequestHeaderCodec.Descriptor.Id)
         {
             ProcessGuestRequest(payload);
@@ -718,6 +768,7 @@ public sealed class RemoteGuestPlayableApplication :
             complete &= QueueStructuralAdvertisement(force: false);
             return complete;
         }
+        complete &= QueueStructuralPackGrants();
         // Presentation authorization is independent of the required-content proof and guest
         // admission. A temporarily unavailable art package cannot prevent world entry.
         complete &= QueuePresentationAdvertisement();
@@ -807,6 +858,17 @@ public sealed class RemoteGuestPlayableApplication :
             StructuralManifestApplied = _structuralManifestApplied,
             StructuralAdvertisementsQueued = _structuralAdvertisementsQueued,
             RejectedStructuralManifestProofs = _rejectedStructuralManifestProofs,
+            StructuralPackRequests = _structuralPackRequests,
+            StructuralPackGrantsQueued = _structuralPackGrantsQueued,
+            StructuralPackProofsAccepted = _structuralPackProofsAccepted,
+            RejectedStructuralPackMessages = _rejectedStructuralPackMessages,
+            StructuralWindowSequence = _structuralWindowSequence,
+            StructuralWindowCenter = _structuralWindowCenter,
+            StructuralWindowMask = _structuralWindowMask,
+            RejectedStructuralWindowProofs = _rejectedStructuralWindowProofs,
+            StructuralPackRetirements = _structuralPackRetirements,
+            InterestRetirementsPending = _pendingInterestRetirementCount,
+            InterestRetirementsQueued = _interestRetirementsQueued,
         };
     }
 
@@ -898,6 +960,13 @@ public sealed class RemoteGuestPlayableApplication :
         }
         return false;
     }
+
+    internal bool TryGetPublicInterestAnchor(out WorldPosition anchor)
+    {
+        anchor = default;
+        return _recipient is not null && _recipient.TryGetLastInterestAnchor(out anchor);
+    }
+
 
     internal void GetSubscriptionTopology(
         out int total, out int immediate, out int near, out int far)
@@ -1048,6 +1117,24 @@ public sealed class RemoteGuestPlayableApplication :
             return false;
         _lastStructuralAdvertisementQueue = now;
         SaturatingIncrement(ref _structuralAdvertisementsQueued);
+        return true;
+    }
+
+    private bool QueueStructuralPackGrants()
+    {
+        for (int index = 0; index < _structuralPackObligations.Length; index++)
+        {
+            ref StructuralPackObligation obligation = ref _structuralPackObligations[index];
+            if (obligation.Grant is null || obligation.GrantQueued) continue;
+            if (!UltraSimGameProtocol.TryWriteStructuralPackGrant(
+                    _messageScratch, obligation.Grant, out int written))
+                throw new InvalidOperationException("An authorized Pack grant did not encode.");
+            if (_peer.TryQueue(RemoteStructuralPackGrantHeaderCodec.Descriptor.Id,
+                    _messageScratch.AsSpan(0, written)) != NetworkQueueStatus.Accepted)
+                return false;
+            obligation.GrantQueued = true;
+            SaturatingIncrement(ref _structuralPackGrantsQueued);
+        }
         return true;
     }
 
@@ -1240,12 +1327,227 @@ public sealed class RemoteGuestPlayableApplication :
             return;
         }
         _structuralManifestApplied = true;
-        if (_admissionDeferredForStructuralProof)
+        TryCompleteDeferredStructuralAdmission();
+    }
+
+    private void ProcessStructuralPackRequest(ReadOnlySpan<byte> payload)
+    {
+        if (!_structuralManifestApplied || _structuralAuthorization is null ||
+            !RemoteStructuralPackRequestMessageCodec.TryReadExact(payload, out var request) ||
+            !UltraSimGameProtocol.IsValidStructuralPackRequest(request) ||
+            request.ApplicationSessionEpoch != _applicationSessionEpoch ||
+            request.StructuralSequence != 1)
         {
-            _admissionDeferredForStructuralProof = false;
-            ProcessValidatedGuestRequest(_deferredAdmissionHeader, in _deferredAdmissionRequest);
-            _deferredAdmissionRequest = default;
+            SaturatingIncrement(ref _rejectedStructuralPackMessages);
+            return;
         }
+        for (int index = 0; index < _structuralPackObligations.Length; index++)
+        {
+            ref StructuralPackObligation existing = ref _structuralPackObligations[index];
+            if (existing.Grant is null ||
+                existing.Request.PackRequestSequence != request.PackRequestSequence)
+                continue;
+            if (existing.Request.ApplicationSessionEpoch != request.ApplicationSessionEpoch ||
+                existing.Request.StructuralSequence != request.StructuralSequence ||
+                existing.Request.PackX != request.PackX ||
+                existing.Request.PackZ != request.PackZ)
+                _applicationFaulted = true;
+            return;
+        }
+        if (request.PackRequestSequence <= _highestStructuralPackRequestSequence ||
+            !_structuralAuthorization.TryCreateGrant(in request,
+                out RemoteStructuralPackGrant? grant))
+        {
+            SaturatingIncrement(ref _rejectedStructuralPackMessages);
+            return;
+        }
+        int slot = -1;
+        for (int index = 0; index < _structuralPackObligations.Length; index++)
+            if (_structuralPackObligations[index].Grant is null ||
+                _structuralPackObligations[index].Retired ||
+                _structuralPackObligations[index].ProofStatus == RemoteStructuralApplyStatus.Rejected)
+            {
+                slot = index;
+                break;
+            }
+        if (slot < 0)
+        {
+            SaturatingIncrement(ref _rejectedStructuralPackMessages);
+            return;
+        }
+        _structuralPackObligations[slot] = new StructuralPackObligation
+        {
+            Request = request,
+            Grant = grant,
+        };
+        _highestStructuralPackRequestSequence = request.PackRequestSequence;
+        SaturatingIncrement(ref _structuralPackRequests);
+    }
+
+    private void ProcessStructuralPackProof(ReadOnlySpan<byte> payload)
+    {
+        if (!_structuralManifestApplied ||
+            !RemoteStructuralPackAppliedMessageCodec.TryReadExact(payload, out var proof) ||
+            !UltraSimGameProtocol.IsValidStructuralPackApplied(proof) ||
+            proof.ApplicationSessionEpoch != _applicationSessionEpoch ||
+            proof.StructuralSequence != 1)
+        {
+            SaturatingIncrement(ref _rejectedStructuralPackMessages);
+            return;
+        }
+        for (int index = 0; index < _structuralPackObligations.Length; index++)
+        {
+            ref StructuralPackObligation obligation = ref _structuralPackObligations[index];
+            if (obligation.Grant is null ||
+                obligation.Request.PackRequestSequence != proof.PackRequestSequence)
+                continue;
+            RemoteStructuralPackGrantHeader expected = obligation.Grant.Header;
+            if (!obligation.GrantQueued || proof.PackX != expected.PackX ||
+                proof.PackZ != expected.PackZ ||
+                proof.PackHash0 != expected.PackHash0 ||
+                proof.PackHash1 != expected.PackHash1 ||
+                proof.PackHash2 != expected.PackHash2 ||
+                proof.PackHash3 != expected.PackHash3)
+            {
+                SaturatingIncrement(ref _rejectedStructuralPackMessages);
+                return;
+            }
+            if (obligation.ProofStatus != 0)
+            {
+                if (obligation.ProofStatus != proof.Status) _applicationFaulted = true;
+                return;
+            }
+            obligation.ProofStatus = proof.Status;
+            if (proof.Status == RemoteStructuralApplyStatus.Applied)
+            {
+                SaturatingIncrement(ref _structuralPackProofsAccepted);
+                _publicationWork?.RefreshAllFromCurrentSource(_authorityTicks);
+                TryCompleteDeferredStructuralAdmission();
+            }
+            return;
+        }
+        SaturatingIncrement(ref _rejectedStructuralPackMessages);
+    }
+
+    private struct StructuralPackObligation
+    {
+        public RemoteStructuralPackRequestMessage Request;
+        public RemoteStructuralPackGrant? Grant;
+        public bool GrantQueued;
+        public RemoteStructuralApplyStatus ProofStatus;
+        public bool Retired;
+    }
+
+    private void ProcessStructuralPackRetired(ReadOnlySpan<byte> payload)
+    {
+        if (!_structuralManifestApplied ||
+            !RemoteStructuralPackRetiredMessageCodec.TryReadExact(payload, out var retired) ||
+            !UltraSimGameProtocol.IsValidStructuralPackRetired(in retired) ||
+            retired.ApplicationSessionEpoch != _applicationSessionEpoch ||
+            retired.StructuralSequence != 1)
+        {
+            SaturatingIncrement(ref _rejectedStructuralPackMessages);
+            return;
+        }
+        foreach (ref StructuralPackObligation obligation in _structuralPackObligations.AsSpan())
+        {
+            if (obligation.Grant is null ||
+                obligation.Request.PackRequestSequence != retired.PackRequestSequence) continue;
+            RemoteStructuralPackGrantHeader expected = obligation.Grant.Header;
+            if (obligation.ProofStatus != RemoteStructuralApplyStatus.Applied ||
+                (_structuralAuthorization is not null &&
+                 retired.PackX == _structuralAuthorization.InitialPack.X &&
+                 retired.PackZ == _structuralAuthorization.InitialPack.Z) ||
+                retired.PackX != expected.PackX || retired.PackZ != expected.PackZ ||
+                retired.PackHash0 != expected.PackHash0 ||
+                retired.PackHash1 != expected.PackHash1 ||
+                retired.PackHash2 != expected.PackHash2 ||
+                retired.PackHash3 != expected.PackHash3)
+            {
+                SaturatingIncrement(ref _rejectedStructuralPackMessages);
+                return;
+            }
+            if (obligation.Retired) return;
+            obligation.Retired = true;
+            SaturatingIncrement(ref _structuralPackRetirements);
+            _publicationWork?.RefreshAllFromCurrentSource(_authorityTicks);
+            return;
+        }
+        SaturatingIncrement(ref _rejectedStructuralPackMessages);
+    }
+
+    private void ProcessStructuralWindowProof(ReadOnlySpan<byte> payload)
+    {
+        if (!_structuralManifestApplied || _structuralAuthorization is null ||
+            !RemoteStructuralWindowAppliedMessageCodec.TryReadExact(payload, out var proof) ||
+            !UltraSimGameProtocol.IsValidStructuralWindowApplied(in proof) ||
+            proof.ApplicationSessionEpoch != _applicationSessionEpoch ||
+            proof.StructuralSequence != 1)
+        {
+            SaturatingIncrement(ref _rejectedStructuralWindowProofs);
+            return;
+        }
+        var center = new SpatialChunkKey(_structuralAuthorization.Space,
+            new SpatialChunkCoord(proof.CenterChunkX, proof.CenterChunkZ));
+        if (!IsPackProven(center) ||
+            proof.ResidentRadiusChunks != StructuralResidentRadiusChunks ||
+            (_structuralWindowSequence == 0 &&
+             center != _structuralAuthorization.InitialCenter) ||
+            (_structuralWindowSequence != 0 && proof.WindowSequence <= _structuralWindowSequence))
+        {
+            if (_structuralWindowSequence == proof.WindowSequence &&
+                center == _structuralWindowCenter &&
+                proof.ResidentRadiusChunks == _structuralWindowRadius &&
+                proof.ResidentMask == _structuralWindowMask)
+                return;
+            SaturatingIncrement(ref _rejectedStructuralWindowProofs);
+            return;
+        }
+        _structuralWindowSequence = proof.WindowSequence;
+        _structuralWindowCenter = center;
+        _structuralWindowRadius = proof.ResidentRadiusChunks;
+        _structuralWindowMask = proof.ResidentMask;
+        _publicationWork?.RefreshAllFromCurrentSource(_authorityTicks);
+        TryCompleteDeferredStructuralAdmission();
+    }
+
+    private bool IsPackProven(SpatialChunkKey key)
+    {
+        WorldPackAddressing.ToPackLocal(key.Coord, out WorldPackCoord coord, out _);
+        foreach (StructuralPackObligation obligation in _structuralPackObligations)
+            if (obligation.Grant is not null &&
+                obligation.Request.PackX == coord.X && obligation.Request.PackZ == coord.Z &&
+                obligation.ProofStatus == RemoteStructuralApplyStatus.Applied &&
+                !obligation.Retired)
+                return true;
+        return false;
+    }
+
+    private bool IsStructuralChunkReady(SpatialChunkKey key)
+    {
+        if (_structuralAuthorization?.AvailablePackageCount is not > 0) return true;
+        if (_structuralWindowSequence == 0 || !IsPackProven(key)) return false;
+        long dx = (long)key.Coord.X - _structuralWindowCenter.Coord.X;
+        long dz = (long)key.Coord.Z - _structuralWindowCenter.Coord.Z;
+        if (key.Space != _structuralWindowCenter.Space ||
+            Math.Abs(dx) > _structuralWindowRadius ||
+            Math.Abs(dz) > _structuralWindowRadius) return false;
+        int bit = checked((int)((dx + _structuralWindowRadius) *
+            (2 * _structuralWindowRadius + 1) + dz + _structuralWindowRadius));
+        return (_structuralWindowMask & (1UL << bit)) != 0;
+    }
+
+    private bool StructuralAdmissionReady => _structuralManifestApplied &&
+        (_structuralAuthorization?.AvailablePackageCount is not > 0 ||
+         (_structuralWindowSequence != 0 &&
+          IsPackProven(_structuralAuthorization.InitialCenter)));
+
+    private void TryCompleteDeferredStructuralAdmission()
+    {
+        if (!_admissionDeferredForStructuralProof || !StructuralAdmissionReady) return;
+        _admissionDeferredForStructuralProof = false;
+        ProcessValidatedGuestRequest(_deferredAdmissionHeader, in _deferredAdmissionRequest);
+        _deferredAdmissionRequest = default;
     }
 
     private void ProcessGuestRequest(ReadOnlySpan<byte> payload)
@@ -1260,7 +1562,7 @@ public sealed class RemoteGuestPlayableApplication :
                 out GameGuestAdmissionRequest request) ||
             header.ApplicationSessionEpoch != _applicationSessionEpoch)
             return;
-        if (!_structuralManifestApplied)
+        if (!StructuralAdmissionReady)
         {
             // Event-lane admission can arrive before the Control-lane structural proof.
             // Retain one bounded, already-decoded request without admitting or mutating Game.
@@ -2653,6 +2955,19 @@ public sealed class RemoteGuestPlayableApplication :
                 "The publication work scheduler did not accept the current source lineage.");
         }
 
+        int retirementCandidateCount = 0;
+        if (_structuralAuthorization is not null)
+        {
+            OfflineDirectChunkSubscriptionView before = _recipient!.Subscriptions;
+            for (int index = 0; index < before.Length; index++)
+            {
+                OfflineDirectChunkSubscription subscription = before[index];
+                if (subscription.HasKnowledge ||
+                    _worldDelivery!.MayHaveDeliveredChunk(subscription.Interest.Key))
+                    _retirementCandidateKeys[retirementCandidateCount++] =
+                        subscription.Interest.Key;
+            }
+        }
         OfflineDirectChunkReconcileStatus reconcile = _worldDelivery!.Reconcile(
             GameWorldState.DefaultSpace, capture.Anchor, _subscriptionChanges,
             out OfflineDirectChunkReconcileResult reconcileResult);
@@ -2668,6 +2983,34 @@ public sealed class RemoteGuestPlayableApplication :
                 _authorityTicks))
             throw new InvalidOperationException(
                 "Remote public interest and publication work topology diverged.");
+
+        if (_structuralAuthorization is not null)
+        {
+            ulong nextDelivery = _worldDelivery.GetSnapshot().NextDeliveryId;
+            ulong cutoff = nextDelivery == 0 ? ulong.MaxValue : nextDelivery - 1;
+            for (int index = 0; index < reconcileResult.ChangeCount; index++)
+            {
+                OfflineDirectChunkSubscriptionChange change = _subscriptionChanges[index];
+                if (change.Kind != OfflineDirectChunkSubscriptionChangeKind.Left) continue;
+                if (_retirementCandidateKeys.AsSpan(0, retirementCandidateCount)
+                    .BinarySearch(change.Key) < 0) continue;
+                if (_pendingInterestRetirementCount == _pendingInterestRetirements.Length)
+                    throw new InvalidOperationException(
+                        "The bounded remote public-interest retirement queue was exhausted.");
+                _pendingInterestRetirements[_pendingInterestRetirementCount++] = new()
+                {
+                    ApplicationSessionEpoch = _applicationSessionEpoch,
+                    PublicationEpoch = capture.Publications.Epoch.Value,
+                    DeliveryCutoff = cutoff,
+                    SpatialSpaceId = change.Key.Space.Value,
+                    ChunkX = change.Key.Coord.X,
+                    ChunkZ = change.Key.Coord.Z,
+                };
+            }
+            // A retirement must enter the reliable Control lane before a later re-entry can
+            // publish new WorldState delivery identities for the same chunk.
+            if (!QueueInterestRetirements()) return;
+        }
 
         int pending = _publicationWork.PendingWorkCount;
         if (pending > _publicationPendingHighWater) _publicationPendingHighWater = pending;
@@ -2694,6 +3037,29 @@ public sealed class RemoteGuestPlayableApplication :
         if (pending > _publicationPendingHighWater) _publicationPendingHighWater = pending;
     }
 
+    private bool QueueInterestRetirements()
+    {
+        int bytes = RemoteChunkInterestRetiredMessageCodec.EncodedSize;
+        while (_pendingInterestRetirementCount != 0)
+        {
+            RemoteChunkInterestRetiredMessage retired = _pendingInterestRetirements[0];
+            if (!RemoteChunkInterestRetiredMessageCodec.TryWriteExact(
+                    _messageScratch.AsSpan(0, bytes), in retired))
+                throw new InvalidOperationException(
+                    "The retained public-interest retirement did not encode.");
+            if (_peer.TryQueue(RemoteChunkInterestRetiredMessageCodec.Descriptor.Id,
+                    _messageScratch.AsSpan(0, bytes)) != NetworkQueueStatus.Accepted)
+                return false;
+            SaturatingIncrement(ref _interestRetirementsQueued);
+            _pendingInterestRetirementCount--;
+            if (_pendingInterestRetirementCount != 0)
+                _pendingInterestRetirements.AsSpan(1, _pendingInterestRetirementCount)
+                    .CopyTo(_pendingInterestRetirements);
+            _pendingInterestRetirements[_pendingInterestRetirementCount] = default;
+        }
+        return true;
+    }
+
     private void DriveStandalonePublicWorld(
         out int publications,
         out int gameMessages,
@@ -2718,7 +3084,8 @@ public sealed class RemoteGuestPlayableApplication :
             // Concept Demo consumer stages the canonical authored WorldPack; unauthored spatial
             // keys have neither structural pages nor a client semantic destination. Later remote
             // structural acquisition will explicitly coordinate the same authored-key boundary.
-            if (!_worldPack!.TryGetBaseTerrain(work.Key, out _))
+            if (!_worldPack!.TryGetBaseTerrain(work.Key, out _) ||
+                !IsStructuralChunkReady(work.Key))
                 continue;
             RemoteChunkWorldStateScheduleStatus status =
                 _worldDelivery!.TrySchedule(in work, _authorityTicks, out int queuedBytes);
@@ -2752,7 +3119,8 @@ public sealed class RemoteGuestPlayableApplication :
                 SaturatingIncrement(ref _publicationTransientDeferralRequeues);
                 break;
             }
-            if (!_worldPack!.TryGetBaseTerrain(work.Key, out _)) continue;
+            if (!_worldPack!.TryGetBaseTerrain(work.Key, out _) ||
+                !IsStructuralChunkReady(work.Key)) continue;
             _publicationDueWork[due++] = work;
         }
 

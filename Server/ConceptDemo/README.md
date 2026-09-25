@@ -3,8 +3,10 @@
 `UltraSim.Server.ConceptDemo` owns the passive deployment composition shared by dedicated Direct
 Connect and Complete-hosted Concept Demo servers:
 
-- the exact authenticated content activation containing the canonical Concept Demo WorldPack plus
-  standard Inventory and read-only Server Monitor UI definitions;
+- the exact authenticated bootstrap activation containing the canonical Concept Demo structural
+  manifest plus standard Inventory and read-only Server Monitor UI definitions;
+- independently authorized packages for canonical WorldPacks `(0,0)` and `(1,0)`, acquired on
+  demand after manifest proof without publishing a new Content catalog;
 - a separate authenticated, non-gating presentation authorization containing actor Add X/Y and
   ordered Replace X packages. Message 149 advertises the exact Realm layer after semantic proof;
   actor package failure never supplies a successful semantic proof or blocks valid world entry;

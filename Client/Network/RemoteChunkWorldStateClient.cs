@@ -25,7 +25,10 @@ public readonly record struct RemoteChunkWorldStateClientSnapshot(
     ulong RejectedSnapshots,
     ulong SupersededDeliveries,
     long ReservedBytes,
-    RemoteChunkWorldStateClientTimingSnapshot Timing);
+    RemoteChunkWorldStateClientTimingSnapshot Timing)
+{
+    public int RetiredInterestCount { get; init; }
+}
 
 /// <summary>
 /// N1.2/N1.3 client bridge for ordinary unfragmented deltas/absences and exceptional atomic Bulk
@@ -46,6 +49,8 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
     private readonly byte[] _snapshotSegmentScratch;
     private readonly bool[] _snapshotSegments;
     private readonly DeliveryLineage[] _deliveryLineage;
+    private readonly Dictionary<SpatialChunkKey, RetiredInterest> _retiredInterest =
+        new(1_024);
     private readonly PendingProof[] _proofs;
     private readonly RemoteChunkAppliedEnvelopeEntry[] _proofEnvelopeEntries;
     private readonly byte[] _proofScratch;
@@ -167,6 +172,11 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
 
     private bool TryProcessCore(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
     {
+        if (message.MessageId == RemoteChunkInterestRetiredMessageCodec.Descriptor.Id)
+        {
+            ProcessInterestRetired(payload);
+            return true;
+        }
         if (message.MessageId == RemoteChunkDeltaHeaderCodec.Descriptor.Id)
         {
             ProcessDelta(payload);
@@ -320,7 +330,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
                 (long)_proofEnvelopeEntries.Length *
                     Unsafe.SizeOf<RemoteChunkAppliedEnvelopeEntry>() +
                 _proofScratch.Length),
-            GetTimingSnapshot());
+            GetTimingSnapshot()) { RetiredInterestCount = _retiredInterest.Count };
     }
 
     public void ConfigureTelemetry(NetworkTelemetryLevel level)
@@ -424,10 +434,54 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         _rejectedSnapshots,
         _supersededDeliveries,
         0,
-        default);
+        default) { RetiredInterestCount = _retiredInterest.Count };
 
     private static ulong Difference(ulong before, ulong after) =>
         after >= before ? after - before : 0;
+
+    private void ProcessInterestRetired(ReadOnlySpan<byte> payload)
+    {
+        if (!RemoteChunkInterestRetiredMessageCodec.TryReadExact(payload, out var retired) ||
+            retired.ApplicationSessionEpoch != _applicationSessionEpoch ||
+            retired.PublicationEpoch == 0 || retired.SpatialSpaceId == 0)
+        {
+            SaturatingIncrement(ref _rejectedDeliveries);
+            return;
+        }
+        var epoch = new PublicationEpoch(retired.PublicationEpoch);
+        var key = new SpatialChunkKey(new SpatialSpaceId(retired.SpatialSpaceId),
+            retired.ChunkX, retired.ChunkZ);
+        PublicationEpoch cacheEpoch = _cache.GetSnapshot().PublicationEpoch;
+        if (cacheEpoch.IsValid && cacheEpoch != epoch) return;
+        if (_retiredInterest.TryGetValue(key, out RetiredInterest prior) &&
+            prior.Epoch == epoch && prior.Cutoff >= retired.DeliveryCutoff)
+            return;
+        if (!_retiredInterest.ContainsKey(key) && _retiredInterest.Count == 1_024)
+            throw new InvalidOperationException(
+                "The bounded public-interest retirement fence is exhausted.");
+        _retiredInterest[key] = new RetiredInterest(epoch, retired.DeliveryCutoff);
+
+        if (_snapshotBegin.DeliveryId != 0 &&
+            _snapshotBegin.PublicationEpoch == retired.PublicationEpoch &&
+            _snapshotBegin.SpatialSpaceId == retired.SpatialSpaceId &&
+            _snapshotBegin.ChunkX == retired.ChunkX &&
+            _snapshotBegin.ChunkZ == retired.ChunkZ &&
+            _snapshotBegin.DeliveryId <= retired.DeliveryCutoff)
+            ClearSnapshotCandidate();
+        if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle)) return;
+        DeliveryLineage lineage = _deliveryLineage[checked((int)handle.Index)];
+        if (lineage.IsValid && lineage.HandleGeneration == handle.Generation &&
+            lineage.Key == key && lineage.Epoch == epoch &&
+            lineage.DeliveryId > retired.DeliveryCutoff)
+            return;
+        if (!_cache.TryRetirePublicInterest(handle, epoch, out _))
+            throw new InvalidOperationException(
+                "An authenticated public-interest retirement could not clear client knowledge.");
+    }
+
+    private bool IsRetiredDelivery(SpatialChunkKey key, PublicationEpoch epoch, ulong deliveryId) =>
+        _retiredInterest.TryGetValue(key, out RetiredInterest retired) &&
+        retired.Epoch == epoch && deliveryId <= retired.Cutoff;
 
     private void ProcessDirtyChunkBundle(ReadOnlySpan<byte> payload)
     {
@@ -510,6 +564,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         var epoch = new PublicationEpoch(header.PublicationEpoch);
         var key = new SpatialChunkKey(
             new SpatialSpaceId(entry.SpatialSpaceId), entry.ChunkX, entry.ChunkZ);
+        if (IsRetiredDelivery(key, epoch, entry.DeliveryId)) return;
         RemoteChunkPublicationApplyStatus status;
         bool duplicate = false;
         DeliveryLineageDecision lineage = DeliveryLineageDecision.New;
@@ -581,6 +636,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         var epoch = new PublicationEpoch(header.PublicationEpoch);
         var key = new SpatialChunkKey(
             new SpatialSpaceId(entry.SpatialSpaceId), entry.ChunkX, entry.ChunkZ);
+        if (IsRetiredDelivery(key, epoch, entry.DeliveryId)) return;
         RemoteChunkPublicationApplyStatus status;
         DeliveryLineageDecision lineage = DeliveryLineageDecision.New;
         if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle)
@@ -637,6 +693,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         var epoch = new PublicationEpoch(header.PublicationEpoch);
         var key = new SpatialChunkKey(
             new SpatialSpaceId(entry.SpatialSpaceId), entry.ChunkX, entry.ChunkZ);
+        if (IsRetiredDelivery(key, epoch, entry.DeliveryId)) return;
         RemoteChunkPublicationApplyStatus status;
         DeliveryLineageDecision lineage = DeliveryLineageDecision.New;
         if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle))
@@ -698,6 +755,11 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
 
         var epoch = new PublicationEpoch(header.PublicationEpoch);
         var key = new SpatialChunkKey(new SpatialSpaceId(header.SpatialSpaceId), header.ChunkX, header.ChunkZ);
+        if (IsRetiredDelivery(key, epoch, header.DeliveryId))
+        {
+            _wireDeltas.AsSpan(0, count).Clear();
+            return;
+        }
         RemoteChunkPublicationApplyStatus status;
         bool duplicate = false;
         DeliveryLineageDecision lineage = DeliveryLineageDecision.New;
@@ -787,6 +849,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         var epoch = new PublicationEpoch(message.PublicationEpoch);
         var key = new SpatialChunkKey(
             new SpatialSpaceId(message.SpatialSpaceId), message.ChunkX, message.ChunkZ);
+        if (IsRetiredDelivery(key, epoch, message.DeliveryId)) return;
         RemoteChunkPublicationApplyStatus status;
         DeliveryLineageDecision lineage = DeliveryLineageDecision.New;
         if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle))
@@ -866,6 +929,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         var epoch = new PublicationEpoch(begin.PublicationEpoch);
         var key = new SpatialChunkKey(
             new SpatialSpaceId(begin.SpatialSpaceId), begin.ChunkX, begin.ChunkZ);
+        if (IsRetiredDelivery(key, epoch, begin.DeliveryId)) return;
         if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle))
         {
             QueueSnapshotProof(in begin, RemoteChunkPublicationApplyStatus.Rejected);
@@ -1362,4 +1426,6 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         internal bool IsValid => Key.Space.IsValid && HandleGeneration != 0 && Epoch.IsValid &&
             DeliveryId != 0;
     }
+
+    private readonly record struct RetiredInterest(PublicationEpoch Epoch, ulong Cutoff);
 }

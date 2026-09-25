@@ -1210,7 +1210,7 @@ internal sealed class BotClient : IDisposable
                     connection.ApplicationSessionEpoch,
                     new RemoteRequiredContentBinding(
                         connection.Realm, _cache, ContentBaseCatalog.Empty, _source),
-                    RemoteConceptDemoWorldProfile.CreateRequiredBinding(),
+                    RemoteConceptDemoWorldProfile.CreateStructuralBinding(),
                     _renderer,
                     new ClientChatLimits(256, 256, 128),
                     standardUiDefinitionResolver: ClientStandardUiLibrary.Resolve);
@@ -1221,7 +1221,7 @@ internal sealed class BotClient : IDisposable
             _ = _session.ProcessReceived();
             RemotePlayableSessionSnapshot snapshot = _session.GetSnapshot();
             if (snapshot.Content.State == RemoteContentClientState.Rejected ||
-                snapshot.StructuralWorld.State == RemoteStructuralWorldState.Rejected ||
+                snapshot.StructuralManifest.State == RemoteStructuralManifestClientState.Rejected ||
                 snapshot.Playable.State is RemotePlayableClientState.Rejected or
                     RemotePlayableClientState.Faulted)
             {
@@ -1237,13 +1237,22 @@ internal sealed class BotClient : IDisposable
                 return;
             }
             if (!_finalRetirement && !_guestSubmitted &&
-                snapshot.StructuralWorld.State == RemoteStructuralWorldState.Ready)
+                snapshot.StructuralPacks.InitialReady)
             {
                 string name = $"PF1 Bot {Id:D4}";
                 if (_session.TrySubmitGuest(new GameGuestAdmissionRequest(Body, name)))
                     _guestSubmitted = true;
             }
             if (snapshot.Playable.State != RemotePlayableClientState.Active) return;
+
+            // Headless bots remain real structural consumers. They stage only the same bounded
+            // semantic neighborhood that a rendered client would prepare before proving its
+            // presentation window; no Pack bytes or authority state are synthesized here.
+            RemoteStructuralPackClient packs = _session.StructuralPacks ??
+                throw new InvalidOperationException("The authenticated structural Packs are absent.");
+            if (packs.TryPreparePresentation(snapshot.Playable.Position,
+                    out SpatialChunkKey center, out ClientStructuralResidencyPlan plan))
+                packs.CommitPresentation(plan, center);
 
             if (_inputScheduler is null)
             {

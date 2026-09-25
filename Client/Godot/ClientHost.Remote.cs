@@ -29,6 +29,7 @@ public partial class ClientHost
     private bool _remoteSmokeStarted;
     private bool _remoteSmokeDisconnectStarted;
     private bool _remoteSmokeValidated;
+    private bool _w7NativeJourneyStarted;
     private bool _remoteSmokeBarrierReadyPublished;
     private bool _remoteSmokeCompletionReadyPublished;
     private bool _remoteProcessObserved;
@@ -122,6 +123,17 @@ public partial class ClientHost
                         ValidateRemoteSmoke(playable);
                         _remoteSmokeValidated = true;
                     }
+                    string? w7GateTrigger = ReadArgument("--w7-native-gate-trigger-file=");
+                    if (w7GateTrigger is not null)
+                    {
+                        if (!_w7NativeJourneyStarted)
+                        {
+                            _remotePlayable.BeginW7NativeJourney(w7GateTrigger);
+                            _w7NativeJourneyStarted = true;
+                            return;
+                        }
+                        if (!playable.W7NativeJourneyComplete) return;
+                    }
                     if (!SharedRemoteSmokeBarrierReleased()) return;
                     // A PF1 bot may retire, re-enter, or leave this client's AOI while the
                     // native process is held. Initial convergence already proved the exact
@@ -132,7 +144,8 @@ public partial class ClientHost
                         ValidateRemoteSmokeSustainedHealth(playable);
                         if (!RemoteSmokePresentationStable(playable)) return;
                     }
-                    else if (playable.Actors.ActiveActors < RemoteSmokeExpectedActors())
+                    else if (w7GateTrigger is null &&
+                             playable.Actors.ActiveActors < RemoteSmokeExpectedActors())
                         return;
                     if (!SharedRemoteSmokeCompletionBarrierReleased()) return;
                     if (string.Equals(
@@ -153,7 +166,11 @@ public partial class ClientHost
                     GD.Print(
                         $"A0.8 CONTENTLESS ONLINE PASS mode={ReadArgument("--a0-8-expect=") ?? "unspecified"} " +
                         $"catalog={playable.Session.Content.ResolvedCatalogFingerprint} " +
-                        $"world={playable.Session.StructuralWorld.WorldPackFingerprint} " +
+                        $"worldManifest={playable.Session.StructuralManifest.ManifestFingerprint} " +
+                        $"manifestEntries={playable.Session.StructuralManifest.ManifestEntryCount} " +
+                        $"preparedPacks={playable.Session.StructuralPacks.PreparedPackCount} " +
+                        $"semanticChunks={playable.Session.StructuralPacks.SemanticResidentChunks} " +
+                        $"packBytesFetched={playable.Session.StructuralPacks.BytesFetched} " +
                         $"generation={playable.Session.Playable.ServerGenerationId} " +
                         $"guest={playable.Session.Playable.GuestIdentity.DisplayName} " +
                         $"body={playable.Session.Playable.GuestIdentity.Body} " +
@@ -750,6 +767,7 @@ public partial class ClientHost
         _remotePlayable.GetParent()?.RemoveChild(_remotePlayable);
         _remotePlayable.QueueFree();
         _remotePlayable = null;
+        _w7NativeJourneyStarted = false;
     }
 
     private void TryStartRemoteSmoke()

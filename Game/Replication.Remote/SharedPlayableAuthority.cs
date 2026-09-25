@@ -378,8 +378,8 @@ public sealed class SharedPlayableAuthority : IDisposable
         limits.Validate();
         long generationStartedTimestamp = Stopwatch.GetTimestamp();
         ConceptDemoStructuralSource source = GamePlayableWorld.CreateConceptDemoStructuralSource();
-        // Pre-W7 remote activation still transfers the frozen historical combined Pack. It is
-        // intentionally not the structural root of this authority generation.
+        // Keep the frozen combined Pack only for legacy in-process regression callers. W7
+        // Remote deployment authorizes the canonical manifest and independent Pack artifacts.
         WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
         var composition = new UltraSimGameComposition(
             limits.RequiredInventoryLimits,
@@ -1513,6 +1513,11 @@ public sealed class SharedRemoteGuestPlayableApplicationFactory : IHostedUdpSess
             throw new ArgumentException(
                 "Structural World authorization requires exact application Content authorization.",
                 nameof(structuralAuthorization));
+        if (structuralAuthorization is not null &&
+            !MatchesCurrentStructuralAuthority(authority, structuralAuthorization))
+            throw new ArgumentException(
+                "Remote structural deployment cannot represent this authority's effective World.",
+                nameof(structuralAuthorization));
         _structuralAuthorization = structuralAuthorization;
         _contentBackedUiDefinitions = CopyDefinitions(
             contentBackedUiDefinitions, nameof(contentBackedUiDefinitions));
@@ -1540,6 +1545,12 @@ public sealed class SharedRemoteGuestPlayableApplicationFactory : IHostedUdpSess
     public IHostedUdpSessionApplication Create(ConnectionId connection, NetworkProtocolPeer peer)
     {
         ArgumentNullException.ThrowIfNull(peer);
+        // An authority overlay may have changed since deployment construction. W7 has no
+        // overlay transport, so a later session must not enter with stale base-Pack truth.
+        if (_structuralAuthorization is not null &&
+            !MatchesCurrentStructuralAuthority(_authority, _structuralAuthorization))
+            throw new InvalidOperationException(
+                "Remote structural admission cannot represent the current effective World.");
         long value = Interlocked.Increment(ref _nextParticipant);
         if (value <= 0)
             throw new InvalidOperationException("The shared participant identity space is exhausted.");
@@ -1568,6 +1579,13 @@ public sealed class SharedRemoteGuestPlayableApplicationFactory : IHostedUdpSess
             throw;
         }
     }
+
+    private static bool MatchesCurrentStructuralAuthority(SharedPlayableAuthority authority,
+        RemoteStructuralWorldAuthorization authorization) =>
+        authority.Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (world, _, game) => authorization.MatchesUnmodifiedAuthority(
+                game.WorldState.PreparedComposition), out bool exactAuthority) &&
+        exactAuthority;
 
     private static UiDefinitionIdentity[] CopyDefinitions(
         IEnumerable<UiDefinitionIdentity>? source,

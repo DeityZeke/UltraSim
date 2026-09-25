@@ -3393,7 +3393,7 @@ static void VerifyContentlessOnlineNative(
                 "--a0-8-expect=cold",
                 "--expect-edition=Online",
             ]), 45_000);
-            RequireNativeA08Result(cold, "cold", coldReady.WorldPackFingerprint,
+            RequireNativeA08Result(cold, "cold", coldReady.StructuralManifestFingerprint,
                 expectedWarm: false, expectedRememberedProfile: false,
                 expectedProfile: "grammar=ThirdPersonDirect camera=Perspective/Free/Free " +
                     "distance=8.5 canonicalFov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT");
@@ -3433,7 +3433,7 @@ static void VerifyContentlessOnlineNative(
                 "--a0-8-expect=warm",
                 "--expect-edition=Online",
             ]), 45_000);
-            RequireNativeA08Result(warm, "warm", warmReady.WorldPackFingerprint,
+            RequireNativeA08Result(warm, "warm", warmReady.StructuralManifestFingerprint,
                 expectedWarm: true, expectedRememberedProfile: true,
                 expectedProfile: "grammar=ThirdPersonDirect camera=Perspective/Free/Free " +
                     "distance=8.5 canonicalFov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT");
@@ -3474,12 +3474,52 @@ static void VerifyContentlessOnlineNative(
                 "--a0-8-expect=warm",
                 "--expect-edition=Online",
             ]), 45_000);
-            RequireNativeA08Result(changed, "warm", changedReady.WorldPackFingerprint,
+            RequireNativeA08Result(changed, "warm", changedReady.StructuralManifestFingerprint,
                 expectedWarm: true, expectedRememberedProfile: false,
                 expectedProfile: "grammar=OrbitCommand camera=Perspective/Free/Free " +
                     "distance=14.0 canonicalFov=70 select=MouseButton:LEFT primary=MouseButton:MIDDLE");
         }
         finally { StopOwnedProcess(changedServer); }
+    }
+
+    // The exported client begins with one prepared Pack, then the test-only server setup
+    // places its admitted guest at the real central Gate. Interaction, Far Pack demand,
+    // ordinary seam walking, retirement and warm reprepare use the production paths.
+    string w7Trigger = Path.Combine(scope, "w7-gate-trigger");
+    NativeDeploymentReady w7Ready;
+    using (Process w7Server = StartNativeDeployment(
+               root, configuration, identity, Path.Combine(scope, "w7-ready.json"),
+               ReserveLoopbackPort(SocketType.Dgram, ProtocolType.Udp),
+               ReserveLoopbackPort(SocketType.Stream, ProtocolType.Tcp), out w7Ready,
+               nativeGateTriggerFile: w7Trigger))
+    {
+        try
+        {
+            string journey = RunCaptured(root, clientExecutable,
+                clientArgumentPrefix.Concat(
+                [
+                    "--a0-8-smoke",
+                    $"--a0-8-endpoint={w7Ready.Endpoint}",
+                    $"--a0-8-fingerprint={w7Ready.Fingerprint}",
+                    $"--a0-8-cache={Path.Combine(scope, "w7-cache")}",
+                    $"--a0-8-trust={trust}",
+                    $"--f0-3c-profile-decisions={profileDecisions}",
+                    "--a0-8-allow-private-content",
+                    "--a0-8-expect=cold",
+                    $"--w7-native-gate-trigger-file={w7Trigger}",
+                    "--expect-edition=Online",
+                ]), 90_000);
+            if (!journey.Contains("W7 NATIVE PACK JOURNEY PASS gate=real " +
+                    "seam=127/128/127 retirement=guarded warmBytes=0 " +
+                    "totalPackBytes=731048", StringComparison.Ordinal) ||
+                !journey.Contains("rejectedPublic=0", StringComparison.Ordinal) ||
+                !ContainsPositiveNamedCount(journey, "rendererChunks=") ||
+                !journey.Contains(" actors=1 publicActor=", StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    $"The exported W7 journey did not complete:\n{Tail(journey, 8_000)}");
+            Console.WriteLine("PASS W7_ExportedOnlinePackJourney");
+        }
+        finally { StopOwnedProcess(w7Server); }
     }
 
     Console.WriteLine(
@@ -3580,17 +3620,17 @@ static void VerifyEmbeddedCompleteHostedNative(
         string bobOutput = bob.GetAwaiter().GetResult();
         string carolOutput = carol.GetAwaiter().GetResult();
         RequireNativeA08Result(
-            bobOutput, "cold", worldPackFingerprint: string.Empty,
+            bobOutput, "cold", expectedManifestFingerprint: string.Empty,
             expectedWarm: false, expectedRememberedProfile: false,
             expectedProfile: "grammar=ThirdPersonDirect camera=Perspective/Free/Free " +
                 "distance=8.5 canonicalFov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT",
-            requireWorldFingerprint: false);
+            requireManifestFingerprint: false);
         RequireNativeA08Result(
-            carolOutput, "cold", worldPackFingerprint: string.Empty,
+            carolOutput, "cold", expectedManifestFingerprint: string.Empty,
             expectedWarm: false, expectedRememberedProfile: false,
             expectedProfile: "grammar=ThirdPersonDirect camera=Perspective/Free/Free " +
                 "distance=8.5 canonicalFov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT",
-            requireWorldFingerprint: false);
+            requireManifestFingerprint: false);
         // Three humans plus the existing woodland animal must be concurrently presented.
         if (!bobOutput.Contains("actors=4", StringComparison.Ordinal) ||
             !carolOutput.Contains("actors=4", StringComparison.Ordinal))
@@ -3798,10 +3838,10 @@ static void VerifyPf2MixedExportedAccountingSwarm(
         File.WriteAllText(nativeRetireRelease, "retire\n");
         string aliceOutput = aliceTask.GetAwaiter().GetResult();
         string bobOutput = bobTask.GetAwaiter().GetResult();
-        RequireNativeA08Result(aliceOutput, "cold", ready.WorldPackFingerprint,
+        RequireNativeA08Result(aliceOutput, "cold", ready.StructuralManifestFingerprint,
             expectedWarm: false, expectedRememberedProfile: false,
             expectedProfile: expectedProfile);
-        RequireNativeA08Result(bobOutput, "cold", ready.WorldPackFingerprint,
+        RequireNativeA08Result(bobOutput, "cold", ready.StructuralManifestFingerprint,
             expectedWarm: false, expectedRememberedProfile: false,
             expectedProfile: expectedProfile);
 
@@ -4673,11 +4713,11 @@ static void VerifyPf1MixedExportedSwarm(
         string aliceOutput = aliceTask.GetAwaiter().GetResult();
         string bobOutput = bobTask.GetAwaiter().GetResult();
         RequireNativeA08Result(
-            aliceOutput, "cold", ready.WorldPackFingerprint,
+            aliceOutput, "cold", ready.StructuralManifestFingerprint,
             expectedWarm: false, expectedRememberedProfile: false,
             expectedProfile: expectedProfile);
         RequireNativeA08Result(
-            bobOutput, "cold", ready.WorldPackFingerprint,
+            bobOutput, "cold", ready.StructuralManifestFingerprint,
             expectedWarm: false, expectedRememberedProfile: false,
             expectedProfile: expectedProfile);
         if (!aliceOutput.Contains($"generation={ready.ServerGeneration}", StringComparison.Ordinal) ||
@@ -5233,7 +5273,8 @@ static Process StartNativeDeployment(
     int recommendedInputHz = 30,
     int inputBurst = 10,
     int inputBurstWindowMilliseconds = 100,
-    int networkServiceDelayMilliseconds = 1)
+    int networkServiceDelayMilliseconds = 1,
+    string? nativeGateTriggerFile = null)
 {
     var start = new ProcessStartInfo("dotnet")
     {
@@ -5259,6 +5300,8 @@ static Process StartNativeDeployment(
         $"--network-service-delay-ms={networkServiceDelayMilliseconds}",
     }) start.ArgumentList.Add(argument);
     if (stopFile is not null) start.ArgumentList.Add($"--stop-file={stopFile}");
+    if (nativeGateTriggerFile is not null)
+        start.ArgumentList.Add($"--w7-native-gate-trigger-file={nativeGateTriggerFile}");
     if (summaryFile is not null) start.ArgumentList.Add($"--summary-file={summaryFile}");
     if (accountingStartFile is not null)
         start.ArgumentList.Add($"--accounting-start-file={accountingStartFile}");
@@ -5307,7 +5350,8 @@ static Process StartNativeDeployment(
             value.GetProperty("InputBurstCapacity").GetInt32(),
             value.GetProperty("InputBurstWindowMilliseconds").GetInt32(),
             value.GetProperty("MaximumParticipants").GetInt32(),
-            value.GetProperty("ServerGeneration").GetUInt64());
+            value.GetProperty("ServerGeneration").GetUInt64(),
+            RequiredString(value, "StructuralManifestFingerprint"));
         return process;
     }
     catch
@@ -5329,19 +5373,22 @@ static string RequiredString(JsonElement parent, string property)
 static void RequireNativeA08Result(
     string output,
     string mode,
-    string worldPackFingerprint,
+    string expectedManifestFingerprint,
     bool expectedWarm,
     bool expectedRememberedProfile,
     string expectedProfile,
-    bool requireWorldFingerprint = true)
+    bool requireManifestFingerprint = true)
 {
     string pass = $"A0.8 CONTENTLESS ONLINE PASS mode={mode}";
     if (!output.Contains(pass, StringComparison.Ordinal) ||
         !output.Contains("F0.3c CLIENT PROFILE APPLIED", StringComparison.Ordinal) ||
         !output.Contains(expectedRememberedProfile ? "remembered=True" : "remembered=False", StringComparison.Ordinal) ||
         !output.Contains(expectedProfile, StringComparison.Ordinal) ||
-        requireWorldFingerprint &&
-            !output.Contains($"world={worldPackFingerprint}", StringComparison.Ordinal) ||
+        requireManifestFingerprint &&
+            !output.Contains($"worldManifest={expectedManifestFingerprint}", StringComparison.Ordinal) ||
+        !output.Contains("manifestEntries=2 preparedPacks=1 semanticChunks=25", StringComparison.Ordinal) ||
+        expectedWarm && !output.Contains("packBytesFetched=0", StringComparison.Ordinal) ||
+        !expectedWarm && output.Contains("packBytesFetched=0", StringComparison.Ordinal) ||
         !output.Contains("chunks=9", StringComparison.Ordinal) ||
         !output.Contains("proofs=1", StringComparison.Ordinal) ||
         !output.Contains("ui=1", StringComparison.Ordinal) ||
@@ -6407,7 +6454,8 @@ internal sealed record NativeDeploymentReady(
     int InputBurstCapacity,
     int InputBurstWindowMilliseconds,
     int MaximumParticipants,
-    ulong ServerGeneration);
+    ulong ServerGeneration,
+    string StructuralManifestFingerprint);
 
 internal sealed record ContentlessOnlineExport(
     string Scope,

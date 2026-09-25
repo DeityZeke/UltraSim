@@ -9,6 +9,8 @@ using UltraSim.Network;
 using UltraSim.Game.UI;
 using UltraSim.UI;
 using UltraSim.Server.ConceptDemo;
+using UltraSim.Game.Composition;
+using UltraSim.Game.World;
 
 DirectConnectOptions options;
 try
@@ -80,8 +82,11 @@ Console.WriteLine($"Application realm: {realm}");
 Console.WriteLine($"Deployment key SHA-256: {Group(fingerprint)}");
 Console.WriteLine($"Content archive: {content.Snapshot.ArchiveUri} ({content.Snapshot.ArchiveBytes} bytes)");
 Console.WriteLine(
-    $"WorldPack: {content.Snapshot.WorldPackFingerprint} " +
-    $"({content.Snapshot.WorldChunks} chunks / {content.Snapshot.WorldPackBytes} bytes)");
+    $"Structural manifest: {content.Snapshot.StructuralManifestFingerprint} " +
+    $"({content.Structural.Manifest.EntryCount} Packs / " +
+    $"{content.Snapshot.StructuralManifestBytes} bytes), " +
+    $"independent Pack bytes: {content.Snapshot.WestPackRawBytes}/" +
+    $"{content.Snapshot.EastPackRawBytes}");
 Console.WriteLine(
     $"Actor presentation: {content.Snapshot.ActorPresentationBytes} verified GLB bytes " +
     "(X/Y Add + X Replace)");
@@ -134,11 +139,16 @@ WriteReady(options.ReadyFile, new DirectConnectReady(
     options.PublicationPolicy.Cadence.NearSteps,
     options.PublicationPolicy.Cadence.FarSteps,
     options.UnreliableFrameCap,
-    options.UnreliableAggregationScope.ToString()));
+    options.UnreliableAggregationScope.ToString())
+    {
+        StructuralManifestFingerprint =
+            content.Snapshot.StructuralManifestFingerprint.ToString(),
+    });
 
 using var stopping = new CancellationTokenSource();
 DirectConnectWireAccounting? wireAccounting = null;
 bool wireAccountingWritten = false;
+bool nativeGateRelocated = false;
 Console.CancelKeyPress += (_, eventArgs) =>
 {
     eventArgs.Cancel = true;
@@ -150,6 +160,24 @@ while (!stopping.IsCancellationRequested)
         break;
     host.Pump();
     _ = authority.TickDue();
+    if (!nativeGateRelocated && options.NativeGateTriggerFile is not null &&
+        File.Exists(options.NativeGateTriggerFile))
+    {
+        var participants = new SharedPlayableParticipant[options.MaximumParticipants];
+        if (authority.CopyParticipants(participants) == 1)
+        {
+            WorldPosition gate = GamePlayableWorld.CentralFarGatePosition;
+            if (!authority.Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider,
+                    GameWorldActionStatus>(
+                    (world, generation, game) => game.WorldActions.RelocateActor(
+                        world, game.WorldState, participants[0].Entities.Player, gate, out _),
+                    out GameWorldActionStatus result) || result != GameWorldActionStatus.Accepted)
+                throw new InvalidOperationException(
+                    "The W7 native Gate setup could not relocate its sole admitted guest.");
+            nativeGateRelocated = true;
+            Console.WriteLine("W7 native Gate setup relocated the admitted guest.");
+        }
+    }
     if (wireAccounting is null && options.AccountingStartFile is not null &&
         File.Exists(options.AccountingStartFile))
     {
@@ -424,6 +452,7 @@ internal readonly record struct DirectConnectOptions(
     string? AccountingStopFile,
     string? AccountingSummaryFile,
     string? AccountingTestMarker,
+    string? NativeGateTriggerFile,
     string ClientProfile,
     int SimulationFrequencyHz,
     int MaximumInputHz,
@@ -456,6 +485,7 @@ internal readonly record struct DirectConnectOptions(
         string? accountingStopFile = null;
         string? accountingSummaryFile = null;
         string? accountingTestMarker = null;
+        string? nativeGateTriggerFile = null;
         string clientProfile = "third-person";
         int simulationFrequencyHz = 60;
         int maximumInputHz = 60;
@@ -568,6 +598,12 @@ internal readonly record struct DirectConnectOptions(
                     accountingTestMarker.Any(char.IsControl))
                     throw new ArgumentException(
                         "--accounting-test-marker must be 1..64 printable characters.");
+                continue;
+            }
+            if (argument.StartsWith("--w7-native-gate-trigger-file=", StringComparison.Ordinal))
+            {
+                nativeGateTriggerFile = RequiredPath(argument,
+                    "--w7-native-gate-trigger-file=");
                 continue;
             }
             if (argument.StartsWith("--client-profile=", StringComparison.Ordinal))
@@ -743,7 +779,7 @@ internal readonly record struct DirectConnectOptions(
             endpoint, contentEndpoint, identity, officialContentRoot,
             readyFile, stopFile, summaryFile,
             accountingStartFile, accountingReadyFile, accountingStopFile,
-            accountingSummaryFile, accountingTestMarker, clientProfile,
+            accountingSummaryFile, accountingTestMarker, nativeGateTriggerFile, clientProfile,
             simulationFrequencyHz, maximumInputHz, recommendedInputHz,
             inputBurstCapacity, inputBurstWindowMilliseconds,
             networkServiceDelayMilliseconds, smoke,
@@ -805,7 +841,10 @@ internal readonly record struct DirectConnectReady(
     uint PublicNearSteps,
     uint PublicFarSteps,
     int UnreliableFrameCap,
-    string UnreliableAggregationScope);
+    string UnreliableAggregationScope)
+{
+    public string StructuralManifestFingerprint { get; init; } = string.Empty;
+}
 
 internal readonly record struct DirectConnectSummary(
     ulong ServerGeneration,

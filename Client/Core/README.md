@@ -200,8 +200,9 @@ revision, and Space; it does not substitute an arbitrary Pack fingerprint for
 World identity. A native W5 window retains seam chunks from Packs `(0,0)` and
 `(1,0)` together and crosses between them without a cache, renderer, or session
 restart. W5R now has the product Local Concept Demo publish a canonical
-two-Pack root into this same cache; the old combined Pack remains only for
-pre-W7 remote structural delivery.
+two-Pack root into this same cache. W7 Remote clients publish bounded prepared subsets of that
+canonical manifest without replacing the semantic cache or retained Pack views; the old combined
+Pack remains a historical regression artifact.
 
 F0.4 adds the bounded renderer-neutral actor-presentation projection above those already-resident
 chunks. `ClientActorDefinitionCatalog` maps finite public prefab vocabulary to presentation kind,

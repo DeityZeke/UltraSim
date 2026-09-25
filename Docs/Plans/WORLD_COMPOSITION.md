@@ -2,7 +2,7 @@
 
 **Status:** canonical World/Terrain direction; W1-W6 closed, W7 active/open. W8-W10 remain planned.
 **Accepted:** 2026-09-23.
-**Current implementation:** W5 proves connected two-Pack authority in a dedicated fixture. W5R moves the actual Concept Demo Game authority and Local client to declared Packs `(0,0)` and `(1,0)` under one completely validated manifest. The frozen combined Pack remains solely for pre-W7 remote structural delivery and as a historical save identity. New Concept Demo saves use `worldview/v2`; historical Cabin keeps `worldview/v1`. Neither WorldPack/v1 nor WorldStructuralManifest/v1 bytes changed.
+**Current implementation:** W5R moves the Concept Demo Game authority and Local client to declared Packs `(0,0)` and `(1,0)` under one validated manifest. W7 implementation now advertises that manifest to Remote clients and acquires the two Packs independently on demand; final Release closure remains pending. The frozen combined Pack is retained as a historical regression/save identity, not normal product Remote delivery. New Concept Demo saves use `worldview/v2`; historical Cabin keeps `worldview/v1`. Neither WorldPack/v1 nor WorldStructuralManifest/v1 bytes changed.
 **Related:** [TERRAIN.md](TERRAIN.md), [ASSET_STREAMING.md](ASSET_STREAMING.md), [../README.md](../README.md), [../../Game/World/README.md](../../Game/World/README.md).
 
 ## 1. Core model
@@ -423,8 +423,8 @@ v1 artifact can be checked against an external declaration through
 and reports the first offending key. The declaration is not encoded in v1 or
 its fingerprint. The legacy unaddressed builder remains available during the
 one-Pack transition. The frozen combined Concept Demo Pack spans `(0,0)`/`(1,0)`
-and cannot validate as one declared shard; W5R preserves its exact bytes for
-pre-W7 remote delivery while independently compiling two authority Packs.
+and cannot validate as one declared shard; W5R preserved its exact bytes for
+historical comparison while independently compiling two authority Packs.
 
 ## 15. Pack and chunk composition operations
 
@@ -544,9 +544,10 @@ PreparedWorldPack
 
 The client semantic cache retains one canonical prepared structural source and may publish a
 validated residency-only prepared subset without replacing live Pack views. Game rejects
-conflicting prepared seams and durable IDs among present Packs. Remote Concept Demo activation
-still transfers the historical combined Pack; W7 demand-driven Remote Pack preparation is not
-complete. This section describes current ownership, not W7 closure or W8 edit publication.
+conflicting prepared seams and durable IDs among present Packs. W7 Remote activation now
+authenticates the manifest, then acquires independently granted Packs through the existing CAS;
+only the central Pack is required for initial admission. This is prepared-subset residency, not
+W8 edit publication.
 
 Terrain/static/Multi/surface queries remain global SpatialChunkKey APIs and resolve the backing Pack internally. Ordinary consumers should not need to know which Pack owns a chunk.
 
@@ -627,8 +628,8 @@ Pack `(0,0)` owns 117 authored chunks (Central plus Far-Island west); Pack `(1,0
 for each generation and validates the complete composition before publication.
 Ordinary Single Player does not build the historical combined Pack. Local semantic
 residency and Godot presentation query the canonical composition without Pack-specific
-rendering branches. Standalone and Complete authority use the same root; their
-pre-W7 remote clients still receive the byte-identical combined compatibility Pack.
+rendering branches. Standalone and Complete authority use the same root; W7 Remote clients
+receive the manifest and independently authorized Pack packages rather than the combined Pack.
 The resulting 162-chunk terrain, static, Multi, and additional-surface semantics are
 exactly compared against that historical artifact. Direct control crosses Far-Island
 chunks 127/128 in both directions; local Far-Island save/load retains exact
@@ -654,13 +655,17 @@ and additional structural surfaces can coexist. W7 still owns acquisition.
 Authenticate exact structural composition, acquire/prepare required Packs on demand, and preserve client residency across Pack seams without expanding semantic disclosure.
 
 The client-side prepared-subset publication seam and Content's independently verified passive
-structural-manifest kind are implemented as W7 groundwork. Game protocol v33 now has bounded
-structural control messages; the product bootstrap includes the exact manifest, independent Pack
-packages can be fetched without another catalog activation, and the authenticated manifest is
-World-validated with an explicit proof before guest admission. Product Remote presentation still
-uses the historical combined Pack. Per-Pack grants/proofs, demand acquisition, bounded initial
-semantic residency, delivery readiness, retirement, and seam acceptance remain open. This does
-not close W7.
+structural-manifest kind are in use. Game protocol v33 has bounded structural control messages.
+The bootstrap contains the exact manifest and required UI but no Pack. After World validates the
+authenticated manifest, the client proves it, creates a zero-Pack structural source, and requests
+the server-owned initial Pack. Each Pack grant binds a manifest coordinate to an exact fingerprint
+and package; Content verifies and installs it without another catalog activation. World validates
+the Pack, its spatial window, binding and prepared-subset compatibility before publishing it.
+Guest admission waits for initial Pack readiness and a bounded semantic presentation window.
+Pack-applied/window proofs gate recipient public delivery; Game authority does not await downloads.
+The client can demand Pack `(1,0)` at the real Far Gate, cross 127/128, safely retire it after
+borrowers leave, and reprepare it from CAS. The renderer remains Pack-blind. The full canonical
+Release/export verification on the final implementation commit is still required for W7 closure.
 
 ### W8 — atomic Add/Replace/Remove Pack composition
 
