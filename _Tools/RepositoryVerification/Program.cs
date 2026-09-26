@@ -5096,12 +5096,14 @@ static void VerifyMixedSessionLifecycleNative(
         string f112Evidence = Path.Combine(root, ".output", "f1.12-verification",
             Environment.ProcessId.ToString(), "Complete-mixed.json");
         Directory.CreateDirectory(Path.GetDirectoryName(f112Evidence)!);
+        string f112Head = RunCaptured(root, "git", ["rev-parse", "HEAD"], 5_000).Trim();
         string output = RunCaptured(root, exportedComplete ?? godot,
         (exportedComplete is null ? new[] { "--headless", "--path", "Client/Godot", "--" }
             : new[] { "--headless", "--" }).Concat(
         [
             "--f0-7-smoke",
             "--f1-12-mixed",
+            $"--f1-12-head={f112Head}",
             $"--f1-12-mixed-evidence={f112Evidence}",
             "--expect-edition=Complete",
             $"--f0-7-a-endpoint={readyA.Endpoint}",

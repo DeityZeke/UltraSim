@@ -1215,6 +1215,7 @@ public partial class ClientHost
                     warmTwo.ApplicationSessionEpoch == remoteA.ApplicationSessionEpoch ||
                     warmTwo.ApplicationSessionEpoch == remoteAReconnect.ApplicationSessionEpoch ||
                     warmTwo.Snapshot.Session.Content.Acquisition.BytesFetched != 0 ||
+                    warmTwo.Snapshot.Session.Presentation.Acquisition.BytesFetched != 0 ||
                     warmTwo.Snapshot.Session.StructuralPacks.BytesFetched != 0)
                     throw new InvalidOperationException("Second warm reconnect lost reuse or fresh proof lifetime.");
                 // Scoped product Settings must not replace the authenticated application.
@@ -1232,6 +1233,7 @@ public partial class ClientHost
                 System.IO.File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(new
                 {
                     Schema = "client-f1.12-mixed-product/v1", Baseline = baseline,
+                    SourceHead = ReadArgument("--f1-12-head="),
                     ColdA = remoteA, B = remoteB, WarmOne = remoteAReconnect, WarmTwo = warmTwo,
                     LocalEpochs = new[] { localOne.ApplicationSessionEpoch, localTwo.ApplicationSessionEpoch,
                         finalLocal.ApplicationSessionEpoch, extraLocal.ApplicationSessionEpoch },

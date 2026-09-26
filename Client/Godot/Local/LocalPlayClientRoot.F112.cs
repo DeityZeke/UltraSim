@@ -161,6 +161,8 @@ public abstract partial class LocalPlayClientRoot
                         current.SemanticResidentChunks, current.RenderedChunks, current.Actors,
                         current.Renderer, current.DerivedResources, current.PresentationCache,
                         ProcessFrameMilliseconds = Performance.GetMonitor(Performance.Monitor.TimeProcess) * 1000d,
+                        FramesPerSecond = Engine.GetFramesPerSecond(),
+                        DrawCalls = Performance.GetMonitor(Performance.Monitor.RenderTotalDrawCallsInFrame),
                         UiChurnCycles = churn });
                 }
                 lifetimes.Add(new { lifetime, Initial = initial, Final = cabin.GetPresentationSnapshot(),
