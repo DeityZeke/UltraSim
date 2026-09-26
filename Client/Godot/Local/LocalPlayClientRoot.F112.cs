@@ -71,9 +71,12 @@ public abstract partial class LocalPlayClientRoot
         string mode = ReadLocalArgument("--f1-12-art=") ?? "installed";
         int seconds = int.TryParse(ReadLocalArgument("--f1-12-seconds="), out int requested)
             ? requested : 40;
+        int stableRadius = int.TryParse(ReadLocalArgument("--f1-12-stable-radius="), out int radius)
+            ? radius : 2;
         try
         {
-            if (seconds is < 4 or > 120 || mode is not ("installed" or "absent" or "primitive") ||
+            if (seconds is < 4 or > 120 || stableRadius is < 1 or > 3 ||
+                mode is not ("installed" or "absent" or "primitive") ||
                 string.IsNullOrWhiteSpace(ReadLocalArgument("--f1-12-save-root=")))
                 throw new InvalidOperationException("F1.12 requires bounded duration/art and an isolated save root.");
             for (int lifetime = 0; lifetime < 3; lifetime++)
@@ -119,6 +122,7 @@ public abstract partial class LocalPlayClientRoot
                 // Normalize source/location/window for a stable bounded trend window.
                 cabin.PrepareF112CentralControl();
                 cabin.RunD01Acceptance();
+                cabin.SetF112StableRadius(stableRadius);
                 await ToSignal(GetTree().CreateTimer(1), SceneTreeTimer.SignalName.Timeout);
                 LocalCabinPresentationSnapshot stable = cabin.GetPresentationSnapshot();
                 long started = Stopwatch.GetTimestamp();
@@ -191,6 +195,7 @@ public abstract partial class LocalPlayClientRoot
             {
                 Schema = "client-f1.12-product-dogfood/v1", SourceHead = ReadLocalArgument("--f1-12-head="),
                 Edition = GetSnapshot().Edition, ArtMode = mode, DisplayBackend = DisplayServer.GetName(),
+                StableRadius = stableRadius,
                 Renderer = RenderingServer.GetCurrentRenderingMethod(), VegetationOptIn =
                     OS.GetCmdlineUserArgs().Contains("--f1-11-vegetation"),
                 Baseline = baseline, lifetimes, reentryLoad, samples, FinalBoundary = CaptureSessionBoundary(),

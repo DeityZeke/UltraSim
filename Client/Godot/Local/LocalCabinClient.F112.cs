@@ -67,6 +67,14 @@ public partial class LocalCabinClient
         SubmitF112Stop();
     }
 
+    public void SetF112StableRadius(int radius)
+    {
+        if (radius is < 1 or > 3 || _settings is null)
+            throw new InvalidOperationException("F1.12 stable radius must be 1/2/3.");
+        ApplySettings(WithRenderDistance(_settings, radius));
+        DrainRenderer();
+    }
+
     public object RunF112ReentryLoadAcceptance()
     {
         LocalPlayableAuthorityView initial = ReadF112Authority();
