@@ -9,6 +9,14 @@ namespace UltraSim.Client.Godot;
 
 public partial class LocalCabinClient
 {
+    public GodotPresentationEnvironmentSnapshot ApplyF112EnvironmentPreview(
+        GodotDiagnosticTimeOfDay time, GodotDiagnosticAtmosphere atmosphere)
+    {
+        if (_diagnosticEnvironment is null)
+            throw new InvalidOperationException("An explicit diagnostic environment preview is required.");
+        _diagnosticEnvironment.Apply(time, atmosphere, shadows: true);
+        return _diagnosticEnvironment.GetSnapshot();
+    }
     /// <summary>Cold, opt-in product acceptance; commands use the existing authority bridge.</summary>
     public object RunF112SaveLoadAcceptance(bool far)
     {

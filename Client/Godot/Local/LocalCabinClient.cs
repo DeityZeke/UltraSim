@@ -3902,7 +3902,8 @@ public partial class LocalCabinClient : Node3D
             _settings?.CameraRig ?? ClientStockCameraRigs.Orbit, CurrentCameraLayout());
         UpdateCamera();
 
-        if (OS.GetCmdlineUserArgs().Contains("--f1-11-vegetation"))
+        if (OS.GetCmdlineUserArgs().Contains("--f1-11-vegetation") ||
+            OS.GetCmdlineUserArgs().Contains("--f1-12-cabin-preview"))
             _diagnosticEnvironment = new GodotPresentationEnvironment(this);
         else
         {

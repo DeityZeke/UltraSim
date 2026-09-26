@@ -10,6 +10,58 @@ namespace UltraSim.Client.Godot;
 
 public abstract partial class LocalPlayClientRoot
 {
+    private async void RunF112CabinPreview()
+    {
+        GodotClientSessionBoundarySnapshot baseline = CaptureSessionBoundary();
+        try
+        {
+            if (DisplayServer.GetName() == "headless")
+                throw new InvalidOperationException("Cabin image evidence requires a real native renderer.");
+            string directory = ReadLocalArgument("--f1-12-cabin-evidence=") ??
+                throw new InvalidOperationException("Cabin preview needs an isolated output directory.");
+            System.IO.Directory.CreateDirectory(directory);
+            StartLocalCabin(CabinContentVariant.Default, CabinHumanBody.XBot, useConceptDemoWorld: false);
+            LocalCabinClient cabin = _cabin!;
+            cabin.RunF02Acceptance();
+            LocalCabinPresentationSnapshot before = cabin.GetPresentationSnapshot();
+            var captures = new List<object>(12);
+            foreach (GodotDiagnosticTimeOfDay time in Enum.GetValues<GodotDiagnosticTimeOfDay>())
+            foreach (GodotDiagnosticAtmosphere atmosphere in Enum.GetValues<GodotDiagnosticAtmosphere>())
+            {
+                GodotPresentationEnvironmentSnapshot environment = cabin.ApplyF112EnvironmentPreview(time, atmosphere);
+                for (int frame = 0; frame < 3; frame++)
+                    await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+                string name = $"{time}-{atmosphere}.png";
+                using Image image = UiComposition.GameplayViewport.GetTexture().GetImage();
+                if (image.IsEmpty() || image.SavePng(System.IO.Path.Combine(directory, name)) != Error.Ok)
+                    throw new InvalidOperationException("The native Gameplay Frame image did not save.");
+                captures.Add(new { time, atmosphere, name, Width = image.GetWidth(), Height = image.GetHeight(), environment });
+            }
+            LocalCabinPresentationSnapshot after = cabin.GetPresentationSnapshot();
+            if (before.ApplicationSessionEpoch != after.ApplicationSessionEpoch ||
+                before.ControlSessionEpoch != after.ControlSessionEpoch)
+                throw new InvalidOperationException("Environment preview replaced the authoritative session.");
+            RetireCurrentSession();
+            ReturnToMainMenu("F1.12 Cabin preview retired.");
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            RequireCleanSessionBoundary(in baseline, "F1.12 Cabin preview");
+            System.IO.File.WriteAllText(System.IO.Path.Combine(directory, "evidence.json"),
+                JsonSerializer.Serialize(new { Schema = "client-f1.12-cabin-preview/v1",
+                    SourceHead = ReadLocalArgument("--f1-12-head="),
+                    Art = ReadLocalArgument("--f1-12-art=") ?? "installed", DisplayBackend = DisplayServer.GetName(),
+                    before, after, captures, FinalBoundary = CaptureSessionBoundary(), HumanFeelRated = false },
+                    new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter() } }));
+            GD.Print("F1.12 CABIN NATIVE PREVIEW PASS captures=12 retirement=clean");
+            GetTree().Quit(0);
+        }
+        catch (Exception exception)
+        {
+            GD.PushError($"F1.12 Cabin preview failed: {exception}");
+            RetireCurrentSession();
+            GetTree().Quit(1);
+        }
+    }
+
     private async void RunF112ProductDogfood()
     {
         GodotClientSessionBoundarySnapshot baseline = CaptureSessionBoundary();

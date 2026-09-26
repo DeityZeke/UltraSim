@@ -36,6 +36,11 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
     {
         base._Ready();
         string[] arguments = OS.GetCmdlineUserArgs();
+        if (arguments.Contains("--f1-12-cabin-preview", StringComparer.Ordinal))
+        {
+            RunF112CabinPreview();
+            return;
+        }
         if (arguments.Contains("--f1-12-dogfood", StringComparer.Ordinal))
         {
             RunF112ProductDogfood();

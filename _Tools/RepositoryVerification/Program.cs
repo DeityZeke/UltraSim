@@ -25,6 +25,18 @@ Console.WriteLine("PASS documentation architecture and links");
 if (options.ArchitectureOnly)
     return 0;
 
+if (options.F112MixedOnly)
+{
+    string godot = ResolveGodot(options.GodotPath);
+    string directory = Path.Combine(root, ".output", "f1.12-products", Environment.ProcessId.ToString());
+    string executable = Path.Combine(directory, "UltraSimComplete.x86_64");
+    Directory.CreateDirectory(directory);
+    ExportClient(root, godot, "Complete", executable);
+    VerifyMixedSessionLifecycleNative(root, options.Configuration, godot, executable);
+    Console.WriteLine("PASS F1.12 focused exported Complete mixed journey");
+    return 0;
+}
+
 if (options.F112Only)
 {
     string godot = ResolveGodot(options.GodotPath);
@@ -6310,6 +6322,7 @@ internal sealed record VerificationOptions(
     bool ArchitectureOnly,
     bool F17Only,
     bool F112Only,
+    bool F112MixedOnly,
     bool Pf1Only,
     bool Pf2Only,
     bool Pf25Only,
@@ -6351,7 +6364,7 @@ internal sealed record VerificationOptions(
 {
     internal static VerificationOptions Parse(string[] arguments)
     {
-        bool architectureOnly = false, f17Only = false, f112Only = false,
+        bool architectureOnly = false, f17Only = false, f112Only = false, f112MixedOnly = false,
             pf1Only = false, pf2Only = false, pf25Only = false,
             pf3Only = false, pf3NativeOnly = false, pf4aOnly = false, pf4bOnly = false,
             pf4cOnly = false, pf4dOnly = false, pf4eOnly = false, pf4eR1Only = false,
@@ -6373,6 +6386,7 @@ internal sealed record VerificationOptions(
             if (argument == "--architecture-only") architectureOnly = true;
             else if (argument == "--f1-7-only") f17Only = true;
             else if (argument == "--f1-12-only") f112Only = true;
+            else if (argument == "--f1-12-mixed-only") f112MixedOnly = true;
             else if (argument == "--pf1-only") pf1Only = true;
             else if (argument == "--pf2-only") pf2Only = true;
             else if (argument == "--pf2.5-only") pf25Only = true;
@@ -6504,14 +6518,14 @@ internal sealed record VerificationOptions(
         }
         if (configuration is not ("Debug" or "Release"))
             throw new ArgumentException("Verification configuration must be Debug or Release.");
-        if ((f17Only || f112Only || pf1Only || pf2Only || pf25Only || pf3Only || pf3NativeOnly || pf4aOnly ||
+        if ((f17Only || f112Only || f112MixedOnly || pf1Only || pf2Only || pf25Only || pf3Only || pf3NativeOnly || pf4aOnly ||
              pf4bOnly || pf4cOnly || pf4dOnly || pf4eOnly || pf4eR1Only || pf4eR2Only ||
              pf4fOnly || pf5Only || pf5R1Only || pf5R2Only || pf5R2R1Only ||
              pf5R2R2Only || pf5R3Only || pf5R4Only || pf5R5Only || pf5R6Only ||
              pf5R7Only || pf5R8Only || pf5R9Only || pf5R12Only) &&
             architectureOnly)
             throw new ArgumentException("Focused PF verification cannot be architecture-only.");
-        if ((f17Only ? 1 : 0) + (f112Only ? 1 : 0) + (pf1Only ? 1 : 0) + (pf2Only ? 1 : 0) + (pf25Only ? 1 : 0) +
+        if ((f17Only ? 1 : 0) + (f112Only ? 1 : 0) + (f112MixedOnly ? 1 : 0) + (pf1Only ? 1 : 0) + (pf2Only ? 1 : 0) + (pf25Only ? 1 : 0) +
             (pf3Only ? 1 : 0) + (pf3NativeOnly ? 1 : 0) + (pf4aOnly ? 1 : 0) +
             (pf4bOnly ? 1 : 0) + (pf4cOnly ? 1 : 0) + (pf4dOnly ? 1 : 0) +
             (pf4eOnly ? 1 : 0) + (pf4eR1Only ? 1 : 0) + (pf4eR2Only ? 1 : 0) +
@@ -6545,9 +6559,9 @@ internal sealed record VerificationOptions(
             !pf4cOnly && !pf4dOnly && !pf4eOnly && !pf4fOnly && !pf5Only)
             throw new ArgumentException(
                 "Native PF options require --pf3-only, --pf3-native-only, --pf4a-only, --pf4b-only, --pf4c-only, --pf4d-only, --pf4e-only, --pf4f-only, or --pf5-only.");
-        if ((f17Only || f112Only) && skipGodot)
+        if ((f17Only || f112Only || f112MixedOnly) && skipGodot)
             throw new ArgumentException("Focused F1 verification requires the native Godot acceptance path.");
-        return new(architectureOnly, f17Only, f112Only, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only, pf4fOnly, pf5Only, pf5R1Only, pf5R2Only, pf5R2R1Only, pf5R2R2Only, pf5R3Only, pf5R4Only, pf5R5Only, pf5R6Only, pf5R7Only, pf5R8Only,
+return new(architectureOnly, f17Only, f112Only, f112MixedOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only, pf4fOnly, pf5Only, pf5R1Only, pf5R2Only, pf5R2R1Only, pf5R2R2Only, pf5R3Only, pf5R4Only, pf5R5Only, pf5R6Only, pf5R7Only, pf5R8Only,
             pf5R9Only, pf5R12Only, pf3Only, pf3NativeOnly,
             pf25LongNative,
             allConfigurations, configuration, skipGodot, noRestore, godot,
