@@ -41,6 +41,7 @@ var tests = new (string Name, Action Body)[]
     ("ConceptDemoSignUsesAuthoritativeInformationalUi", ConceptDemoSignUsesAuthoritativeInformationalUi),
     ("SaveLoadReplacesGenerationAndRebuildsPublicLineage", SaveLoadReplacesGenerationAndRebuildsPublicLineage),
     ("ConceptDemoCanonicalFarIslandSaveLoad", ConceptDemoCanonicalFarIslandSaveLoad),
+    ("ConceptDemoSaveSequenceSurvivesSessionReentry", ConceptDemoSaveSequenceSurvivesSessionReentry),
     ("DistantInterestReentryInvalidatesOldPublicDebt", DistantInterestReentryInvalidatesOldPublicDebt),
 };
 
@@ -1124,6 +1125,44 @@ static void ConceptDemoCanonicalFarIslandSaveLoad()
     Equal(manifest, restored.PreparedComposition.ManifestFingerprint);
     Equal(revision, restored.PreparedComposition.Revision);
     True(restored.PreparedComposition.TryValidateComplete(out _));
+}
+
+static void ConceptDemoSaveSequenceSurvivesSessionReentry()
+{
+    string root = Path.Combine(Path.GetTempPath(), $"ultrasim-f112-save-reentry-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(root);
+    try
+    {
+        for (int lifetime = 0; lifetime < 3; lifetime++)
+        {
+            using LocalPlayableSession session = LocalPlayableSession.CreateConceptDemo(root);
+            session.WaitUntilReady(TimeSpan.FromSeconds(10));
+            True(session.TryRequestSave(1));
+            DriveUntil(() => session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+                view.LastAdministrativeSequence == 1);
+            True(session.TryGetLatestView(out LocalPlayableAuthorityView saved));
+            True(saved.LastAdministrativeSucceeded, saved.LastAdministrativeMessage);
+            True(session.TryRequestLoad(2));
+            DriveUntil(() => session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+                view.LastAdministrativeSequence == 2);
+            True(session.TryGetLatestView(out LocalPlayableAuthorityView loaded));
+            True(loaded.LastAdministrativeSucceeded, loaded.LastAdministrativeMessage);
+            True(loaded.GenerationId > saved.GenerationId);
+        }
+        var coordinator = new UltraSim.Server.Persistence.SaveSetCoordinator(root);
+        True(coordinator.TryGetNextSequence(out ulong next));
+        Equal(4UL, next);
+        // Pending/malformed names cannot reserve a sequence. Complete names fence reuse even
+        // when CURRENT is older, and exhaustion cannot wrap back to zero/one.
+        Directory.CreateDirectory(Path.Combine(root, "generations", "00000000000000000099.pending"));
+        Directory.CreateDirectory(Path.Combine(root, "generations", "not-a-generation"));
+        True(coordinator.TryGetNextSequence(out next));
+        Equal(4UL, next);
+        Directory.CreateDirectory(Path.Combine(root, "generations", ulong.MaxValue.ToString("D20")));
+        True(!coordinator.TryGetNextSequence(out next));
+        Equal(0UL, next);
+    }
+    finally { Directory.Delete(root, recursive: true); }
 }
 
 static void DistantInterestReentryInvalidatesOldPublicDebt()

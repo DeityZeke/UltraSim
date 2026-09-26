@@ -34,6 +34,19 @@ public sealed class SaveSetCoordinator
         _files.CreateDirectory(_generations);
     }
 
+    /// <summary>
+    /// Reads the next forward publication sequence for a newly opened owner. This is not a
+    /// reservation: Publish still checks the durable high-water under its exclusive writer lease.
+    /// Complete generation names, including abandoned complete publications, fence reuse;
+    /// pending staging names do not. False means the sequence space is exhausted, never wrapped.
+    /// </summary>
+    public bool TryGetNextSequence(out ulong sequence)
+    {
+        ulong greatest = ReadGenerationHighWater();
+        sequence = greatest == ulong.MaxValue ? 0 : greatest + 1;
+        return sequence != 0;
+    }
+
     /// <summary>Captures all participants inside one caller-owned frozen logical epoch.</summary>
     public SaveSetManifest Save(IReadOnlyList<ISaveSetParticipant> participants, in SaveSetContext context,
         Action<Action> captureBoundary)
@@ -391,6 +404,13 @@ public sealed class SaveSetCoordinator
     private void EnsureForwardSequence(ulong sequence)
     {
         if (sequence == 0) throw new ArgumentOutOfRangeException(nameof(sequence));
+        ulong greatest = ReadGenerationHighWater();
+        if (sequence <= greatest)
+            throw new InvalidOperationException($"Save-set sequence {sequence} does not advance the published generation high-water {greatest}.");
+    }
+
+    private ulong ReadGenerationHighWater()
+    {
         ulong greatest = 0;
         foreach (string directory in _files.EnumerateDirectories(_generations, "*"))
         {
@@ -398,8 +418,7 @@ public sealed class SaveSetCoordinator
             if (name.Length == 20 && ulong.TryParse(name, out ulong candidate) && candidate > greatest)
                 greatest = candidate;
         }
-        if (sequence <= greatest)
-            throw new InvalidOperationException($"Save-set sequence {sequence} does not advance the published generation high-water {greatest}.");
+        return greatest;
     }
     private void Reach(SaveSetFaultPoint point, string path) => _faults?.Reach(point, path);
 }

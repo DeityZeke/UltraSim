@@ -489,11 +489,12 @@ public sealed class LocalPlayableSession : IDisposable
             inventoryUi = new InventoryUiController(runtime.Game, ui);
             signUi = new InformationalSignUiController(ui);
             serverMonitorUi = new ServerMonitorUiController(ui);
+            var saveSets = new SaveSetCoordinator(_saveRoot);
             var persistence = new GameRuntimePersistence(
                 runtime.Game,
                 composition,
                 RestoreOptions(),
-                new SaveSetCoordinator(_saveRoot));
+                saveSets);
             OfflineDirectChunkRecipient recipient = CreateRecipient();
             BindControl(runtime, entities);
             if (_serverExtensionFactory is not null)
@@ -549,7 +550,7 @@ public sealed class LocalPlayableSession : IDisposable
             ulong observedGeneration = runtime.ActiveGenerationId;
             ulong lastChatSubmission = 0;
             ulong lastAdministrative = 0;
-            ulong saveSequence = 1;
+            _ = saveSets.TryGetNextSequence(out ulong saveSequence);
             GamePlayerCommandResult lastCommand = default;
             ulong lastCommandSequence = 0;
             LocalPlayableSelection lastSelection = LocalPlayableSelection.None;
@@ -861,8 +862,15 @@ public sealed class LocalPlayableSession : IDisposable
             {
                 case LocalAdministrativeOperationKind.Save:
                 {
+                    if (saveSequence == 0)
+                    {
+                        lastSucceeded = false;
+                        lastMessage = "Save generation sequence exhausted.";
+                        break;
+                    }
                     long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                    ulong sequence = saveSequence++;
+                    ulong sequence = saveSequence;
+                    saveSequence = sequence == ulong.MaxValue ? 0 : sequence + 1;
                     GameSaveResult result = persistence.TrySave(
                         new SaveSetContext(sequence, now), static capture => capture());
                     lastSucceeded = result.Succeeded;
