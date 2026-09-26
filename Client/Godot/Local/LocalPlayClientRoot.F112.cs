@@ -21,32 +21,34 @@ public abstract partial class LocalPlayClientRoot
             if (DisplayServer.GetName() == "headless") throw new InvalidOperationException("Actual native rendering required.");
             await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
             StartLocalCabin(CabinContentVariant.Default, CabinHumanBody.XBot, useConceptDemoWorld: true);
+            LocalCabinClient cabin = _cabin ?? throw new InvalidOperationException("Native product entry failed.");
             await AwaitF112Boundary(GetTree(), SceneTree.SignalName.PhysicsFrame);
-            object pointer = await RunF112PointerSettingsAcceptance(() => _cabin!.RunF112PointerControl(checkInteraction: true));
+            object pointer = await RunF112PointerSettingsAcceptance(() => cabin.RunF112PointerControl(checkInteraction: true));
             await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
             await AwaitF112Boundary(GetTree(), SceneTree.SignalName.PhysicsFrame);
             var tiers = new List<object>(3);
             foreach (bool far in new[] { false, true, false })
             {
-                object tier = _cabin.RunF112TierControl(far);
-                object targets = await _cabin.RunF112PointerControl();
-                var visible = _cabin.SetF112Reveal(true);
+                object tier = cabin.RunF112TierControl(far);
+                object targets = await cabin.RunF112PointerControl();
+                var visible = cabin.SetF112Reveal(true);
                 await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
                 object image = CaptureF112Output(System.IO.Path.Combine(directory, $"tier-{tiers.Count}.png"), _ => { });
-                var hidden = _cabin.SetF112Reveal(false);
+                var hidden = cabin.SetF112Reveal(false);
                 tiers.Add(new { tier, targets, image, visible, hidden });
             }
-            _cabin.SetPhysicsProcess(true);
-            _cabin.PrepareF112CentralControl();
-            _cabin.RunD00Acceptance(); // establish the existing authoritative pickup/equip prerequisite
-            _cabin.RunF112ItemAcceptance(); // maintained equipped/action feature-required Detailed acceptance
-            var equipment = _cabin.GetPresentationSnapshot();
+            cabin.SetPhysicsProcess(true);
+            cabin.PrepareF112CentralControl();
+            cabin.RunD00Acceptance(); // establish the existing authoritative pickup/equip prerequisite
+            var equipment = cabin.GetPresentationSnapshot();
+            cabin.RunF112ItemAcceptance(); // maintained equipped/action feature-required Detailed acceptance
+            var finalItem = cabin.GetPresentationSnapshot();
             RetireCurrentSession(); ReturnToMainMenu("Native product control retired.");
             await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
             RequireCleanSessionBoundary(in baseline, "F1.12-R1 native pointer/tier");
             File.WriteAllText(System.IO.Path.Combine(directory, "evidence.json"), JsonSerializer.Serialize(new
             { Schema = "client-f1.12-r1-native-product/v1", SourceHead = ReadLocalArgument("--f1-12-head="),
-                Display = DisplayServer.GetName(), pointer, tiers, equipment, FinalBoundary = CaptureSessionBoundary() },
+                Display = DisplayServer.GetName(), pointer, tiers, equipment, finalItem, FinalBoundary = CaptureSessionBoundary() },
                 new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter() } }));
             GD.Print("F1.12-R1 NATIVE PRODUCT PASS pointer=4 tiers=3 reveal=exact retirement=clean");
             GetTree().Quit();

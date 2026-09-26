@@ -1,3 +1,4 @@
+#if ULTRASIM_ONLINE || ULTRASIM_COMPLETE
 using Godot;
 using UltraSim.Client.Core;
 
@@ -20,3 +21,4 @@ public sealed partial class RemoteConceptDemoClient
         }
     }
 }
+#endif
