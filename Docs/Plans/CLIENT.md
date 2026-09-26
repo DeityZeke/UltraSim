@@ -24,6 +24,10 @@ four mechanical product repairs, exported lifecycle journeys and uninterrupted c
 adds actual native captures, pointer/tier/nameplate coverage and repeated radius-1 retired-memory
 high-water reuse. Settings v6 exposes device-owned/default-Off Experimental Vegetation (next entry).
 An unexpected HTTP shutdown error observed in canonical Release remains unresolved; PF6 is NOT READY.
+The [R2 investigation](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r2.md)
+adds explicit accept ownership and single response-closer hardening, but demonstrates a remaining
+managed-runtime teardown/header race outside application context ownership. This is not a closure
+claim. The grass preference is now directly beneath Show Advanced, still default Off/next-entry.
 The historical capture-stall trigger was not reproduced and is not claimed as an engine diagnosis.
 W8 remains unstarted. The initial F1.8A
 closure evidence remains historical, and the [R1 correction](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md)

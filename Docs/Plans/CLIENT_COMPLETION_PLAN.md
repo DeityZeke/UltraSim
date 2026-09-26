@@ -1400,7 +1400,15 @@ Vegetation is device-owned/default Off/next-entry in settings v6.
 
 An unexpected `HttpListener` header-finalization `NullReferenceException` during unchanged hosting
 shutdown stress failed one canonical R1 run. A focused passing retry does not establish its repair.
-This concrete failure remains open, and no Server repair is hidden inside the client checkpoint.
+The linked [R2 investigation](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r2.md)
+repairs abandoned application accept ownership and competing application response closers, and
+moves the existing grass preference beside Show Advanced. Its controlled managed-runtime probe
+still permits framework-owned header mutation during endpoint teardown without an application-visible
+context. The historical formatter failure is therefore **not closed** by passing host stress.
+No `NullReferenceException` suppression or replacement HTTP server is introduced. A supported
+runtime/HTTP-host decision is required before claiming a causal complete shutdown repair.
+The obsolete unbounded Cabin harness's unknown historical trigger is not an additional PF6 blocker;
+R1's current bounded native capture assurance remains the control.
 PF6/W8/W9/W10 remain unstarted. Human motion feel and the historical approximately 1.4–1.67 m
 correction range remain ungraded, nonblocking polish questions.
 

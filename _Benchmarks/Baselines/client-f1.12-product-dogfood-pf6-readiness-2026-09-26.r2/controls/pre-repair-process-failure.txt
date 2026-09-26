@@ -1,0 +1,28 @@
+F1.12-R2 terminal-output preservation (not a reconstructed canonical log)
+
+Starting production HEAD: 9877eed960f7857d151bfe566a346ab912c67765.
+Working test change: HTTP-only selector and stress increased from 128 to 1,024 cycles;
+no production HTTP changes had been applied. .NET runtime 8.0.31, Linux.
+Command: dotnet run --project _Tests/UltraSim.Server.Hosting.Tests/UltraSim.Server.Hosting.Tests.csproj -c Release -- --http-only
+Exit code: 134. Exact failing stress cycle was not captured.
+
+The ten original focused HTTP tests preceding stress passed. Stress terminated the process:
+
+Unhandled exception. System.NullReferenceException: Object reference not set to an instance of an object.
+   at System.Net.HttpEndPointListener.UnbindContext(HttpListenerContext context)
+   at System.Net.HttpConnection.Unbind()
+   at System.Net.HttpConnection.BeginReadRequest()
+   at System.Net.HttpEndPointListener.ProcessAccept(SocketAsyncEventArgs args)
+   at System.Net.HttpEndPointListener.OnAccept(Object sender, SocketAsyncEventArgs e)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+--- End of stack trace from previous location ---
+   at System.Net.Sockets.SocketAsyncEventArgs.AcceptCompletionCallback(IntPtr acceptedFileDescriptor, Memory`1 socketAddress, SocketError socketError)
+   at System.Net.Sockets.SocketAsyncEngine.System.Threading.IThreadPoolWorkItem.Execute()
+   at System.Threading.ThreadPoolWorkQueue.Dispatch()
+   at System.Threading.PortableThreadPool.WorkerThread.WorkerThreadStart()
+
+This is an additional framework-callback failure, NOT a second reproduction of the
+historical FormatHeaders stack. No reflection control or exception injection ran before
+this failure. Do not infer an exact historical cycle or hidden application context.
+The original canonical R1 failure is preserved unchanged at:
+_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/f112-r1-release.log

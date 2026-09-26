@@ -100,7 +100,8 @@ rendered Remote/mixed controls. Capture is cold diagnostic behavior, not gamepla
 a native FPS rating. Latest-frame monitors and shared Local-process CPU must not be labeled
 whole-frame percentiles or dedicated-server cost.
 
-Advanced Settings now exposes **Experimental Vegetation (prototype; applies next world entry)**.
+Settings → **Show Advanced** exposes **Experimental Vegetation / grass (next world entry)**
+directly beneath the Advanced checkbox (rather than below the long display-dimension section).
 It is device-owned, persisted and default Off. `--f1-11-vegetation` force-enables it for diagnostics;
 otherwise Local/Remote use the saved choice at entry. This does not replace any semantic session.
 

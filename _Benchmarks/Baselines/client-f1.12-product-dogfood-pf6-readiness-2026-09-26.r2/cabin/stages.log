@@ -1,0 +1,91 @@
+2026-09-26T22:56:06.0514229Z request
+2026-09-26T22:56:06.0586589Z initial-process-frame
+2026-09-26T22:56:06.8111621Z session-entered
+2026-09-26T22:56:07.0393874Z acceptance-complete
+2026-09-26T22:56:07.0899745Z process-frame
+2026-09-26T22:56:07.0964016Z physics-frame
+2026-09-26T22:56:07.0991654Z environment-applied view=Exterior time=Noon atmosphere=Temperate
+2026-09-26T22:56:07.1078741Z render-request
+2026-09-26T22:56:07.1079776Z native-pre-draw
+2026-09-26T22:56:07.1097596Z native-post-draw
+2026-09-26T22:56:07.1098652Z texture-valid=True
+2026-09-26T22:56:07.1139541Z readback-complete
+2026-09-26T22:56:07.1873153Z png-saved
+2026-09-26T22:56:07.1922490Z environment-applied view=Doorway time=Noon atmosphere=Temperate
+2026-09-26T22:56:07.1934118Z render-request
+2026-09-26T22:56:07.1934351Z native-pre-draw
+2026-09-26T22:56:07.1940508Z native-post-draw
+2026-09-26T22:56:07.1940788Z texture-valid=True
+2026-09-26T22:56:07.1976874Z readback-complete
+2026-09-26T22:56:07.2561213Z png-saved
+2026-09-26T22:56:07.2600941Z environment-applied view=Interior time=Noon atmosphere=Temperate
+2026-09-26T22:56:07.2651094Z render-request
+2026-09-26T22:56:07.2651371Z native-pre-draw
+2026-09-26T22:56:07.2656180Z native-post-draw
+2026-09-26T22:56:07.2656458Z texture-valid=True
+2026-09-26T22:56:07.2685956Z readback-complete
+2026-09-26T22:56:07.3157095Z png-saved
+2026-09-26T22:56:07.3196665Z environment-applied view=Shelf time=Noon atmosphere=Temperate
+2026-09-26T22:56:07.3206449Z render-request
+2026-09-26T22:56:07.3206667Z native-pre-draw
+2026-09-26T22:56:07.3210759Z native-post-draw
+2026-09-26T22:56:07.3211008Z texture-valid=True
+2026-09-26T22:56:07.3239396Z readback-complete
+2026-09-26T22:56:07.3820050Z png-saved
+2026-09-26T22:56:07.3860817Z environment-applied view=Exterior time=Dawn atmosphere=Temperate
+2026-09-26T22:56:07.3874414Z render-request
+2026-09-26T22:56:07.3874644Z native-pre-draw
+2026-09-26T22:56:07.3880023Z native-post-draw
+2026-09-26T22:56:07.3880314Z texture-valid=True
+2026-09-26T22:56:07.3908462Z readback-complete
+2026-09-26T22:56:07.4796072Z png-saved
+2026-09-26T22:56:07.4840268Z environment-applied view=Exterior time=Dusk atmosphere=Temperate
+2026-09-26T22:56:07.4859561Z render-request
+2026-09-26T22:56:07.4859900Z native-pre-draw
+2026-09-26T22:56:07.4869090Z native-post-draw
+2026-09-26T22:56:07.4869449Z texture-valid=True
+2026-09-26T22:56:07.4900817Z readback-complete
+2026-09-26T22:56:07.5645744Z png-saved
+2026-09-26T22:56:07.5689684Z environment-applied view=Exterior time=Night atmosphere=Temperate
+2026-09-26T22:56:07.5703105Z render-request
+2026-09-26T22:56:07.5703370Z native-pre-draw
+2026-09-26T22:56:07.5708508Z native-post-draw
+2026-09-26T22:56:07.5708828Z texture-valid=True
+2026-09-26T22:56:07.5737144Z readback-complete
+2026-09-26T22:56:07.6279710Z png-saved
+2026-09-26T22:56:07.6324593Z environment-applied view=Exterior time=Noon atmosphere=Cold
+2026-09-26T22:56:07.6337913Z render-request
+2026-09-26T22:56:07.6338181Z native-pre-draw
+2026-09-26T22:56:07.6350562Z native-post-draw
+2026-09-26T22:56:07.6350896Z texture-valid=True
+2026-09-26T22:56:07.6388018Z readback-complete
+2026-09-26T22:56:07.7173322Z png-saved
+2026-09-26T22:56:07.8390414Z environment-applied view=Exterior time=Noon atmosphere=Temperate
+2026-09-26T22:56:07.8408525Z render-request
+2026-09-26T22:56:07.8408801Z native-pre-draw
+2026-09-26T22:56:07.8413369Z native-post-draw
+2026-09-26T22:56:07.8413668Z texture-valid=True
+2026-09-26T22:56:07.8441250Z readback-complete
+2026-09-26T22:56:07.9138610Z png-saved
+2026-09-26T22:56:07.9183119Z environment-applied view=Doorway time=Noon atmosphere=Temperate
+2026-09-26T22:56:07.9197638Z render-request
+2026-09-26T22:56:07.9197918Z native-pre-draw
+2026-09-26T22:56:07.9208332Z native-post-draw
+2026-09-26T22:56:07.9208650Z texture-valid=True
+2026-09-26T22:56:07.9235805Z readback-complete
+2026-09-26T22:56:07.9700518Z png-saved
+2026-09-26T22:56:07.9741241Z environment-applied view=Interior time=Noon atmosphere=Temperate
+2026-09-26T22:56:07.9751198Z render-request
+2026-09-26T22:56:07.9751487Z native-pre-draw
+2026-09-26T22:56:07.9756549Z native-post-draw
+2026-09-26T22:56:07.9756895Z texture-valid=True
+2026-09-26T22:56:07.9785750Z readback-complete
+2026-09-26T22:56:08.0207639Z png-saved
+2026-09-26T22:56:08.0249982Z environment-applied view=Shelf time=Noon atmosphere=Temperate
+2026-09-26T22:56:08.0258206Z render-request
+2026-09-26T22:56:08.0258433Z native-pre-draw
+2026-09-26T22:56:08.0262870Z native-post-draw
+2026-09-26T22:56:08.0263152Z texture-valid=True
+2026-09-26T22:56:08.0290567Z readback-complete
+2026-09-26T22:56:08.0690498Z png-saved
+2026-09-26T22:56:08.0839937Z retirement-clean

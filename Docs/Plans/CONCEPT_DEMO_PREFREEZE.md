@@ -8,7 +8,11 @@ records repaired product mechanics and historical canonical Release success. Its
 [R1 companion](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1.md)
 adds native Cabin/pointer/tier/nameplate assurance and repeated memory high-water reuse, but preserves
 a new unexpected HTTP shutdown failure from canonical Release as an unresolved release blocker.
-No passing retry is represented as a repair. W8/W9/W10 and PF6 are unstarted.
+No passing retry is represented as a repair. The linked
+[R2 investigation](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r2.md)
+hardens application accept/response ownership but keeps the managed `HttpListener` teardown issue
+open: framework-owned unregistered responses can still race endpoint shutdown. No exception is
+suppressed and no replacement HTTP server is silently adopted. W8/W9/W10 and PF6 are unstarted.
 
 **Status:** active campaign. PF0 records the exact feature-complete candidate, PF1 closes the
 real headless ClientOnly Network bot plus mixed exported-client correctness gate, and PF2 closes

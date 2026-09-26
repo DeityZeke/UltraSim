@@ -1,0 +1,4 @@
+Unhandled exception. System.InvalidOperationException: Expected 0, got 1.
+   at Assert.Equal[T](T expected, T actual) in /mnt/data/mega/Godot Projects/UltraSim/_Tests/UltraSim.Server.Hosting.Tests/Program.cs:line 1083
+   at Program.<<Main>$>g__StaticContentHttpHostDoesNotAbortInitializingResponse|0_21() in /mnt/data/mega/Godot Projects/UltraSim/_Tests/UltraSim.Server.Hosting.Tests/Program.cs:line 647
+   at Program.<Main>$(String[] args) in /mnt/data/mega/Godot Projects/UltraSim/_Tests/UltraSim.Server.Hosting.Tests/Program.cs:line 66

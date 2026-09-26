@@ -1,0 +1,6 @@
+CONTROL Stop keepAlive=False: managed endpoint teardown / framework SendError header mutation overlap proven; no application-visible context; no exception injected.
+CONTROL Stop keepAlive=True: managed endpoint teardown / framework SendError header mutation overlap proven; no application-visible context; no exception injected.
+CONTROL Abort keepAlive=False: managed endpoint teardown / framework SendError header mutation overlap proven; no application-visible context; no exception injected.
+CONTROL Abort keepAlive=True: managed endpoint teardown / framework SendError header mutation overlap proven; no application-visible context; no exception injected.
+PASS ManagedHttpListenerTeardownCanOverlapUnregisteredHeaderMutation
+All 1 Server Hosting S0.2 tests passed.

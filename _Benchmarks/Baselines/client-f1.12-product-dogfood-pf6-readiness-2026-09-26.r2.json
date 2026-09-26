@@ -1,0 +1,136 @@
+{
+  "schema": "client-f1.12-r2-http-shutdown-investigation/v1",
+  "disposition": "Incomplete correctness closure",
+  "startingHead": "9877eed960f7857d151bfe566a346ab912c67765",
+  "ownershipRepairCommit": "b2902449dab8edbb80f6840f85f2d0cfa078c2d0",
+  "grassDiscoverabilityCommit": "ca48ca05b0a988f861610c59d9b56f511f437140",
+  "testedImplementationHead": "ca48ca05b0a988f861610c59d9b56f511f437140",
+  "finalEvidenceHeadResolution": "git log -1 --format=%H -- _Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r2.md",
+  "integratedImplementationApprovedForPf6": false,
+  "environment": {
+    "configuration": "Release",
+    "sdk": "8.0.131",
+    "runtime": "8.0.31",
+    "os": "CachyOS Linux",
+    "cpu": "Ryzen 7800X3D",
+    "gpu": "RTX 4070 Ti SUPER",
+    "godot": "4.7.1 Mono a13da4feb",
+    "affinityControlled": false,
+    "desktopEditorActivity": true,
+    "performanceRatingClaimed": false
+  },
+  "originalFailure": {
+    "finding": "F112-R1-06",
+    "log": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/f112-r1-release.log",
+    "sha256": "e10313032f0ea4ac56f3ddb4a266829cd09a750ef10a8b6b20c90184486d07e1",
+    "unchanged": true,
+    "exception": "NullReferenceException in NameValueCollection.GetKey / HttpListenerResponse.FormatHeaders / endpoint Close / HttpListener.Stop",
+    "exactCycleKnown": false,
+    "exactHistoricalNreDeterministicallyReproduced": false
+  },
+  "additionalPreRepairFailure": {
+    "exception": "Unhandled framework callback NullReferenceException in UnbindContext / BeginReadRequest / ProcessAccept / OnAccept",
+    "exitCode": 134,
+    "evidence": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r2/controls/pre-repair-process-failure.txt",
+    "isPreservedTerminalExcerptNotRawCanonicalLog": true
+  },
+  "focusedRepairs": {
+    "actualAcceptTaskOwnedThroughTeardown": true,
+    "noInitializerAbort": true,
+    "oneApplicationCloser": true,
+    "globalLocksAcrossResponseIoRemoved": true,
+    "pendingCleanupContinuesAfterIndividualFault": true,
+    "nreSuppressed": false,
+    "httpServerReplaced": false,
+    "productionReflection": false,
+    "targetedMutants": [
+      {"mutation": "restore cancellable accept wrapper", "regression": "StaticContentHttpHostRetainsActualAcceptUntilTeardown", "exitCode": 134, "expectedFailure": true},
+      {"mutation": "allow abort during initialization", "regression": "StaticContentHttpHostDoesNotAbortInitializingResponse", "exitCode": 134, "expectedFailure": true}
+    ]
+  },
+  "runtimeControl": {
+    "test": "ManagedHttpListenerTeardownCanOverlapUnregisteredHeaderMutation",
+    "optInPinnedRuntimeReflectionOnly": true,
+    "exceptionInjected": false,
+    "applicationContextDisclosed": false,
+    "headerMutationDuringTeardownProven": true,
+    "literalNreProducedByControl": false,
+    "controls": [
+      {"operation": "Stop", "connection": "close", "overlapObserved": true},
+      {"operation": "Stop", "connection": "keep-alive", "overlapObserved": true},
+      {"operation": "Abort", "connection": "close", "overlapObserved": true},
+      {"operation": "Abort", "connection": "keep-alive", "overlapObserved": true}
+    ],
+    "applicationHardeningEliminatesThisOverlap": false
+  },
+  "verification": {
+    "independentFocusedHostingProcesses": 3,
+    "focusedTestsPerProcess": 27,
+    "focusedExitCodes": [0, 0, 0],
+    "canonicalHostingTests": 27,
+    "canonicalHostingExitCode": 0,
+    "stressCyclesPerHostingInvocation": 1024,
+    "successfulStressCyclesTotal": 4096,
+    "samePortReuseCyclesTotal": 64,
+    "topologies": [{"workers": 1, "queue": 1}, {"workers": 3, "queue": 4}],
+    "existingTwoWorkerDownloadAndFaultControls": true,
+    "retiredApplicationStateExact": true,
+    "unexpectedWorkerFaultsPreserved": true,
+    "allWorkerFaultsAggregated": true,
+    "repeatedConcurrentDispose": "PASS",
+    "stalledWriteTermination": "PASS",
+    "architecture": "PASS",
+    "canonicalRelease": "PASS",
+    "canonicalReleaseProcessId": 2630508,
+    "canonicalFullPasses": 1,
+    "directConnectColdWarmContentAndProfile": "PASS",
+    "completeHostedActualExports": "PASS",
+    "mixedSessionLifecycle": "PASS",
+    "nativeBotImpairmentAccounting": "PASS",
+    "privateFrameworkCallbackRetirement": "UNPROVEN"
+  },
+  "nativeCabinRegression": {
+    "sourceHead": "ca48ca05b0a988f861610c59d9b56f511f437140",
+    "product": "actual Complete Linux export",
+    "exitCode": 0,
+    "backend": "X11 / OpenGL",
+    "installedPngs": 8,
+    "sameSessionPrimitivePngs": 4,
+    "dimensions": [1920, 1080],
+    "applicationEpochBeforeAfter": [2, 2],
+    "controlEpochBeforeAfter": [1, 1],
+    "semanticTruthPreserved": true,
+    "exactRetirement": true,
+    "evidence": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r2/cabin/evidence.json",
+    "overlappedNonratedCanonicalExportControls": true,
+    "matchedPerformanceOrVisualQualityRating": false
+  },
+  "grassPreference": {
+    "control": "SettingsExperimentalVegetation",
+    "label": "Experimental Vegetation / grass (next world entry)",
+    "location": "immediately after Show Advanced",
+    "actualSettingsRegression": "PASS",
+    "completeEditorAssemblyRebuilt": true,
+    "deviceOwned": true,
+    "default": false,
+    "appliesNextWorldEntry": true
+  },
+  "carriedForward": {
+    "r1PointerTierNameplateAssurance": true,
+    "r1TwoEightLifetimeMemoryControls": true,
+    "obsoleteCaptureHarnessUnknownTriggerIsPf6Blocker": false,
+    "originalAndR1ArtifactsUnchanged": true
+  },
+  "unchangedVersions": {"settings": 6, "gameManifest": 33, "transport": 2, "worldPack": 1, "worldStructuralManifest": 1, "worldView": 2, "participantCap": 64},
+  "contentAuthorizationRoutesHashesCasUnchanged": true,
+  "remaining": {
+    "finding": "F112-R2-01 (linked F112-R1-06)",
+    "category1Blockers": 1,
+    "independentBlockingCategory2Findings": 0,
+    "requiredDecision": "Supported runtime fix/workaround or separately approved HTTP-host replacement; no suppression/private production hooks",
+    "exactHistoricalNreInterleaving": "NOT ISOLATED",
+    "f1.12": "ACTIVE",
+    "pf6": "NOT READY FOR PF6 / NOT STARTED",
+    "w8w9w10": "NOT STARTED"
+  }
+}

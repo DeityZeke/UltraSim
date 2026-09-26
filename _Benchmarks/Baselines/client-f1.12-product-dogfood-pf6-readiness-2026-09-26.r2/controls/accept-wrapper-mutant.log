@@ -1,0 +1,4 @@
+Unhandled exception. System.InvalidOperationException: Expected true.
+   at Assert.True(Boolean value) in /mnt/data/mega/Godot Projects/UltraSim/_Tests/UltraSim.Server.Hosting.Tests/Program.cs:line 1088
+   at Program.<<Main>$>g__StaticContentHttpHostRetainsActualAcceptUntilTeardown|0_20() in /mnt/data/mega/Godot Projects/UltraSim/_Tests/UltraSim.Server.Hosting.Tests/Program.cs:line 613
+   at Program.<Main>$(String[] args) in /mnt/data/mega/Godot Projects/UltraSim/_Tests/UltraSim.Server.Hosting.Tests/Program.cs:line 66
