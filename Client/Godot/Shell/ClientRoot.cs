@@ -612,6 +612,16 @@ public abstract partial class ClientRoot : Control
                 "The server recommendation is not copied into global settings."));
 
         Func<ClientDisplaySettings> readDisplay = BuildDisplaySettingsControls(column);
+        var vegetation = new CheckBox
+        {
+            Name = "SettingsExperimentalVegetation",
+            Text = "Experimental Vegetation (prototype; applies next world entry)",
+            ButtonPressed = _settings.ExperimentalVegetation,
+            Visible = _settings.Display.SettingsMode == ClientDisplaySettingsMode.Advanced,
+        };
+        column.AddChild(vegetation);
+        var advanced = column.FindChild("DisplayShowAdvanced", true, false) as CheckBox;
+        if (advanced is not null) advanced.Toggled += enabled => vegetation.Visible = enabled;
 
         HSlider uiScale = Slider(0.5, 3, 0.05, _resolved.UiScale);
         uiScale.Name = "SettingsUiScale";
@@ -698,7 +708,8 @@ public abstract partial class ClientRoot : Control
                 ClientSettingsDocument candidate = scoped
                     ? _settings.WithScope(_activeSettingsScope, saved)
                     : _settings.WithGlobal(saved);
-                candidate = candidate.WithDisplay(readDisplay());
+                candidate = candidate.WithDisplay(readDisplay())
+                    .WithExperimentalVegetation(vegetation.ButtonPressed);
                 ResolvedClientDisplayConfiguration nextDisplay = ClientDisplayResolver.Resolve(candidate.Display);
                 ResolvedClientDisplayConfiguration previousDisplay = _display;
                 ApplyDisplay(nextDisplay);

@@ -95,6 +95,23 @@ static class ClientApplicationSettingsTests
         Equal("E", RequireBinding(ambiguous, ClientSemanticAction.Interact).Code);
         Equal("SPACE", RequireBinding(ambiguous, ClientSemanticAction.Jump).Code);
 
+        // Device-only prototype preference survives every document update and realm resolution.
+        var opted = document.WithExperimentalVegetation(true);
+        True(!ClientSettingsDocument.Empty.ExperimentalVegetation);
+        True(opted.WithGlobal(document.Global).WithDisplay(opted.Display).WithScope(scope, ClientSettingsLayer.Empty)
+            .ExperimentalVegetation);
+        True(ClientSettingsResolver.Resolve(opted, scope, recommendation,
+            ClientProfileApplicationMode.UseServerDefaults).ExperimentalVegetation);
+        string vegetationJson = ClientSettingsJsonCodec.Write(opted);
+        True(ClientSettingsJsonCodec.TryRead(vegetationJson, out var reopenedVegetation, out _));
+        True(reopenedVegetation.ExperimentalVegetation);
+        string v5 = vegetationJson.Replace("\"version\": 6", "\"version\": 5", StringComparison.Ordinal)
+            .Replace("  \"experimentalVegetation\": true,\n", "", StringComparison.Ordinal);
+        True(ClientSettingsJsonCodec.TryRead(v5, out var migratedVegetation, out _));
+        True(!migratedVegetation.ExperimentalVegetation);
+        True(!ClientSettingsJsonCodec.TryRead(vegetationJson.Replace(
+            "  \"experimentalVegetation\": true,\n", "", StringComparison.Ordinal), out _, out _));
+
         string json = ClientSettingsJsonCodec.Write(document);
         True(json.Contains("\"uiScale\": 1.25", StringComparison.Ordinal));
         True(json.Contains("\"controlGrammar\": \"OrbitCommand\"", StringComparison.Ordinal));

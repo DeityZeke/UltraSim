@@ -264,6 +264,7 @@ public partial class LocalCabinClient : Node3D
     private int _peakRenderedChunks;
     private int _effectiveRenderDistanceChunks;
     private bool _gameplayInputAllowed = true;
+    private bool _vegetationForSession;
     private bool _gameplayInputAdmittedLastFrame;
     private bool _gameplayStopPending;
     private bool _shutdown;
@@ -308,6 +309,7 @@ public partial class LocalCabinClient : Node3D
         _officialContentRoot = officialContentRoot;
         _serverExtensionFactory = serverExtensionFactory;
         _settings = settings ?? ClientSettingsResolver.Resolve(ClientSettingsDocument.Empty);
+        _vegetationForSession = _settings.ExperimentalVegetation || OS.GetCmdlineUserArgs().Contains("--f1-11-vegetation");
     }
 
     public void SetGameplayInputAllowed(bool allowed)
@@ -752,7 +754,7 @@ public partial class LocalCabinClient : Node3D
             settings.CameraFovDegrees,
             settings.Bindings,
             renderDistanceChunks,
-            settings.CameraRig)));
+            settings.CameraRig), experimentalVegetation: settings.ExperimentalVegetation));
 
     public override void _Ready()
     {
@@ -1820,7 +1822,7 @@ public partial class LocalCabinClient : Node3D
                 ? GodotWorldFallbackMaterialMode.Neutral
                 : GodotWorldFallbackMaterialMode.Diagnostic,
             publicBatchFilter: _actorPresenter,
-            vegetationPrototype: OS.GetCmdlineUserArgs().Contains("--f1-11-vegetation"));
+            vegetationPrototype: _vegetationForSession);
         _window = new GodotSlidingRenderWindow(_cache, _renderer, renderRadius);
         int maximumPresented = _window.MaximumActiveChunks;
         _presentationChanges = new ClientPresentationChange[checked(maximumPresented * 2)];
@@ -3902,7 +3904,7 @@ public partial class LocalCabinClient : Node3D
             _settings?.CameraRig ?? ClientStockCameraRigs.Orbit, CurrentCameraLayout());
         UpdateCamera();
 
-        if (OS.GetCmdlineUserArgs().Contains("--f1-11-vegetation") ||
+        if (_vegetationForSession ||
             OS.GetCmdlineUserArgs().Contains("--f1-12-cabin-preview"))
             _diagnosticEnvironment = new GodotPresentationEnvironment(this);
         else

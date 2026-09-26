@@ -129,6 +129,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private GodotContentActorVisualResolver? _actorVisuals;
     private PresentationGenerationId _lastPresentationGeneration;
     private ResolvedClientSettings? _settings;
+    private bool _vegetationForSession;
     private ClientWorldInputScheduler? _inputScheduler;
     private Camera3D? _camera;
     private GodotGameplayCameraRig? _cameraRig;
@@ -770,6 +771,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 "Remote actor presentation requires an authenticated presentation source."));
         _lastPresentationGeneration = _session.Presentation!.CurrentPresentationGeneration;
         RefreshWorldResources();
+        _vegetationForSession = _settings?.ExperimentalVegetation == true ||
+            OS.GetCmdlineUserArgs().Contains("--f1-11-vegetation");
         _actorPresenter = new GodotActorPresenter(
             this, ClientActorDefinitionCatalog.ConceptDemo, 64, _actorVisuals);
         _actorPresenter.SetControlledActorPose(
@@ -781,7 +784,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             assets: _worldAssets,
             GodotWorldFallbackMaterialMode.Neutral,
             _actorPresenter,
-            vegetationPrototype: OS.GetCmdlineUserArgs().Contains("--f1-11-vegetation"));
+            vegetationPrototype: _vegetationForSession);
         _window = new GodotSlidingRenderWindow(
             _session.WorldCache, _renderer, RenderRadiusChunks);
         if (!_window.TryTrackPlayer(
@@ -810,7 +813,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             _sessionUi?.GameplayFrame ?? GameplayFrameLayout.MaxFit(
                 ClientPixelSize.Create(1920, 1080), ClientPixelSize.Create(1920, 1080)));
         ApplyCameraProfile();
-        if (OS.GetCmdlineUserArgs().Contains("--f1-11-vegetation"))
+        if (_vegetationForSession)
             _diagnosticEnvironment = new GodotPresentationEnvironment(this);
         else
         {

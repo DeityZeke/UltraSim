@@ -318,7 +318,7 @@ public readonly record struct ClientScopedSettings(
 /// </summary>
 public sealed class ClientSettingsDocument
 {
-    public const int CurrentVersion = 5;
+    public const int CurrentVersion = 6;
     public const int MaximumScopes = 128;
     private readonly ReadOnlyCollection<ClientScopedSettings> _scopes;
     private readonly ReadOnlyCollection<ClientNamedControlProfile> _namedProfiles;
@@ -327,8 +327,10 @@ public sealed class ClientSettingsDocument
         ClientSettingsLayer? global = null,
         IEnumerable<ClientScopedSettings>? scopes = null,
         IEnumerable<ClientNamedControlProfile>? namedProfiles = null,
-        ClientDisplaySettings? display = null)
+        ClientDisplaySettings? display = null,
+        bool experimentalVegetation = false)
     {
+        ExperimentalVegetation = experimentalVegetation;
         Display = display ?? ClientDisplaySettings.Default;
         _ = ClientDisplayResolver.Resolve(Display);
         Global = global ?? ClientSettingsLayer.Empty;
@@ -355,6 +357,8 @@ public sealed class ClientSettingsDocument
     public static ClientSettingsDocument Empty { get; } = new();
     public ClientSettingsLayer Global { get; }
     public ClientDisplaySettings Display { get; }
+    /// <summary>Device-owned prototype opt-in. Not a realm override or server profile field.</summary>
+    public bool ExperimentalVegetation { get; }
     public ReadOnlyCollection<ClientScopedSettings> Scopes => _scopes;
     public ReadOnlyCollection<ClientNamedControlProfile> NamedProfiles => _namedProfiles;
 
@@ -371,7 +375,7 @@ public sealed class ClientSettingsDocument
         ClientNamedControlProfile[] values = _namedProfiles
             .Where(value => !string.Equals(value.Name, profile.Name, StringComparison.OrdinalIgnoreCase))
             .Append(profile).ToArray();
-        return new ClientSettingsDocument(Global, _scopes, values, Display);
+        return new ClientSettingsDocument(Global, _scopes, values, Display, ExperimentalVegetation);
     }
 
     public bool TryGetScope(ClientSettingsScopeKey scope, out ClientSettingsLayer layer)
@@ -396,10 +400,13 @@ public sealed class ClientSettingsDocument
     }
 
     public ClientSettingsDocument WithGlobal(ClientSettingsLayer layer) =>
-        new(layer ?? throw new ArgumentNullException(nameof(layer)), _scopes, _namedProfiles, Display);
+        new(layer ?? throw new ArgumentNullException(nameof(layer)), _scopes, _namedProfiles, Display, ExperimentalVegetation);
 
     public ClientSettingsDocument WithDisplay(ClientDisplaySettings display) =>
-        new(Global, _scopes, _namedProfiles, display);
+        new(Global, _scopes, _namedProfiles, display, ExperimentalVegetation);
+
+    public ClientSettingsDocument WithExperimentalVegetation(bool enabled) =>
+        new(Global, _scopes, _namedProfiles, Display, enabled);
 
     public ClientSettingsDocument WithScope(ClientSettingsScopeKey scope, ClientSettingsLayer layer)
     {
@@ -417,7 +424,7 @@ public sealed class ClientSettingsDocument
             else values.Add(value);
         }
         if (!replaced) values.Add(new ClientScopedSettings(scope, layer));
-        return new ClientSettingsDocument(Global, values, _namedProfiles, Display);
+        return new ClientSettingsDocument(Global, values, _namedProfiles, Display, ExperimentalVegetation);
     }
 }
 
@@ -436,8 +443,10 @@ public sealed class ResolvedClientSettings
         float cameraFovDegrees,
         ClientCameraRig cameraRig,
         int renderDistanceChunks,
-        ClientPhysicalBinding[] bindings)
+        ClientPhysicalBinding[] bindings,
+        bool experimentalVegetation = false)
     {
+        ExperimentalVegetation = experimentalVegetation;
         UiScale = uiScale;
         MasterVolume = masterVolume;
         PointerSensitivity = pointerSensitivity;
@@ -461,6 +470,7 @@ public sealed class ResolvedClientSettings
     public float CameraFovDegrees { get; }
     public ClientCameraRig CameraRig { get; }
     public int RenderDistanceChunks { get; }
+    public bool ExperimentalVegetation { get; }
     public ReadOnlyCollection<ClientPhysicalBinding> Bindings => _bindings;
 
     public bool TryGetBinding(ClientSemanticAction action, out ClientPhysicalInput input)
@@ -546,7 +556,8 @@ public static class ClientSettingsResolver
         return new ResolvedClientSettings(
             current.UiScale, current.MasterVolume, current.PointerSensitivity, current.InvertY,
             current.ControlGrammar, current.CameraProfile, current.CameraDistance,
-            current.CameraFovDegrees, current.CameraRig, current.RenderDistanceChunks, bindings);
+            current.CameraFovDegrees, current.CameraRig, current.RenderDistanceChunks, bindings,
+            document.ExperimentalVegetation);
     }
 
     private static MutableSettings BuiltIn()
@@ -717,6 +728,7 @@ public static class ClientSettingsJsonCodec
         var value = new DocumentDto
         {
             Version = ClientSettingsDocument.CurrentVersion,
+            ExperimentalVegetation = document.ExperimentalVegetation,
             Display = ToDto(document.Display),
             Global = ToDto(document.Global),
             Scopes = document.Scopes.Select(scope => new ScopeDto
@@ -782,7 +794,9 @@ public static class ClientSettingsJsonCodec
             ClientDisplaySettings display = value.Version >= 5
                 ? FromDto(value.Display ?? throw new JsonException("Display settings are required in v5."))
                 : ClientDisplaySettings.Default;
-            document = new ClientSettingsDocument(global, scopes, namedProfiles, display);
+            bool vegetation = value.Version < 6 ? false : value.ExperimentalVegetation ??
+                throw new JsonException("ExperimentalVegetation is required in v6.");
+            document = new ClientSettingsDocument(global, scopes, namedProfiles, display, vegetation);
             ValidateDocument(document);
             error = null;
             return true;
@@ -892,6 +906,7 @@ public static class ClientSettingsJsonCodec
     private sealed class DocumentDto
     {
         public int Version { get; set; }
+        public bool? ExperimentalVegetation { get; set; }
         public DisplayDto? Display { get; set; }
         public LayerDto? Global { get; set; }
         public List<ScopeDto>? Scopes { get; set; }
