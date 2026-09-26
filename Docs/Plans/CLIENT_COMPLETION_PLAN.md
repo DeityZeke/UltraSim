@@ -1,6 +1,6 @@
 # UltraSim Client Completion Plan
 
-**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.11 are CLOSED; F1.12 is ACTIVE; dogfood verification and closure evidence are pending.** The [F1.11 evidence](../../_Benchmarks/Baselines/client-f1.11-renderer-stress-vegetation-2026-09-25.md) closes shared Local/Remote world-resource consumption and bounded renderer stress; vegetation remains opt-in/default Off. F1.10 selects a conservative Detailed/BatchedPrimitive hybrid after the [actor-tier comparison](../../_Benchmarks/Baselines/client-f1.10-actor-representation-tiers-2026-09-25.md): distant body batching reduces Nodes/construction/retirement, not moving-update CPU. F1.9B retains NodeMultiMesh/PerRow after the [measured backend comparison](../../_Benchmarks/Baselines/client-f1.9b-scalable-godot-backend-2026-09-25.md); direct RIDs and bulk submission remain bounded comparison controls, not selected product policy. F1.9A's tested implementation and verification are recorded in the [display-composition evidence](../../_Benchmarks/Baselines/client-f1.9a-display-composition-2026-09-25.md). The original F1.8A closure claim is superseded by the [corrective evidence](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md), which records both the reproduced defects and the earlier final-tree verifier failures.
+**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.11 are CLOSED; F1.12 is ACTIVE; NOT READY FOR PF6.** The [partial F1.12 evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.md) records four product repairs, exported journeys and an uninterrupted canonical Release pass on `ac6a81bf`, but native visual/product-resource coverage remains incomplete. The [F1.11 evidence](../../_Benchmarks/Baselines/client-f1.11-renderer-stress-vegetation-2026-09-25.md) closes shared Local/Remote world-resource consumption and bounded renderer stress; vegetation remains opt-in/default Off. F1.10 selects a conservative Detailed/BatchedPrimitive hybrid after the [actor-tier comparison](../../_Benchmarks/Baselines/client-f1.10-actor-representation-tiers-2026-09-25.md): distant body batching reduces Nodes/construction/retirement, not moving-update CPU. F1.9B retains NodeMultiMesh/PerRow after the [measured backend comparison](../../_Benchmarks/Baselines/client-f1.9b-scalable-godot-backend-2026-09-25.md); direct RIDs and bulk submission remain bounded comparison controls, not selected product policy. F1.9A's tested implementation and verification are recorded in the [display-composition evidence](../../_Benchmarks/Baselines/client-f1.9a-display-composition-2026-09-25.md). The original F1.8A closure claim is superseded by the [corrective evidence](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md), which records both the reproduced defects and the earlier final-tree verifier failures.
 
 **Parent architecture:** [CLIENT_PRESENTATION_ARCHITECTURE.md](CLIENT_PRESENTATION_ARCHITECTURE.md)
 
@@ -94,7 +94,7 @@ F1.9A Simple/Advanced display composition and real Gameplay Frame output (CLOSED
 F1.9B scalable Godot realization / RID / MultiMesh (CLOSED; NodeMultiMesh/PerRow retained)
 F1.10 Actor representation tiers and GPU-friendly interpolation seam (CLOSED; conservative hybrid)
 F1.11 Renderer stress consumers / vegetation prototype (CLOSED; prototype default Off)
-F1.12 Product dogfooding and PF6 readiness (ACTIVE; verification and dogfood evidence pending)
+F1.12 Product dogfooding and PF6 readiness (ACTIVE; partial evidence accepted, visual/resource matrix open)
 ~~~
 
 The dependency direction is intentional. Do not begin aesthetic menu polish before F1.7, and do not make the renderer depend on Local/Server special cases before F1.2.
@@ -1381,6 +1381,18 @@ Never move authoritative gameplay/navigation/collision into the client renderer 
 ---
 
 # 16. F1.12 - Product dogfooding and PF6 readiness
+
+**Current disposition: ACTIVE / NOT READY FOR PF6.** The
+[2026-09-26 evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.md)
+preserves both repaired failures and passing controls. Durable Local save sequence, explicit exact
+Local guest restore/Chat, generation-coherent metadata copying and active Remote Settings are repaired.
+One uninterrupted canonical Release passed on `ac6a81bf`. Actual exported Local/Complete/Online
+journeys and eight mixed lifetimes passed; the native logical resource control retained stable owner
+counts but rising RSS and zero draw-call observations. The shipping built-in radius is 1; the
+harness radius-2 steady window is a separate control. Cabin post-draw captures did not complete.
+Required next work is successful native visual/pointer/actor-tier/Cabin coverage and representative
+rendered/Online resource trends, not W8 or another optimization campaign. Human motion feel and the
+historical approximately 1.4–1.67 m correction range remain ungraded.
 
 ## Goal
 

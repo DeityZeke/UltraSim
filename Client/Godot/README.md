@@ -76,7 +76,21 @@ bounded custom-row cut is diagnostic, not Game harvesting. Finite native AABB in
 shader envelope. Grass casting and the prototype default are Off. `--f1-11-time=dawn|noon|dusk|night`,
 `--f1-11-atmosphere=temperate|dry|cold` and `--f1-11-no-shadows` select a finite common debug
 environment when opted in; no authoritative weather/time, compute or advanced GI is claimed.
-GPU observations are not sustained FPS or server CCU. F1.12 is next and unstarted.
+GPU observations are not sustained FPS or server CCU. F1.12 is ACTIVE with
+[partial evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.md);
+PF6 remains waiting. `--f1-12-dogfood` runs bounded actual-product mechanics/Settings/UI/session
+journeys and emits snapshots through `--f1-12-evidence=<absolute-path>`. It requires isolated
+`--f1-12-save-root` and content-cache roots; `--f1-12-art=installed|absent|primitive` preserves the
+existing presentation controls and `--f1-12-stable-radius=1|2|3` defaults to 2 in this diagnostic
+harness (the shipping built-in setting is 1). The verifier's
+`--f1-12-only` and `--f1-12-mixed-only` use actual exports, not a parallel harness. The eight-lifetime
+mixed journey preserves scoped Settings and fresh Remote epochs on two warm A reconnects.
+
+The optional `--f1-12-cabin-preview` is a diagnostic image probe, not new default lighting.
+It requires a real renderer and `--f1-12-cabin-evidence=<absolute-directory>`; use an outer process
+timeout until the failed native post-draw control is resolved. No successful image or native FPS
+rating is claimed in the partial evidence. Latest-frame monitors, script-driven UI probes and shared
+Local-process CPU must not be labeled whole-frame percentiles or dedicated-server cost.
 
 This is the one maintained Godot application and the only production Godot script assembly. Its
 `Adapter/`, `Shell/`, and conditionally compiled `Local/` sources replace the former `_Godot`,

@@ -17,7 +17,11 @@ The [F1.10 actor-tier evidence](../../_Benchmarks/Baselines/client-f1.10-actor-r
 selects a conservative hybrid: Detailed near/feature-bearing actors, distant batched primitives.
 [F1.11](../../_Benchmarks/Baselines/client-f1.11-renderer-stress-vegetation-2026-09-25.md)
 closes common Local/Remote catalog-backed world resources and native renderer stress, with
-procedural vegetation opt-in/default Off. F1.12 is active; closure evidence is pending and PF6 remains waiting. W8 remains unstarted. The initial F1.8A
+procedural vegetation opt-in/default Off. F1.12 is active with
+[partial dogfood evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.md):
+four mechanical product repairs, exported lifecycle journeys and uninterrupted canonical Release on
+`ac6a81bf`. Native visual/Cabin and product resource-trend coverage remain open; PF6 is NOT READY.
+W8 remains unstarted. The initial F1.8A
 closure evidence remains historical, and the [R1 correction](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md)
 records reproduced defects, the earlier intermittent final-tree verifier failures, and corrected
 verification. F1.2 separates the required remote WorldPack/UI activation and its exact application proof

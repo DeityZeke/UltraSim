@@ -1,0 +1,835 @@
+{
+  "Schema": "client-f1.12-readiness-summary/v1",
+  "Date": "2026-09-26",
+  "Status": "PARTIAL; F1.12 ACTIVE",
+  "Verdict": "NOT READY FOR PF6",
+  "StartingHead": "e96af793046afc21dcd0a4f164a9eaec7e8ad2bc",
+  "TestedImplementationHead": "ac6a81bf1f777380cdf87b62719a6204bded4a8f",
+  "FinalEvidenceCommit": "Resolve git log -1 --format=%H -- _Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.json; implementation verified separately before evidence-only commit.",
+  "Environment": {
+    "Os": "CachyOS Linux",
+    "Kernel": "7.2.6-1-cachyos",
+    "Cpu": "AMD Ryzen 7 7800X3D (8 cores / 16 threads)",
+    "RamBytes": 32738320384,
+    "Gpu": "NVIDIA RTX 4070 Ti SUPER",
+    "Driver": "615.71.09",
+    "GpuMemoryMiB": 16376,
+    "Godot": "4.7.1 stable mono",
+    "Renderer": "Compatibility OpenGL",
+    "DotnetSdk": "8.0.131",
+    "ManagedRuntime": "8.0.31",
+    "DotnetLauncherHost": "10.0.12",
+    "Desktop": "KDE Wayland; primary product launch X11",
+    "AffinityControlled": false,
+    "LowerSpecTested": false
+  },
+  "Policy": {
+    "Renderer": "NodeMultiMesh/PerRow",
+    "Actors": "Hybrid soft limit 64; promote 20 m / demote 28 m",
+    "Vegetation": "Opt-in; default Off; base-only; presentation-only",
+    "SettingsVersion": 5,
+    "GameManifest": 33,
+    "TransportRevision": 2,
+    "WorldPack": 1,
+    "StructuralManifest": 1,
+    "WorldView": 2,
+    "AuthorityHz": 60,
+    "ProductParticipantCap": 64,
+    "RemoteReplication": "ChunkPublication; compatible body/canonical-byte sharing; CurrentBundled; message-148 selective LZ4; singleton Off; cadence 1/2/4; CrossLane cap 2; BackgroundPlatformBatch",
+    "BuiltInRenderRadius": 1,
+    "DiagnosticHarnessStableRadiusDefault": 2
+  },
+  "Verification": {
+    "Architecture": {
+      "Command": "bash ./verify.sh --architecture-only",
+      "ExitCode": 0,
+      "PassedGates": 4
+    },
+    "Canonical": {
+      "Command": "bash ./verify.sh --configuration=Release",
+      "ExitCode": 0,
+      "Uninterrupted": true,
+      "VerifierPid": 2477095,
+      "SourceHead": "ac6a81bf1f777380cdf87b62719a6204bded4a8f",
+      "Log": "_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.release.log",
+      "OriginalLogSha256": "05e3f136d9509b3e082f16567dce7918207dd460077082356fd2becea2514da0",
+      "ExpectedNegativeTests": "Unknown Network flavor, stripped canonical package and deliberately wrong exported edition fail closed; these are expected gates."
+    },
+    "Focused": {
+      "LocalTests": 24,
+      "AdmissionTests": 18,
+      "ChatTests": 36,
+      "NativeT010": "PASS",
+      "SaveSetSuite": "PASS",
+      "MutatedSaveSequence": "Regression fails",
+      "MutatedMetadataFence": "Regression fails",
+      "OriginalRemoteSettings": "Exported regression fails"
+    }
+  },
+  "CanonicalLocal": [
+    {
+      "Case": "Complete-installed-vegetation.json",
+      "Art": "installed",
+      "Vegetation": true,
+      "Head": "ac6a81bf1f777380cdf87b62719a6204bded4a8f",
+      "Display": "headless",
+      "Radius": 2,
+      "MeasuredLifetimes": 3,
+      "AdditionalReentryLoadLifetimes": 1,
+      "Samples": 12,
+      "StableSeconds": [
+        4.0248214,
+        4.0170092,
+        4.0197146
+      ],
+      "ResidentChunks": 49,
+      "RenderedChunks": 25,
+      "Actors": 2,
+      "Retirement": "Exact persistent baseline",
+      "HumanFeelRated": false
+    },
+    {
+      "Case": "SinglePlayer-absent-default.json",
+      "Art": "absent",
+      "Vegetation": false,
+      "Head": "ac6a81bf1f777380cdf87b62719a6204bded4a8f",
+      "Display": "headless",
+      "Radius": 2,
+      "MeasuredLifetimes": 3,
+      "AdditionalReentryLoadLifetimes": 1,
+      "Samples": 12,
+      "StableSeconds": [
+        4.0273201,
+        4.0251652,
+        4.0313219
+      ],
+      "ResidentChunks": 49,
+      "RenderedChunks": 25,
+      "Actors": 2,
+      "Retirement": "Exact persistent baseline",
+      "HumanFeelRated": false
+    },
+    {
+      "Case": "SinglePlayer-installed-default.json",
+      "Art": "installed",
+      "Vegetation": false,
+      "Head": "ac6a81bf1f777380cdf87b62719a6204bded4a8f",
+      "Display": "headless",
+      "Radius": 2,
+      "MeasuredLifetimes": 3,
+      "AdditionalReentryLoadLifetimes": 1,
+      "Samples": 24,
+      "StableSeconds": [
+        8.0509749,
+        8.0492201,
+        8.0547724
+      ],
+      "ResidentChunks": 49,
+      "RenderedChunks": 25,
+      "Actors": 2,
+      "Retirement": "Exact persistent baseline",
+      "HumanFeelRated": false
+    },
+    {
+      "Case": "SinglePlayer-primitive-default.json",
+      "Art": "primitive",
+      "Vegetation": false,
+      "Head": "ac6a81bf1f777380cdf87b62719a6204bded4a8f",
+      "Display": "headless",
+      "Radius": 2,
+      "MeasuredLifetimes": 3,
+      "AdditionalReentryLoadLifetimes": 1,
+      "Samples": 12,
+      "StableSeconds": [
+        4.0275496,
+        4.0302892,
+        4.0292916
+      ],
+      "ResidentChunks": 49,
+      "RenderedChunks": 25,
+      "Actors": 2,
+      "Retirement": "Exact persistent baseline",
+      "HumanFeelRated": false
+    }
+  ],
+  "Mixed": {
+    "Lifetimes": 8,
+    "LocalLifetimes": 4,
+    "RemoteLifetimes": 4,
+    "MenuBetweenEverySession": true,
+    "FreshEpochsAsserted": true,
+    "ExactBoundaryAsserted": true,
+    "SettingsPreservedSession": true,
+    "Rows": [
+      {
+        "Case": "ColdA",
+        "Realm": "15c5249be3d0f124715dc784f55c9d91",
+        "RememberedProfile": false,
+        "RequiredBytes": 1958,
+        "OptionalPresentationBytes": 6936776,
+        "StructuralPackBytes": 531138,
+        "RequiredReadyMilliseconds": 267.9013,
+        "GuestActiveMilliseconds": 490.141,
+        "ClockStart": "Remote consumer construction after profile authentication; not full connect",
+        "WorldProofsQueued": 27,
+        "PublicMetadataProofsQueued": 2,
+        "ChatProofsQueued": 1
+      },
+      {
+        "Case": "B",
+        "Realm": "f0516838411878f012463a7cfb087880",
+        "RememberedProfile": false,
+        "RequiredBytes": 1958,
+        "OptionalPresentationBytes": 6936776,
+        "StructuralPackBytes": 531138,
+        "RequiredReadyMilliseconds": 234.7786,
+        "GuestActiveMilliseconds": 435.9034,
+        "ClockStart": "Remote consumer construction after profile authentication; not full connect",
+        "WorldProofsQueued": 27,
+        "PublicMetadataProofsQueued": 2,
+        "ChatProofsQueued": 1
+      },
+      {
+        "Case": "WarmOne",
+        "Realm": "15c5249be3d0f124715dc784f55c9d91",
+        "RememberedProfile": true,
+        "RequiredBytes": 0,
+        "OptionalPresentationBytes": 0,
+        "StructuralPackBytes": 0,
+        "RequiredReadyMilliseconds": 226.9267,
+        "GuestActiveMilliseconds": 297.4064,
+        "ClockStart": "Remote consumer construction after profile authentication; not full connect",
+        "WorldProofsQueued": 26,
+        "PublicMetadataProofsQueued": 2,
+        "ChatProofsQueued": 1
+      },
+      {
+        "Case": "WarmTwo",
+        "Realm": "15c5249be3d0f124715dc784f55c9d91",
+        "RememberedProfile": true,
+        "RequiredBytes": 0,
+        "OptionalPresentationBytes": 0,
+        "StructuralPackBytes": 0,
+        "RequiredReadyMilliseconds": 163.7316,
+        "GuestActiveMilliseconds": 242.7967,
+        "ClockStart": "Remote consumer construction after profile authentication; not full connect",
+        "WorldProofsQueued": 26,
+        "PublicMetadataProofsQueued": 2,
+        "ChatProofsQueued": 1
+      }
+    ]
+  },
+  "NativeInstalled": {
+    "Edition": "Complete (Local capability)",
+    "Head": "ac6a81bf1f777380cdf87b62719a6204bded4a8f",
+    "Display": "X11",
+    "Renderer": "gl_compatibility",
+    "Radius": 2,
+    "Vegetation": false,
+    "MeasuredLifetimes": 3,
+    "AdditionalLoadLifetime": 1,
+    "Samples": 120,
+    "UiChurnCycles": 30,
+    "WallSeconds": 171.623,
+    "UserCpuSeconds": 28.541,
+    "SystemCpuSeconds": 1.614,
+    "CpuOwnership": "Whole exported process, including packet-free local authority; not dedicated-server CPU",
+    "Retirement": "PASS",
+    "PerLifetime": [
+      {
+        "Lifetime": 0,
+        "StableSeconds": 40.2597117,
+        "RssBytes": {
+          "minimum": 552615936,
+          "maximum": 610398208,
+          "first": 552615936,
+          "last": 610398208
+        },
+        "ManagedBytes": {
+          "minimum": 48203720,
+          "maximum": 110181648,
+          "first": 52246208,
+          "last": 103469640
+        },
+        "Gen0": {
+          "minimum": 8,
+          "maximum": 12,
+          "first": 8,
+          "last": 12
+        },
+        "Residents": {
+          "minimum": 49,
+          "maximum": 49,
+          "first": 49,
+          "last": 49
+        },
+        "RenderChunks": {
+          "minimum": 25,
+          "maximum": 25,
+          "first": 25,
+          "last": 25
+        },
+        "ActorCount": {
+          "minimum": 2,
+          "maximum": 2,
+          "first": 2,
+          "last": 2
+        },
+        "Nodes": {
+          "minimum": 180,
+          "maximum": 180,
+          "first": 180,
+          "last": 180
+        },
+        "ProcessMonitorMilliseconds": {
+          "minimum": 0.705,
+          "maximum": 72.49600000000001,
+          "first": 71.744,
+          "last": 0.767
+        },
+        "EngineFps": {
+          "minimum": 131,
+          "maximum": 145,
+          "first": 137,
+          "last": 145
+        },
+        "DrawCalls": {
+          "minimum": 0,
+          "maximum": 0,
+          "first": 0,
+          "last": 0
+        }
+      },
+      {
+        "Lifetime": 1,
+        "StableSeconds": 40.1862184,
+        "RssBytes": {
+          "minimum": 550436864,
+          "maximum": 590073856,
+          "first": 550436864,
+          "last": 590073856
+        },
+        "ManagedBytes": {
+          "minimum": 62672616,
+          "maximum": 126934288,
+          "first": 79327768,
+          "last": 101147448
+        },
+        "Gen0": {
+          "minimum": 18,
+          "maximum": 21,
+          "first": 18,
+          "last": 21
+        },
+        "Residents": {
+          "minimum": 49,
+          "maximum": 49,
+          "first": 49,
+          "last": 49
+        },
+        "RenderChunks": {
+          "minimum": 25,
+          "maximum": 25,
+          "first": 25,
+          "last": 25
+        },
+        "ActorCount": {
+          "minimum": 2,
+          "maximum": 2,
+          "first": 2,
+          "last": 2
+        },
+        "Nodes": {
+          "minimum": 180,
+          "maximum": 180,
+          "first": 180,
+          "last": 180
+        },
+        "ProcessMonitorMilliseconds": {
+          "minimum": 0.203,
+          "maximum": 76.139,
+          "first": 65.065,
+          "last": 0.753
+        },
+        "EngineFps": {
+          "minimum": 130,
+          "maximum": 145,
+          "first": 130,
+          "last": 144
+        },
+        "DrawCalls": {
+          "minimum": 0,
+          "maximum": 0,
+          "first": 0,
+          "last": 0
+        }
+      },
+      {
+        "Lifetime": 2,
+        "StableSeconds": 40.1994084,
+        "RssBytes": {
+          "minimum": 611155968,
+          "maximum": 650493952,
+          "first": 611155968,
+          "last": 646115328
+        },
+        "ManagedBytes": {
+          "minimum": 48041208,
+          "maximum": 110037256,
+          "first": 48041208,
+          "last": 57888336
+        },
+        "Gen0": {
+          "minimum": 29,
+          "maximum": 33,
+          "first": 29,
+          "last": 33
+        },
+        "Residents": {
+          "minimum": 49,
+          "maximum": 49,
+          "first": 49,
+          "last": 49
+        },
+        "RenderChunks": {
+          "minimum": 25,
+          "maximum": 25,
+          "first": 25,
+          "last": 25
+        },
+        "ActorCount": {
+          "minimum": 2,
+          "maximum": 2,
+          "first": 2,
+          "last": 2
+        },
+        "Nodes": {
+          "minimum": 180,
+          "maximum": 180,
+          "first": 180,
+          "last": 180
+        },
+        "ProcessMonitorMilliseconds": {
+          "minimum": 0.6629999999999999,
+          "maximum": 73.093,
+          "first": 69.331,
+          "last": 0.6880000000000001
+        },
+        "EngineFps": {
+          "minimum": 135,
+          "maximum": 145,
+          "first": 137,
+          "last": 145
+        },
+        "DrawCalls": {
+          "minimum": 0,
+          "maximum": 0,
+          "first": 0,
+          "last": 0
+        }
+      }
+    ],
+    "Interpretation": "Explicit radius-2 control, not shipping radius. Stable owned counts; heap sawtooth/GC; RSS growth not resolved. Draw monitor zero: no validated rendered performance rating. Per-second last-frame monitor includes synchronous acceptance/UI probes; not frame p95."
+  },
+  "Cabin": {
+    "X11": "No post-draw capture; cancelled bounded attempt; zero images",
+    "Wayland": "90-second timeout exit 124; zero images; forced-termination engine errors retained",
+    "PrimitivePreview": "Not reached after first failure",
+    "VisualMatrix": "OPEN",
+    "RootCause": "Not established; do not classify as a repaired product defect or a successful native gate"
+  },
+  "Motion": {
+    "Kind": "Existing real UDP deterministic model harness, not human/native-frame rating",
+    "CurrentRows": [
+      {
+        "LatencyMs": 0,
+        "JitterMs": 0,
+        "FirstPresentedUs": 4451,
+        "FirstOwnerUs": 14804,
+        "StopErrorMm": 122,
+        "Settle20MmUs": 149879,
+        "MaximumCorrectionMm": 123
+      },
+      {
+        "LatencyMs": 50,
+        "JitterMs": 0,
+        "FirstPresentedUs": 4220,
+        "FirstOwnerUs": 133234,
+        "StopErrorMm": 1136,
+        "Settle20MmUs": 178412,
+        "MaximumCorrectionMm": 1137
+      },
+      {
+        "LatencyMs": 50,
+        "JitterMs": 15,
+        "FirstPresentedUs": 4252,
+        "FirstOwnerUs": 112167,
+        "StopErrorMm": 29,
+        "Settle20MmUs": 55475,
+        "MaximumCorrectionMm": 30
+      },
+      {
+        "LatencyMs": 50,
+        "JitterMs": 15,
+        "DropPeriod": 53,
+        "FirstPresentedUs": 4259,
+        "FirstOwnerUs": 137664,
+        "StopErrorMm": 436,
+        "Settle20MmUs": 172324,
+        "MaximumCorrectionMm": 436
+      }
+    ],
+    "HistoricalCorrectionRangeMeters": [
+      1.4,
+      1.67
+    ],
+    "HumanFeelRated": false
+  },
+  "Findings": [
+    {
+      "Id": "F112-01",
+      "Category": 1,
+      "Kind": "product mechanical defect",
+      "Description": "Local save sequence restarted at one across session reentry.",
+      "Reproduction": "Save; retire; reenter against the same root; save again.",
+      "Disposition": "Fixed; cold read-only durable publication high-water determines next sequence; exhaustion fails closed.",
+      "Commit": "efe2d0fdb531f6289574b7d98469d53132f7688f",
+      "Proof": "ConceptDemoSaveSequenceSurvivesSessionReentry; original placement mutation fails second lifetime.",
+      "BlocksPf6Now": false
+    },
+    {
+      "Id": "F112-02",
+      "Category": 1,
+      "Kind": "product mechanical defect",
+      "Description": "Post-load accountless Local admission expired while control remained bound; Chat returned participant-not-entered.",
+      "Reproduction": "Load saved Local generation; submit spatial speech.",
+      "Disposition": "Fixed by explicit exact trusted-Local guest restore policy. Remote/accountless automatic expiry remains unchanged.",
+      "Commit": "1a74c162b82cad7675608548b0fddb3c740052eb",
+      "Proof": "Post-load speech plus GuestRestoreRequiresExplicitExactLocalBinding rejection/fencing controls.",
+      "BlocksPf6Now": false
+    },
+    {
+      "Id": "F112-03",
+      "Category": 1,
+      "Kind": "product mechanical defect",
+      "Description": "Independently captured Local metadata could cross a generation replacement and reject cold public metadata.",
+      "Reproduction": "Complete exported fourth-lifetime Load after three save/load journeys.",
+      "Disposition": "Fixed expected-generation copy under existing view lock; stale cohort defers without mutation.",
+      "Commit": "92a79c275db2aec2332c5bf462838334944c310e",
+      "Proof": "Removing cohort fence fails focused regression; repaired Complete export passed.",
+      "BlocksPf6Now": false
+    },
+    {
+      "Id": "F112-04",
+      "Category": 1,
+      "Kind": "product mechanical defect",
+      "Description": "Active Remote progress re-entered a session while its shell was Settings or options.",
+      "Reproduction": "Complete Remote A reconnect; open scoped Settings across progress frames.",
+      "Disposition": "Fixed session entry restricted to Loading; settings preserves application epoch.",
+      "Commit": "3bc00dced2eb02cea6c8547b0d25ebbb583172a1",
+      "Proof": "Original exported mixed journey failed EnterSession; repaired and canonical eight-lifetime journeys passed.",
+      "BlocksPf6Now": false
+    },
+    {
+      "Id": "F112-05",
+      "Category": 1,
+      "Kind": "assurance defect, not demonstrated runtime defect",
+      "Description": "Equipped-grip assertion assumed a global downward blade regardless of animated hand phase.",
+      "Reproduction": "Validate equipped sword after native animated hand update.",
+      "Disposition": "Fixed exact hand-local basis/attachment/dimensions assertion; global directional check retained for primitive hand only.",
+      "Commit": "1cd00dd0666c35454ffbe895ebeb6c656e539df7",
+      "Proof": "T010 walking full-hand/root transform coverage and Local native acceptance.",
+      "BlocksPf6Now": false
+    },
+    {
+      "Id": "F112-06",
+      "Category": 3,
+      "Kind": "carried-forward human-feel question",
+      "Description": "Rapid reversal/Stop correction tails approximately 1.4–1.67 m historically; sparse public interpolation holds.",
+      "Disposition": "Preserved range; no automated human-feel verdict or policy tuning.",
+      "BlocksPf6Now": false
+    },
+    {
+      "Id": "F112-07",
+      "Category": 3,
+      "Kind": "carried-forward polish question",
+      "Description": "Equipped grip and primitive/clay appearance need actual human visual evaluation.",
+      "Disposition": "Mechanical attachment/dimensions tested; visual quality not declared finished.",
+      "BlocksPf6Now": false
+    },
+    {
+      "Id": "F112-08",
+      "Category": 3,
+      "Kind": "carried-forward polish question",
+      "Description": "Cabin lighting/material look and final art quality remain ungraded.",
+      "Disposition": "Not a final-art/GI project; required mechanical visual matrix still open.",
+      "BlocksPf6Now": false
+    },
+    {
+      "Id": "F112-09",
+      "Category": 4,
+      "Kind": "deferred scope",
+      "Description": "W8/W9/W10 live authored editing and durable runtime topology.",
+      "Disposition": "Not started.",
+      "BlocksPf6Now": false
+    },
+    {
+      "Id": "F112-10",
+      "Category": 4,
+      "Kind": "deferred scope",
+      "Description": "Advanced GI, universal atlas, full Cabin remodel and universal occlusion.",
+      "Disposition": "Not started.",
+      "BlocksPf6Now": false
+    },
+    {
+      "Id": "F112-11",
+      "Category": 4,
+      "Kind": "deferred scope",
+      "Description": "Gameplay vegetation/regrowth and production vegetation art.",
+      "Disposition": "Prototype remains opt-in/default Off; no lower-spec claim.",
+      "BlocksPf6Now": false
+    },
+    {
+      "Id": "F112-12",
+      "Category": 4,
+      "Kind": "deferred scope",
+      "Description": "Future GPU actor simulation, universal skeletal batching and other engine adapters.",
+      "Disposition": "No new architecture implemented.",
+      "BlocksPf6Now": false
+    }
+  ],
+  "FindingCounts": {
+    "Total": 12,
+    "NewProductDefects": 4,
+    "NewAssuranceDefects": 1,
+    "CarriedForwardRisksOrDeferred": 7,
+    "Category1": 5,
+    "Category2": 0,
+    "Category3": 3,
+    "Category4": 4
+  },
+  "ConcreteClosureGaps": [
+    "Obtain successful native post-draw product/Cabin evidence and diagnose the stalled capture; complete doorway/interior/window/blocker and time/atmosphere controls.",
+    "Complete actual-product actor tier/nameplate and pointer/display visual interaction controls; synthetic native tests do not replace these.",
+    "Extend actual Online/resource and representative rendered workload observations; resolve whether RSS growth plateaus under stable workload. Current short samples do not prove absence of monotonic growth."
+  ],
+  "HumanFeedbackNotStarted": true,
+  "Pf6Started": false,
+  "W8W9W10Started": false,
+  "ProductionOptimizations": false,
+  "RawEvidence": "_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.raw.json",
+  "Report": "_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.md",
+  "NativeBuiltInRadius": {
+    "Head": "ac6a81bf1f777380cdf87b62719a6204bded4a8f",
+    "Edition": "Complete (Local capability)",
+    "Display": "X11",
+    "Renderer": "gl_compatibility",
+    "Radius": 1,
+    "OriginalSettingsRadius": 1,
+    "FinalSettingsRadius": 1,
+    "Vegetation": false,
+    "MeasuredLifetimes": 3,
+    "AdditionalLoadLifetime": 1,
+    "Samples": 120,
+    "UiChurnCycles": 30,
+    "WallSeconds": 170.639,
+    "UserCpuSeconds": 25.325,
+    "SystemCpuSeconds": 1.636,
+    "Retirement": "PASS",
+    "PerLifetime": [
+      {
+        "Lifetime": 0,
+        "StableSeconds": 40.1741606,
+        "RssBytes": {
+          "minimum": 489422848,
+          "maximum": 511246336,
+          "first": 489422848,
+          "last": 511246336
+        },
+        "ManagedBytes": {
+          "minimum": 45886488,
+          "maximum": 92793224,
+          "first": 49235200,
+          "last": 69032440
+        },
+        "Gen0": {
+          "minimum": 8,
+          "maximum": 10,
+          "first": 8,
+          "last": 10
+        },
+        "Residents": {
+          "minimum": 25,
+          "maximum": 25,
+          "first": 25,
+          "last": 25
+        },
+        "RenderChunks": {
+          "minimum": 9,
+          "maximum": 9,
+          "first": 9,
+          "last": 9
+        },
+        "ActorCount": {
+          "minimum": 2,
+          "maximum": 2,
+          "first": 2,
+          "last": 2
+        },
+        "Nodes": {
+          "minimum": 84,
+          "maximum": 84,
+          "first": 84,
+          "last": 84
+        },
+        "DrawCalls": {
+          "minimum": 0,
+          "maximum": 0,
+          "first": 0,
+          "last": 0
+        },
+        "DerivedTextures": {
+          "minimum": 2,
+          "maximum": 2,
+          "first": 2,
+          "last": 2
+        },
+        "DerivedMaterials": {
+          "minimum": 2,
+          "maximum": 2,
+          "first": 2,
+          "last": 2
+        }
+      },
+      {
+        "Lifetime": 1,
+        "StableSeconds": 40.2025365,
+        "RssBytes": {
+          "minimum": 487112704,
+          "maximum": 518037504,
+          "first": 487112704,
+          "last": 518037504
+        },
+        "ManagedBytes": {
+          "minimum": 72931712,
+          "maximum": 132324544,
+          "first": 72931712,
+          "last": 132324544
+        },
+        "Gen0": {
+          "minimum": 19,
+          "maximum": 20,
+          "first": 19,
+          "last": 20
+        },
+        "Residents": {
+          "minimum": 25,
+          "maximum": 25,
+          "first": 25,
+          "last": 25
+        },
+        "RenderChunks": {
+          "minimum": 9,
+          "maximum": 9,
+          "first": 9,
+          "last": 9
+        },
+        "ActorCount": {
+          "minimum": 2,
+          "maximum": 2,
+          "first": 2,
+          "last": 2
+        },
+        "Nodes": {
+          "minimum": 84,
+          "maximum": 84,
+          "first": 84,
+          "last": 84
+        },
+        "DrawCalls": {
+          "minimum": 0,
+          "maximum": 0,
+          "first": 0,
+          "last": 0
+        },
+        "DerivedTextures": {
+          "minimum": 2,
+          "maximum": 2,
+          "first": 2,
+          "last": 2
+        },
+        "DerivedMaterials": {
+          "minimum": 2,
+          "maximum": 2,
+          "first": 2,
+          "last": 2
+        }
+      },
+      {
+        "Lifetime": 2,
+        "StableSeconds": 40.2096869,
+        "RssBytes": {
+          "minimum": 491945984,
+          "maximum": 526454784,
+          "first": 491945984,
+          "last": 526454784
+        },
+        "ManagedBytes": {
+          "minimum": 56009808,
+          "maximum": 115100248,
+          "first": 56009808,
+          "last": 115100248
+        },
+        "Gen0": {
+          "minimum": 31,
+          "maximum": 32,
+          "first": 31,
+          "last": 32
+        },
+        "Residents": {
+          "minimum": 25,
+          "maximum": 25,
+          "first": 25,
+          "last": 25
+        },
+        "RenderChunks": {
+          "minimum": 9,
+          "maximum": 9,
+          "first": 9,
+          "last": 9
+        },
+        "ActorCount": {
+          "minimum": 2,
+          "maximum": 2,
+          "first": 2,
+          "last": 2
+        },
+        "Nodes": {
+          "minimum": 84,
+          "maximum": 84,
+          "first": 84,
+          "last": 84
+        },
+        "DrawCalls": {
+          "minimum": 0,
+          "maximum": 0,
+          "first": 0,
+          "last": 0
+        },
+        "DerivedTextures": {
+          "minimum": 2,
+          "maximum": 2,
+          "first": 2,
+          "last": 2
+        },
+        "DerivedMaterials": {
+          "minimum": 2,
+          "maximum": 2,
+          "first": 2,
+          "last": 2
+        }
+      }
+    ],
+    "Interpretation": "Built-in-radius resource control, not validated rendered performance. Draw monitor zero; RSS trend still open; owner counts stable."
+  }
+}

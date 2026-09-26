@@ -1,5 +1,12 @@
 # UltraSim Concept Demo — Pre-Freeze Hardening, Load, and Deployment-Policy Plan
 
+**Current release disposition (2026-09-26): PF6 WAITING ON F1.12 / NOT READY FOR PF6.**
+The earlier PF5 readiness statements below remain historical subsystem conclusions. The active
+[Client Completion plan](CLIENT_COMPLETION_PLAN.md) now governs readiness. Its
+[partial F1.12 evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.md)
+records repaired product mechanics and canonical Release success, with native visual/Cabin and
+representative product resource coverage still open. W8/W9/W10 and PF6 are unstarted.
+
 **Status:** active campaign. PF0 records the exact feature-complete candidate, PF1 closes the
 real headless ClientOnly Network bot plus mixed exported-client correctness gate, and PF2 closes
 first-class wire accounting plus quiet/moving/crowd characterization. PF2.5 now reconciles the
@@ -2355,7 +2362,8 @@ companion, and the human-readable report.
 
 ## PF6 — external human validation
 
-**Status: READY TO RESUME after PF5-R8 measurement closure.** PF5-R2-R2 repaired the HTTP-host
+**Status: WAITING ON F1.12.** PF5-R8's earlier measurement closure was not the later client-dogfood
+readiness gate; see the current disposition above. PF5-R2-R2 repaired the HTTP-host
 shutdown race and retained complete unexpected-worker-failure reporting. PF5-R3 leaves Game,
 replication, proof, wire, cadence, AOI, compression, aggregation, and participant policy exact;
 its selected physical egress is covered by focused lifecycle, external Hosted, and full export

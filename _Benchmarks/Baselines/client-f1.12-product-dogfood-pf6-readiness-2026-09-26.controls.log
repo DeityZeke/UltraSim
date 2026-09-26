@@ -1,0 +1,166 @@
+F1.12 diagnostic and failed-control logs. Successful implementation: ac6a81bf. Mutations were reverted before the canonical pass.
+
+SOURCE: /tmp/ultrasim-f112-native-installed.log
+Godot Engine v4.7.1.stable.mono.official.a13da4feb - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 615.71.09 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce RTX 4070 Ti SUPER
+
+ULTRASIM CLIENT READY edition=Complete capabilities=SinglePlayer,Multiplayer,Settings,Exit screen=MainMenu settings=MissingDefaults
+T0.10 PLAYABLE CLIENT READY chunks=9 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+F1.12 START lifetime=0 art=installed
+F1.12 LIFETIME PASS lifetime=0 uiCycles=10 retirement=clean
+T0.10 PLAYABLE CLIENT READY chunks=9 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+F1.12 START lifetime=1 art=installed
+F1.12 LIFETIME PASS lifetime=1 uiCycles=10 retirement=clean
+T0.10 PLAYABLE CLIENT READY chunks=9 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+F1.12 START lifetime=2 art=installed
+F1.12 LIFETIME PASS lifetime=2 uiCycles=10 retirement=clean
+T0.10 PLAYABLE CLIENT READY chunks=9 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+F1.12 PRODUCT DOGFOOD PASS lifetimes=3 settings=product saveLoad=central/far item=pickup/equip/drop/repickup retirement=clean
+
+real	2m51.623s
+user	0m28.541s
+sys	0m1.614s
+
+SOURCE: /tmp/ultrasim-f112-cabin-installed.log
+Godot Engine v4.7.1.stable.mono.official.a13da4feb - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 615.71.09 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce RTX 4070 Ti SUPER
+
+ERROR: BUG: Unreferenced static string to 0: _draw_rect
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _validate_bone_names
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: use_dynamic_gi
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: use_in_baked_light
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _import_node
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _generate_scene_node
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _import_pre_generate
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _import_post_parse
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _get_supported_extensions
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _import_preflight
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _shaped_text_get_dominant_direction_in_range
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _shaped_text_get_carets
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _enter_world
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _shaped_text_get_line_breaks
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: .
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _initialize
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _exists
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _recognize_path
+   at: unref (core/string/string_name.cpp:117)
+ULTRASIM CLIENT READY edition=Complete capabilities=SinglePlayer,Multiplayer,Settings,Exit screen=MainMenu settings=MissingDefaults
+T0.10 PLAYABLE CLIENT READY chunks=9 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+ERROR: 3 RID allocations of type 'PN13RichTextLabel4ItemE' were leaked at exit.
+ERROR: 7 RID allocations of type '23NavMeshGeometryParser2D' were leaked at exit.
+ERROR: 6 RID allocations of type '23NavMeshGeometryParser3D' were leaked at exit.
+ERROR: Pages in use exist at exit in PagedAllocator: N12VariantPools11BucketLargeE
+   at: ~PagedAllocator (./core/templates/paged_allocator.h:170)
+ERROR: Pages in use exist at exit in PagedAllocator: N12VariantPools12BucketMediumE
+   at: ~PagedAllocator (./core/templates/paged_allocator.h:170)
+ERROR: Pages in use exist at exit in PagedAllocator: N12VariantPools11BucketSmallE
+   at: ~PagedAllocator (./core/templates/paged_allocator.h:170)
+ERROR: BUG: Unreferenced static string to 0: animate_physical_bones
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _shaped_text_draw
+   at: unref (core/string/string_name.cpp:117)
+ERROR: Pages in use exist at exit in PagedAllocator: N10StringName5_DataE
+   at: ~PagedAllocator (./core/templates/paged_allocator.h:170)
+
+SOURCE: /tmp/ultrasim-f112-cabin-wayland.log
+Godot Engine v4.7.1.stable.mono.official.a13da4feb - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 615.71.09 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce RTX 4070 Ti SUPER
+
+ERROR: BUG: Unreferenced static string to 0: _draw_rect
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _validate_bone_names
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: use_dynamic_gi
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: use_in_baked_light
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _import_node
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _generate_scene_node
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _import_pre_generate
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _import_post_parse
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _get_supported_extensions
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _import_preflight
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _shaped_text_get_dominant_direction_in_range
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _shaped_text_get_carets
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _enter_world
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _shaped_text_get_line_breaks
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: .
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _initialize
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _exists
+   at: unref (core/string/string_name.cpp:117)
+ERROR: BUG: Unreferenced static string to 0: _recognize_path
+   at: unref (core/string/string_name.cpp:117)
+ULTRASIM CLIENT READY edition=Complete capabilities=SinglePlayer,Multiplayer,Settings,Exit screen=MainMenu settings=MissingDefaults
+T0.10 PLAYABLE CLIENT READY chunks=9 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+ERROR: 3 RID allocations of type 'PN13RichTextLabel4ItemE' were leaked at exit.
+ERROR: 7 RID allocations of type '23NavMeshGeometryParser2D' were leaked at exit.
+ERROR: 6 RID allocations of type '23NavMeshGeometryParser3D' were leaked at exit.
+ERROR: Pages in use exist at exit in PagedAllocator: N12VariantPools11BucketLargeE
+   at: ~PagedAllocator (./core/templates/paged_allocator.h:170)
+ERROR: Pages in use exist at exit in PagedAllocator: N12VariantPools12BucketMediumE
+   at: ~PagedAllocator (./core/templates/paged_allocator.h:170)
+ERROR: Pages in use exist at exit in PagedAllocator: N12VariantPools11BucketSmallE
+   at: ~PagedAllocator (./core/templates/paged_allocator.h:170)
+timeout: the monitored command dumped core
+
+SOURCE: /tmp/ultrasim-f112-save-mutation.log
+Unhandled exception. System.InvalidOperationException: Save failed: Save-set sequence 1 does not advance the published generation high-water 1.
+   at Program.<<Main>$>g__True|0_30(Boolean value, String message) in /mnt/data/mega/Godot Projects/UltraSim/_Tests/UltraSim.Client.Local.Tests/Program.cs:line 1281
+   at Program.<<Main>$>g__ConceptDemoSaveSequenceSurvivesSessionReentry|0_23() in /mnt/data/mega/Godot Projects/UltraSim/_Tests/UltraSim.Client.Local.Tests/Program.cs:line 1144
+   at Program.<Main>$(String[] args) in /mnt/data/mega/Godot Projects/UltraSim/_Tests/UltraSim.Client.Local.Tests/Program.cs:line 53
+
+SOURCE: /tmp/ultrasim-f112-cohort-mutation.log
+Unhandled exception. System.InvalidOperationException: Expected true.
+   at Program.<<Main>$>g__True|0_30(Boolean value, String message) in /mnt/data/mega/Godot Projects/UltraSim/_Tests/UltraSim.Client.Local.Tests/Program.cs:line 1294
+   at Program.<<Main>$>g__ConceptDemoSaveSequenceSurvivesSessionReentry|0_23() in /mnt/data/mega/Godot Projects/UltraSim/_Tests/UltraSim.Client.Local.Tests/Program.cs:line 1152
+   at Program.<Main>$(String[] args) in /mnt/data/mega/Godot Projects/UltraSim/_Tests/UltraSim.Client.Local.Tests/Program.cs:line 53
+
+SOURCE: /tmp/ultrasim-f112-native-radius1.log
+Godot Engine v4.7.1.stable.mono.official.a13da4feb - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 615.71.09 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce RTX 4070 Ti SUPER
+
+ULTRASIM CLIENT READY edition=Complete capabilities=SinglePlayer,Multiplayer,Settings,Exit screen=MainMenu settings=MissingDefaults
+T0.10 PLAYABLE CLIENT READY chunks=9 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+F1.12 START lifetime=0 art=installed
+F1.12 LIFETIME PASS lifetime=0 uiCycles=10 retirement=clean
+T0.10 PLAYABLE CLIENT READY chunks=9 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+F1.12 START lifetime=1 art=installed
+F1.12 LIFETIME PASS lifetime=1 uiCycles=10 retirement=clean
+T0.10 PLAYABLE CLIENT READY chunks=9 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+F1.12 START lifetime=2 art=installed
+F1.12 LIFETIME PASS lifetime=2 uiCycles=10 retirement=clean
+T0.10 PLAYABLE CLIENT READY chunks=9 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+F1.12 PRODUCT DOGFOOD PASS lifetimes=3 settings=product saveLoad=central/far item=pickup/equip/drop/repickup retirement=clean
+
+real	2m50.639s
+user	0m25.325s
+sys	0m1.636s
