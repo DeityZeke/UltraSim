@@ -33,6 +33,31 @@ renderer run exercises the full 100/1,000/5,000/10,000 matrix, display/scenario 
 rebases and native frame boundaries. Pass an absolute `--evidence=` path after `--` to retain raw
 samples. The evidence records exact commands and source provenance; it is not a product CCU rating.
 
+F1.10 adds Detailed/BatchedPrimitive realization inside `GodotActorPresenter`, shared by Local,
+Remote and Complete. Semantic slots and CPU-presented poses outlive a native tier change.
+`GodotPrimitiveActorBatches` owns three finite compatible primitive families, generational dense
+swap-back rows, real MultiMeshInstance3D/PerRow uploads, and moving/rebased AABBs. A cheap actor has
+no body root or per-actor process/physics Node. `TryGetActorRoot` is Detailed-only; pose/record/tier
+queries are not. Detailed promotion uses the current content resolver and prepares hidden state
+before commit, with failure cleanup. Active equipment/action/landing/overhead features and the
+controlled actor pin Detailed. Cheap reveal labels are independent temporary overlay ownership.
+
+The [F1.10 comparison](../../_Benchmarks/Baselines/client-f1.10-actor-representation-tiers-2026-09-25.md)
+selects a conservative hybrid (soft 64 Detailed, 20/28 m hysteresis): strong body-Node and cold
+construction/retirement savings, **higher** moving-update cost. Snapshot fields distinguish
+Detailed fallback/animated/equipped actors from policy-cheap actors, owned batch resources,
+row/Node counts, promotions/demotions, native writes and array payload reservation. Cheap resources
+belong to actor presentation, not world-renderer counters. The Presentation debug page reports a
+compact tier summary on demand. This is not an actor-exclusive GPU memory or process CPU census.
+
+`F110ActorTierAcceptance.tscn` uses the same optimized Debug native-build convention above.
+Headless runs bounded functional/lifecycle checks; real OpenGL additionally verifies row readback,
+frustum culling, frame-boundary transitions and the 16/64/128/256 three-repetition actor-only matrix.
+Pass an absolute `--evidence=` output after `--`; retained samples are independent of export code.
+T010 also proves real User hot replacement and disable while an actor is cheap, followed by current
+User/Realm promotion. Existing X/Y animation/socket tests remain. CPU interpolation stays in Core;
+the new actual endpoint descriptor is a future-GPU seam only. F1.11 and W8 are unstarted.
+
 This is the one maintained Godot application and the only production Godot script assembly. Its
 `Adapter/`, `Shell/`, and conditionally compiled `Local/` sources replace the former `_Godot`,
 `Bootstrap.Godot`, `Local.Godot`, and `Playable.Godot` projects. Keeping all native scripts in

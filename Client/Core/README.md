@@ -42,8 +42,17 @@ Pixel count changes fidelity, not World visibility. Godot alone owns the output 
 F1.9B compares NodeMultiMesh and direct-RID realization entirely below the existing semantic cache
 and presentation-window seam. Core owns no renderer-backend choice, native slot map, RIDs, upload
 buffers or Godot resources. Public identity/picking and cache hashes do not change with a native
-group representation. The measured production path retains NodeMultiMesh/per-row uploads; F1.10
-actor tiers and W8 live composition changes remain unstarted.
+group representation. The measured production path retains NodeMultiMesh/per-row uploads; W8
+live composition changes remain unstarted.
+
+F1.10 adds `ClientActorRepresentationTier` (Detailed/BatchedPrimitive) and a bounded, deterministic
+client-local selector. Its conservative stock policy uses a soft 64 Detailed budget, 20 m promotion
+and 28 m demotion hysteresis; mandatory controlled/equipment/cue/overhead facts may expand the soft
+budget within 256 actors. Names do not imply body tier. Core owns no native hierarchy or batch row.
+`ClientActorTemporalPresentation` describes the real receipt-time bracket chosen by the unchanged
+remote interpolator, including exact versions/generation/ID and the CPU-resolved pose. The legacy
+sampling API delegates once. Holds/snaps have equal endpoints; no server timestamps, speculative
+remote extrapolation or GPU interpolation were introduced. Controlled prediction is unchanged.
 
 F1.8A adds `ClientMotionPose`, `ClientControlledMotionPresentation`, and
 `ClientRemoteActorInterpolation`. These are renderer-neutral, bounded presentation state beside

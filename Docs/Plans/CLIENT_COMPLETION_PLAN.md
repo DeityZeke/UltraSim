@@ -1,6 +1,6 @@
 # UltraSim Client Completion Plan
 
-**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.9B are CLOSED; F1.10 actor representation tiers is NEXT.** F1.9B retains NodeMultiMesh/PerRow after the [measured backend comparison](../../_Benchmarks/Baselines/client-f1.9b-scalable-godot-backend-2026-09-25.md); direct RIDs and bulk submission remain bounded comparison controls, not selected product policy. F1.9A's tested implementation and verification are recorded in the [display-composition evidence](../../_Benchmarks/Baselines/client-f1.9a-display-composition-2026-09-25.md). The original F1.8A closure claim is superseded by the [corrective evidence](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md), which records both the reproduced defects and the earlier final-tree verifier failures.
+**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.10 are CLOSED; F1.11 is NEXT and unstarted.** F1.10 selects a conservative Detailed/BatchedPrimitive hybrid after the [actor-tier comparison](../../_Benchmarks/Baselines/client-f1.10-actor-representation-tiers-2026-09-25.md): distant body batching reduces Nodes/construction/retirement, not moving-update CPU. F1.9B retains NodeMultiMesh/PerRow after the [measured backend comparison](../../_Benchmarks/Baselines/client-f1.9b-scalable-godot-backend-2026-09-25.md); direct RIDs and bulk submission remain bounded comparison controls, not selected product policy. F1.9A's tested implementation and verification are recorded in the [display-composition evidence](../../_Benchmarks/Baselines/client-f1.9a-display-composition-2026-09-25.md). The original F1.8A closure claim is superseded by the [corrective evidence](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md), which records both the reproduced defects and the earlier final-tree verifier failures.
 
 **Parent architecture:** [CLIENT_PRESENTATION_ARCHITECTURE.md](CLIENT_PRESENTATION_ARCHITECTURE.md)
 
@@ -92,8 +92,8 @@ F1.8  Declarative camera/control rig and canonical gameplay-view crop (CLOSED)
 F1.8A Remote motion prediction/reconciliation/interpolation (CLOSED after R1 correction)
 F1.9A Simple/Advanced display composition and real Gameplay Frame output (CLOSED)
 F1.9B scalable Godot realization / RID / MultiMesh (CLOSED; NodeMultiMesh/PerRow retained)
-F1.10 Actor representation tiers and GPU-friendly interpolation seam (NEXT; unstarted)
-F1.11 Renderer stress consumers / vegetation prototype
+F1.10 Actor representation tiers and GPU-friendly interpolation seam (CLOSED; conservative hybrid)
+F1.11 Renderer stress consumers / vegetation prototype (NEXT; unstarted)
 F1.12 Product dogfooding and PF6 readiness
 ~~~
 
@@ -1174,12 +1174,36 @@ The report preserves an earlier debug-hook compilation failure and an intermitte
 F1.8A loss-case assertion before the final pass. Headless tests certify lifecycle but cannot
 certify native transforms/culling; the real OpenGL matrix covers those separately. Cold build
 residuals, short GPU diagnostics, and the Remote catalog world-material consumer gap remain
-explicit limitations, not claims that rendering is already minimal. F1.10 and W8 are unstarted;
+explicit limitations, not claims that rendering is already minimal. F1.10 follows below; W8 is unstarted;
 PF6 still waits for F1.12.
 
 ---
 
 # 14. F1.10 - Actor representation tiers and interpolation seam
+
+## Closure — conservative hybrid
+
+The [F1.10 evidence](../../_Benchmarks/Baselines/client-f1.10-actor-representation-tiers-2026-09-25.md)
+records an uninterrupted canonical Release pass on `cbf9175c63a7f7ab843363782a2c80c018b88cbd`
+and three matched real-native repetitions at 16/64/128/256 actors. **Outcome C** retains Detailed
+near/important actors and batches distant primitives. The soft Detailed budget is 64, promotion
+is at 20 m, demotion beyond 28 m; mandatory controlled/equipment/active cue/overhead features may
+expand that budget within the unchanged 256-actor presentation capacity. Reveal labels remain
+independent of body tier. Product participant admission remains 64.
+
+At 256 actors the far fixture reduces body Nodes 2,560→23, cold realization 58.081→1.884 ms,
+and synchronous retirement 11.656→0.321 ms, but moving owner-thread mean increases
+193.017→400.758 µs. This is a bounded resource/lifecycle tradeoff, not a universal CPU/FPS win.
+Both warmed idle/moving loops allocate zero managed bytes. Cheap groups use real
+MultiMeshInstance3D/PerRow, dense generational mappings and moving/rebased bounds; no body Node
+per cheap actor. Detailed promotion uses current resolved content, retains the CPU pose and action
+sequence, and commits only after hidden preparation succeeds. Native-frame, content-generation,
+picking, feature pins, failure cleanup, slot reuse and mixed retirement have permanent coverage.
+
+`ClientActorTemporalPresentation` exposes the actual F1.8A receipt-time bracket plus its CPU-resolved
+pose. Remote consumes that result in either tier. Controlled prediction, interpolation policy,
+content precedence and protocol/settings/World formats are unchanged. GPU interpolation, skeletal
+batching and impostors remain future work; F1.11 and W8 are not started. PF6 still waits for F1.12.
 
 ## Goal
 

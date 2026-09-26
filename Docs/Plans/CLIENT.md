@@ -10,10 +10,12 @@ Complete-hosted deployment shapes. I0.12 human-play hardening prevents visible e
 remaining a pointer-nominated world pickup, and I0.13 replaces its temporary cold property text
 with bounded typed Inspection Properties plus content-sized world-hover/Inventory presentation.
 
-F1.0-F1.9B are closed after the F1.8A-R1 corrective checkpoint, the
+F1.0-F1.10 are closed after the F1.8A-R1 corrective checkpoint, the
 [F1.9A display-composition evidence](../../_Benchmarks/Baselines/client-f1.9a-display-composition-2026-09-25.md),
 and the [F1.9B backend comparison](../../_Benchmarks/Baselines/client-f1.9b-scalable-godot-backend-2026-09-25.md).
-F1.10 actor representation tiers is next and unstarted. The initial F1.8A
+The [F1.10 actor-tier evidence](../../_Benchmarks/Baselines/client-f1.10-actor-representation-tiers-2026-09-25.md)
+selects a conservative hybrid: Detailed near/feature-bearing actors, distant batched primitives.
+F1.11 is next and unstarted. The initial F1.8A
 closure evidence remains historical, and the [R1 correction](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md)
 records reproduced defects, the earlier intermittent final-tree verifier failures, and corrected
 verification. F1.2 separates the required remote WorldPack/UI activation and its exact application proof
@@ -2820,8 +2822,8 @@ F1.8 declarative camera/control rig + canonical gameplay-view crop            CL
 F1.8A remote motion prediction/reconciliation/interpolation                   CLOSED after R1
 F1.9A Simple/Advanced display composition and real Gameplay Frame output      CLOSED
 F1.9B scalable Godot RID/MultiMesh backend                                    CLOSED (NodeMultiMesh/PerRow)
-F1.10 actor representation tiers/realization interpolation seam               NEXT / UNSTARTED
-F1.11 renderer stress consumers/vegetation prototype                          PLANNED
+F1.10 actor representation tiers/realization interpolation seam               CLOSED (conservative hybrid)
+F1.11 renderer stress consumers/vegetation prototype                          NEXT / UNSTARTED
 F1.12 product dogfooding/PF6 readiness                                        PLANNED
         |
         v
@@ -2863,7 +2865,13 @@ actor paths are unchanged. Native transforms/AABBs, picking, fallback, display c
 replacement, rebasing and retirement have acceptance evidence. Headless lifecycle and real-renderer
 geometry results are distinguished, and cold-preparation residuals remain an investigation area.
 F1.8A now owns controlled-remote horizontal prediction/reconciliation and non-controlled-remote
-receipt-time interpolation. It selects a pose, while F1.10 may optimize its realization.
+receipt-time interpolation. F1.10 consumes that same CPU pose through Detailed or BatchedPrimitive
+realization; it does not implement GPU interpolation or alter motion policy. A semantic actor does
+not require a native root. Controlled actors remain Detailed; equipment/active cues/overhead speech
+pin Detailed, while nameplate reveal does not. The soft 64 Detailed budget and 20/28 m hysteresis
+retain near actors. Cheap groups preserve generational row identity, picking, current-content
+promotion and native retirement. The measured far fixture reduces Nodes and cold lifecycle cost
+but increases moving-update cost; no universal efficiency or higher server population is claimed.
 Neither temporal pose is semantic or client-side authority. The current client-local 6 m/s
 presentation approximation is capped at 900 mm; vertical movement remains exact Game output.
 The [F1.8A baseline](../../_Benchmarks/Baselines/client-f1.8a-remote-motion-presentation-2026-09-23.md)

@@ -1153,8 +1153,9 @@ continues to authorize its disclosed identity/range. The accepted camera profile
 height, and orthographic stepped zoom changes lens size rather than only camera distance.
 Rapid reversal/Stop correction tails and sparse impaired public samples remain explicit
 human-feel questions, not claims of imperceptible motion.
-F1.10 may later realize these poses through cheaper actor tiers or GPU interpolation; it must not
-move temporal ownership into Godot nodes.
+F1.10 now realizes the same CPU poses through Detailed or BatchedPrimitive bodies. The actual
+receipt-time endpoint seam supports future GPU realization, but no GPU interpolation is active;
+temporal ownership remains in Core, not Godot nodes.
 
 ---
 
@@ -1231,8 +1232,44 @@ there is no incremental entity-slot map, new terrain backend, or actor-tier impl
 Real-native tests cover transforms, AABB/frustum culling, semantic picking, source replacement,
 fallback, display/scenario changes, high/low rebasing and disposal. Dummy headless tests certify
 only the explicitly available lifecycle behavior. Short GPU diagnostics and cold-build residuals
-do not establish a global minimum or sustained frame-rate rating. F1.10 and vegetation remain
-future work; the separate Remote world-material resolver integration gap is not closed by this seam.
+do not establish a global minimum or sustained frame-rate rating. Actor tiers follow in F1.10;
+vegetation remains future work. The separate Remote world-material resolver gap is not closed here.
+
+## Actor representation and temporal endpoint ownership (F1.10)
+
+One semantic WorldPublicEntityId retains its record, CPU presented pose, action sequence and cue
+expiry independently of Detailed hierarchy or BatchedPrimitive row. `TryGetPresentedPose` works for
+either tier; `TryGetActorRoot` is a Detailed feature/diagnostic query, never semantic existence.
+The current [measured policy](../../_Benchmarks/Baselines/client-f1.10-actor-representation-tiers-2026-09-25.md)
+is a conservative hybrid: soft 64 Detailed budget, 20 m promotion / 28 m demotion, deterministic
+distance/full-ID priority. Controlled, equipped and active action/landing/overhead actors are
+mandatory Detailed; mandatory features may expand the soft budget within the 256-actor bound.
+Cheap means deliberately simplified primitive realization, not missing-content fallback.
+
+Three compatible primitive shape/color families own finite MultiMeshInstance3D groups. Dense
+swap-back rows carry full generational identities; per-row transforms and live transformed bounds
+track the F1.8A CPU pose and floating origin. Nameplate overlays can appear without body promotion.
+Overhead Chat instead pins Detailed until its original expiry. No per-cheap-actor physics/process
+Node is required. Pointer nomination uses displayed pose and retained disclosed ID; Game retains
+range and interaction authority.
+
+Promotion prepares a hidden Detailed candidate from current User→Realm→world.local→Primitive
+resolution, commits on the engine owner thread, and retires the old row. Failure retains the cheap
+body and frees the candidate. There is no pending async transition that can resurrect a removed
+actor. Demotion preserves pose/action state, so promotion does not replay an old accepted cue.
+Cheap bodies do not retain hidden skeletal visuals. Current-content hot replacement/disable has
+real catalog/generation acceptance coverage, not just a synthetic visual provider.
+
+`ClientActorTemporalPresentation` carries the real selected interpolation endpoints, public
+versions, receipt timestamps, target time, generation/ID and CPU-resolved pose. Holds/snaps use
+equal endpoints. Neither server timestamps nor controlled prediction are fabricated as remote
+interpolation. The existing delay, hold/gap/teleport and lifetime policies remain unchanged.
+GPU interpolation, skeletal batching, impostors and vegetation are not implemented.
+
+The far-crowd fixture demonstrates large Node and cold lifecycle savings, but higher moving
+owner-thread cost from explicit batch service. This does not prove a global minimum or imply a
+server R300/R350 gain. GPU diagnostics remain separate short stationary samples. F1.11 and W8
+remain unstarted; Remote world-material parity and F1.8A human-feel tails remain explicit risks.
 
 ---
 
