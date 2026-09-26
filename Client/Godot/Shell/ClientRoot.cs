@@ -1245,6 +1245,8 @@ public abstract partial class ClientRoot : Control
         _ => throw new ArgumentOutOfRangeException(nameof(capability)),
     };
 
+    protected virtual string SessionPresentationDiagnostics() => "world renderer=inactive";
+
     private string BuildDebugPage(GodotClientDebugPage page)
     {
         ClientShellSnapshot shell = ShellSnapshot();
@@ -1275,7 +1277,7 @@ public abstract partial class ClientRoot : Control
                 $"canonicalCrop=16:9\n" +
                 $"world/hud/gumps={ui.WorldHostChildren}/{ui.HudHostChildren}/{ui.Gumps.OpenWindows}\n" +
                 $"canonical=16:9 targetV={projection.TargetVerticalExtent:0.####} " +
-                $"targetH={projection.TargetHorizontalExtent:0.####}",
+                $"targetH={projection.TargetHorizontalExtent:0.####}\n" + SessionPresentationDiagnostics(),
             GodotClientDebugPage.Content =>
                 $"Content\ncatalogMarkers={ContentCatalogRoot.GetChildCount()}\n" +
                 $"session={ui.SessionActive} context={ui.ContextHostChildren}\n" +

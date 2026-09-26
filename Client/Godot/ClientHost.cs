@@ -44,6 +44,15 @@ public partial class ClientHost :
         }
     }
 
+    protected override string SessionPresentationDiagnostics()
+    {
+#if ULTRASIM_ONLINE || ULTRASIM_COMPLETE
+        if (_remotePlayable is not null)
+            return _remotePlayable.GetSnapshot().Renderer.ToDiagnosticText();
+#endif
+        return base.SessionPresentationDiagnostics();
+    }
+
     public override void _Ready()
     {
         try

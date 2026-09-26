@@ -2393,6 +2393,11 @@ foreach (string configuration in configurations)
         var build = new List<string> { "build", godotProject, "-c", configuration };
         if (options.NoRestore) build.Add("--no-restore");
         Run(root, "dotnet", build);
+        // Godot's editor executable loads Debug, not Release (as for BuildClientApplication).
+        // Rebuild the current acceptance sources explicitly; never use a stale development DLL.
+        // Optimize native Release-campaign controls without pretending this is an exported player.
+        if (!string.Equals(configuration, "Debug", StringComparison.Ordinal))
+            Run(root, "dotnet", ["build", godotProject, "-c", "Debug", "-p:Optimize=true"]);
         string godot = ResolveGodot(options.GodotPath);
         Run(root, godot,
         [
@@ -2405,6 +2410,12 @@ foreach (string configuration in configurations)
             "--headless",
             "--path", "_Tests/UltraSim.S0.Godot.Tests",
             "--scene", "res://T08WorldHeadlessAcceptance.tscn",
+        ]);
+        Run(root, godot,
+        [
+            "--headless",
+            "--path", "_Tests/UltraSim.S0.Godot.Tests",
+            "--scene", "res://F19bWorldBackendAcceptance.tscn",
         ]);
         Run(root, godot,
         [

@@ -162,6 +162,25 @@ public readonly record struct GodotWorldRendererSnapshot(
     long LastFrameTicks,
     long MaximumFrameTicks)
 {
+    public GodotWorldInstanceBackend InstanceBackend { get; init; }
+    public GodotWorldInstanceUpload InstanceUpload { get; init; }
+    public int NodeBackedGroups { get; init; }
+    public int DirectRidGroups { get; init; }
+    public int ActiveMultiMeshes { get; init; }
+    public int ActiveVisualInstanceRids { get; init; }
+    public int ActiveInstances { get; init; }
+    public ulong BulkUploads { get; init; }
+    public ulong TargetedInstanceUpdates { get; init; }
+    public ulong UploadedInstanceRows { get; init; }
+    public ulong BulkUploadBytes { get; init; }
+    public long GroupPreparationTicks { get; init; }
+    public long GroupingTicks { get; init; }
+    public long UploadScratchBytes { get; init; }
+    /// <summary>On-demand debug formatting, never called by the renderer hot path.</summary>
+    public string ToDiagnosticText() =>
+        $"world={InstanceBackend}/{InstanceUpload} chunks={ActiveRenderChunks} nodes={ActiveNodes}\n" +
+        $"groups={ActiveMultiMeshes} visualRids={ActiveVisualInstanceRids} instances={ActiveInstances}\n" +
+        $"bulk={BulkUploads} targetedRows={TargetedInstanceUpdates}";
     public double LastMeshBuildMicroseconds => LastMeshBuildTicks * 1_000_000d / Stopwatch.Frequency;
     public double MaximumMeshBuildMicroseconds => MaximumMeshBuildTicks * 1_000_000d / Stopwatch.Frequency;
     public double LastResourceCommitMicroseconds => LastResourceCommitTicks * 1_000_000d / Stopwatch.Frequency;
@@ -231,6 +250,16 @@ public sealed class GodotWorldRenderer : IDisposable
     private readonly StandardMaterial3D _neutralFallbackMaterial;
     private readonly ShaderMaterial _diagnosticFallbackMaterial;
     private readonly GodotWorldFallbackMaterialMode _fallbackMaterialMode;
+    private readonly GodotWorldInstanceBackend _instanceBackend;
+    private readonly GodotWorldInstanceUpload _instanceUpload;
+    private readonly float[] _uploadScratch;
+    private int _activeInstances;
+    private ulong _bulkUploads;
+    private ulong _targetedInstanceUpdates;
+    private ulong _uploadedInstanceRows;
+    private ulong _bulkUploadBytes;
+    private long _groupPreparationTicks;
+    private long _groupingTicks;
     private int _freeRenderSlotCount;
     private int _buildHead;
     private int _buildCount;
@@ -273,7 +302,9 @@ public sealed class GodotWorldRenderer : IDisposable
         GodotWorldRendererLimits limits = default, IGodotWorldAssetResolver? assets = null,
         GodotWorldFallbackMaterialMode fallbackMaterialMode =
             GodotWorldFallbackMaterialMode.Diagnostic,
-        IGodotWorldPublicBatchFilter? publicBatchFilter = null)
+        IGodotWorldPublicBatchFilter? publicBatchFilter = null,
+        GodotWorldInstanceBackend instanceBackend = GodotWorldInstanceBackend.NodeMultiMesh,
+        GodotWorldInstanceUpload instanceUpload = GodotWorldInstanceUpload.PerRow)
     {
         ArgumentNullException.ThrowIfNull(host);
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
@@ -287,6 +318,14 @@ public sealed class GodotWorldRenderer : IDisposable
         _limits = limits;
         _assets = assets;
         _publicBatchFilter = publicBatchFilter;
+        if (!Enum.IsDefined(instanceBackend) || !Enum.IsDefined(instanceUpload))
+            throw new ArgumentOutOfRangeException(nameof(instanceBackend));
+        _instanceBackend = instanceBackend;
+        _instanceUpload = instanceUpload;
+        _uploadScratch = instanceUpload == GodotWorldInstanceUpload.PerRow ? [] :
+            new float[checked(GodotWorldInstanceGroup.FloatsPerTransform * Math.Max(
+                cache.Limits.MaximumFrozenStaticsPerChunk + cache.Limits.MaximumMultiFragmentsPerChunk,
+                cache.Limits.MaximumPublicRecordsPerChunk))];
         if (fallbackMaterialMode is not (GodotWorldFallbackMaterialMode.Diagnostic or
                 GodotWorldFallbackMaterialMode.Neutral))
             throw new ArgumentOutOfRangeException(nameof(fallbackMaterialMode));
@@ -630,6 +669,7 @@ public sealed class GodotWorldRenderer : IDisposable
             }
         }
         _rebases++;
+        SynchronizeDirectGroups();
     }
 
     public void ProcessFrame(GodotWorldFrameBudget budget)
@@ -640,6 +680,7 @@ public sealed class GodotWorldRenderer : IDisposable
         long frameStart = Stopwatch.GetTimestamp();
         int builds = 0;
         while (builds < budget.MaximumBuilds && TryProcessNextBuild()) builds++;
+        SynchronizeDirectGroups();
         for (int count = 0; count < budget.MaximumRetirements && _retireCount != 0; count++)
             Retire(Dequeue(_retireQueue, ref _retireHead, ref _retireCount));
         while (builds < budget.MaximumBuilds && TryProcessNextBuild()) builds++;
@@ -691,7 +732,47 @@ public sealed class GodotWorldRenderer : IDisposable
             _chunkRootTransformWrites, _groupValidationCalls, _verticalRebases,
             _lastMeshBuildTicks, _maximumMeshBuildTicks,
             _lastResourceCommitTicks, _maximumResourceCommitTicks,
-            _lastFrameTicks, _maximumFrameTicks);
+            _lastFrameTicks, _maximumFrameTicks)
+        {
+            InstanceBackend = _instanceBackend, InstanceUpload = _instanceUpload,
+            NodeBackedGroups = _instanceBackend == GodotWorldInstanceBackend.NodeMultiMesh
+                ? _activeStaticBatchGroups + _activePublicBatchGroups : 0,
+            DirectRidGroups = _instanceBackend == GodotWorldInstanceBackend.DirectRid
+                ? _activeStaticBatchGroups + _activePublicBatchGroups : 0,
+            ActiveMultiMeshes = _activeStaticBatchGroups + _activePublicBatchGroups,
+            ActiveVisualInstanceRids = _activeStaticBatchGroups + _activePublicBatchGroups,
+            ActiveInstances = _activeInstances,
+            BulkUploads = _bulkUploads, TargetedInstanceUpdates = _targetedInstanceUpdates,
+            UploadedInstanceRows = _uploadedInstanceRows, BulkUploadBytes = _bulkUploadBytes,
+            GroupPreparationTicks = _groupPreparationTicks, GroupingTicks = _groupingTicks,
+            UploadScratchBytes = (long)_uploadScratch.Length * sizeof(float),
+        };
+    }
+
+    /// <summary>Native diagnostics by renderer-local group name, not semantic/native identity binding.</summary>
+    public bool TryGetInstanceGroup(ClientSemanticChunkHandle handle, string name,
+        out GodotWorldInstanceGroupDiagnostics diagnostics, Span<Transform3D> transforms)
+    {
+        EnsureOwner();
+        if (TryFindRenderSlot(handle, out int slot))
+        {
+            RenderChunk chunk = _renderChunks[slot]!;
+            foreach (GodotWorldInstanceGroup group in chunk.StructuralGroups.Concat(chunk.PublicGroups))
+            {
+                if (group.Name != name) continue;
+                if (transforms.Length < group.Count) throw new ArgumentException("Diagnostic destination too small.");
+                for (int index = 0; index < group.Count; index++)
+                    transforms[index] = group.MultiMesh.GetInstanceTransform(index);
+                diagnostics = new(group.Name, group.Direct, group.Count, group.Bounds,
+                    group.Direct ? group.Scenario : chunk.Root.GetWorld3D().Scenario,
+                    group.VisualRid, group.Direct ? group.GlobalTransform : chunk.Root.GlobalTransform,
+                    group.Direct ? group.Visible : chunk.Root.IsVisibleInTree(), group.TransformWrites, group.ScenarioBindings,
+                    group.MultiMesh.GetRid(), group.MeshRid, group.MaterialOverrideRid);
+                return true;
+            }
+        }
+        diagnostics = default;
+        return false;
     }
 
     internal bool TryQueueWindowTransition(
@@ -822,6 +903,7 @@ public sealed class GodotWorldRenderer : IDisposable
         ApplyOrigin(candidate);
         candidate.Root.Visible = _desiredVisible[semanticIndex];
         Root.AddChild(candidate.Root);
+        SynchronizeDirectGroups(candidate);
         _activeChunks++;
         if (candidate.Root.Visible) _visibleChunks++;
         _activeNodes += candidate.NodeCount;
@@ -830,6 +912,7 @@ public sealed class GodotWorldRenderer : IDisposable
         _activeStaticBatchGroups += candidate.StaticBatchGroupCount;
         _activePublicBatchGroups += candidate.PublicResourceCount;
         _activeFallbackGroups += candidate.FallbackGroupCount;
+        _activeInstances += candidate.InstanceCount;
         _completedBuilds++;
         if (replacing) _rebuilds++;
         _lastResourceCommitTicks = Stopwatch.GetTimestamp() - commitStart;
@@ -848,7 +931,9 @@ public sealed class GodotWorldRenderer : IDisposable
         _maximumMeshBuildTicks = Math.Max(_maximumMeshBuildTicks, _lastMeshBuildTicks);
 
         long commitStart = Stopwatch.GetTimestamp();
+        foreach (GodotWorldInstanceGroup group in chunk.PublicGroups) group.Dispose();
         if (GodotObject.IsInstanceValid(chunk.PublicRoot)) chunk.PublicRoot.Free();
+        _activeInstances -= chunk.PublicInstanceCount;
         _activeNodes -= chunk.PublicNodeCount;
         _activeResources -= chunk.PublicResourceCount;
         _activePublicBatchGroups -= chunk.PublicResourceCount;
@@ -857,9 +942,12 @@ public sealed class GodotWorldRenderer : IDisposable
         chunk.PublicNodeCount = candidate.NodeCount;
         chunk.PublicResourceCount = candidate.ResourceCount;
         chunk.PublicFallbacks = candidate.Fallbacks;
+        chunk.PublicGroups = candidate.Groups;
         chunk.FirstPublicLocalY = candidate.FirstLocalY;
         chunk.SemanticHash = semantic.Info.SemanticHash;
         chunk.Root.AddChild(candidate.Root);
+        SynchronizeDirectGroups(chunk);
+        _activeInstances += chunk.PublicInstanceCount;
         _activeNodes += candidate.NodeCount;
         _activeResources += candidate.ResourceCount;
         _activePublicBatchGroups += candidate.ResourceCount;
@@ -874,6 +962,8 @@ public sealed class GodotWorldRenderer : IDisposable
     {
         var root = new Node3D { Name = $"Chunk_{semantic.Info.Key.Coord.X}_{semantic.Info.Key.Coord.Z}" };
         var structural = new Node3D { Name = "Structural" };
+        var nativeGroups = new List<GodotWorldInstanceGroup>();
+        RenderLayer? publicLayer = null;
         root.AddChild(structural);
         try
         {
@@ -897,6 +987,7 @@ public sealed class GodotWorldRenderer : IDisposable
                 if (float.IsNaN(firstAdditionalTerrainY)) firstAdditionalTerrainY = fragmentFirstY;
             }
 
+            long groupingStart = Stopwatch.GetTimestamp();
             var staticGroups = new SortedDictionary<WorldStaticRenderKey, RenderTransforms>();
             float firstStaticY = float.NaN;
             FallbackCounts structuralFallbacks = default;
@@ -908,6 +999,7 @@ public sealed class GodotWorldRenderer : IDisposable
                 AddStatic(staticGroups, semantic.Info.Key, record.RenderKey, record.Position,
                     record.Orientation, record.Flags, record.Bounds, true,
                     yAnchor, ref firstStaticY);
+            _groupingTicks += Stopwatch.GetTimestamp() - groupingStart;
             foreach ((WorldStaticRenderKey key, RenderTransforms transforms) in staticGroups)
             {
                 ResolvedMesh presentation = ResolveMesh(
@@ -915,7 +1007,7 @@ public sealed class GodotWorldRenderer : IDisposable
                         GodotWorldMeshResolution.MissingModelAndTexture(),
                     _fallbackStaticMesh);
                 structuralFallbacks += FallbackCounts.From(presentation.Availability);
-                structural.AddChild(CreateMultiMesh(
+                nativeGroups.Add(CreateInstanceGroup(structural,
                     $"Static_{key.DefinitionId.Value}_{key.Variant}_{(ushort)key.Flags}" +
                         (_assets is null ? string.Empty :
                             FallbackNameSuffix(presentation.Availability)),
@@ -926,22 +1018,28 @@ public sealed class GodotWorldRenderer : IDisposable
                     presentation.MaterialOverride));
             }
 
-            RenderLayer publicLayer = CreatePublicLayer(semantic, yAnchor);
-            root.AddChild(publicLayer.Root);
+            publicLayer = CreatePublicLayer(semantic, yAnchor);
+            RenderLayer preparedPublic = publicLayer.Value;
+            root.AddChild(preparedPublic.Root);
             return new RenderChunk(handle, semantic.Info.Key, semantic.Info.SemanticHash,
                 windowOffset, root,
-                structural, publicLayer.Root, terrainMesh, yAnchor, firstTerrainY,
+                structural, preparedPublic.Root, terrainMesh, yAnchor, firstTerrainY,
                 terrainTriangleCount, firstStaticY,
-                publicLayer.FirstLocalY,
-                3 + semantic.AdditionalTerrainSurfaces.Count + staticGroups.Count,
+                preparedPublic.FirstLocalY,
+                3 + semantic.AdditionalTerrainSurfaces.Count +
+                    (_instanceBackend == GodotWorldInstanceBackend.NodeMultiMesh ? staticGroups.Count : 0),
                 1 + semantic.AdditionalTerrainSurfaces.Count + staticGroups.Count,
                 semantic.AdditionalTerrainSurfaces.Count, additionalTerrainTriangles,
                 firstAdditionalTerrainY,
                 structuralFallbacks,
-                publicLayer.NodeCount, publicLayer.ResourceCount, publicLayer.Fallbacks);
+                preparedPublic.NodeCount, preparedPublic.ResourceCount, preparedPublic.Fallbacks,
+                nativeGroups.ToArray(), preparedPublic.Groups);
         }
         catch
         {
+            foreach (GodotWorldInstanceGroup group in nativeGroups) group.Dispose();
+            if (publicLayer is { } preparedPublic)
+                foreach (GodotWorldInstanceGroup group in preparedPublic.Groups) group.Dispose();
             root.Free();
             throw;
         }
@@ -950,8 +1048,10 @@ public sealed class GodotWorldRenderer : IDisposable
     private RenderLayer CreatePublicLayer(ClientSemanticChunkView semantic, int yAnchor)
     {
         var root = new Node3D { Name = "Public" };
+        var nativeGroups = new List<GodotWorldInstanceGroup>();
         try
         {
+            long groupingStart = Stopwatch.GetTimestamp();
             var groups = new SortedDictionary<uint, RenderTransforms>();
             Node3D? names = null;
             int nameCount = 0;
@@ -997,13 +1097,14 @@ public sealed class GodotWorldRenderer : IDisposable
                 }
                 if (float.IsNaN(firstY)) firstY = transform.Origin.Y;
             }
+            _groupingTicks += Stopwatch.GetTimestamp() - groupingStart;
             foreach ((uint prefab, RenderTransforms transforms) in groups)
             {
                 GodotWorldMeshResolution resolution = _assets?.ResolvePublicMesh(prefab) ??
                     GodotWorldMeshResolution.MissingModelAndTexture();
                 ResolvedMesh presentation = ResolveMesh(resolution, _fallbackPublicMesh);
                 fallbacks += FallbackCounts.From(presentation.Availability);
-                root.AddChild(CreateMultiMesh(
+                nativeGroups.Add(CreateInstanceGroup(root,
                     $"Public_{prefab}" + (_assets is null ? string.Empty :
                         FallbackNameSuffix(presentation.Availability)),
                     presentation.Mesh,
@@ -1015,13 +1116,15 @@ public sealed class GodotWorldRenderer : IDisposable
             if (names is not null) root.AddChild(names);
             return new RenderLayer(
                 root,
-                1 + groups.Count + (names is null ? 0 : 1 + nameCount),
+                1 + (_instanceBackend == GodotWorldInstanceBackend.NodeMultiMesh ? groups.Count : 0) +
+                    (names is null ? 0 : 1 + nameCount),
                 groups.Count,
                 firstY,
-                fallbacks);
+                fallbacks, nativeGroups.ToArray());
         }
         catch
         {
+            foreach (GodotWorldInstanceGroup group in nativeGroups) group.Dispose();
             root.Free();
             throw;
         }
@@ -1146,37 +1249,24 @@ public sealed class GodotWorldRenderer : IDisposable
         return mesh;
     }
 
-    private static MultiMeshInstance3D CreateMultiMesh(
+    private GodotWorldInstanceGroup CreateInstanceGroup(Node3D parent,
         string name,
         Mesh mesh,
         List<Transform3D> transforms,
         Material? materialOverride = null)
     {
-        if (transforms.Count == 0)
-            throw new ArgumentException("A MultiMesh render group cannot be empty.", nameof(transforms));
-        Aabb meshBounds = mesh.GetAabb();
-        Aabb combinedBounds = transforms[0] * meshBounds;
-        for (int index = 1; index < transforms.Count; index++)
-            combinedBounds = combinedBounds.Merge(transforms[index] * meshBounds);
-        var multiMesh = new MultiMesh
+        long started = Stopwatch.GetTimestamp();
+        var group = new GodotWorldInstanceGroup(parent, name, mesh, transforms,
+            materialOverride, _instanceBackend, _instanceUpload, _uploadScratch);
+        _groupPreparationTicks += Stopwatch.GetTimestamp() - started;
+        _uploadedInstanceRows += (ulong)transforms.Count;
+        if (group.BulkUploaded)
         {
-            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
-            Mesh = mesh,
-            InstanceCount = transforms.Count,
-            // Runtime-created MultiMeshes otherwise report a zero AABB until Godot happens to
-            // recalculate one. Frustum culling would then use the chunk origin and could hide a
-            // visible door/chest/sign whose actual instance lies inside the camera.
-            CustomAabb = combinedBounds,
-        };
-        for (int index = 0; index < transforms.Count; index++)
-            multiMesh.SetInstanceTransform(index, transforms[index]);
-        return new MultiMeshInstance3D
-        {
-            Name = name,
-            Multimesh = multiMesh,
-            CustomAabb = combinedBounds,
-            MaterialOverride = materialOverride,
-        };
+            _bulkUploads++;
+            _bulkUploadBytes += checked((ulong)transforms.Count * 12 * sizeof(float));
+        }
+        else _targetedInstanceUpdates += (ulong)transforms.Count;
+        return group;
     }
 
     private ResolvedMesh ResolveMesh(
@@ -1382,6 +1472,26 @@ public sealed class GodotWorldRenderer : IDisposable
             checked((long)chunk.WindowOffset.Z * GameWorldSpatialProfile.WorldChunkEdgeUnits) *
                 MillimetersToMeters);
         _chunkRootTransformWrites++;
+        SynchronizeDirectGroups(chunk);
+    }
+
+    private void SynchronizeDirectGroups()
+    {
+        if (_instanceBackend != GodotWorldInstanceBackend.DirectRid) return;
+        foreach (RenderChunk? chunk in _renderChunks)
+            if (chunk is not null) SynchronizeDirectGroups(chunk);
+    }
+
+    private void SynchronizeDirectGroups(RenderChunk chunk)
+    {
+        if (_instanceBackend != GodotWorldInstanceBackend.DirectRid || !chunk.Root.IsInsideTree()) return;
+        Rid scenario = chunk.Root.GetWorld3D().Scenario;
+        Transform3D transform = chunk.Root.GlobalTransform;
+        bool visible = chunk.Root.IsVisibleInTree();
+        foreach (GodotWorldInstanceGroup group in chunk.StructuralGroups)
+            group.Synchronize(scenario, transform, visible);
+        foreach (GodotWorldInstanceGroup group in chunk.PublicGroups)
+            group.Synchronize(scenario, transform, visible);
     }
 
     private bool TryProcessNextBuild()
@@ -1427,6 +1537,9 @@ public sealed class GodotWorldRenderer : IDisposable
         _activeStaticBatchGroups -= chunk.StaticBatchGroupCount;
         _activePublicBatchGroups -= chunk.PublicResourceCount;
         _activeFallbackGroups -= chunk.FallbackGroupCount;
+        _activeInstances -= chunk.InstanceCount;
+        foreach (GodotWorldInstanceGroup group in chunk.StructuralGroups) group.Dispose();
+        foreach (GodotWorldInstanceGroup group in chunk.PublicGroups) group.Dispose();
         if (GodotObject.IsInstanceValid(chunk.Root)) chunk.Root.Free();
         _renderChunks[renderSlot] = null;
         int semanticIndex = checked((int)chunk.Handle.Index);
@@ -1440,6 +1553,7 @@ public sealed class GodotWorldRenderer : IDisposable
     {
         if (chunk.Root.Visible == visible) return;
         chunk.Root.Visible = visible;
+        SynchronizeDirectGroups(chunk);
         _visibleChunks += visible ? 1 : -1;
     }
 
@@ -1626,7 +1740,8 @@ public sealed class GodotWorldRenderer : IDisposable
         int NodeCount,
         int ResourceCount,
         float FirstLocalY,
-        FallbackCounts Fallbacks);
+        FallbackCounts Fallbacks,
+        GodotWorldInstanceGroup[] Groups);
 
     private sealed class RenderChunk
     {
@@ -1641,7 +1756,9 @@ public sealed class GodotWorldRenderer : IDisposable
             float firstAdditionalTerrainLocalY,
             FallbackCounts structuralFallbacks,
             int publicNodeCount, int publicResourceCount,
-            FallbackCounts publicFallbacks)
+            FallbackCounts publicFallbacks,
+            GodotWorldInstanceGroup[] structuralGroups,
+            GodotWorldInstanceGroup[] publicGroups)
         {
             Handle = handle;
             Key = key;
@@ -1665,6 +1782,8 @@ public sealed class GodotWorldRenderer : IDisposable
             PublicNodeCount = publicNodeCount;
             PublicResourceCount = publicResourceCount;
             PublicFallbacks = publicFallbacks;
+            StructuralGroups = structuralGroups;
+            PublicGroups = publicGroups;
         }
 
         internal ClientSemanticChunkHandle Handle { get; }
@@ -1697,5 +1816,9 @@ public sealed class GodotWorldRenderer : IDisposable
             GodotWorldRenderer.FallbackGroupCount(PublicFallbacks);
         internal int NodeCount => StructuralNodeCount + PublicNodeCount;
         internal int ResourceCount => StructuralResourceCount + PublicResourceCount;
+        internal GodotWorldInstanceGroup[] StructuralGroups { get; }
+        internal GodotWorldInstanceGroup[] PublicGroups { get; set; }
+        internal int PublicInstanceCount => PublicGroups.Sum(static group => group.Count);
+        internal int InstanceCount => StructuralGroups.Sum(static group => group.Count) + PublicInstanceCount;
     }
 }
