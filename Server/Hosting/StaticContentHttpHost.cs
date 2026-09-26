@@ -71,7 +71,10 @@ public readonly record struct StaticContentHttpHostSnapshot(
 internal sealed class StaticContentHttpHostTestHooks
 {
     internal Action? BeforeAcceptWait { get; init; }
+    internal Action<Task<HttpListenerContext>>? AcceptWaitStarted { get; init; }
     internal Action? AfterAccept { get; init; }
+    internal Action? BeforeListenerStop { get; init; }
+    internal Action? AfterActiveResponseAbort { get; init; }
     internal Action? BeforeResponseInitialization { get; init; }
     internal Action? BeforeResponseWrite { get; init; }
     internal Action? AfterResponseWrite { get; init; }
@@ -84,7 +87,10 @@ internal readonly record struct StaticContentHttpHostLifecycleSnapshot(
     int PendingResponses,
     int ActiveResponses,
     bool ListenerClosed,
-    bool CancellationDisposed);
+    bool CancellationDisposed,
+    long AcceptOperationsStarted,
+    long AcceptOperationsCompleted,
+    long ResponseCloseOperations);
 
 /// <summary>
 /// Small bounded immutable-byte HTTP host. It runs independently from authority/Network pumps and
@@ -103,10 +109,19 @@ public sealed class StaticContentHttpHost : IDisposable
     private readonly int _responseTimeoutMilliseconds;
     private readonly long _reservedResourceBytes;
     private readonly object _disposeGate = new();
-    private readonly object _listenerLifecycleGate = new();
     private readonly object _responseOwnershipGate = new();
+    private readonly object _acceptOwnershipGate = new();
+    private readonly ManualResetEventSlim _acceptPublicationRetired = new(initialState: true);
+    private bool _acceptAdmissionStopped;
+    private readonly TaskCompletionSource _listenerTeardownCompleted = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly StaticContentHttpHostTestHooks? _testHooks;
     private readonly HttpListenerContext?[] _activeContexts;
+    // 0 unused, 1 initialization, 2 immutable headers/write, 3 closer claimed.
+    private readonly int[] _responseStates;
+    private long _acceptOperationsStarted;
+    private long _acceptOperationsCompleted;
+    private long _responseCloseOperations;
     private long _requests;
     private long _served;
     private long _rejected;
@@ -173,6 +188,7 @@ public sealed class StaticContentHttpHost : IDisposable
         BaseUri = new Uri(prefix, UriKind.Absolute);
         _responseWorkers = new Task[limits.MaximumConcurrentResponses];
         _activeContexts = new HttpListenerContext?[limits.MaximumConcurrentResponses];
+        _responseStates = new int[limits.MaximumConcurrentResponses];
         for (int index = 0; index < _responseWorkers.Length; index++)
         {
             int workerIndex = index;
@@ -223,19 +239,26 @@ public sealed class StaticContentHttpHost : IDisposable
         List<Exception>? failures = null;
         try
         {
+            lock (_acceptOwnershipGate) _acceptAdmissionStopped = true;
             TryCleanup(_stopping.Cancel, ref failures);
             _pending.Writer.TryComplete();
             AbortActiveResponses(ref failures);
+            TryCleanup(() => _testHooks?.AfterActiveResponseAbort?.Invoke(), ref failures);
             TryJoinAll(_responseWorkers, ref failures);
             DrainPending(ref failures);
-            lock (_listenerLifecycleGate)
+            // Only the short ownership transition is locked; rejection/close and joining are not.
+            _acceptPublicationRetired.Wait();
+            try
             {
+                TryCleanup(() => _testHooks?.BeforeListenerStop?.Invoke(), ref failures);
                 TryCleanup(_listener.Stop, ref failures, IsExpectedListenerShutdownException);
                 TryCleanup(_listener.Close, ref failures, IsExpectedListenerShutdownException);
                 _listenerClosed = true;
             }
+            finally { _listenerTeardownCompleted.TrySetResult(); }
             TryJoin(_acceptWorker, ref failures);
             DrainPending(ref failures);
+            TryCleanup(_acceptPublicationRetired.Dispose, ref failures);
             TryCleanup(_stopping.Dispose, ref failures);
             _cancellationDisposed = true;
         }
@@ -265,7 +288,10 @@ public sealed class StaticContentHttpHost : IDisposable
         _pending.Reader.CanCount ? _pending.Reader.Count : -1,
         Volatile.Read(ref _activeResponses),
         _listenerClosed,
-        _cancellationDisposed);
+        _cancellationDisposed,
+        Interlocked.Read(ref _acceptOperationsStarted),
+        Interlocked.Read(ref _acceptOperationsCompleted),
+        Interlocked.Read(ref _responseCloseOperations));
 
     internal static bool IsValidRoute(string? route)
     {
@@ -292,19 +318,40 @@ public sealed class StaticContentHttpHost : IDisposable
                 HttpListenerContext context;
                 try
                 {
-                    context = await _listener.GetContextAsync().WaitAsync(_stopping.Token)
-                        .ConfigureAwait(false);
+                    // WaitAsync(cancellation) retires only its wrapper, not the listener accept.
+                    // This worker owns/observes the actual operation through listener teardown.
+                    Task<HttpListenerContext> accept = _listener.GetContextAsync();
+                    Interlocked.Increment(ref _acceptOperationsStarted);
+                    try
+                    {
+                        _testHooks?.AcceptWaitStarted?.Invoke(accept);
+                        context = await accept.ConfigureAwait(false);
+                    }
+                    finally { Interlocked.Increment(ref _acceptOperationsCompleted); }
                 }
                 catch (OperationCanceledException) when (IsStopping) { break; }
                 catch (HttpListenerException) when (IsStopping) { break; }
                 catch (ObjectDisposedException) when (IsStopping) { break; }
                 catch (InvalidOperationException) when (IsStopping) { break; }
-                lock (_listenerLifecycleGate)
+                _testHooks?.AfterAccept?.Invoke();
+                Interlocked.Increment(ref _requests);
+                bool stopping;
+                lock (_acceptOwnershipGate)
                 {
-                    _testHooks?.AfterAccept?.Invoke();
-                    Interlocked.Increment(ref _requests);
-                    if (IsStopping || !_pending.Writer.TryWrite(context))
-                        RejectOverCapacity(context);
+                    stopping = _acceptAdmissionStopped;
+                    if (!stopping) _acceptPublicationRetired.Reset();
+                }
+                if (stopping)
+                {
+                    // Do not mutate framework response state concurrently with listener teardown.
+                    await _listenerTeardownCompleted.Task.ConfigureAwait(false);
+                    Interlocked.Increment(ref _rejected);
+                    AbortResponse(context);
+                }
+                else
+                {
+                    try { if (!_pending.Writer.TryWrite(context)) RejectOverCapacity(context); }
+                    finally { _acceptPublicationRetired.Set(); }
                 }
             }
         }
@@ -321,23 +368,28 @@ public sealed class StaticContentHttpHost : IDisposable
             while (await _pending.Reader.WaitToReadAsync(_stopping.Token).ConfigureAwait(false))
                 while (_pending.Reader.TryRead(out HttpListenerContext? context))
                 {
+                    bool stopping;
                     lock (_responseOwnershipGate)
                     {
-                        if (IsStopping)
+                        stopping = IsStopping;
+                        if (!stopping)
                         {
-                            RejectOverCapacity(context);
-                            continue;
+                            _activeContexts[workerIndex] = context;
+                            Volatile.Write(ref _responseStates[workerIndex], 1);
                         }
-                        _activeContexts[workerIndex] = context;
                     }
+                    if (stopping) { RejectOverCapacity(context); continue; }
                     try
                     {
-                        await HandleBoundedAsync(context).ConfigureAwait(false);
+                        await HandleBoundedAsync(context, workerIndex).ConfigureAwait(false);
                     }
                     finally
                     {
                         lock (_responseOwnershipGate)
+                        {
                             _activeContexts[workerIndex] = null;
+                            Volatile.Write(ref _responseStates[workerIndex], 0);
+                        }
                     }
                 }
         }
@@ -346,12 +398,12 @@ public sealed class StaticContentHttpHost : IDisposable
         }
     }
 
-    private async Task HandleBoundedAsync(HttpListenerContext context)
+    private async Task HandleBoundedAsync(HttpListenerContext context, int workerIndex)
     {
         int active = Interlocked.Increment(ref _activeResponses);
         PublishPeak(active);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
-        Task response = HandleAsync(context, timeout.Token);
+        Task response = HandleAsync(context, timeout.Token, workerIndex);
         try
         {
             await response.WaitAsync(
@@ -361,13 +413,13 @@ public sealed class StaticContentHttpHost : IDisposable
         catch (TimeoutException)
         {
             timeout.Cancel();
-            AbortResponse(context);
+            CloseOwnedResponse(context, workerIndex, abort: true);
             await response.ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (_stopping.IsCancellationRequested)
         {
             timeout.Cancel();
-            AbortResponse(context);
+            CloseOwnedResponse(context, workerIndex, abort: true);
             await response.ConfigureAwait(false);
         }
         finally
@@ -376,11 +428,12 @@ public sealed class StaticContentHttpHost : IDisposable
         }
     }
 
-    private async Task HandleAsync(HttpListenerContext context, CancellationToken cancellation)
+    private async Task HandleAsync(HttpListenerContext context, CancellationToken cancellation, int workerIndex)
     {
         try
         {
             _testHooks?.BeforeResponseInitialization?.Invoke();
+            cancellation.ThrowIfCancellationRequested();
             string route = context.Request.Url?.AbsolutePath ?? string.Empty;
             if (context.Request.HttpMethod != "GET" || context.Request.Url?.Query.Length > 0 ||
                 !_resources.TryGetValue(route, out byte[]? bytes))
@@ -408,7 +461,9 @@ public sealed class StaticContentHttpHost : IDisposable
                 Interlocked.Increment(ref _rejected);
                 return;
             }
+            Volatile.Write(ref _responseStates[workerIndex], 2);
             _testHooks?.BeforeResponseWrite?.Invoke();
+            cancellation.ThrowIfCancellationRequested();
             await context.Response.OutputStream.WriteAsync(bytes, cancellation).ConfigureAwait(false);
             cancellation.ThrowIfCancellationRequested();
             _testHooks?.AfterResponseWrite?.Invoke();
@@ -427,9 +482,26 @@ public sealed class StaticContentHttpHost : IDisposable
         }
         finally
         {
-            try { context.Response.Close(); }
-            catch (Exception exception) when (exception is HttpListenerException or
-                ObjectDisposedException || exception is InvalidOperationException && IsStopping) { }
+            CloseOwnedResponse(context, workerIndex, abort: IsStopping || cancellation.IsCancellationRequested);
+        }
+    }
+
+    private void CloseOwnedResponse(HttpListenerContext context, int workerIndex, bool abort)
+    {
+        int state = Volatile.Read(ref _responseStates[workerIndex]);
+        while (state is 1 or 2)
+        {
+            int prior = Interlocked.CompareExchange(ref _responseStates[workerIndex], 3, state);
+            if (prior != state) { state = prior; continue; }
+            Interlocked.Increment(ref _responseCloseOperations);
+            try
+            {
+                if (abort) context.Response.Abort();
+                else context.Response.Close();
+            }
+            catch (Exception exception) when (exception is HttpListenerException or ObjectDisposedException ||
+                exception is InvalidOperationException && (abort || IsStopping)) { }
+            return;
         }
     }
 
@@ -473,37 +545,24 @@ public sealed class StaticContentHttpHost : IDisposable
     private void DrainPending(ref List<Exception>? failures)
     {
         while (_pending.Reader.TryRead(out HttpListenerContext? context))
-        {
-            Interlocked.Increment(ref _rejected);
-            try
-            {
-                context.Response.StatusCode = (int)HttpStatusCode.ServiceUnavailable;
-                context.Response.ContentLength64 = 0;
-            }
-            catch (Exception exception) when (exception is HttpListenerException or
-                ObjectDisposedException or InvalidOperationException)
-            {
-            }
-            try { context.Response.Close(); }
-            catch (Exception exception) when (exception is HttpListenerException or
-                ObjectDisposedException or InvalidOperationException)
-            {
-            }
-        }
+            TryCleanup(() => RejectOverCapacity(context), ref failures);
     }
 
     private void AbortActiveResponses(ref List<Exception>? failures)
     {
-        lock (_responseOwnershipGate)
+        for (int index = 0; index < _activeContexts.Length; index++)
         {
-            foreach (HttpListenerContext? context in _activeContexts)
+            HttpListenerContext? context;
+            lock (_responseOwnershipGate)
             {
-                if (context is null) continue;
-                TryCleanup(
-                    () => context.Response.Abort(),
-                    ref failures,
-                    IsExpectedResponseShutdownException);
+                context = _activeContexts[index];
+                // Header initialization has no I/O. Its owner observes cancellation and closes
+                // after initialization exits; Abort must not mutate that response concurrently.
+                if (context is null || Volatile.Read(ref _responseStates[index]) != 2) continue;
+                if (Interlocked.CompareExchange(ref _responseStates[index], 3, 2) != 2) continue;
             }
+            Interlocked.Increment(ref _responseCloseOperations);
+            TryCleanup(() => context.Response.Abort(), ref failures, IsExpectedResponseShutdownException);
         }
     }
 

@@ -4,6 +4,7 @@ using UltraSim.Server.Runtime;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Reflection;
 
 var tests = new (string Name, Action Body)[]
 {
@@ -35,9 +36,32 @@ var tests = new (string Name, Action Body)[]
         StaticContentHttpHostShutdownPreservesEveryResponseWorkerFault),
     ("StaticContentHttpHostShutdownPreservesPreStoppingAcceptFault",
         StaticContentHttpHostShutdownPreservesPreStoppingAcceptFault),
+    ("StaticContentHttpHostRetainsActualAcceptUntilTeardown", StaticContentHttpHostRetainsActualAcceptUntilTeardown),
+    ("StaticContentHttpHostDoesNotAbortInitializingResponse", StaticContentHttpHostDoesNotAbortInitializingResponse),
+    ("StaticContentHttpHostPartialRequestsAndPortReuse", StaticContentHttpHostPartialRequestsAndPortReuse),
+    ("CancelledHttpListenerWrapperDoesNotRetireAccept", CancelledHttpListenerWrapperDoesNotRetireAccept),
+    ("ManagedHttpListenerTeardownCanOverlapUnregisteredHeaderMutation",
+        ManagedHttpListenerTeardownCanOverlapUnregisteredHeaderMutation),
     ("StaticContentHttpHostShutdownStressIsBounded",
         StaticContentHttpHostShutdownStressIsBounded),
 };
+
+if (args.Contains("--http-only", StringComparer.Ordinal))
+    tests = tests.Where(static test => !test.Name.StartsWith("Host", StringComparison.Ordinal) &&
+        !test.Name.StartsWith("Internal", StringComparison.Ordinal) &&
+        !test.Name.StartsWith("Headless", StringComparison.Ordinal) &&
+        !test.Name.StartsWith("Throwing", StringComparison.Ordinal) &&
+        !test.Name.StartsWith("Warmed", StringComparison.Ordinal)).ToArray();
+string? filter = args.FirstOrDefault(static argument => argument.StartsWith("--test=", StringComparison.Ordinal));
+// This pinned-runtime investigation deliberately gates framework internals. Keep it opt-in:
+// the normal product gate uses only public APIs and host-owned lifecycle observations.
+if (filter is null)
+    tests = tests.Where(static test => test.Name != "ManagedHttpListenerTeardownCanOverlapUnregisteredHeaderMutation").ToArray();
+if (filter is not null)
+{
+    tests = tests.Where(test => test.Name == filter["--test=".Length..]).ToArray();
+    if (tests.Length == 0) throw new ArgumentException("Unknown hosting test.");
+}
 
 foreach ((string name, Action body) in tests)
 {
@@ -306,26 +330,22 @@ static void StaticContentHttpHostShutdownInterleavingsRetireEveryOwner()
         AssertHttpHostRetired(host);
     }
 
-    RunGatedShutdown(gate => new StaticContentHttpHostTestHooks
+    foreach (bool concurrent in new[] { false, true })
+    foreach (int workers in new[] { 1, 3 })
     {
-        BeforeAcceptWait = gate,
-    }, sendRequest: false);
-    RunGatedShutdown(gate => new StaticContentHttpHostTestHooks
-    {
-        AfterAccept = gate,
-    });
-    RunGatedShutdown(gate => new StaticContentHttpHostTestHooks
-    {
-        BeforeResponseInitialization = gate,
-    });
-    RunGatedShutdown(gate => new StaticContentHttpHostTestHooks
-    {
-        BeforeResponseWrite = gate,
-    });
-    RunGatedShutdown(gate => new StaticContentHttpHostTestHooks
-    {
-        AfterResponseWrite = gate,
-    });
+        RunGatedShutdown(gate => new StaticContentHttpHostTestHooks { BeforeAcceptWait = gate },
+            sendRequest: false, concurrent: concurrent, workers: workers);
+        RunGatedShutdown(gate => new StaticContentHttpHostTestHooks { BeforeAcceptWait = gate },
+            concurrent: concurrent, workers: workers);
+        RunGatedShutdown(gate => new StaticContentHttpHostTestHooks { AfterAccept = gate },
+            concurrent: concurrent, workers: workers);
+        RunGatedShutdown(gate => new StaticContentHttpHostTestHooks { BeforeResponseInitialization = gate },
+            concurrent: concurrent, workers: workers);
+        RunGatedShutdown(gate => new StaticContentHttpHostTestHooks { BeforeResponseWrite = gate },
+            concurrent: concurrent, workers: workers);
+        RunGatedShutdown(gate => new StaticContentHttpHostTestHooks { AfterResponseWrite = gate },
+            concurrent: concurrent, workers: workers);
+    }
 
     using (var host = CreateHttpHost())
     using (var client = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }))
@@ -523,7 +543,7 @@ static void AssertCompleteResponseFailureSet(Exception? failure)
 
 static void StaticContentHttpHostShutdownStressIsBounded()
 {
-    const int cycles = 128;
+    const int cycles = 1_024;
     for (int cycle = 0; cycle < cycles; cycle++)
     {
         using var host = CreateHttpHost();
@@ -542,9 +562,176 @@ static void StaticContentHttpHostShutdownStressIsBounded()
     }
 }
 
+static void CancelledHttpListenerWrapperDoesNotRetireAccept()
+{
+    using var listener = new HttpListener();
+    int port = ReserveLoopbackPort();
+    listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+    listener.Start();
+    Task<HttpListenerContext> accept = listener.GetContextAsync();
+    using var cancellation = new CancellationTokenSource();
+    Task<HttpListenerContext> wrapper = accept.WaitAsync(cancellation.Token);
+    cancellation.Cancel();
+    Assert.Throws<OperationCanceledException>(() => wrapper.GetAwaiter().GetResult());
+    Assert.True(!accept.IsCompleted);
+    using var client = new TcpClient();
+    client.Connect(IPAddress.Loopback, port);
+    SendRawGet(client, "/owned");
+    Assert.True(accept.Wait(TimeSpan.FromSeconds(2)));
+    HttpListenerContext context = accept.GetAwaiter().GetResult();
+    context.Response.ContentLength64 = 0;
+    context.Response.Close();
+    listener.Stop();
+}
+
+static void StaticContentHttpHostRetainsActualAcceptUntilTeardown()
+{
+    using var acceptStarted = new ManualResetEventSlim();
+    using var beforeStop = new ManualResetEventSlim();
+    using var release = new ManualResetEventSlim();
+    Task<HttpListenerContext>? accept = null;
+    using var host = CreateHttpHost(new StaticContentHttpHostTestHooks
+    {
+        AcceptWaitStarted = operation => { accept = operation; acceptStarted.Set(); },
+        BeforeListenerStop = () =>
+        {
+            beforeStop.Set();
+            Assert.True(release.Wait(TimeSpan.FromSeconds(2)));
+        },
+    });
+    Assert.True(acceptStarted.Wait(TimeSpan.FromSeconds(2)));
+    Task first = Task.Run(host.Dispose);
+    Task second = Task.Run(host.Dispose);
+    try
+    {
+        Assert.True(beforeStop.Wait(TimeSpan.FromSeconds(2)));
+        Assert.True(!accept!.IsCompleted);
+        Assert.True(!host.GetLifecycleSnapshotForTesting().AcceptWorkerCompleted);
+        Assert.Equal(1L, host.GetLifecycleSnapshotForTesting().AcceptOperationsStarted);
+        Assert.Equal(0L, host.GetLifecycleSnapshotForTesting().AcceptOperationsCompleted);
+    }
+    finally { release.Set(); }
+    Assert.True(Task.WhenAll(first, second).Wait(TimeSpan.FromSeconds(2)));
+    Assert.True(accept!.IsCompleted);
+    AssertHttpHostRetired(host);
+}
+
+static void StaticContentHttpHostDoesNotAbortInitializingResponse()
+{
+    using var initializing = new ManualResetEventSlim();
+    using var abortSweep = new ManualResetEventSlim();
+    using var release = new ManualResetEventSlim();
+    using var host = CreateHttpHost(new StaticContentHttpHostTestHooks
+    {
+        BeforeResponseInitialization = () =>
+        {
+            initializing.Set();
+            Assert.True(release.Wait(TimeSpan.FromSeconds(2)));
+        },
+        AfterActiveResponseAbort = abortSweep.Set,
+    });
+    using var client = new TcpClient();
+    client.Connect(IPAddress.Loopback, host.BaseUri.Port);
+    SendRawGet(client, "/content/test.uspkg");
+    Assert.True(initializing.Wait(TimeSpan.FromSeconds(2)));
+    Task first = Task.Run(host.Dispose);
+    Task second = Task.Run(host.Dispose);
+    try
+    {
+        Assert.True(abortSweep.Wait(TimeSpan.FromSeconds(2)));
+        // Independent of telemetry: counts actual Close/Abort invocations, not disabled counters.
+        Assert.Equal(0L, host.GetLifecycleSnapshotForTesting().ResponseCloseOperations);
+    }
+    finally { release.Set(); }
+    Assert.True(Task.WhenAll(first, second).Wait(TimeSpan.FromSeconds(2)));
+    Assert.Equal(1L, host.GetLifecycleSnapshotForTesting().ResponseCloseOperations);
+    AssertHttpHostRetired(host);
+}
+
+static void StaticContentHttpHostPartialRequestsAndPortReuse()
+{
+    int port = ReserveLoopbackPort();
+    for (int cycle = 0; cycle < 16; cycle++)
+    {
+        using var host = new StaticContentHttpHost(new IPEndPoint(IPAddress.Loopback, port),
+            [new StaticContentHttpResource("/one", "x"u8.ToArray())],
+            new StaticContentHttpHostLimits(1, 1, cycle % 2 == 0 ? 1 : 3, cycle % 2 == 0 ? 1 : 4, 1_000));
+        using var client = new TcpClient();
+        client.Connect(IPAddress.Loopback, port);
+        if ((cycle & 2) != 0) client.GetStream().Write("GET /one HTTP/1.1\r\nHost: 127.0.0.1\r\n"u8);
+        Task first = Task.Run(host.Dispose);
+        Task second = Task.Run(host.Dispose);
+        Assert.True(Task.WhenAll(first, second).Wait(TimeSpan.FromSeconds(2)));
+        AssertHttpHostRetired(host);
+    }
+}
+
+// Runtime-source control, not a production reflection dependency. On managed HttpListener,
+// endpoint teardown closes partial (not yet application-visible) requests. Its header formatter
+// may overlap the framework read callback's SendError header mutation after prefix removal.
+static void ManagedHttpListenerTeardownCanOverlapUnregisteredHeaderMutation()
+{
+    if (OperatingSystem.IsWindows()) return; // HTTP.sys is a different implementation.
+    foreach (bool abort in new[] { false, true })
+    foreach (bool keepAlive in new[] { false, true })
+    {
+    using var listener = new HttpListener();
+    int port = ReserveLoopbackPort();
+    listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+    listener.Start();
+    Task<HttpListenerContext> accept = listener.GetContextAsync();
+    using var client = new TcpClient();
+    client.Connect(IPAddress.Loopback, port);
+    client.GetStream().Write(System.Text.Encoding.ASCII.GetBytes(
+        "GET /pending HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: " +
+        (keepAlive ? "keep-alive" : "close") + "\r\n"));
+    Type manager = typeof(HttpListener).Assembly.GetType("System.Net.HttpEndPointManager", true)!;
+    var endpoints = (System.Collections.IDictionary)manager.GetField("s_ipEndPoints",
+        BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
+    object endpoint = ((System.Collections.IDictionary)endpoints[IPAddress.Loopback]!)[port]!;
+    var connections = (System.Collections.IDictionary)Field(endpoint, "_unregisteredConnections");
+    object? connection = null;
+    WaitUntil(() =>
+    {
+        lock (connections)
+            foreach (object key in connections.Keys) { connection = key; break; }
+        return connection is not null;
+    }, TimeSpan.FromSeconds(2), "Managed endpoint did not publish the partial connection.");
+    var context = (HttpListenerContext)Field(connection!, "_context");
+    using var formatting = new ManualResetEventSlim();
+    using var mutated = new ManualResetEventSlim();
+    using var release = new ManualResetEventSlim();
+    var headers = new TeardownObservedHeaders(formatting, mutated, release);
+    typeof(HttpListenerResponse).GetField("_webHeaders", BindingFlags.Instance | BindingFlags.NonPublic)!
+        .SetValue(context.Response, headers);
+    Task<Exception?> stop = Task.Run(() => CaptureFailure(abort ? listener.Abort : listener.Stop));
+    try
+    {
+        Assert.True(formatting.Wait(TimeSpan.FromSeconds(2)));
+        // The prefix is now removed, but the accepted socket remains open inside endpoint.Close.
+        // Complete the real request: the runtime's BindContext failure executes SendError(404).
+        client.GetStream().Write("\r\n"u8);
+        Assert.True(mutated.Wait(TimeSpan.FromSeconds(2)));
+        Assert.True(!accept.IsCompleted); // no application owner ever receives this context.
+    }
+    finally { release.Set(); }
+    Assert.True(stop.Wait(TimeSpan.FromSeconds(2)));
+    if (stop.Result is not null) throw stop.Result;
+    Assert.Throws<ObjectDisposedException>(() => accept.GetAwaiter().GetResult());
+    Console.WriteLine($"CONTROL {(abort ? "Abort" : "Stop")} keepAlive={keepAlive}: " +
+        "managed endpoint teardown / framework SendError header mutation overlap proven; " +
+        "no application-visible context; no exception injected.");
+    }
+
+    static object Field(object instance, string name) => instance.GetType()
+        .GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(instance)!;
+}
+
 static void RunGatedShutdown(
     Func<Action, StaticContentHttpHostTestHooks> createHooks,
-    bool sendRequest = true)
+    bool sendRequest = true,
+    bool concurrent = false,
+    int workers = 1)
 {
     using var entered = new ManualResetEventSlim();
     using var release = new ManualResetEventSlim();
@@ -553,7 +740,8 @@ static void RunGatedShutdown(
         entered.Set();
         Assert.True(release.Wait(TimeSpan.FromSeconds(2)));
     };
-    using var host = CreateHttpHost(createHooks(gate));
+    using var host = CreateHttpHost(createHooks(gate), maximumConcurrentResponses: workers,
+        maximumQueuedResponses: workers == 1 ? 1 : 4);
     using var client = new TcpClient();
     if (sendRequest)
     {
@@ -562,10 +750,11 @@ static void RunGatedShutdown(
     }
     Assert.True(entered.Wait(TimeSpan.FromSeconds(2)));
     Task disposing = Task.Run(host.Dispose);
+    Task second = concurrent ? Task.Run(host.Dispose) : Task.CompletedTask;
     WaitUntil(() => host.GetLifecycleSnapshotForTesting().State == 1,
         TimeSpan.FromSeconds(1), "HTTP host did not enter Stopping.");
     release.Set();
-    Assert.True(disposing.Wait(TimeSpan.FromSeconds(2)));
+    Assert.True(Task.WhenAll(disposing, second).Wait(TimeSpan.FromSeconds(2)));
     disposing.GetAwaiter().GetResult();
     AssertHttpHostRetired(host);
 }
@@ -611,6 +800,7 @@ static void AssertHttpHostRetired(StaticContentHttpHost host)
     Assert.Equal(0, snapshot.ActiveResponses);
     Assert.True(snapshot.ListenerClosed);
     Assert.True(snapshot.CancellationDisposed);
+    Assert.Equal(snapshot.AcceptOperationsStarted, snapshot.AcceptOperationsCompleted);
 }
 
 static void WaitUntil(Func<bool> condition, TimeSpan timeout, string failure)
@@ -939,6 +1129,33 @@ sealed class InjectedHttpResponseException : Exception
         : base($"Injected response-worker failure {worker}.") => Worker = worker;
 
     internal int Worker { get; }
+}
+
+sealed class TeardownObservedHeaders(
+    ManualResetEventSlim formatting,
+    ManualResetEventSlim mutated,
+    ManualResetEventSlim release) : WebHeaderCollection
+{
+    private int _formattingThread;
+    public override string GetKey(int index)
+    {
+        if (Interlocked.CompareExchange(ref _formattingThread, Environment.CurrentManagedThreadId, 0) == 0)
+        {
+            formatting.Set();
+            if (!release.Wait(TimeSpan.FromSeconds(2)))
+                throw new TimeoutException("Managed header-formatter control was not released.");
+        }
+        return base.GetKey(index)!;
+    }
+
+    public override void Set(string name, string? value)
+    {
+        base.Set(name, value);
+        if (name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase) &&
+            Volatile.Read(ref _formattingThread) != 0 &&
+            Volatile.Read(ref _formattingThread) != Environment.CurrentManagedThreadId)
+            mutated.Set();
+    }
 }
 
 sealed class FixtureComposition : IServerComposition
