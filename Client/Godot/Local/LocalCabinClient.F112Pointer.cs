@@ -66,7 +66,7 @@ public partial class LocalCabinClient
                 interaction = ReadF112Authority().LastCommandResult.Interaction.ToString();
                 // This disclosed fallback-lab sign is deliberately beyond reach at PlayerStart.
                 if (ReadF112Authority().LastCommandResult.Interaction != GameWorldActionStatus.OutOfRange)
-                    throw new InvalidOperationException("Display mapping changed the authoritative sign range result.");
+                    throw new InvalidOperationException($"Display mapping sign range result was {interaction}, selection={_selection}, player={ReadF112Authority().PlayerPosition}.");
                 SubmitF112Stop();
             }
             results.Add(new { Kind = "Public", record.Id, record.EntityPublicVersion, prefab,
