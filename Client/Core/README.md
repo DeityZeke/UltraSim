@@ -54,6 +54,14 @@ remote interpolator, including exact versions/generation/ID and the CPU-resolved
 sampling API delegates once. Holds/snaps have equal endpoints; no server timestamps, speculative
 remote extrapolation or GPU interpolation were introduced. Controlled prediction is unchanged.
 
+F1.11 adds `ClientVegetationScatter`, a bounded presentation-only consumer of existing resident
+BaseTerrain. It hashes fixed world seed/full spatial key/cell/profile and samples the canonical
+triangle height for one root per present Grass cell (maximum 1,024/chunk). Base intentional void
+is excluded even under an additional grass surface; additional surfaces are deliberately not
+scatter sources. It changes no semantic hash, entity identity, collision, persistence or protocol.
+No per-blade mutable authority or native state belongs to Core. The native opt-in consumer and
+actual stress evidence are documented in [Godot](../Godot/README.md).
+
 F1.8A adds `ClientMotionPose`, `ClientControlledMotionPresentation`, and
 `ClientRemoteActorInterpolation`. These are renderer-neutral, bounded presentation state beside
 exact semantic owner/public records. The controlled controller accepts only sequenced semantic

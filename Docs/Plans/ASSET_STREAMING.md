@@ -1557,6 +1557,18 @@ while corruption, deletion, content changes, and policy changes rebuild/select d
 The first `WorldOpaque` atlas candidate remains diagnostic because one page did not reduce the
 current two-material/draw shape.
 
+F1.11 closes the Remote world Texture/Material consumer gap: both clients now use the extracted
+common `GodotCatalogWorldAssetResolver` and the same derived-resource policy. The independently
+authorized optional Realm presentation plan includes a small `cabin` world-palette package; its
+activation suffix is 2 so immutable suffix-1 metadata is not retargeted. Required structural/UI
+content, authenticated Realm mapping and semantic proof are unchanged. An explicitly installed
+Cabin Default activation can reopen as world.local resource fallback through existing authorized
+metadata, never blob discovery. User replacement updates retained mesh materials, and leases
+remain bounded through refresh/retirement. Actual Contentless Online cold/warm runs report Realm
+textures/materials 2/2 and derived disk hits 0/2; warm required/Pack fetch bytes are zero. See the
+[F1.11 evidence](../../_Benchmarks/Baselines/client-f1.11-renderer-stress-vegetation-2026-09-25.md).
+The palette is diagnostic, not final Official art, a new atlas or executable/shader admission.
+
 The local Concept Demo D0.4 canary now proves that the maintained Godot renderer can distinguish
 model absence from texture absence and degrade only presentation while immutable World identity and
 physical bounds remain unchanged. Its four fixture outcomes are local/preinstalled test resolution,

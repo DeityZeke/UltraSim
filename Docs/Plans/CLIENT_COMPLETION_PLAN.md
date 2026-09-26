@@ -1,6 +1,6 @@
 # UltraSim Client Completion Plan
 
-**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.10 are CLOSED; F1.11 is NEXT and unstarted.** F1.10 selects a conservative Detailed/BatchedPrimitive hybrid after the [actor-tier comparison](../../_Benchmarks/Baselines/client-f1.10-actor-representation-tiers-2026-09-25.md): distant body batching reduces Nodes/construction/retirement, not moving-update CPU. F1.9B retains NodeMultiMesh/PerRow after the [measured backend comparison](../../_Benchmarks/Baselines/client-f1.9b-scalable-godot-backend-2026-09-25.md); direct RIDs and bulk submission remain bounded comparison controls, not selected product policy. F1.9A's tested implementation and verification are recorded in the [display-composition evidence](../../_Benchmarks/Baselines/client-f1.9a-display-composition-2026-09-25.md). The original F1.8A closure claim is superseded by the [corrective evidence](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md), which records both the reproduced defects and the earlier final-tree verifier failures.
+**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.11 are CLOSED; F1.12 is NEXT and unstarted.** The [F1.11 evidence](../../_Benchmarks/Baselines/client-f1.11-renderer-stress-vegetation-2026-09-25.md) closes shared Local/Remote world-resource consumption and bounded renderer stress; vegetation remains opt-in/default Off. F1.10 selects a conservative Detailed/BatchedPrimitive hybrid after the [actor-tier comparison](../../_Benchmarks/Baselines/client-f1.10-actor-representation-tiers-2026-09-25.md): distant body batching reduces Nodes/construction/retirement, not moving-update CPU. F1.9B retains NodeMultiMesh/PerRow after the [measured backend comparison](../../_Benchmarks/Baselines/client-f1.9b-scalable-godot-backend-2026-09-25.md); direct RIDs and bulk submission remain bounded comparison controls, not selected product policy. F1.9A's tested implementation and verification are recorded in the [display-composition evidence](../../_Benchmarks/Baselines/client-f1.9a-display-composition-2026-09-25.md). The original F1.8A closure claim is superseded by the [corrective evidence](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md), which records both the reproduced defects and the earlier final-tree verifier failures.
 
 **Parent architecture:** [CLIENT_PRESENTATION_ARCHITECTURE.md](CLIENT_PRESENTATION_ARCHITECTURE.md)
 
@@ -93,8 +93,8 @@ F1.8A Remote motion prediction/reconciliation/interpolation (CLOSED after R1 cor
 F1.9A Simple/Advanced display composition and real Gameplay Frame output (CLOSED)
 F1.9B scalable Godot realization / RID / MultiMesh (CLOSED; NodeMultiMesh/PerRow retained)
 F1.10 Actor representation tiers and GPU-friendly interpolation seam (CLOSED; conservative hybrid)
-F1.11 Renderer stress consumers / vegetation prototype (NEXT; unstarted)
-F1.12 Product dogfooding and PF6 readiness
+F1.11 Renderer stress consumers / vegetation prototype (CLOSED; prototype default Off)
+F1.12 Product dogfooding and PF6 readiness (NEXT; unstarted)
 ~~~
 
 The dependency direction is intentional. Do not begin aesthetic menu polish before F1.7, and do not make the renderer depend on Local/Server special cases before F1.2.
@@ -1173,8 +1173,9 @@ including exports, Local/Remote parity, W7 seam/corner controls and mixed lifecy
 The report preserves an earlier debug-hook compilation failure and an intermittent unchanged
 F1.8A loss-case assertion before the final pass. Headless tests certify lifecycle but cannot
 certify native transforms/culling; the real OpenGL matrix covers those separately. Cold build
-residuals, short GPU diagnostics, and the Remote catalog world-material consumer gap remain
-explicit limitations, not claims that rendering is already minimal. F1.10 follows below; W8 is unstarted;
+residuals and short GPU diagnostics remain explicit limitations, not claims that rendering is
+already minimal. The Remote catalog world-material consumer gap remained at F1.9B and is closed
+by F1.11 below. F1.10 follows below; W8 is unstarted;
 PF6 still waits for F1.12.
 
 ---
@@ -1203,7 +1204,7 @@ picking, feature pins, failure cleanup, slot reuse and mixed retirement have per
 `ClientActorTemporalPresentation` exposes the actual F1.8A receipt-time bracket plus its CPU-resolved
 pose. Remote consumes that result in either tier. Controlled prediction, interpolation policy,
 content precedence and protocol/settings/World formats are unchanged. GPU interpolation, skeletal
-batching and impostors remain future work; F1.11 and W8 are not started. PF6 still waits for F1.12.
+batching and impostors remain future work. F1.11 is closed below; W8 is not started. PF6 still waits for F1.12.
 
 ## Goal
 
@@ -1279,6 +1280,24 @@ Equipment may require:
 ---
 
 # 15. F1.11 - Renderer stress consumers and vegetation prototype
+
+## Closure
+
+[Immutable evidence](../../_Benchmarks/Baselines/client-f1.11-renderer-stress-vegetation-2026-09-25.md)
+records implementation `1ac8e614`, W7 accounting assurance/tested tree `b59dd382`, native Compatibility
+measurements and an uninterrupted canonical Release/export pass. One common catalog-backed
+world palette now serves Local and Remote; required structural activation is unchanged. The
+optional presentation activation advances to suffix 2 rather than retargeting old metadata.
+User material refresh preserves compatible meshes/groups, semantic truth and actor lifetimes.
+
+The maintained production-consumer scene exercises 1,000/5,000/10,000 statics/Multi/public objects,
+64/128/256 actors, dense nameplates, radius 1/2/3 and three pixel configurations. A chunk-owned,
+base-only procedural grass prototype reaches 50,175 patches; actual slope/void/culling/rebase,
+cut and retirement controls pass. No per-blade entity/Node/process loop or World format change.
+Selected NodeMultiMesh/PerRow and conservative actor tiers remain unchanged. Short GPU windows
+and materially variable CPU runs are diagnostics, not FPS/CCU ratings. Grass remains default Off;
+lower-spec/Deck evidence, advanced GI, final painted art and authoritative vegetation gameplay
+remain unimplemented. F1.12 is next; W8/W9/W10 and F1.12 were not begun.
 
 ## Goal
 

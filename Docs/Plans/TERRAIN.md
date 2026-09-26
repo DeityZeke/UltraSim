@@ -4868,3 +4868,16 @@ P0.1d Physics vertical
 Concept Demo integration
     MountainShell/cave, Sky Island, telepad, central terrain, Far Island/gate
 ```
+
+## F1.11 decorative vegetation consumer
+
+The opt-in renderer prototype derives one patch per present Grass **base** cell, with deterministic
+full-key seed/profile identity and height from the canonical World triangle query. Intentional
+base void remains excluded even beneath an authored T1.1 grass Top surface. Additional surfaces
+are not yet scatter sources. Eight procedural blades share each sampled root; chunk-local native
+AABBs include terrain range and shader wind/height. Native culling/rebase/re-entry controls pass.
+No WorldPack/terrain format, material plane, authority, physics, occupancy, entity, persistence or
+live-edit transaction changes. Wind and debug cut stay presentation-local; cut does not rebuild
+terrain or erase semantic truth. Grass remains default Off after the
+[F1.11 stress evidence](../../_Benchmarks/Baselines/client-f1.11-renderer-stress-vegetation-2026-09-25.md).
+Authoritative harvesting/regrowth, surface-aware vegetation and W8/W9/W10 editing remain future.

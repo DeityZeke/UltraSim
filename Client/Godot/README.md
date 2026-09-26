@@ -56,7 +56,27 @@ frustum culling, frame-boundary transitions and the 16/64/128/256 three-repetiti
 Pass an absolute `--evidence=` output after `--`; retained samples are independent of export code.
 T010 also proves real User hot replacement and disable while an actor is cheap, followed by current
 User/Realm promotion. Existing X/Y animation/socket tests remain. CPU interpolation stays in Core;
-the new actual endpoint descriptor is a future-GPU seam only. F1.11 and W8 are unstarted.
+the new actual endpoint descriptor is a future-GPU seam only. F1.11 is closed below; W8 is unstarted.
+
+F1.11 shares the existing catalog-backed Cabin world palette as `GodotCatalogWorldAssetResolver`
+between Local and Remote. Effective User/Realm/world.local/Primitive resource resolution and
+derived leases are common; compatible material refresh preserves mesh/instance/semantic identity.
+The independently authorized Realm presentation activation suffix is 2; required World/UI proof
+is unchanged. Native resources retire before their cache/generation ownership.
+
+`F111RendererStressAcceptance.tscn` uses production semantic residency, window, renderer,
+actor presenter and Gameplay Output SubViewport, with 1,000/5,000/10,000 World objects and
+64/128/256 synthetic actors. Native Compatibility runs retain per-call CPU samples and short GPU
+diagnostics; headless runs bounded lifecycle checks only. The [immutable evidence](../../_Benchmarks/Baselines/client-f1.11-renderer-stress-vegetation-2026-09-25.md)
+records exact commands, resource/lease counts, pixel/radius/churn controls and both variable runs.
+
+`--f1-11-vegetation` opts Local/Remote into one chunk-owned grass MultiMesh, one patch per eligible
+base cell, eight shared-root blades/96 finite vertices per patch. Shader TIME supplies wind;
+bounded custom-row cut is diagnostic, not Game harvesting. Finite native AABB includes the whole
+shader envelope. Grass casting and the prototype default are Off. `--f1-11-time=dawn|noon|dusk|night`,
+`--f1-11-atmosphere=temperate|dry|cold` and `--f1-11-no-shadows` select a finite common debug
+environment when opted in; no authoritative weather/time, compute or advanced GI is claimed.
+GPU observations are not sustained FPS or server CCU. F1.12 is next and unstarted.
 
 This is the one maintained Godot application and the only production Godot script assembly. Its
 `Adapter/`, `Shell/`, and conditionally compiled `Local/` sources replace the former `_Godot`,

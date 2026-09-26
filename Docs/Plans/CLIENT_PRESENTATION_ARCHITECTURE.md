@@ -1232,8 +1232,8 @@ there is no incremental entity-slot map, new terrain backend, or actor-tier impl
 Real-native tests cover transforms, AABB/frustum culling, semantic picking, source replacement,
 fallback, display/scenario changes, high/low rebasing and disposal. Dummy headless tests certify
 only the explicitly available lifecycle behavior. Short GPU diagnostics and cold-build residuals
-do not establish a global minimum or sustained frame-rate rating. Actor tiers follow in F1.10;
-vegetation remains future work. The separate Remote world-material resolver gap is not closed here.
+do not establish a global minimum or sustained frame-rate rating. F1.10 subsequently adds actor
+tiers; F1.11 below closes the separate Remote world-material consumer gap and adds opt-in grass.
 
 ## Actor representation and temporal endpoint ownership (F1.10)
 
@@ -1264,12 +1264,34 @@ real catalog/generation acceptance coverage, not just a synthetic visual provide
 versions, receipt timestamps, target time, generation/ID and CPU-resolved pose. Holds/snaps use
 equal endpoints. Neither server timestamps nor controlled prediction are fabricated as remote
 interpolation. The existing delay, hold/gap/teleport and lifetime policies remain unchanged.
-GPU interpolation, skeletal batching, impostors and vegetation are not implemented.
+GPU interpolation, skeletal batching and impostors are not implemented. F1.11's decorative
+vegetation prototype is separate from actor representation policy.
 
 The far-crowd fixture demonstrates large Node and cold lifecycle savings, but higher moving
 owner-thread cost from explicit batch service. This does not prove a global minimum or imply a
-server R300/R350 gain. GPU diagnostics remain separate short stationary samples. F1.11 and W8
-remain unstarted; Remote world-material parity and F1.8A human-feel tails remain explicit risks.
+server R300/R350 gain. GPU diagnostics remain separate short stationary samples. F1.11 is closed
+below; W8 remains unstarted and F1.8A human-feel tails remain explicit dogfooding risks.
+
+## Shared world resources and renderer stress (F1.11)
+
+Local and Remote use `GodotCatalogWorldAssetResolver` through the same immutable presentation
+generation Texture/Material leaves and derived store. Remote's authenticated optional palette
+uses ordinary passive packages; semantic World/UI activation and exact proof remain independent.
+User → Realm → already-authorized world.local → Primitive precedence holds. Compatible texture
+updates replace materials on retained meshes, not semantic chunks/actors or native instance groups.
+Availability changes may rebuild only bounded native realization. Scope leases and derived native
+resources retire before the cache; persisted CAS/derived artifacts are not live session ownership.
+
+The [F1.11 evidence](../../_Benchmarks/Baselines/client-f1.11-renderer-stress-vegetation-2026-09-25.md)
+records production residency/window/SubViewport consumers with 10,000 objects and 256 disclosed
+actors, actual nameplate reveal, stock cameras, distance/pixel controls and cold/warm resources.
+Decorative grass is explicitly opt-in/default Off: one batch per chunk, one patch per present
+Grass base cell, eight blades sharing its exact sampled root, 96 finite shader-generated vertices.
+Base void remains void even beneath an upper surface; additional surfaces are not scatter sources.
+Shader TIME drives wind; one custom-data row carries debug cut, with no Game cut/regrowth semantics.
+Native finite AABB/frustum, horizontal/vertical rebase and deterministic re-entry pass. Collapsed
+geometry still submits vertices. Finite debug sun/time/ambient palettes are not advanced GI or
+authoritative weather. NodeMultiMesh/PerRow and conservative actor tiers remain unchanged.
 
 ---
 
