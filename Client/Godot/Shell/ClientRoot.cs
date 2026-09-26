@@ -614,11 +614,14 @@ public abstract partial class ClientRoot : Control
         Func<ClientDisplaySettings> readDisplay = BuildDisplaySettingsControls(column);
 
         HSlider uiScale = Slider(0.5, 3, 0.05, _resolved.UiScale);
+        uiScale.Name = "SettingsUiScale";
         HSlider volume = Slider(0, 1, 0.05, _resolved.MasterVolume);
         HSlider sensitivity = Slider(0.1, 5, 0.1, _resolved.PointerSensitivity);
         CheckBox invert = new() { Text = "Invert camera Y", ButtonPressed = _resolved.InvertY };
         OptionButton grammar = EnumOptions(_resolved.ControlGrammar);
         OptionButton camera = EnumOptions(_resolved.CameraProfile);
+        grammar.Name = "SettingsControlGrammar";
+        camera.Name = "SettingsCameraProfile";
         HSlider distance = Slider(2, 80, 1, _resolved.CameraDistance);
         HSlider fov = Slider(40, 120, 1, _resolved.CameraFovDegrees);
         ClientCameraProfile initialCamera = (ClientCameraProfile)camera.GetSelectedId();
@@ -629,6 +632,7 @@ public abstract partial class ClientRoot : Control
             ClientSettingsResolver.MaximumRenderDistanceChunks,
             1,
             _resolved.RenderDistanceChunks);
+        renderDistance.Name = "SettingsRenderDistance";
         AddSetting(column, "UI scale", uiScale);
         AddSetting(column, "Master volume", volume);
         AddSetting(column, "Pointer sensitivity", sensitivity);
@@ -761,6 +765,7 @@ public abstract partial class ClientRoot : Control
         ClientDisplaySettings current = _settings.Display;
         column.AddChild(Title("Display (this device only)"));
         OptionButton displayMode = EnumOptions(current.DisplayMode);
+        displayMode.Name = "DisplayWindowMode";
         AddSetting(column, "Display mode", displayMode);
         var advancedToggle = new CheckBox
         {
@@ -806,13 +811,21 @@ public abstract partial class ClientRoot : Control
         SpinBox frameHeight = Dimension(current.AdvancedFrameSize.Height);
         SpinBox outputWidth = Dimension(current.AdvancedOutput.Width);
         SpinBox outputHeight = Dimension(current.AdvancedOutput.Height);
+        applicationWidth.Name = "DisplayApplicationWidth";
+        applicationHeight.Name = "DisplayApplicationHeight";
+        frameWidth.Name = "DisplayFrameWidth";
+        frameHeight.Name = "DisplayFrameHeight";
+        outputWidth.Name = "DisplayOutputWidth";
+        outputHeight.Name = "DisplayOutputHeight";
         OptionButton frameMode = EnumOptions(current.AdvancedFrameMode);
+        frameMode.Name = "DisplayFrameMode";
         SpinBox scale = new()
         {
             MinValue = ClientDisplayResolver.MinimumInternalScalePercent,
             MaxValue = ClientDisplayResolver.MaximumInternalScalePercent,
             Step = 1, Rounded = true, Value = current.AdvancedInternalScalePercent,
         };
+        scale.Name = "DisplayInternalScale";
         AddSetting(advancedPanel, "Application width", applicationWidth);
         AddSetting(advancedPanel, "Application height", applicationHeight);
         AddSetting(advancedPanel, "Gameplay Frame", frameMode);

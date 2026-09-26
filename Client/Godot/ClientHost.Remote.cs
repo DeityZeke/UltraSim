@@ -177,6 +177,10 @@ public partial class ClientHost
                         $"chunks={playable.RenderedChunks} triangles={playable.TerrainTriangles} " +
                         $"filesFetched={playable.Session.Content.Acquisition.FilesFetched} " +
                         $"bytesFetched={playable.Session.Content.Acquisition.BytesFetched} " +
+                        $"optionalPresentationBytes={playable.Session.Presentation.Acquisition.BytesFetched} " +
+                        $"requiredReadyMs={playable.RequiredWorldReadyMilliseconds:0.###} " +
+                        $"guestActiveMs={playable.GuestActiveMilliseconds:0.###} " +
+                        $"applicationEpoch={playable.Session.Presentation.ApplicationSessionEpoch} " +
                         $"proofs={playable.Session.Content.ProofsQueued} " +
                         $"ui={playable.OpenUiViews} chat={playable.Session.Chat.OccurrencesApplied} " +
                         $"actors={playable.Actors.ActiveActors} primitiveActors=" +
@@ -1200,6 +1204,41 @@ public partial class ClientHost
                 in remoteA, in remoteB, in remoteAReconnect,
                 in finalLocal, in finalLocalBoundary, in finalLocalResidue,
                 in finalBoundary);
+
+            if (OS.GetCmdlineUserArgs().Contains("--f1-12-mixed", StringComparer.Ordinal))
+            {
+                F07RemoteLifetime warmTwo = await EnterF07Remote(
+                    ReadRequiredF07Argument("--f0-7-a-endpoint="),
+                    ReadRequiredF07Argument("--f0-7-a-fingerprint="),
+                    "F1.12 Remote A Warm Two", GameGuestBody.HumanFemale);
+                if (!warmTwo.RememberedProfile || warmTwo.Realm != remoteA.Realm ||
+                    warmTwo.ApplicationSessionEpoch == remoteA.ApplicationSessionEpoch ||
+                    warmTwo.ApplicationSessionEpoch == remoteAReconnect.ApplicationSessionEpoch ||
+                    warmTwo.Snapshot.Session.Content.Acquisition.BytesFetched != 0 ||
+                    warmTwo.Snapshot.Session.StructuralPacks.BytesFetched != 0)
+                    throw new InvalidOperationException("Second warm reconnect lost reuse or fresh proof lifetime.");
+                // Scoped product Settings must not replace the authenticated application.
+                await RunF112SettingsAcceptance();
+                if (_remoteSession!.GetSnapshot().ApplicationSessionEpoch != warmTwo.ApplicationSessionEpoch)
+                    throw new InvalidOperationException("Remote product Settings replaced application lifetime.");
+                await RetireF07ToCleanMenu(baseline, "F1.12 second warm reconnect");
+                LocalCabinPresentationSnapshot extraLocal = StartF07LocalSession(
+                    "F1.12 Extra Local", CabinHumanBody.XBot);
+                if (extraLocal.ApplicationSessionEpoch == finalLocal.ApplicationSessionEpoch)
+                    throw new InvalidOperationException("Mixed churn reused Local lineage.");
+                _ = PrepareF07LocalRetirement("F1.12 Extra Local", CabinHumanBody.XBot);
+                await RetireF07ToCleanMenu(baseline, "F1.12 extra Local");
+                string path = ReadRequiredF07Argument("--f1-12-mixed-evidence=");
+                System.IO.File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    Schema = "client-f1.12-mixed-product/v1", Baseline = baseline,
+                    ColdA = remoteA, B = remoteB, WarmOne = remoteAReconnect, WarmTwo = warmTwo,
+                    LocalEpochs = new[] { localOne.ApplicationSessionEpoch, localTwo.ApplicationSessionEpoch,
+                        finalLocal.ApplicationSessionEpoch, extraLocal.ApplicationSessionEpoch },
+                    FinalBoundary = CaptureSessionBoundary(),
+                }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                GD.Print("F1.12 MIXED PRODUCT PASS lifetimes=8 warmReconnects=2 settings=scoped retirement=clean");
+            }
 
             GD.Print(
                 "F0.7 MIXED SESSION LIFECYCLE PASS " +

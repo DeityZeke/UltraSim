@@ -1569,7 +1569,11 @@ public partial class LocalCabinClient : Node3D
             _chatInput.HasFocus(),
             _chatInput.Text,
             _gameplayInputAllowed,
-            _chatState.GetSnapshot().Applied);
+            _chatState.GetSnapshot().Applied)
+        {
+            NextSubmission = _nextChatSubmission,
+            Session = _localSession!.GetSnapshot(),
+        };
     }
 
     /// <summary>
@@ -4415,4 +4419,8 @@ public readonly record struct LocalChatInputSnapshot(
     bool HasFocus,
     string Draft,
     bool GameplayInputAllowed,
-    ulong AppliedOccurrences);
+    ulong AppliedOccurrences)
+{
+    public ulong NextSubmission { get; init; }
+    public LocalPlayableSessionSnapshot Session { get; init; }
+}

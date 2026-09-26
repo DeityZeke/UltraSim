@@ -52,6 +52,9 @@ public readonly record struct RemoteConceptDemoClientSnapshot(
     public ContentHash WorldWallTextureHash { get; init; }
     public PresentationSourceKind WorldWallTextureSource { get; init; }
     public GodotDerivedResourceStoreSnapshot WorldResources { get; init; }
+    /// <summary>Consumer wall stages; creation follows authenticated profile application.</summary>
+    public double RequiredWorldReadyMilliseconds { get; init; }
+    public double GuestActiveMilliseconds { get; init; }
 }
 
 /// <summary>
@@ -180,6 +183,9 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private bool _telemetryWindowActive;
     private long _pf3SustainedInputStarted;
     private RemoteConceptDemoClientState _state = RemoteConceptDemoClientState.AwaitingContent;
+    private readonly long _joinStartedTimestamp = Stopwatch.GetTimestamp();
+    private double _requiredReadyMilliseconds;
+    private double _guestActiveMilliseconds;
     private NetworkTelemetryLevel _telemetryLevel;
     private string? _fault;
     private GodotCatalogWorldAssetResolver? _worldAssets;
@@ -337,6 +343,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             {
                 _contentCacheObserved = _cache!.GetSnapshot();
                 _state = RemoteConceptDemoClientState.AwaitingGuest;
+                _requiredReadyMilliseconds = Stopwatch.GetElapsedTime(_joinStartedTimestamp).TotalMilliseconds;
                 UpdateHud("Required world and UI content applied; choose a guest identity.");
             }
             if (_state == RemoteConceptDemoClientState.AdmissionPending &&
@@ -345,6 +352,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             {
                 BuildWorldPresentation(snapshot.Playable);
                 _state = RemoteConceptDemoClientState.Active;
+                _guestActiveMilliseconds = Stopwatch.GetElapsedTime(_joinStartedTimestamp).TotalMilliseconds;
                 UpdateHud("Remote Concept Demo active");
             }
             if (_state != RemoteConceptDemoClientState.Active) return;
@@ -434,6 +442,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             WorldWallTextureHash = _worldAssets?.WallTextureHash ?? default,
             WorldWallTextureSource = _worldAssets?.WallTextureSource ?? PresentationSourceKind.Primitive,
             WorldResources = _worldDerived?.GetSnapshot() ?? default,
+            RequiredWorldReadyMilliseconds = _requiredReadyMilliseconds,
+            GuestActiveMilliseconds = _guestActiveMilliseconds,
         };
     }
 

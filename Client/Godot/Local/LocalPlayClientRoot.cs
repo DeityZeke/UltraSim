@@ -36,6 +36,11 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
     {
         base._Ready();
         string[] arguments = OS.GetCmdlineUserArgs();
+        if (arguments.Contains("--f1-12-dogfood", StringComparer.Ordinal))
+        {
+            RunF112ProductDogfood();
+            return;
+        }
         bool conceptDemoSmoke = arguments.Contains("--d0-0-smoke", StringComparer.Ordinal);
         bool residencySmoke = arguments.Contains("--d0-1-smoke", StringComparer.Ordinal);
         bool farIslandSmoke = arguments.Contains("--d0-2-smoke", StringComparer.Ordinal);
@@ -760,7 +765,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         cabin.Configure(
             oracle,
             resolved,
-            ProjectSettings.GlobalizePath(useConceptDemoWorld
+            ReadLocalArgument("--f1-12-save-root=") ?? ProjectSettings.GlobalizePath(useConceptDemoWorld
                 ? "user://single-player/concept-demo-d0-0-saves"
                 : "user://single-player/cabin-saves"),
             sessionUi,
@@ -769,7 +774,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             useConceptDemoWorld,
             guestDisplayName,
             extensionFactory,
-            primitiveOnlyPresentation,
+            primitiveOnlyPresentation || ReadLocalArgument("--f1-12-art=") == "primitive",
             PresentationCacheRoot(),
             OfficialContentRoot());
         _cabin = cabin;
@@ -889,7 +894,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         if (submitted.HasFocus || submitted.Draft.Length != 0 ||
             submitted.AppliedOccurrences != before.AppliedOccurrences + 1)
             throw new InvalidOperationException(
-                "Enter did not submit and retire the focused Chat draft exactly once.");
+                $"Enter did not submit and retire the focused Chat draft exactly once. Before={before}; After={submitted}.");
 
         chat.Text = "preserved draft";
         chat.GrabFocus();

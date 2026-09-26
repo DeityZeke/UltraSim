@@ -176,6 +176,8 @@ public readonly record struct GodotWorldRendererSnapshot(
     public long GroupPreparationTicks { get; init; }
     public long GroupingTicks { get; init; }
     public long UploadScratchBytes { get; init; }
+    /// <summary>Live public-layer roots, batch nodes and known-name labels; excludes structural nodes.</summary>
+    public int ActivePublicNodes { get; init; }
     /// <summary>On-demand debug formatting, never called by the renderer hot path.</summary>
     public string ToDiagnosticText() =>
         $"world={InstanceBackend}/{InstanceUpload} chunks={ActiveRenderChunks} nodes={ActiveNodes}\n" +
@@ -272,6 +274,7 @@ public sealed class GodotWorldRenderer : IDisposable
     private int _activeChunks;
     private int _visibleChunks;
     private int _activeNodes;
+    private int _activePublicNodes;
     private int _activeResources;
     private int _activeTerrainSurfaceMeshes;
     private int _activeStaticBatchGroups;
@@ -782,6 +785,7 @@ public sealed class GodotWorldRenderer : IDisposable
             UploadedInstanceRows = _uploadedInstanceRows, BulkUploadBytes = _bulkUploadBytes,
             GroupPreparationTicks = _groupPreparationTicks, GroupingTicks = _groupingTicks,
             UploadScratchBytes = (long)_uploadScratch.Length * sizeof(float),
+            ActivePublicNodes = _activePublicNodes,
         };
     }
 
@@ -906,6 +910,7 @@ public sealed class GodotWorldRenderer : IDisposable
         _retireHead = 0;
         _retireCount = 0;
         _activeNodes = 0;
+        _activePublicNodes = 0;
         _vegetation?.Dispose();
         _activeResources = 0;
         _disposed = true;
@@ -944,6 +949,7 @@ public sealed class GodotWorldRenderer : IDisposable
         _activeChunks++;
         if (candidate.Root.Visible) _visibleChunks++;
         _activeNodes += candidate.NodeCount;
+        _activePublicNodes += candidate.PublicNodeCount;
         _activeResources += candidate.ResourceCount;
         _activeTerrainSurfaceMeshes += candidate.TerrainSurfaceMeshCount;
         _activeStaticBatchGroups += candidate.StaticBatchGroupCount;
@@ -982,6 +988,7 @@ public sealed class GodotWorldRenderer : IDisposable
         if (GodotObject.IsInstanceValid(chunk.PublicRoot)) chunk.PublicRoot.Free();
         _activeInstances -= chunk.PublicInstanceCount;
         _activeNodes -= chunk.PublicNodeCount;
+        _activePublicNodes -= chunk.PublicNodeCount;
         _activeResources -= chunk.PublicResourceCount;
         _activePublicBatchGroups -= chunk.PublicResourceCount;
         _activeFallbackGroups -= FallbackGroupCount(chunk.PublicFallbacks);
@@ -996,6 +1003,7 @@ public sealed class GodotWorldRenderer : IDisposable
         SynchronizeDirectGroups(chunk);
         _activeInstances += chunk.PublicInstanceCount;
         _activeNodes += candidate.NodeCount;
+        _activePublicNodes += candidate.NodeCount;
         _activeResources += candidate.ResourceCount;
         _activePublicBatchGroups += candidate.ResourceCount;
         _activeFallbackGroups += FallbackGroupCount(candidate.Fallbacks);
@@ -1592,6 +1600,7 @@ public sealed class GodotWorldRenderer : IDisposable
         if (chunk.Root.Visible) _visibleChunks--;
         _activeChunks--;
         _activeNodes -= chunk.NodeCount;
+        _activePublicNodes -= chunk.PublicNodeCount;
         _activeResources -= chunk.ResourceCount;
         _activeTerrainSurfaceMeshes -= chunk.TerrainSurfaceMeshCount;
         _activeStaticBatchGroups -= chunk.StaticBatchGroupCount;

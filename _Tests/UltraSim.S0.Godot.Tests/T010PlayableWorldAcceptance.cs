@@ -1582,6 +1582,8 @@ public partial class T010PlayableWorldAcceptance : Node3D
         Expect(!groundItemName.IsVisibleInTree(),
             "Releasing Ctrl did not hide the generic ground-item name.");
         ValidateGodotTerrainFrontFaces(renderer.Root);
+        Expect(initialRender.ActivePublicNodes == CountPublicLayerNodes(renderer.Root),
+            "Public-layer node diagnostic drifted from native ownership.");
         Expect(initialRender.ActiveNodes < 9 * TerrainChunkFormat.MaterialCellCount,
             "The playable renderer created cell-shaped scene-tree identity.");
         var swordPrimitive = FindNamedDescendant(renderer.Root,
@@ -1639,6 +1641,8 @@ public partial class T010PlayableWorldAcceptance : Node3D
             "The native door public refresh did not queue.");
         renderer.ProcessFrame(new GodotWorldFrameBudget(1, 0));
         GodotWorldRendererSnapshot afterRefresh = renderer.GetSnapshot();
+        Expect(afterRefresh.ActivePublicNodes == CountPublicLayerNodes(renderer.Root),
+            "Public refresh lost exact public-layer node accounting.");
         Expect(afterRefresh.PublicRefreshes == beforeRefresh.PublicRefreshes + 1 &&
             afterRefresh.CompletedBuilds == beforeRefresh.CompletedBuilds,
             "Opening the door rebuilt immutable cabin presentation.");
@@ -1653,6 +1657,8 @@ public partial class T010PlayableWorldAcceptance : Node3D
         double peakResources = Performance.GetMonitor(Performance.Monitor.ObjectResourceCount);
         double peakBuffers = Performance.GetMonitor(Performance.Monitor.RenderBufferMemUsed);
         renderer.Dispose();
+        Expect(renderer.GetSnapshot().ActivePublicNodes == 0,
+            "Retired renderer retained public-layer node ownership.");
         GC.Collect();
         GC.WaitForPendingFinalizers();
         GC.Collect();
@@ -1939,6 +1945,22 @@ public partial class T010PlayableWorldAcceptance : Node3D
     private sealed record ActorContentFixture(
         ContentPackageManifest Manifest,
         ContentFilePayload[] Payloads);
+
+    // Cold acceptance observation only; production snapshots use maintained owner-local counts.
+    private static int CountPublicLayerNodes(Node root)
+    {
+        int total = 0;
+        foreach (Node child in root.GetChildren())
+            total += child.Name == "Public" ? CountSubtree(child) : CountPublicLayerNodes(child);
+        return total;
+
+        static int CountSubtree(Node node)
+        {
+            int count = 1;
+            foreach (Node child in node.GetChildren()) count += CountSubtree(child);
+            return count;
+        }
+    }
 
     private static int Drain(GodotWorldRenderer renderer)
     {

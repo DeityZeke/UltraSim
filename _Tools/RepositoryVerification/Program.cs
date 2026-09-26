@@ -25,6 +25,24 @@ Console.WriteLine("PASS documentation architecture and links");
 if (options.ArchitectureOnly)
     return 0;
 
+if (options.F112Only)
+{
+    string godot = ResolveGodot(options.GodotPath);
+    ContentlessOnlineExport product = VerifyContentlessOnlineExport(root, godot);
+    try
+    {
+        FinalClientProductExports local = VerifyFinalClientProductExports(root, godot, product.Scope);
+        VerifyContentlessOnlineNative(root, options.Configuration, product.Executable, ["--headless", "--"]);
+        VerifyMixedSessionLifecycleNative(root, options.Configuration, godot, local.CompleteExecutable);
+    }
+    finally
+    {
+        if (Directory.Exists(product.Scope)) Directory.Delete(product.Scope, recursive: true);
+    }
+    Console.WriteLine("PASS F1.12 focused actual-exported-product journeys");
+    return 0;
+}
+
 if (options.F17Only)
 {
     VerifyF17ClientWorkspace(root, options);
@@ -2551,6 +2569,9 @@ foreach (string configuration in configurations)
                     ["--headless", "--"]);
                 VerifyEmbeddedCompleteHostedNative(
                     root, product.Executable, finalProducts.CompleteExecutable);
+                VerifyMixedSessionLifecycleNative(root, configuration, godot,
+                    finalProducts.CompleteExecutable);
+                mixedSessionLifecycleVerified = true;
                 embeddedCompleteHostedVerified = true;
                 VerifyPf1MixedExportedSwarm(
                     root, configuration, product.Executable);
@@ -3270,7 +3291,41 @@ static FinalClientProductExports VerifyFinalClientProductExports(
         $"completeAssemblies={completeAssemblies.Length} completeNetwork=Full " +
         "singlePlayerNative=pass completeLocalNative=pass " +
         "officialExternal=true installedAbsentRestored=true binaryIdentity=true");
+    VerifyF112LocalExport(root, singlePlayerExecutable, "SinglePlayer", "installed", 8);
+    VerifyF112LocalExport(root, singleAbsentExecutable, "SinglePlayer", "absent", 4);
+    VerifyF112LocalExport(root, singlePlayerExecutable, "SinglePlayer", "primitive", 4);
+    VerifyF112LocalExport(root, completeExecutable, "Complete", "installed", 4,
+        vegetation: true);
     return new FinalClientProductExports(singlePlayerExecutable, completeExecutable);
+}
+
+static void VerifyF112LocalExport(string root, string executable, string edition,
+    string art, int seconds, bool vegetation = false)
+{
+    string scope = Path.Combine(root, ".output", "f1.12-verification", Environment.ProcessId.ToString());
+    Directory.CreateDirectory(scope);
+    string label = $"{edition}-{art}-{(vegetation ? "vegetation" : "default")}";
+    string evidence = Path.Combine(scope, label + ".json");
+    string head = RunCaptured(root, "git", ["rev-parse", "HEAD"], 5_000).Trim();
+    var args = new List<string>
+    {
+        "--headless", "--", "--f1-12-dogfood", $"--expect-edition={edition}",
+        $"--f1-12-art={art}", $"--f1-12-seconds={seconds}", $"--f1-12-head={head}",
+        $"--f1-12-save-root={Path.Combine(scope, label + "-saves")}",
+        $"--content-cache={Path.Combine(scope, label + "-content")}",
+        $"--f1-12-evidence={evidence}",
+    };
+    if (vegetation) args.Add("--f1-11-vegetation");
+    string output = RunCaptured(root, executable, args, 240_000);
+    if (!output.Contains("F1.12 PRODUCT DOGFOOD PASS", StringComparison.Ordinal) || !File.Exists(evidence))
+        throw new InvalidOperationException("Actual exported F1.12 journey omitted its evidence.");
+    using JsonDocument recorded = JsonDocument.Parse(File.ReadAllBytes(evidence));
+    if (recorded.RootElement.GetProperty("lifetimes").GetArrayLength() != 3 ||
+        recorded.RootElement.GetProperty("samples").GetArrayLength() != 3 * seconds ||
+        recorded.RootElement.GetProperty("HumanFeelRated").GetBoolean())
+        throw new InvalidOperationException("F1.12 bounded resource/journey evidence is incomplete.");
+    Console.WriteLine($"PASS F1.12_ExportedProductDogfood edition={edition} art={art} " +
+        $"vegetation={vegetation} evidence={evidence}");
 }
 
 static void RequireExternalOfficialPresentation(
@@ -4985,7 +5040,8 @@ static void WaitForPf1Files(
 static void VerifyMixedSessionLifecycleNative(
     string root,
     string configuration,
-    string godot)
+    string godot,
+    string? exportedComplete = null)
 {
     string scope = Path.Combine(
         Path.GetTempPath(), "ultrasim-repository-verification",
@@ -5025,12 +5081,16 @@ static void VerifyMixedSessionLifecycleNative(
                 "World, actor, and client-profile payload contract.");
 
         string f10Evidence = Path.Combine(scope, "f1.0-client-baseline.json");
-        string output = RunCaptured(root, godot,
+        string f112Evidence = Path.Combine(root, ".output", "f1.12-verification",
+            Environment.ProcessId.ToString(), "Complete-mixed.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(f112Evidence)!);
+        string output = RunCaptured(root, exportedComplete ?? godot,
+        (exportedComplete is null ? new[] { "--headless", "--path", "Client/Godot", "--" }
+            : new[] { "--headless", "--" }).Concat(
         [
-            "--headless",
-            "--path", "Client/Godot",
-            "--",
             "--f0-7-smoke",
+            "--f1-12-mixed",
+            $"--f1-12-mixed-evidence={f112Evidence}",
             "--expect-edition=Complete",
             $"--f0-7-a-endpoint={readyA.Endpoint}",
             $"--f0-7-a-fingerprint={readyA.Fingerprint}",
@@ -5040,7 +5100,9 @@ static void VerifyMixedSessionLifecycleNative(
             $"--a0-8-trust={Path.Combine(scope, "client", "trusted-servers.json")}",
             $"--f0-3c-profile-decisions={Path.Combine(scope, "client", "server-profiles.json")}",
             $"--f1-0-evidence={f10Evidence}",
-        ], 240_000);
+        ]), 300_000);
+        if (!output.Contains("F1.12 MIXED PRODUCT PASS lifetimes=8", StringComparison.Ordinal))
+            throw new InvalidOperationException("Extended same-process mixed lifetime control did not complete.");
         if (!output.Contains("F0.7 MIXED SESSION LIFECYCLE PASS", StringComparison.Ordinal) ||
             !output.Contains("F1.0 CLIENT BASELINE PASS", StringComparison.Ordinal) ||
             !output.Contains($"realms={readyA.Realm}/{readyB.Realm}/{readyA.Realm}",
@@ -6247,6 +6309,7 @@ static string Relative(string root, string path) => Path.GetRelativePath(root, p
 internal sealed record VerificationOptions(
     bool ArchitectureOnly,
     bool F17Only,
+    bool F112Only,
     bool Pf1Only,
     bool Pf2Only,
     bool Pf25Only,
@@ -6288,7 +6351,7 @@ internal sealed record VerificationOptions(
 {
     internal static VerificationOptions Parse(string[] arguments)
     {
-        bool architectureOnly = false, f17Only = false,
+        bool architectureOnly = false, f17Only = false, f112Only = false,
             pf1Only = false, pf2Only = false, pf25Only = false,
             pf3Only = false, pf3NativeOnly = false, pf4aOnly = false, pf4bOnly = false,
             pf4cOnly = false, pf4dOnly = false, pf4eOnly = false, pf4eR1Only = false,
@@ -6309,6 +6372,7 @@ internal sealed record VerificationOptions(
         {
             if (argument == "--architecture-only") architectureOnly = true;
             else if (argument == "--f1-7-only") f17Only = true;
+            else if (argument == "--f1-12-only") f112Only = true;
             else if (argument == "--pf1-only") pf1Only = true;
             else if (argument == "--pf2-only") pf2Only = true;
             else if (argument == "--pf2.5-only") pf25Only = true;
@@ -6440,14 +6504,14 @@ internal sealed record VerificationOptions(
         }
         if (configuration is not ("Debug" or "Release"))
             throw new ArgumentException("Verification configuration must be Debug or Release.");
-        if ((f17Only || pf1Only || pf2Only || pf25Only || pf3Only || pf3NativeOnly || pf4aOnly ||
+        if ((f17Only || f112Only || pf1Only || pf2Only || pf25Only || pf3Only || pf3NativeOnly || pf4aOnly ||
              pf4bOnly || pf4cOnly || pf4dOnly || pf4eOnly || pf4eR1Only || pf4eR2Only ||
              pf4fOnly || pf5Only || pf5R1Only || pf5R2Only || pf5R2R1Only ||
              pf5R2R2Only || pf5R3Only || pf5R4Only || pf5R5Only || pf5R6Only ||
              pf5R7Only || pf5R8Only || pf5R9Only || pf5R12Only) &&
             architectureOnly)
             throw new ArgumentException("Focused PF verification cannot be architecture-only.");
-        if ((f17Only ? 1 : 0) + (pf1Only ? 1 : 0) + (pf2Only ? 1 : 0) + (pf25Only ? 1 : 0) +
+        if ((f17Only ? 1 : 0) + (f112Only ? 1 : 0) + (pf1Only ? 1 : 0) + (pf2Only ? 1 : 0) + (pf25Only ? 1 : 0) +
             (pf3Only ? 1 : 0) + (pf3NativeOnly ? 1 : 0) + (pf4aOnly ? 1 : 0) +
             (pf4bOnly ? 1 : 0) + (pf4cOnly ? 1 : 0) + (pf4dOnly ? 1 : 0) +
             (pf4eOnly ? 1 : 0) + (pf4eR1Only ? 1 : 0) + (pf4eR2Only ? 1 : 0) +
@@ -6481,9 +6545,9 @@ internal sealed record VerificationOptions(
             !pf4cOnly && !pf4dOnly && !pf4eOnly && !pf4fOnly && !pf5Only)
             throw new ArgumentException(
                 "Native PF options require --pf3-only, --pf3-native-only, --pf4a-only, --pf4b-only, --pf4c-only, --pf4d-only, --pf4e-only, --pf4f-only, or --pf5-only.");
-        if (f17Only && skipGodot)
-            throw new ArgumentException("--f1-7-only requires the native Godot acceptance path.");
-        return new(architectureOnly, f17Only, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only, pf4fOnly, pf5Only, pf5R1Only, pf5R2Only, pf5R2R1Only, pf5R2R2Only, pf5R3Only, pf5R4Only, pf5R5Only, pf5R6Only, pf5R7Only, pf5R8Only,
+        if ((f17Only || f112Only) && skipGodot)
+            throw new ArgumentException("Focused F1 verification requires the native Godot acceptance path.");
+        return new(architectureOnly, f17Only, f112Only, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only, pf4fOnly, pf5Only, pf5R1Only, pf5R2Only, pf5R2R1Only, pf5R2R2Only, pf5R3Only, pf5R4Only, pf5R5Only, pf5R6Only, pf5R7Only, pf5R8Only,
             pf5R9Only, pf5R12Only, pf3Only, pf3NativeOnly,
             pf25LongNative,
             allConfigurations, configuration, skipGodot, noRestore, godot,

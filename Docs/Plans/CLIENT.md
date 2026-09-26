@@ -17,7 +17,7 @@ The [F1.10 actor-tier evidence](../../_Benchmarks/Baselines/client-f1.10-actor-r
 selects a conservative hybrid: Detailed near/feature-bearing actors, distant batched primitives.
 [F1.11](../../_Benchmarks/Baselines/client-f1.11-renderer-stress-vegetation-2026-09-25.md)
 closes common Local/Remote catalog-backed world resources and native renderer stress, with
-procedural vegetation opt-in/default Off. F1.12 is next and unstarted; W8 remains unstarted. The initial F1.8A
+procedural vegetation opt-in/default Off. F1.12 is active; closure evidence is pending and PF6 remains waiting. W8 remains unstarted. The initial F1.8A
 closure evidence remains historical, and the [R1 correction](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md)
 records reproduced defects, the earlier intermittent final-tree verifier failures, and corrected
 verification. F1.2 separates the required remote WorldPack/UI activation and its exact application proof
@@ -2826,7 +2826,7 @@ F1.9A Simple/Advanced display composition and real Gameplay Frame output      CL
 F1.9B scalable Godot RID/MultiMesh backend                                    CLOSED (NodeMultiMesh/PerRow)
 F1.10 actor representation tiers/realization interpolation seam               CLOSED (conservative hybrid)
 F1.11 renderer stress consumers/vegetation prototype                          CLOSED (default Off)
-F1.12 product dogfooding/PF6 readiness                                        NEXT / UNSTARTED
+F1.12 product dogfooding/PF6 readiness                                        ACTIVE / EVIDENCE PENDING
         |
         v
 PF6 external human validation                                                WAITING ON F1.12
