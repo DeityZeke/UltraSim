@@ -1148,6 +1148,11 @@ static void ConceptDemoSaveSequenceSurvivesSessionReentry()
             True(session.TryGetLatestView(out LocalPlayableAuthorityView loaded));
             True(loaded.LastAdministrativeSucceeded, loaded.LastAdministrativeMessage);
             True(loaded.GenerationId > saved.GenerationId);
+            var metadata = new ClientPublicPresentationMetadata[128];
+            True(!session.TryCopyPublicPresentationMetadata(saved.GenerationId, metadata, out int staleCount));
+            Equal(0, staleCount);
+            True(session.TryCopyPublicPresentationMetadata(loaded.GenerationId, metadata, out int currentCount));
+            for (int row = 0; row < currentCount; row++) Equal(loaded.GenerationId, metadata[row].ServerGenerationId);
             var chat = new ClientChatState(session.ApplicationSessionEpoch);
             True(session.TrySubmitChat(1, ClientChatSpeechMode.Say, "after restored generation"));
             DriveUntil(() => { session.PumpChat(chat); return chat.GetSnapshot().Applied == 1; });
@@ -1155,6 +1160,7 @@ static void ConceptDemoSaveSequenceSurvivesSessionReentry()
             Equal(1, chat.CopyRecent(speech));
             True(speech[0].Kind == ClientChatOccurrenceKind.SpatialSpeech, speech[0].Text);
             Equal("after restored generation", speech[0].Text);
+            Equal(loaded.GenerationId, speech[0].ServerGenerationId);
         }
         var coordinator = new UltraSim.Server.Persistence.SaveSetCoordinator(root);
         True(coordinator.TryGetNextSequence(out ulong next));

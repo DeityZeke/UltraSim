@@ -290,6 +290,23 @@ public sealed class LocalPlayableSession : IDisposable
         }
     }
 
+    /// <summary>Copies only the metadata cohort matching a previously captured authority view.</summary>
+    public bool TryCopyPublicPresentationMetadata(
+        ulong expectedGeneration, Span<ClientPublicPresentationMetadata> destination, out int count)
+    {
+        EnsureOperational();
+        lock (_viewGate)
+        {
+            count = 0;
+            if (expectedGeneration == 0) return false;
+            if (_latestView.GenerationId != expectedGeneration) return false;
+            count = _latestPublicPresentationCount;
+            if (destination.Length < count) return false;
+            _latestPublicPresentation.AsSpan(0, count).CopyTo(destination);
+            return true;
+        }
+    }
+
     public int PumpChat(ClientChatState chat, int maximumDeliveries = 32)
     {
         EnsureOperational();

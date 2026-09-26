@@ -1904,10 +1904,15 @@ public partial class LocalCabinClient : Node3D
     private void SynchronizeColdPublicPresentationMetadata()
     {
         if (_localSession is null || _publicPresentationMetadata is null) return;
-        int count = _localSession.CopyPublicPresentationMetadata(_sharedMetadata);
-        if (count < 0)
-            throw new InvalidOperationException(
-                "The cold public metadata exceeded the local presentation capacity.");
+        if (!_localSession.TryCopyPublicPresentationMetadata(
+                _publicPresentationMetadata.GetSnapshot().ServerGenerationId, _sharedMetadata, out int count))
+        {
+            if (count > _sharedMetadata.Length)
+                throw new InvalidOperationException("The cold public metadata exceeded the local presentation capacity.");
+            // The owner published a replacement after we captured the view. Keep the previous
+            // valid presentation; the next projection pass will observe and rebuild that generation.
+            return;
+        }
         for (int previous = 0; previous < _previousSharedMetadataCount; previous++)
         {
             ClientPublicPresentationMetadata old = _previousSharedMetadata[previous];
@@ -1940,7 +1945,7 @@ public partial class LocalCabinClient : Node3D
             if (status is not (ClientPublicPresentationApplyStatus.Applied or
                     ClientPublicPresentationApplyStatus.Duplicate))
                 throw new InvalidOperationException(
-                    $"Cold public metadata was rejected: {status}.");
+                    $"Cold public metadata was rejected: {status}; source={metadata}; state={_publicPresentationMetadata.GetSnapshot()}.");
         }
         _sharedMetadata.AsSpan(0, count).CopyTo(_previousSharedMetadata);
         if (count < _previousSharedMetadataCount)
