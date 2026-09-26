@@ -10,8 +10,9 @@ Complete-hosted deployment shapes. I0.12 human-play hardening prevents visible e
 remaining a pointer-nominated world pickup, and I0.13 replaces its temporary cold property text
 with bounded typed Inspection Properties plus content-sized world-hover/Inventory presentation.
 
-F1.0-F1.8A are closed after the F1.8A-R1 corrective checkpoint; F1.9A display composition is
-active, with F1.9B scalable realization next. The initial F1.8A
+F1.0-F1.9A are closed after the F1.8A-R1 corrective checkpoint and the
+[F1.9A display-composition evidence](../../_Benchmarks/Baselines/client-f1.9a-display-composition-2026-09-25.md);
+F1.9B scalable realization is next. The initial F1.8A
 closure evidence remains historical, and the [R1 correction](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md)
 records reproduced defects, the earlier intermittent final-tree verifier failures, and corrected
 verification. F1.2 separates the required remote WorldPack/UI activation and its exact application proof
@@ -2816,8 +2817,8 @@ F1.6 derived resources/atlas pipeline                                         CL
 F1.7 application workspace/Gameplay Frame/shared UI/gump manager             CLOSED
 F1.8 declarative camera/control rig + canonical gameplay-view crop            CLOSED
 F1.8A remote motion prediction/reconciliation/interpolation                   CLOSED after R1
-F1.9A Simple/Advanced display composition and real Gameplay Frame output      ACTIVE
-F1.9B scalable Godot RID/MultiMesh backend                                    PLANNED
+F1.9A Simple/Advanced display composition and real Gameplay Frame output      CLOSED
+F1.9B scalable Godot RID/MultiMesh backend                                    NEXT
 F1.10 actor representation tiers/realization interpolation seam               PLANNED
 F1.11 renderer stress consumers/vegetation prototype                          PLANNED
 F1.12 product dogfooding/PF6 readiness                                        PLANNED

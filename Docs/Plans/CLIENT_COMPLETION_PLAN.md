@@ -1,6 +1,6 @@
 # UltraSim Client Completion Plan
 
-**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.8A are CLOSED after the F1.8A-R1 correction; F1.9A display composition is ACTIVE, then F1.9B scalable realization.** The original F1.8A closure claim is superseded by the [corrective evidence](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md), which records both the reproduced defects and the earlier final-tree verifier failures.
+**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.9A are CLOSED; F1.9B scalable realization is NEXT.** F1.9A's tested implementation and verification are recorded in the [display-composition evidence](../../_Benchmarks/Baselines/client-f1.9a-display-composition-2026-09-25.md). The original F1.8A closure claim is superseded by the [corrective evidence](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md), which records both the reproduced defects and the earlier final-tree verifier failures.
 
 **Parent architecture:** [CLIENT_PRESENTATION_ARCHITECTURE.md](CLIENT_PRESENTATION_ARCHITECTURE.md)
 
@@ -90,8 +90,8 @@ F1.6  Derived resources / atlas pipeline (CLOSED)
 F1.7  Application workspace, Gameplay Frame, shared UI/gump composition (CLOSED)
 F1.8  Declarative camera/control rig and canonical gameplay-view crop (CLOSED)
 F1.8A Remote motion prediction/reconciliation/interpolation (CLOSED after R1 correction)
-F1.9A Simple/Advanced display composition and real Gameplay Frame output (ACTIVE)
-F1.9B scalable Godot realization / RID / MultiMesh (PLANNED)
+F1.9A Simple/Advanced display composition and real Gameplay Frame output (CLOSED)
+F1.9B scalable Godot realization / RID / MultiMesh (NEXT)
 F1.10 Actor representation tiers and GPU-friendly interpolation seam
 F1.11 Renderer stress consumers / vegetation prototype
 F1.12 Product dogfooding and PF6 readiness

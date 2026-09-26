@@ -1,0 +1,87 @@
+{
+  "checkpoint": "F1.9A",
+  "date": "2026-09-25",
+  "startingHead": "9ab3030413898298f5f4a06c23157ebcc0722017",
+  "testedImplementationHead": "371ffc90978f69ddc2a94149b6343c669b59f1ec",
+  "evidenceCommit": "see git history containing this artifact",
+  "environment": {
+    "os": "CachyOS Linux 7.2.6 x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D, 8 cores, 16 threads",
+    "memoryGiB": 30,
+    "dotnetSdk": "8.0.131",
+    "dotnetRuntime": "8.0.31",
+    "godot": "4.7.1 Mono",
+    "renderer": "gl_compatibility",
+    "physicalMonitorControlled": false,
+    "gpuTimingAvailable": false
+  },
+  "versions": {
+    "settingsBefore": 4,
+    "settingsAfter": 5,
+    "gameManifest": 33,
+    "networkTransportRevision": 2,
+    "worldPack": 1,
+    "worldStructuralManifest": 1,
+    "worldview": 2
+  },
+  "simplePresets": {
+    "16:9": [[1280,720],[1600,900],[1920,1080],[2560,1440],[3840,2160]],
+    "16:10": [[1280,800],[1440,900],[1680,1050],[1920,1200],[2560,1600]],
+    "4:3": [[1024,768],[1280,960],[1600,1200],[1920,1440]],
+    "5:4": [[1280,1024]]
+  },
+  "constraints": {
+    "maximumDimension": 4096,
+    "maximumPixelsPerTarget": 8294400,
+    "minimumInternalScalePercent": 50,
+    "maximumInternalScalePercent": 100,
+    "outputFrameAspect": "exact reduced-ratio equality",
+    "maximumCanonicalWorldAspect": "16:9 envelope",
+    "displayOwnership": "user-global; not server-profile controlled"
+  },
+  "nativeCases": [
+    {"name":"simple16_9","application":[1920,1080],"frame":[0,0,1920,1080],"output":[1920,1080],"internal3D":[1920,1080],"pass":true},
+    {"name":"simple4_3","application":[1600,1200],"frame":[0,0,1600,1200],"output":[1600,1200],"internal3D":[1600,1200],"pass":true},
+    {"name":"advancedSmallerOutput","application":[2560,1440],"frame":[320,180,1920,1080],"output":[1280,720],"internal3D":[1280,720],"pass":true},
+    {"name":"advancedHalfInternal","application":[2560,1440],"frame":[320,180,1920,1080],"output":[1920,1080],"internal3D":[960,540],"pass":true},
+    {"name":"custom1500x920","application":[1500,920],"frame":[0,0,1500,920],"output":[1500,920],"internal3D":[1125,690],"pass":true},
+    {"name":"exactMaxFit","application":[1500,920],"frame":[6,41,1488,837],"output":[1280,720],"internal3D":[960,540],"pass":true}
+  ],
+  "nativeAssertions": {
+    "oneRetainedSubViewport": true,
+    "worldAndCameraOwnershipRetained": true,
+    "frameToOutputMapping": true,
+    "nativeRayRoundTrip": true,
+    "cameraCanonicalEnvelopeBounded": true,
+    "physicalFullscreenLogicalResolutionStable": true,
+    "localActiveSessionSemanticIdentityRetained": true,
+    "localRetirementClean": true,
+    "remoteW7ScaledOutput": [1280,720],
+    "remoteW7ScaledInternal3D": [960,540],
+    "remoteFarGateAndSeam127_128_127": "pass"
+  },
+  "localNativeDiagnostic": [
+    {"name":"simple1920_100","reconfigureUs":91,"engineProcessMeanMs":0.633,"rendererFrameMeanUs":0.146,"rgbaLowerBoundBytes":16588800,"rendererNodes":177,"rendererResources":99,"gpuMonitorBytes":0},
+    {"name":"output1920_internal50","reconfigureUs":27,"engineProcessMeanMs":0.633,"rendererFrameMeanUs":0.137,"rgbaLowerBoundBytes":10368000,"rendererNodes":177,"rendererResources":99,"gpuMonitorBytes":0},
+    {"name":"output1280_internal100","reconfigureUs":45,"engineProcessMeanMs":2.172,"rendererFrameMeanUs":0.128,"rgbaLowerBoundBytes":7372800,"rendererNodes":177,"rendererResources":99,"gpuMonitorBytes":0}
+  ],
+  "performanceInterpretation": "headless smoke diagnostics only; GPU unavailable; not a rated resolution speed curve",
+  "verification": {
+    "clientCoreRelease": "pass",
+    "nativeS08": "pass, six display cases and legacy ray/presentation controls",
+    "focusedF17Release": "pass, active Local display change and clean retirement",
+    "architectureOnlyOnImplementation": "pass",
+    "canonicalReleaseOnImplementation": "pass, one uninterrupted invocation ending PASS repository verification",
+    "completeManagedExportInternalRetry": "first export incomplete; verifier exporter retried from clean generated state and passed",
+    "singlePlayerExport": "pass",
+    "onlineExportAndContentless": "pass",
+    "completeExport": "pass",
+    "remoteW7ScaledJourney": "pass",
+    "w7R1CoreControls": "pass",
+    "pf1Pf2NativeSwarms": "pass",
+    "f07MixedLifecycle": "pass",
+    "f10LifecycleGuardrails": "pass"
+  },
+  "f19bStarted": false,
+  "w8Started": false
+}
