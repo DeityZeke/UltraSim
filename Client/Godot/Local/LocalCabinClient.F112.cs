@@ -1,5 +1,6 @@
 using Godot;
 using UltraSim.Client.Core;
+using UltraSim.Client.Content;
 using UltraSim.Client.Local;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Input;
@@ -9,6 +10,38 @@ namespace UltraSim.Client.Godot;
 
 public partial class LocalCabinClient
 {
+    public void PrepareF112CabinCapture()
+    {
+        // Matched mechanical preparation; the separate F0.2 gate still requires its exact art.
+        ProbeSelectedPublicTargetRetention();
+        ProbePlayableChat();
+        ProbePlayableInventory();
+        ProbeDoorAndChestInteraction();
+        PrepareF112CentralControl();
+        var actors = GetPresentationSnapshot().Actors;
+        if (actors.ActiveActors == 0 || _primitiveOnlyPresentation && actors.AnimatedActors != 0)
+            throw new InvalidOperationException("Cabin capture presentation mode was not realized.");
+    }
+
+    public void SetF112PrimitivePreview(bool primitive)
+    {
+        if (_presentationGeneration is null || _assetResolver is null || _actorVisuals is null ||
+            _actorPresenter is null || _derivedResources is null)
+            throw new InvalidOperationException("Same-session preview requires installed presentation resources.");
+        PresentationGeneration candidate = PresentationGeneration.CreateWithResources(
+            primitive ? null : OpenUserResourcePacks(), null,
+            primitive ? null : OpenLocalPresentationCatalog(), null,
+            primitive ? null : OpenCabinResourceCatalog());
+        var previous = _presentationGeneration;
+        _assetResolver.Refresh(candidate, _derivedResources);
+        _presentationGeneration = candidate;
+        _actorVisuals.UpdateSource(candidate);
+        _ = _actorPresenter.RefreshResolvedVisuals();
+        _actorVisuals.ReleaseRetiredResources();
+        previous.Dispose();
+        _primitiveOnlyPresentation = primitive;
+        RebuildClientProjection(ReadF112Authority(), preserveSemanticCache: true);
+    }
     public object SetF112CabinView(string view)
     {
         if (_camera is null || _cache is null) throw new InvalidOperationException("Cabin is not ready.");
@@ -28,6 +61,7 @@ public partial class LocalCabinClient
         return new { ApplicationEpoch = _localSession!.ApplicationSessionEpoch,
             ControlEpoch = _localSession.ControlSession.Value, authority.GenerationId,
             Manifest = authority.PreparedComposition?.Manifest.Fingerprint.ToString(),
+            BaseWorldFingerprint = authority.PreparedWorld?.BaseWorldFingerprint.ToString(),
             Catalog = _resolvedContent!.Catalog.Fingerprint.ToString(),
             Presentation = GetPresentationSnapshot().PresentationGeneration,
             SemanticHash = _cache.GetSnapshot().WorldSemanticHash,

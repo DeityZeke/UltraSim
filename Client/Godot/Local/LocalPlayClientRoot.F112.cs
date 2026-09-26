@@ -67,7 +67,7 @@ public abstract partial class LocalPlayClientRoot
         {
             Stage($"request display={DisplayServer.GetName()} loop={RenderingServer.IsRenderLoopEnabled()} visible={GetWindow().Visible}");
             if (DisplayServer.GetName() == "headless") throw new InvalidOperationException("Native display required.");
-            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
             Stage("process-frame");
             var scene = new Node3D { Name = "F112KnownScene" };
             WorldRoot.AddChild(scene);
@@ -76,7 +76,7 @@ public abstract partial class LocalPlayClientRoot
             var mesh = new MeshInstance3D { Mesh = new BoxMesh(), MaterialOverride = new StandardMaterial3D
             { ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded, AlbedoColor = new Color(1, .2f, .05f) } };
             scene.AddChild(mesh);
-            await ToSignal(GetTree(), SceneTree.SignalName.PhysicsFrame);
+            await AwaitF112Boundary(GetTree(), SceneTree.SignalName.PhysicsFrame);
             Stage($"physics-frame pre={pre} post={post} viewport={UiComposition.GameplayViewport.Size}");
             // Documented synchronous native rendering boundary, not a timing delay.
             Stage("force-draw-start");
@@ -87,7 +87,7 @@ public abstract partial class LocalPlayClientRoot
             if (image.IsEmpty() || image.SavePng(System.IO.Path.Combine(directory, "probe.png")) != Error.Ok)
                 throw new InvalidOperationException("Native readback failed.");
             scene.Free();
-            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
             Stage("retired");
             GetTree().Quit(0);
         }
@@ -117,7 +117,7 @@ public abstract partial class LocalPlayClientRoot
             StartLocalCabin(CabinContentVariant.Default, CabinHumanBody.XBot, useConceptDemoWorld: false);
             Stage("session-entered");
             LocalCabinClient cabin = _cabin!;
-            cabin.RunF02Acceptance();
+            cabin.PrepareF112CabinCapture();
             Stage("acceptance-complete");
             if (passiveReadyControl)
             {
@@ -131,16 +131,25 @@ public abstract partial class LocalPlayClientRoot
             await AwaitF112Boundary(GetTree(), SceneTree.SignalName.PhysicsFrame);
             Stage("physics-frame");
             LocalCabinPresentationSnapshot before = cabin.GetPresentationSnapshot();
-            var captures = new List<object>(10);
+            string art = ReadLocalArgument("--f1-12-art=") ?? "installed";
+            var captures = new List<object>(12);
             foreach (string view in new[] { "Exterior", "Doorway", "Interior", "Shelf" })
                 await Capture(view, GodotDiagnosticTimeOfDay.Noon, GodotDiagnosticAtmosphere.Temperate);
             foreach (GodotDiagnosticTimeOfDay time in new[]
                 { GodotDiagnosticTimeOfDay.Dawn, GodotDiagnosticTimeOfDay.Dusk, GodotDiagnosticTimeOfDay.Night })
                 await Capture("Exterior", time, GodotDiagnosticAtmosphere.Temperate);
             await Capture("Exterior", GodotDiagnosticTimeOfDay.Noon, GodotDiagnosticAtmosphere.Cold);
+            if (art == "installed")
+            {
+                cabin.SetF112PrimitivePreview(true);
+                art = "primitive-same-session";
+                foreach (string view in new[] { "Exterior", "Doorway", "Interior", "Shelf" })
+                    await Capture(view, GodotDiagnosticTimeOfDay.Noon, GodotDiagnosticAtmosphere.Temperate);
+            }
             LocalCabinPresentationSnapshot after = cabin.GetPresentationSnapshot();
             if (before.ApplicationSessionEpoch != after.ApplicationSessionEpoch ||
-                before.ControlSessionEpoch != after.ControlSessionEpoch)
+                before.ControlSessionEpoch != after.ControlSessionEpoch ||
+                before.SemanticWorld.WorldSemanticHash != after.SemanticWorld.WorldSemanticHash)
                 throw new InvalidOperationException("Environment preview replaced the authoritative session.");
             RetireCurrentSession();
             ReturnToMainMenu("F1.12 Cabin preview retired.");
@@ -154,7 +163,7 @@ public abstract partial class LocalPlayClientRoot
                     before, after, captures, MissingAuthoredGeometry = new[] { "Secondary room", "Interior doorway", "Window" },
                     FinalBoundary = CaptureSessionBoundary(), HumanFeelRated = false },
                     new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter() } }));
-            GD.Print("F1.12 CABIN NATIVE PREVIEW PASS captures=8 retirement=clean");
+            GD.Print($"F1.12 CABIN NATIVE PREVIEW PASS captures={captures.Count} retirement=clean");
             GetTree().Quit(0);
 
             async Task Capture(string view, GodotDiagnosticTimeOfDay time, GodotDiagnosticAtmosphere atmosphere)
@@ -163,9 +172,9 @@ public abstract partial class LocalPlayClientRoot
                 object truth = cabin.SetF112CabinView(view);
                 Stage($"environment-applied view={view} time={time} atmosphere={atmosphere}");
                 await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
-                string name = $"{view}-{time}-{atmosphere}.png";
+                string name = $"{art}-{view}-{time}-{atmosphere}.png";
                 object image = CaptureF112Output(System.IO.Path.Combine(directory, name), Stage);
-                captures.Add(new { view, time, atmosphere, name, image, truth,
+                captures.Add(new { art, view, time, atmosphere, name, image, truth,
                     Environment = new { SunRotation = environment.SunRotationDegrees.ToString(), environment.SunEnergy,
                         environment.Shadows, Background = environment.BackgroundColor.ToHtml(),
                         Ambient = environment.AmbientColor.ToHtml(), environment.AmbientEnergy } });

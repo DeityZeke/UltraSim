@@ -10,6 +10,13 @@ public partial class LocalCabinClient
 {
     public GodotActorPresenterSnapshot SetF112Reveal(bool held)
     {
+        if (held && _camera is not null && TryFindPublicRecord(GameWorldPublicPrefabIds.WoodlandAnimal, out var animal))
+        {
+            Vector3 target = new((animal.Position.GlobalXMillimeters - _player.GlobalXMillimeters) * .001f,
+                .7f, (animal.Position.GlobalZMillimeters - _player.GlobalZMillimeters) * .001f);
+            _camera.Position = target + new Vector3(0, 4, 6);
+            _camera.LookAt(target);
+        }
         _Input(new InputEventKey { Keycode = Key.Ctrl, PhysicalKeycode = Key.Ctrl, Pressed = held });
         return _actorPresenter!.GetSnapshot();
     }
