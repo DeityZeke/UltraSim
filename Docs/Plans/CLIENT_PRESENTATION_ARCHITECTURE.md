@@ -828,11 +828,28 @@ Higher-quality presentation realization may be lazy where semantic safety permit
 
 # 16. UI scene-tree categories and z-order
 
-## Application workspace and Gameplay Frame (F1.7-F1.9)
+## Application workspace and Gameplay Frame (F1.7-F1.9A)
 
-The physical Application Window is not the gameplay viewport. A selected Gameplay Output Resolution (default 1920×1080, with bounded lower/higher/custom choices) determines render-target pixels and aspect. The Gameplay Frame is the application-space rectangle displaying that output: it defaults to maximum aspect-preserving fit inside the OS window, may later snap to bounded sizes, cannot exceed the window, and has no internal letterbox merely to retain 16:9. Unused window area is a dark application/UI workspace. A 480×270 output scaled into a 1920×1080 frame is still the same 16:9 view at lower fidelity; changing pixel count alone never expands world visibility.
+Physical Display, Physical Application Window, logical Application Resolution, Gameplay Frame,
+Gameplay Output Resolution, and Internal 3D Render Resolution are separate quantities. Physical
+window resizing or fullscreen presentation aspect-fits the stable logical application and never
+rewrites its selected resolution or expands World visibility. The Gameplay Frame is the
+application-space rectangle showing the World image. Gameplay Output is its final pixel grid;
+Internal 3D scale controls expensive rendering inside that output. World render distance remains
+separate from all of these. Simple mode locks Application/Frame/Output/Internal together and
+behaves like a conventional game resolution selector. Advanced mode exposes the same layers
+independently; it is not a separate renderer. Simple has finite exact-ratio aspect/resolution
+presets; Advanced Custom accepts safe bounded arbitrary dimensions without inventing a named
+aspect family. Output must have the Frame's exact reduced aspect to avoid distortion.
 
-The frame is below normal UI. The implemented order is workspace/background, Gameplay Frame, frame-associated World overlays, HUD, Menus/Gumps, Debug, then Context/Tooltip. Nameplates, health bars, overhead Chat, and markers track world positions in the frame; ordinary gumps can cover the frame or occupy unused workspace, supporting desktop-style layout. F1.7 closes the frame host/shared UI composition with transitional main-viewport masks and a frame-local input seam. F1.8 now realizes one Core `ClientCameraRig` through the same Local/Remote Godot controller. Its canonical 16:9 vertical perspective half-tangent or orthographic size is cropped by selected frame aspect; the temporary main-viewport lens multiplies the target vertical extent by application height/frame height. Native ray acceptance verifies the masked frame rather than merely reading FOV values. F1.9 still owns a real frame-sized SubViewport and independent pixel resolution.
+The frame is below normal UI. The implemented order is workspace/background, Gameplay Frame,
+frame-associated World overlays, HUD, Menus/Gumps, Debug, then Context/Tooltip. Native Label3D
+nameplates and overhead Chat follow their actors inside the output viewport; any application-space
+World overlay must convert projected output pixels into frame coordinates;
+ordinary gumps can cover the frame or occupy unused workspace. F1.7 owns the host/shared UI
+composition, F1.8 the Core camera crop, F1.9A the real SubViewport and display stack, and F1.9B
+the scalable renderer backend. The earlier main-viewport camera compensation is transitional,
+not the F1.9A target.
 
 The maximum stock-client world-space view is a canonical 16:9 envelope. The selected output aspect sees the largest centered rectangle of that aspect contained in the envelope: 16:9 sees all of it, 4:3 or 5:4 crops horizontally with the same vertical extent, and an aspect wider than 16:9 retains canonical width while cropping vertically. Scaling or increasing resolution never expands that envelope. This is presentation consistency, not security: a modified client can ignore crop, and Game AOI/disclosure remains authoritative. World render/residency distance is separate from window size, frame size, output pixels, and this view envelope.
 

@@ -10,12 +10,12 @@ public readonly record struct GodotGameplayCameraSnapshot(
     float DistanceMeters,
     float PivotMeters,
     ClientCanonicalViewProjection TargetFrameProjection,
-    float MainViewportVerticalFovDegrees,
-    float MainViewportOrthographicSizeMeters);
+    float NativeOutputVerticalFovDegrees,
+    float NativeOutputOrthographicSizeMeters);
 
 /// <summary>
-/// One Godot realization of the Core camera rig for both Local and Remote. The temporary
-/// viewport compensation will be removed when F1.9 gives the camera a frame-sized viewport.
+/// One Godot realization of the Core camera rig for both Local and Remote. The camera renders
+/// into the independent Gameplay Output viewport, so no main-viewport compensation applies.
 /// </summary>
 public sealed class GodotGameplayCameraRig
 {
@@ -114,7 +114,7 @@ public sealed class GodotGameplayCameraRig
         if (_rig.Projection == ClientCameraProjection.Perspective)
         {
             _camera.SetPerspective(
-                (float)_projection.MainViewportVerticalFovDegrees(_layout),
+                (float)_projection.TargetVerticalFovDegrees,
                 _camera.Near, _camera.Far);
             return;
         }
@@ -122,7 +122,7 @@ public sealed class GodotGameplayCameraRig
         // bounded zoom control's scalar so the same profile min/default/max values apply.
         float zoomRatio = _distance / (_rig.DefaultDistanceMillimeters / 1_000f);
         _camera.SetOrthogonal(
-            (float)_projection.MainViewportVerticalExtent(_layout) * zoomRatio,
+            (float)_projection.TargetVerticalExtent * zoomRatio,
             _camera.Near, _camera.Far);
     }
 

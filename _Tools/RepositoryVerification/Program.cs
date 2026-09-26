@@ -63,7 +63,12 @@ static void VerifyF17ClientWorkspace(string root, VerificationOptions options)
     Run(root, godot,
     [
         "--headless", "--path", "Client/Godot", "--", "--f1-7-ui-smoke",
-        "--gameplay-output=800x600", "--expect-edition=SinglePlayer",
+        "--expect-edition=SinglePlayer",
+    ]);
+    Run(root, godot,
+    [
+        "--headless", "--path", "Client/Godot", "--", "--f1-9a-display-smoke",
+        "--expect-edition=SinglePlayer",
     ]);
 }
 
@@ -2457,6 +2462,11 @@ foreach (string configuration in configurations)
         ]);
         Run(root, godot,
         [
+            "--headless", "--path", "Client/Godot", "--", "--f1-9a-display-smoke",
+            "--expect-edition=SinglePlayer",
+        ]);
+        Run(root, godot,
+        [
             "--headless",
             "--path", "Client/Godot",
             "--", "--d0-1-smoke", "--expect-edition=SinglePlayer",
@@ -3506,6 +3516,7 @@ static void VerifyContentlessOnlineNative(
                     $"--f0-3c-profile-decisions={profileDecisions}",
                     "--a0-8-allow-private-content",
                     "--a0-8-expect=cold",
+                    "--f1-9a-scaled-output",
                     $"--w7-native-gate-trigger-file={w7Trigger}",
                     "--expect-edition=Online",
                 ]), 90_000);
@@ -3515,6 +3526,9 @@ static void VerifyContentlessOnlineNative(
             // retired while walking 127/128/127. They must all name still-prepared Pack truth;
             // none may be caused by the Far Pack's acquisition/readiness interval.
             if (passLine is null ||
+                !journey.Contains("F1.9A SCALED OUTPUT PASS app=1920x1080 " +
+                    "frame=1920x1080 output=1280x720 internal3D=960x540 " +
+                    "world=SubViewport", StringComparison.Ordinal) ||
                 !journey.Contains("W7 NATIVE DELIVERY CHECK farArrivalRejected=0 " +
                     "farReadyRejected=0", StringComparison.Ordinal) ||
                 !journey.Contains("W7 NATIVE PACK JOURNEY PASS gate=real " +

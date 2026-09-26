@@ -25,13 +25,19 @@ F0.1 also places the application-shell state and local settings model here. The 
 adapters. Reserved application controls remain available without allowing ordinary gameplay input
 to leak through a text field or modal surface.
 
-F1.7 adds the renderer-neutral `GameplayFrameLayout`: a finite selected output shape maps to the
-maximum centered aspect-preserving rectangle in application space, with half-open pointer admission
-and frame-local coordinate conversion. Client Core does not create Godot nodes, crop a camera, or
-own a render target. The Godot adapter uses this seam for workspace masks and outside-frame world
-input rejection. F1.8 adds `ClientCameraRig` and `ClientCanonicalViewProjection`: finite fixed-unit
-camera meaning and a selected-aspect crop of the 16:9 canonical envelope. Pixel resolution does not
-change world coverage. F1.9 retains ownership of the SubViewport and independent render pixels.
+F1.9A adds a user-global `ClientDisplaySettings` to settings schema v5. Simple authoring has finite
+exact 16:9, 16:10, 4:3 and 5:4 resolution tables; it locks Application Resolution, Gameplay Frame,
+Gameplay Output and internal 3D pixels together at 100%. Advanced authoring allows bounded custom
+Application/Frame/Output dimensions and 50–100% internal 3D scaling. Both resolve through one
+`ResolvedClientDisplayConfiguration`, not different renderers. Output and Frame must have exactly
+the same reduced aspect; native dimensions are capped at 4096 per side and 8,294,400 pixels.
+v1–v4 settings migrate to Simple 1920×1080 without discarding controls or scoped profiles. Display
+settings are never server-recommended or realm-scoped.
+
+`GameplayFrameLayout` is renderer-neutral: it supports full, max-fit and centered custom frames,
+half-open pointer admission and application→frame→output mapping. F1.8's `ClientCameraRig` and
+`ClientCanonicalViewProjection` still own finite camera meaning and the 16:9 canonical envelope.
+Pixel count changes fidelity, not World visibility. Godot alone owns the output SubViewport.
 
 F1.8A adds `ClientMotionPose`, `ClientControlledMotionPresentation`, and
 `ClientRemoteActorInterpolation`. These are renderer-neutral, bounded presentation state beside

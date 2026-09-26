@@ -1,4 +1,5 @@
 using Godot;
+using System.Diagnostics;
 using UltraSim.Client.BuiltInTestWorlds;
 using UltraSim.Client.Content;
 using UltraSim.Client.Core;
@@ -25,6 +26,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
     private GameGuestBody _guestAdmissionBody = GameGuestBody.HumanFemale;
     private string? _guestAdmissionError;
     private GodotClientSessionBoundarySnapshot _f13PrimitiveBaseline;
+    private GodotClientSessionBoundarySnapshot _f19DisplayBaseline;
 
     public override void _Ready()
     {
@@ -38,6 +40,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         bool primitiveOnlySmoke = arguments.Contains("--f1-3-primitive-smoke", StringComparer.Ordinal);
         bool f16DerivedSmoke = arguments.Contains("--f1-6-derived-smoke", StringComparer.Ordinal);
         bool f17UiSmoke = arguments.Contains("--f1-7-ui-smoke", StringComparer.Ordinal);
+        bool f19DisplaySmoke = arguments.Contains("--f1-9a-display-smoke", StringComparer.Ordinal);
         string? f14Mode = ReadLocalArgument("--f1-4-official-smoke=");
         bool guestAdmissionSmoke = arguments.Contains("--d0-5-smoke", StringComparer.Ordinal);
         bool f02Smoke = arguments.Contains("--f0-2-smoke", StringComparer.Ordinal);
@@ -49,7 +52,8 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         if (arguments.Contains("--composition-smoke", StringComparer.Ordinal) ||
             !conceptDemoSmoke && !residencySmoke && !farIslandSmoke && !signSmoke &&
             !fallbackLabSmoke && !primitiveOnlySmoke && !guestAdmissionSmoke &&
-            !f16DerivedSmoke && !f17UiSmoke && f14Mode is null && !f02Smoke && !sharedHostSmoke)
+            !f16DerivedSmoke && !f17UiSmoke && !f19DisplaySmoke &&
+            f14Mode is null && !f02Smoke && !sharedHostSmoke)
             return;
         try
         {
@@ -112,6 +116,35 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
                     CabinContentVariant.Default, CabinHumanBody.XBot,
                     useConceptDemoWorld: true);
                 LocalF17UiAcceptanceSnapshot evidence = _cabin!.RunF17UiAcceptance();
+                LocalCabinPresentationSnapshot beforeDisplay = _cabin.GetPresentationSnapshot();
+                SubViewport retainedOutput = UiComposition.GameplayViewport;
+                Node retainedWorld = WorldRoot;
+                ResolvedClientDisplayConfiguration originalDisplay = EffectiveDisplay;
+                ApplyDisplay(ClientDisplayResolver.Resolve(
+                    ClientDisplaySettings.Default.WithAdvancedFromSimple() with
+                    {
+                        AdvancedApplication = ClientPixelSize.Create(2560, 1440),
+                        AdvancedFrameMode = ClientGameplayFrameMode.Custom,
+                        AdvancedFrameSize = ClientPixelSize.Create(1920, 1080),
+                        AdvancedOutput = ClientPixelSize.Create(1280, 720),
+                        AdvancedInternalScalePercent = 50,
+                    }));
+                LocalCabinPresentationSnapshot afterDisplay = _cabin.GetPresentationSnapshot();
+                if (!ReferenceEquals(retainedOutput, UiComposition.GameplayViewport) ||
+                    !ReferenceEquals(retainedWorld.GetParent(), retainedOutput) ||
+                    beforeDisplay.ApplicationSessionEpoch != afterDisplay.ApplicationSessionEpoch ||
+                    beforeDisplay.ControlSessionEpoch != afterDisplay.ControlSessionEpoch ||
+                    beforeDisplay.ContentFingerprint != afterDisplay.ContentFingerprint ||
+                    beforeDisplay.SemanticResidentChunks != afterDisplay.SemanticResidentChunks ||
+                    beforeDisplay.RenderedChunks != afterDisplay.RenderedChunks ||
+                    beforeDisplay.Actors.ActiveActors != afterDisplay.Actors.ActiveActors ||
+                    UiComposition.GetSnapshot().Workspace.SelectedOutputShape !=
+                        ClientPixelSize.Create(1280, 720))
+                    throw new InvalidOperationException(
+                        "A presentation-only display change replaced Local semantic/session ownership.");
+                ApplyDisplay(originalDisplay);
+                GD.Print("F1.9A LOCAL ACTIVE DISPLAY PASS session=retained " +
+                    "semantic=retained viewport=retained output=1280x720 internal3D=640x360");
                 GD.Print(
                     $"F1.7 LOCAL UI PASS views={evidence.MaximumOpenSemanticViews} " +
                     $"windows={evidence.MaximumOpenNativeWindows} " +
@@ -122,6 +155,14 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
                 ReturnToMainMenu("F1.7 Local UI smoke passed.");
                 RequireCleanSessionBoundary(in baseline, "F1.7 Local UI retirement");
                 GetTree().Quit(0);
+                return;
+            }
+            if (f19DisplaySmoke)
+            {
+                _f19DisplayBaseline = CaptureSessionBoundary();
+                StartLocalCabin(CabinContentVariant.Default, CabinHumanBody.XBot,
+                    useConceptDemoWorld: true);
+                RunF19DisplaySmokeAfterNativeFrames();
                 return;
             }
             if (f14Mode is not null)
@@ -244,6 +285,82 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             GD.PushError($"F0.2 local composition failed: {exception}");
             RetireCurrentSession();
             FailSession(exception.Message);
+            GetTree().Quit(1);
+        }
+    }
+
+    private async void RunF19DisplaySmokeAfterNativeFrames()
+    {
+        // The active session intentionally already exists at this point; capture stable semantic
+        // identity separately and require it to survive every native display resize.
+        LocalCabinPresentationSnapshot initial = _cabin!.GetPresentationSnapshot();
+        SubViewport retainedViewport = UiComposition.GameplayViewport;
+        ResolvedClientDisplayConfiguration originalDisplay = EffectiveDisplay;
+        try
+        {
+            var cases = new (string Name, ClientDisplaySettings Settings)[]
+            {
+                ("simple1920_100", ClientDisplaySettings.Default),
+                ("output1920_internal50", ClientDisplaySettings.Default.WithAdvancedFromSimple() with
+                { AdvancedInternalScalePercent = 50 }),
+                ("output1280_internal100", ClientDisplaySettings.Default.WithAdvancedFromSimple() with
+                { AdvancedOutput = ClientPixelSize.Create(1280, 720) }),
+            };
+            foreach ((string name, ClientDisplaySettings settings) in cases)
+            {
+                long started = Stopwatch.GetTimestamp();
+                ResolvedClientDisplayConfiguration display = ClientDisplayResolver.Resolve(settings);
+                ApplyDisplay(display);
+                long rebuildMicroseconds = (long)(Stopwatch.GetElapsedTime(started).TotalMicroseconds);
+                for (int frame = 0; frame < 5; frame++)
+                    await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                double processMillisecondsTotal = 0;
+                double rendererMicrosecondsTotal = 0;
+                for (int frame = 0; frame < 30; frame++)
+                {
+                    await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                    processMillisecondsTotal += Performance.GetMonitor(Performance.Monitor.TimeProcess) * 1_000d;
+                    rendererMicrosecondsTotal += _cabin!.GetPresentationSnapshot().Renderer.LastFrameMicroseconds;
+                }
+                LocalCabinPresentationSnapshot current = _cabin!.GetPresentationSnapshot();
+                if (!ReferenceEquals(retainedViewport, UiComposition.GameplayViewport) ||
+                    !ReferenceEquals(WorldRoot.GetParent(), retainedViewport) ||
+                    current.ApplicationSessionEpoch != initial.ApplicationSessionEpoch ||
+                    current.ControlSessionEpoch != initial.ControlSessionEpoch ||
+                    current.ContentFingerprint != initial.ContentFingerprint ||
+                    current.SemanticResidentChunks != initial.SemanticResidentChunks ||
+                    current.Actors.ActiveActors != initial.Actors.ActiveActors ||
+                    retainedViewport.Size != new Vector2I(
+                        display.GameplayOutputResolution.Width, display.GameplayOutputResolution.Height))
+                    throw new InvalidOperationException($"Display case {name} replaced semantic ownership.");
+                long rgbaLowerBound = 4L * (
+                    (long)display.GameplayOutputResolution.Width * display.GameplayOutputResolution.Height +
+                    (long)display.InternalRenderResolution.Width * display.InternalRenderResolution.Height);
+                GD.Print($"F1.9A NATIVE PERF case={name} app={display.ApplicationResolution.Width}x" +
+                    $"{display.ApplicationResolution.Height} frame={display.GameplayFrame.Frame.Width}x" +
+                    $"{display.GameplayFrame.Frame.Height} output={display.GameplayOutputResolution.Width}x" +
+                    $"{display.GameplayOutputResolution.Height} internal3D=" +
+                    $"{display.InternalRenderResolution.Width}x{display.InternalRenderResolution.Height} " +
+                    $"rebuild_us={rebuildMicroseconds} engine_process_mean_ms={processMillisecondsTotal / 30:0.###} " +
+                    $"renderer_frame_mean_us={rendererMicrosecondsTotal / 30:0.###} " +
+                    $"rgba_lower_bound_bytes={rgbaLowerBound} renderer_nodes={current.Renderer.ActiveNodes} " +
+                    $"renderer_resources={current.Renderer.ActiveResources} " +
+                    $"gpu_bytes={Performance.GetMonitor(Performance.Monitor.RenderVideoMemUsed):0}");
+            }
+            ApplyDisplay(originalDisplay);
+            RetireCurrentSession();
+            ReturnToMainMenu("F1.9A display smoke passed.");
+            RequireCleanSessionBoundary(in _f19DisplayBaseline, "F1.9A Local display retirement");
+            if (UiComposition.GetSnapshot().Workspace.SubViewportCount != 1 ||
+                EffectiveDisplay != originalDisplay)
+                throw new InvalidOperationException("The F1.9A display smoke leaked native output ownership.");
+            GD.Print("F1.9A LOCAL DISPLAY SMOKE PASS cases=3 session=retained retirement=clean");
+            GetTree().Quit(0);
+        }
+        catch (Exception exception)
+        {
+            GD.PushError($"F1.9A native display smoke failed: {exception}");
+            RetireCurrentSession();
             GetTree().Quit(1);
         }
     }

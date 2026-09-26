@@ -2465,8 +2465,8 @@ public partial class LocalCabinClient : Node3D
         _hoverTooltip.Show(
             title,
             properties,
-            GetViewport().GetMousePosition(),
-            GetViewport().GetVisibleRect().Size);
+            GetTree().Root.GetMousePosition(),
+            GetTree().Root.GetVisibleRect().Size);
     }
 
     private bool IsKnownPresentedPrefabNear(
@@ -2500,16 +2500,16 @@ public partial class LocalCabinClient : Node3D
     {
         if (_camera is null || _cache is null || _window is null)
             return;
-        Vector2 mouse = GetViewport().GetMousePosition();
-        if (_sessionUi?.ContainsWorldPointer(mouse) == false)
+        Vector2 mouse = GetTree().Root.GetMousePosition();
+        if (_sessionUi is null || !_sessionUi.TryToOutput(mouse, out Vector2 outputPoint))
         {
             _pointerPointValid = false;
             _pointerTarget = default;
             _pointerTargetPrefab = 0;
             return;
         }
-        Vector3 origin = _camera.ProjectRayOrigin(mouse);
-        Vector3 direction = _camera.ProjectRayNormal(mouse);
+        Vector3 origin = _camera.ProjectRayOrigin(outputPoint);
+        Vector3 direction = _camera.ProjectRayNormal(outputPoint);
         if (TryPickPresentedPublicObject(
                 origin,
                 direction,
@@ -2796,7 +2796,7 @@ public partial class LocalCabinClient : Node3D
     private GameplayFrameLayout CurrentCameraLayout()
     {
         if (_sessionUi is not null) return _sessionUi.GameplayFrame;
-        Vector2 size = GetViewport().GetVisibleRect().Size;
+        Vector2 size = GetTree().Root.GetVisibleRect().Size;
         return GameplayFrameLayout.MaxFit(
             ClientPixelSize.Create(Math.Max(1, (int)size.X), Math.Max(1, (int)size.Y)),
             ClientPixelSize.Create(1920, 1080));
@@ -3361,7 +3361,7 @@ public partial class LocalCabinClient : Node3D
         });
         Control? inventory = FindOpenInventoryView();
         Control? window = inventory?.GetParent() as Control;
-        Rect2 application = GetViewport().GetVisibleRect();
+        Rect2 application = GetTree().Root.GetVisibleRect();
         if (inventory is null ||
             inventory.FindChild("Element_background", recursive: true, owned: false) is not Panel ||
             inventory.FindChild("Element_close", recursive: true, owned: false) is not Button ||

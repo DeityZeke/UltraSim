@@ -115,7 +115,7 @@ internal static class ClientCameraRigTests
         ResolvedClientSettings migratedScoped = ClientSettingsResolver.Resolve(migrated, scope);
         Assert.Equal(17_000, migratedScoped.CameraRig.DefaultDistanceMillimeters);
         Assert.Equal(830, migratedScoped.CameraRig.CanonicalFovTenths);
-        Assert.True(ClientSettingsJsonCodec.Write(migrated).Contains("\"version\": 4",
+        Assert.True(ClientSettingsJsonCodec.Write(migrated).Contains("\"version\": 5",
             StringComparison.Ordinal));
     }
 

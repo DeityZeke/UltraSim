@@ -1488,15 +1488,15 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private void UpdatePointerWorldPoint()
     {
         if (_camera is null || _session is null) return;
-        Vector2 mouse = GetViewport().GetMousePosition();
-        if (_sessionUi?.ContainsWorldPointer(mouse) == false)
+        Vector2 mouse = GetTree().Root.GetMousePosition();
+        if (_sessionUi is null || !_sessionUi.TryToOutput(mouse, out Vector2 outputPoint))
         {
             _pointerPointValid = false;
             _pointerTarget = default;
             return;
         }
-        Vector3 origin = _camera.ProjectRayOrigin(mouse);
-        Vector3 direction = _camera.ProjectRayNormal(mouse);
+        Vector3 origin = _camera.ProjectRayOrigin(outputPoint);
+        Vector3 direction = _camera.ProjectRayNormal(outputPoint);
         if (TryPickPresentedPublicObject(origin, direction, out ClientControlWorldPoint objectPoint,
                 out WorldPublicEntityId target))
         {
@@ -1585,8 +1585,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         _hoverTooltip.Show(
             item.DisplayLabel,
             item.InspectionProperties,
-            GetViewport().GetMousePosition(),
-            GetViewport().GetVisibleRect().Size);
+            GetTree().Root.GetMousePosition(),
+            GetTree().Root.GetVisibleRect().Size);
     }
 
     private bool TryPickPresentedPublicObject(

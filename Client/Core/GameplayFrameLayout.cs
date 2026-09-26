@@ -46,8 +46,7 @@ public readonly record struct ClientPixelRect(int X, int Y, int Width, int Heigh
 }
 
 /// <summary>
-/// Renderer-neutral application workspace result. F1.7 uses the selected output only as an
-/// aspect/layout contract; it does not claim an independent render target.
+/// Renderer-neutral application workspace result. SelectedOutput is the native World image size.
 /// </summary>
 public readonly record struct GameplayFrameLayout(
     ClientPixelSize Application,
@@ -76,6 +75,36 @@ public readonly record struct GameplayFrameLayout(
             applicationPoint.X - Frame.X,
             applicationPoint.Y - Frame.Y);
         return true;
+    }
+
+    /// <summary>Map a logical application pointer into the independent World output pixel grid.</summary>
+    public bool TryToOutput(in ClientPixelPoint applicationPoint, out ClientPixelPoint outputPoint)
+    {
+        if (!TryToFrameLocal(applicationPoint, out ClientPixelPoint local))
+        {
+            outputPoint = default;
+            return false;
+        }
+        outputPoint = new ClientPixelPoint(
+            (int)((long)local.X * SelectedOutput.Width / Frame.Width),
+            (int)((long)local.Y * SelectedOutput.Height / Frame.Height));
+        return true;
+    }
+
+    public static GameplayFrameLayout Fill(in ClientPixelSize application, in ClientPixelSize output) =>
+        Custom(application, output, application);
+
+    public static GameplayFrameLayout Custom(
+        in ClientPixelSize application, in ClientPixelSize output, in ClientPixelSize frameSize)
+    {
+        if (!application.IsValid || !output.IsValid || !frameSize.IsValid ||
+            frameSize.Width > application.Width || frameSize.Height > application.Height)
+            throw new ArgumentException("The frame, output and application must be finite and the frame must fit.");
+        int left = (application.Width - frameSize.Width) / 2;
+        int top = (application.Height - frameSize.Height) / 2;
+        var frame = new ClientPixelRect(left, top, frameSize.Width, frameSize.Height);
+        return new GameplayFrameLayout(application, output, frame, left, top,
+            application.Width - frame.Right, application.Height - frame.Bottom);
     }
 
     public static GameplayFrameLayout MaxFit(
@@ -114,5 +143,32 @@ public readonly record struct GameplayFrameLayout(
             top,
             application.Width - frame.Right,
             application.Height - frame.Bottom);
+    }
+
+    /// <summary>
+    /// Largest centered integer frame with exactly the output's reduced aspect. Unlike the
+    /// historical rounded MaxFit helper, this is safe for a non-stretched native output texture.
+    /// </summary>
+    public static GameplayFrameLayout MaxFitExact(
+        in ClientPixelSize application, in ClientPixelSize selectedOutput)
+    {
+        if (!application.IsValid || !selectedOutput.IsValid)
+            throw new ArgumentException("A finite application and output are required.");
+        int width = selectedOutput.Width;
+        int height = selectedOutput.Height;
+        while (height != 0)
+        {
+            int remainder = width % height;
+            width = height;
+            height = remainder;
+        }
+        int reducedWidth = selectedOutput.Width / width;
+        int reducedHeight = selectedOutput.Height / width;
+        int multiplier = Math.Min(application.Width / reducedWidth,
+            application.Height / reducedHeight);
+        if (multiplier == 0)
+            throw new ArgumentException("The application cannot fit one exact output-aspect pixel unit.");
+        return Custom(application, selectedOutput,
+            ClientPixelSize.Create(reducedWidth * multiplier, reducedHeight * multiplier));
     }
 }

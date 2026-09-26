@@ -24,6 +24,7 @@ public partial class S08HeadlessAcceptance : Control
             RunNativeAdapterBoundaryAcceptance();
             RunOutsidePointerPolicyAcceptance();
             RunF17WorkspaceAndGumpAcceptance();
+            RunF19DisplayCompositionAcceptance();
             RunF18CameraRayAcceptance();
             RunRemoteInventoryAcceptance();
             GD.Print("S0.8 / I0.11 GODOT ACCEPTANCE PASS");
@@ -36,11 +37,131 @@ public partial class S08HeadlessAcceptance : Control
         }
     }
 
+    private void RunF19DisplayCompositionAcceptance()
+    {
+        var cases = new (ClientDisplaySettings Settings, ClientPixelSize Application,
+            ClientPixelRect Frame, ClientPixelSize Output, ClientPixelSize Internal)[]
+        {
+            (ClientDisplaySettings.Default, Size(1920, 1080),
+                new ClientPixelRect(0, 0, 1920, 1080), Size(1920, 1080), Size(1920, 1080)),
+            (ClientDisplaySettings.Default with
+            {
+                SimpleAspect = ClientDisplayAspectPreset.FourThree,
+                SimpleResolution = Size(1600, 1200),
+            }, Size(1600, 1200), new ClientPixelRect(0, 0, 1600, 1200),
+                Size(1600, 1200), Size(1600, 1200)),
+            (ClientDisplaySettings.Default.WithAdvancedFromSimple() with
+            {
+                AdvancedApplication = Size(2560, 1440),
+                AdvancedFrameMode = ClientGameplayFrameMode.Custom,
+                AdvancedFrameSize = Size(1920, 1080),
+                AdvancedOutput = Size(1280, 720),
+            }, Size(2560, 1440), new ClientPixelRect(320, 180, 1920, 1080),
+                Size(1280, 720), Size(1280, 720)),
+            (ClientDisplaySettings.Default.WithAdvancedFromSimple() with
+            {
+                AdvancedApplication = Size(2560, 1440),
+                AdvancedFrameMode = ClientGameplayFrameMode.Custom,
+                AdvancedFrameSize = Size(1920, 1080),
+                AdvancedOutput = Size(1920, 1080),
+                AdvancedInternalScalePercent = 50,
+            }, Size(2560, 1440), new ClientPixelRect(320, 180, 1920, 1080),
+                Size(1920, 1080), Size(960, 540)),
+            (ClientDisplaySettings.Default.WithAdvancedFromSimple() with
+            {
+                AdvancedApplication = Size(1500, 920),
+                AdvancedOutput = Size(1500, 920),
+                AdvancedInternalScalePercent = 75,
+            }, Size(1500, 920), new ClientPixelRect(0, 0, 1500, 920),
+                Size(1500, 920), Size(1125, 690)),
+            (ClientDisplaySettings.Default.WithAdvancedFromSimple() with
+            {
+                AdvancedApplication = Size(1500, 920),
+                AdvancedFrameMode = ClientGameplayFrameMode.MaxFit,
+                AdvancedOutput = Size(1280, 720),
+                AdvancedInternalScalePercent = 75,
+            }, Size(1500, 920), new ClientPixelRect(6, 41, 1488, 837),
+                Size(1280, 720), Size(960, 540)),
+        };
+        var owner = new Control { Name = "F19DisplayAcceptance" };
+        AddChild(owner);
+        GodotClientUiComposition? composition = null;
+        Node3D? worldCanary = null;
+        Camera3D? camera = null;
+        GodotGameplayCameraRig? cameraRig = null;
+        try
+        {
+            for (int index = 0; index < cases.Length; index++)
+            {
+                var item = cases[index];
+                ResolvedClientDisplayConfiguration display = ClientDisplayResolver.Resolve(item.Settings);
+                if (composition is null)
+                {
+                    composition = new GodotClientUiComposition(owner, display);
+                    worldCanary = new Node3D { Name = "DisplayOwnedWorldCanary" };
+                    composition.GameplayViewport.AddChild(worldCanary);
+                    camera = new Camera3D
+                    {
+                        Name = "DisplayOutputCamera", Current = true, Near = 0.1f, Far = 500f,
+                    };
+                    worldCanary.AddChild(camera);
+                    cameraRig = new GodotGameplayCameraRig(camera,
+                        ClientStockCameraRigs.Orbit, display.GameplayFrame);
+                }
+                else composition.ApplyDisplay(display);
+                cameraRig!.ApplyFrame(display.GameplayFrame);
+                GodotApplicationWorkspaceSnapshot snapshot = composition.GetSnapshot().Workspace;
+                Expect(snapshot.ApplicationSize == item.Application &&
+                    snapshot.GameplayFrame == item.Frame &&
+                    snapshot.SelectedOutputShape == item.Output &&
+                    snapshot.Internal3DSize == item.Internal &&
+                    snapshot.SubViewportCount == 1 &&
+                    composition.GameplayViewport.Size ==
+                        new Vector2I(item.Output.Width, item.Output.Height) &&
+                    ReferenceEquals(worldCanary?.GetParent(), composition.GameplayViewport) &&
+                    composition.GameplayViewport.GetChildCount() == 1 &&
+                    Math.Abs(composition.GameplayViewport.Scaling3DScale -
+                        display.InternalRenderScalePercent / 100f) < 0.0001f,
+                    $"The F1.9 native display layers diverged for case {index}: {snapshot}.");
+                Vector2 applicationCenter = new(item.Frame.X + item.Frame.Width / 2f,
+                    item.Frame.Y + item.Frame.Height / 2f);
+                Expect(composition.TryToOutput(applicationCenter, out Vector2 outputCenter) &&
+                    outputCenter.DistanceTo(new Vector2(item.Output.Width / 2f,
+                        item.Output.Height / 2f)) < 1.5f,
+                    $"F1.9 pointer mapping diverged for case {index}.");
+                Vector3 nominated = camera!.ProjectPosition(outputCenter, 15f);
+                Expect(camera.UnprojectPosition(nominated).DistanceTo(outputCenter) < 0.1f,
+                    $"F1.9 output-viewport native ray diverged for case {index}.");
+                ClientCanonicalViewProjection crop = ClientCanonicalViewProjection.ForFrame(
+                    ClientStockCameraRigs.Orbit, display.GameplayFrame);
+                Expect(crop.TargetHorizontalExtent <= crop.CanonicalHorizontalExtent + 0.00001 &&
+                    crop.TargetVerticalExtent <= crop.CanonicalVerticalExtent + 0.00001,
+                    "Display resolution expanded the canonical camera envelope.");
+            }
+            GD.Print("F1.9A DISPLAY COMPOSITION PASS cases=6 subviewport=1 " +
+                "output=independent internal3d=scaled pointer=frame-to-output");
+        }
+        finally
+        {
+            composition?.Dispose();
+            RemoveChild(owner);
+            owner.Free();
+        }
+
+        static ClientPixelSize Size(int width, int height) => ClientPixelSize.Create(width, height);
+    }
+
     private void RunF18CameraRayAcceptance()
     {
         Vector2 viewportSize = GetViewport().GetVisibleRect().Size;
         ClientPixelSize application = ClientPixelSize.Create(
             Math.Max(1, (int)viewportSize.X), Math.Max(1, (int)viewportSize.Y));
+        var outputViewport = new SubViewport
+        {
+            Name = "F19GameplayOutputAcceptance",
+            Size = new Vector2I(1920, 1080),
+        };
+        AddChild(outputViewport);
         var camera = new Camera3D
         {
             Name = "F18CameraAcceptance",
@@ -48,7 +169,7 @@ public partial class S08HeadlessAcceptance : Control
             Near = 0.1f,
             Far = 500f,
         };
-        AddChild(camera);
+        outputViewport.AddChild(camera);
         try
         {
             ClientCameraRig orbit = ClientStockCameraRigs.Orbit;
@@ -71,17 +192,20 @@ public partial class S08HeadlessAcceptance : Control
                 "A user-named stock-equivalent rig diverged in native Godot realization.");
             controller.ApplyRig(ClientStockCameraRigs.ThirdPerson, full);
             Expect(Math.Abs(camera.Fov - controller.TargetFrameProjection
-                    .MainViewportVerticalFovDegrees(full)) < 0.01d &&
+                    .TargetVerticalFovDegrees) < 0.01d &&
                 Math.Abs(controller.TargetFrameProjection.TargetVerticalFovDegrees - 76d) < 0.01d,
                 "A same-frame perspective rig switch retained the prior native lens.");
             controller.ApplyRig(orbit, full);
             // Pointer nomination uses the same native projection as the visible frame.
-            Vector2 nominationPixel = new(full.Frame.X + full.Frame.Width * 0.75f,
-                full.Frame.Y + full.Frame.Height * 0.5f);
+            Vector2 nominationPixel = new(full.SelectedOutput.Width * 0.75f,
+                full.SelectedOutput.Height * 0.5f);
+            ClientPixelPoint applicationNomination = new(
+                full.Frame.X + full.Frame.Width * 3 / 4,
+                full.Frame.Y + full.Frame.Height / 2);
             Vector3 nominationPoint = camera.ProjectPosition(nominationPixel, 15f);
             Expect(camera.UnprojectPosition(nominationPoint).DistanceTo(nominationPixel) < 0.1f &&
-                full.ContainsApplicationPoint(new ClientPixelPoint(
-                    (int)nominationPixel.X, (int)nominationPixel.Y)),
+                full.TryToOutput(applicationNomination, out ClientPixelPoint mapped) &&
+                Math.Abs(mapped.X - nominationPixel.X) <= full.SelectedOutput.Width / full.Frame.Width + 1,
                 "Inside-frame pointer rays did not nominate the expected projected world point.");
             var drag = new InputEventMouseMotion { ButtonMask = MouseButtonMask.Middle };
             var idleMotion = new InputEventMouseMotion { ButtonMask = 0 };
@@ -93,6 +217,7 @@ public partial class S08HeadlessAcceptance : Control
 
             GameplayFrameLayout fourThree = GameplayFrameLayout.MaxFit(application,
                 ClientPixelSize.Create(800, 600));
+            outputViewport.Size = new Vector2I(800, 600);
             controller.ApplyFrame(fourThree);
             AssertRays(controller, fourThree);
             Expect(controller.YawRadians == yaw && controller.PitchRadians == pitch &&
@@ -104,18 +229,22 @@ public partial class S08HeadlessAcceptance : Control
                 Math.Abs(cropped.TargetVerticalExtent - cropped.CanonicalVerticalExtent) < 0.00001,
                 "The 4:3 frame expanded or failed to crop the canonical camera view.");
 
+            outputViewport.Size = new Vector2I(1600, 1200);
             controller.ApplyFrame(GameplayFrameLayout.MaxFit(application,
                 ClientPixelSize.Create(1600, 1200)));
             AssertRays(controller, GameplayFrameLayout.MaxFit(application,
                 ClientPixelSize.Create(1600, 1200)));
+            outputViewport.Size = new Vector2I(600, 800);
             controller.ApplyFrame(GameplayFrameLayout.MaxFit(application,
                 ClientPixelSize.Create(600, 800)));
             AssertRays(controller, GameplayFrameLayout.MaxFit(application,
                 ClientPixelSize.Create(600, 800)));
+            outputViewport.Size = new Vector2I(2560, 1080);
             controller.ApplyFrame(GameplayFrameLayout.MaxFit(application,
                 ClientPixelSize.Create(2560, 1080)));
             AssertRays(controller, GameplayFrameLayout.MaxFit(application,
                 ClientPixelSize.Create(2560, 1080)));
+            outputViewport.Size = new Vector2I(1920, 1080);
             controller.ApplyFrame(full);
             AssertRays(controller, full);
 
@@ -134,14 +263,15 @@ public partial class S08HeadlessAcceptance : Control
                 Projection = ClientCameraProjection.Orthographic,
                 CanonicalOrthographicSizeMillimeters = 20_000,
             };
+            outputViewport.Size = new Vector2I(800, 600);
             controller.ApplyRig(orthographic, fourThree);
             Expect(camera.Projection == Camera3D.ProjectionType.Orthogonal &&
                 Math.Abs(camera.Size - controller.TargetFrameProjection
-                    .MainViewportVerticalExtent(fourThree)) < 0.001,
-                "The orthographic rig did not realize its compensated native size.");
+                    .TargetVerticalExtent) < 0.001,
+                "The orthographic rig did not realize its output-viewport native size.");
             Vector3 centerRay = camera.ProjectRayNormal(Center(fourThree));
             Vector3 edgeRay = camera.ProjectRayNormal(new Vector2(
-                fourThree.Frame.X, fourThree.Frame.Y));
+                0, 0));
             Expect(centerRay.DistanceTo(edgeRay) < 0.001f,
                 "Orthographic rays were not parallel.");
             float beforeZoomSize = camera.Size;
@@ -167,46 +297,42 @@ public partial class S08HeadlessAcceptance : Control
         }
         finally
         {
-            RemoveChild(camera);
-            camera.Free();
+            RemoveChild(outputViewport);
+            outputViewport.Free();
         }
 
         static Vector2 Center(in GameplayFrameLayout layout) => new(
-            layout.Frame.X + layout.Frame.Width / 2f,
-            layout.Frame.Y + layout.Frame.Height / 2f);
+            layout.SelectedOutput.Width / 2f,
+            layout.SelectedOutput.Height / 2f);
 
         static void AssertRays(GodotGameplayCameraRig controller, in GameplayFrameLayout layout)
         {
             Camera3D camera = controller.Camera;
             ClientCanonicalViewProjection desired = controller.TargetFrameProjection;
-            float centerX = layout.Frame.X + layout.Frame.Width / 2f;
-            float centerY = layout.Frame.Y + layout.Frame.Height / 2f;
+            float centerX = layout.SelectedOutput.Width / 2f;
+            float centerY = layout.SelectedOutput.Height / 2f;
             foreach (Vector2 nominated in new[]
                      {
                          new Vector2(centerX, centerY),
-                         new Vector2(layout.Frame.X + layout.Frame.Width * 0.1f, centerY),
-                         new Vector2(layout.Frame.X + layout.Frame.Width * 0.9f, centerY),
-                         new Vector2(centerX, layout.Frame.Y + layout.Frame.Height * 0.1f),
-                         new Vector2(centerX, layout.Frame.Y + layout.Frame.Height * 0.9f),
+                         new Vector2(layout.SelectedOutput.Width * 0.1f, centerY),
+                         new Vector2(layout.SelectedOutput.Width * 0.9f, centerY),
+                         new Vector2(centerX, layout.SelectedOutput.Height * 0.1f),
+                         new Vector2(centerX, layout.SelectedOutput.Height * 0.9f),
                      })
             {
                 Vector3 world = camera.ProjectPosition(nominated, 15f);
-                if (!layout.ContainsApplicationPoint(new ClientPixelPoint(
-                        (int)nominated.X, (int)nominated.Y)) ||
-                    camera.UnprojectPosition(world).DistanceTo(nominated) > 0.1f)
+                if (camera.UnprojectPosition(world).DistanceTo(nominated) > 0.1f)
                     throw new InvalidOperationException(
                         $"Inside-frame pointer nomination failed at {nominated}.");
             }
-            double left = Tangent(camera, new Vector2(layout.Frame.X, centerY), horizontal: true);
-            double right = Tangent(camera, new Vector2(layout.Frame.Right, centerY), horizontal: true);
-            double top = Tangent(camera, new Vector2(centerX, layout.Frame.Y), horizontal: false);
-            double bottom = Tangent(camera, new Vector2(centerX, layout.Frame.Bottom), horizontal: false);
-            // F1.7 max-fit integer rounding may center an odd-height frame half a pixel
-            // from the viewport center. The headless viewport is only 64x64, so retain
-            // a one-pixel geometric tolerance rather than hiding the rounding drift.
-            double onePixelVertical = 2d * desired.MainViewportVerticalExtent(layout) /
-                layout.Application.Height;
-            double onePixelHorizontal = onePixelVertical;
+            double left = Tangent(camera, new Vector2(0, centerY), horizontal: true);
+            double right = Tangent(camera, new Vector2(layout.SelectedOutput.Width, centerY), horizontal: true);
+            double top = Tangent(camera, new Vector2(centerX, 0), horizontal: false);
+            double bottom = Tangent(camera, new Vector2(centerX, layout.SelectedOutput.Height), horizontal: false);
+            double onePixelVertical = 2d * desired.TargetVerticalExtent /
+                layout.SelectedOutput.Height;
+            double onePixelHorizontal = 2d * desired.TargetHorizontalExtent /
+                layout.SelectedOutput.Width;
             if (Math.Abs(Math.Abs(left) - desired.TargetHorizontalExtent) > onePixelHorizontal + 0.005 ||
                 Math.Abs(Math.Abs(right) - desired.TargetHorizontalExtent) > onePixelHorizontal + 0.005 ||
                 Math.Abs(Math.Abs(top) - desired.TargetVerticalExtent) > onePixelVertical + 0.005 ||

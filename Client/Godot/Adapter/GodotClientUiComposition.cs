@@ -12,7 +12,11 @@ public readonly record struct GodotApplicationWorkspaceSnapshot(
     int UnusedRight,
     int UnusedBottom,
     long UnusedArea,
-    bool TransitionalMaskingActive);
+    bool TransitionalMaskingActive)
+{
+    public ClientPixelSize Internal3DSize { get; init; }
+    public int SubViewportCount { get; init; }
+}
 
 public readonly record struct GodotGumpWindowManagerSnapshot(
     int OpenWindows,
@@ -50,9 +54,8 @@ public readonly record struct GodotClientUiCompositionSnapshot(
     bool ShellModalVisible);
 
 /// <summary>
-/// Persistent F1.7 application workspace and category composition. The dark frame masks are a
-/// transitional main-viewport realization; F1.9 may replace only that realization with a
-/// SubViewport without changing the layout/input/category contract.
+/// Persistent application workspace. World 3D is rendered once in the independent output
+/// SubViewport; its texture is scaled into the logical Gameplay Frame behind application UI.
 /// </summary>
 public sealed class GodotClientUiComposition : IDisposable
 {
@@ -61,6 +64,8 @@ public sealed class GodotClientUiComposition : IDisposable
     private readonly CanvasLayer _workspaceLayer;
     private readonly Control _workspaceRoot;
     private readonly ColorRect[] _masks = new ColorRect[4];
+    private readonly SubViewport _gameplayViewport;
+    private readonly TextureRect _gameplayImage;
     private readonly CanvasLayer _worldLayer;
     private readonly CanvasLayer _hudLayer;
     private readonly CanvasLayer _menuLayer;
@@ -68,6 +73,7 @@ public sealed class GodotClientUiComposition : IDisposable
     private readonly CanvasLayer _contextLayer;
     private readonly GodotClientDebugPresenter _debug;
     private ClientPixelSize _selectedOutput;
+    private ResolvedClientDisplayConfiguration? _display;
     private GameplayFrameLayout _layout;
     private GodotSessionUiLease? _session;
     private bool _shellModalVisible;
@@ -98,6 +104,24 @@ public sealed class GodotClientUiComposition : IDisposable
         _workspaceRoot = FullRect("ApplicationWorkspace");
         _workspaceRoot.MouseFilter = Control.MouseFilterEnum.Ignore;
         _workspaceLayer.AddChild(_workspaceRoot);
+        _gameplayViewport = new SubViewport
+        {
+            Name = "GameplayOutput",
+            Size = new Vector2I(selectedOutput.Width, selectedOutput.Height),
+            RenderTargetUpdateMode = SubViewport.UpdateMode.Always,
+            TransparentBg = false,
+            HandleInputLocally = false,
+        };
+        layers.AddChild(_gameplayViewport);
+        _gameplayImage = new TextureRect
+        {
+            Name = "GameplayFrameImage",
+            Texture = _gameplayViewport.GetTexture(),
+            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+            StretchMode = TextureRect.StretchModeEnum.Scale,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        _workspaceRoot.AddChild(_gameplayImage);
         string[] names = ["WorkspaceLeft", "WorkspaceTop", "WorkspaceRight", "WorkspaceBottom"];
         for (int index = 0; index < _masks.Length; index++)
         {
@@ -129,6 +153,9 @@ public sealed class GodotClientUiComposition : IDisposable
         UpdateApplicationSize(CurrentApplicationSize());
     }
 
+    public GodotClientUiComposition(Node owner, ResolvedClientDisplayConfiguration display)
+        : this(owner, display.GameplayOutputResolution) => ApplyDisplay(display);
+
     public CanvasLayer WorldLayer => _worldLayer;
     public CanvasLayer HudLayer => _hudLayer;
     public CanvasLayer MenuLayer => _menuLayer;
@@ -142,6 +169,7 @@ public sealed class GodotClientUiComposition : IDisposable
     public Control ContextHost { get; }
     public GodotGumpWindowManager Gumps { get; }
     public GameplayFrameLayout Layout => _layout;
+    public SubViewport GameplayViewport => _gameplayViewport;
     public GodotClientDebugPage DebugPage => _debug.Page;
 
     public GodotSessionUiLease BeginSession(string name)
@@ -193,10 +221,34 @@ public sealed class GodotClientUiComposition : IDisposable
         return false;
     }
 
+    public bool TryToOutput(Vector2 applicationPoint, out Vector2 outputPoint)
+    {
+        if (TryToFrameLocal(applicationPoint, out Vector2 local))
+        {
+            outputPoint = new Vector2(
+                local.X * _layout.SelectedOutput.Width / _layout.Frame.Width,
+                local.Y * _layout.SelectedOutput.Height / _layout.Frame.Height);
+            return true;
+        }
+        outputPoint = default;
+        return false;
+    }
+
+    public void ApplyDisplay(ResolvedClientDisplayConfiguration display)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _display = display;
+        _selectedOutput = display.GameplayOutputResolution;
+        _gameplayViewport.Size = new Vector2I(_selectedOutput.Width, _selectedOutput.Height);
+        _gameplayViewport.Scaling3DMode = Viewport.Scaling3DModeEnum.Bilinear;
+        _gameplayViewport.Scaling3DScale = display.InternalRenderScalePercent / 100f;
+        UpdateApplicationSize(display.ApplicationResolution);
+    }
+
     public void UpdateLayoutIfNeeded()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        ClientPixelSize current = CurrentApplicationSize();
+        ClientPixelSize current = _display?.ApplicationResolution ?? CurrentApplicationSize();
         if (current != _layout.Application)
             UpdateApplicationSize(current);
     }
@@ -210,6 +262,7 @@ public sealed class GodotClientUiComposition : IDisposable
         if (!selectedOutput.IsValid)
             throw new ArgumentException("A finite selected output shape is required.", nameof(selectedOutput));
         _selectedOutput = selectedOutput;
+        _gameplayViewport.Size = new Vector2I(selectedOutput.Width, selectedOutput.Height);
         UpdateApplicationSize(CurrentApplicationSize());
     }
 
@@ -231,7 +284,11 @@ public sealed class GodotClientUiComposition : IDisposable
             _layout.UnusedRight,
             _layout.UnusedBottom,
             _layout.UnusedArea,
-            _layout.UnusedArea != 0),
+            false)
+        {
+            Internal3DSize = _display?.InternalRenderResolution ?? _selectedOutput,
+            SubViewportCount = 1,
+        },
         WorldOverlayHost.GetChildCount(),
         HudHost.GetChildCount(),
         GameplayGumpHost.GetChildCount(),
@@ -251,6 +308,7 @@ public sealed class GodotClientUiComposition : IDisposable
         _session = null;
         Gumps.Dispose();
         _debug.Dispose();
+        _gameplayViewport.QueueFree();
     }
 
     internal void RetireSession(GodotSessionUiLease session)
@@ -262,8 +320,9 @@ public sealed class GodotClientUiComposition : IDisposable
 
     private void UpdateApplicationSize(ClientPixelSize application)
     {
-        _layout = GameplayFrameLayout.MaxFit(application, _selectedOutput);
+        _layout = _display?.GameplayFrame ?? GameplayFrameLayout.MaxFit(application, _selectedOutput);
         ClientPixelRect frame = _layout.Frame;
+        SetRect(_gameplayImage, frame.X, frame.Y, frame.Width, frame.Height);
         SetRect(WorldOverlayHost, frame.X, frame.Y, frame.Width, frame.Height);
         SetRect(_masks[0], 0, 0, frame.X, application.Height);
         SetRect(_masks[1], frame.X, 0, frame.Width, frame.Y);
@@ -342,6 +401,9 @@ public sealed class GodotSessionUiLease : IDisposable
 
     public bool TryToFrameLocal(Vector2 applicationPoint, out Vector2 frameLocalPoint) =>
         _owner.TryToFrameLocal(applicationPoint, out frameLocalPoint);
+
+    public bool TryToOutput(Vector2 applicationPoint, out Vector2 outputPoint) =>
+        _owner.TryToOutput(applicationPoint, out outputPoint);
 
     public void RegisterTransientSuppressor(Action suppress)
     {

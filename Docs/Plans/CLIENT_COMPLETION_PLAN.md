@@ -1,6 +1,6 @@
 # UltraSim Client Completion Plan
 
-**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.8A are CLOSED after the F1.8A-R1 correction; F1.9 is NEXT.** The original F1.8A closure claim is superseded by the [corrective evidence](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md), which records both the reproduced defects and the earlier final-tree verifier failures.
+**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.8A are CLOSED after the F1.8A-R1 correction; F1.9A display composition is ACTIVE, then F1.9B scalable realization.** The original F1.8A closure claim is superseded by the [corrective evidence](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md), which records both the reproduced defects and the earlier final-tree verifier failures.
 
 **Parent architecture:** [CLIENT_PRESENTATION_ARCHITECTURE.md](CLIENT_PRESENTATION_ARCHITECTURE.md)
 
@@ -90,7 +90,8 @@ F1.6  Derived resources / atlas pipeline (CLOSED)
 F1.7  Application workspace, Gameplay Frame, shared UI/gump composition (CLOSED)
 F1.8  Declarative camera/control rig and canonical gameplay-view crop (CLOSED)
 F1.8A Remote motion prediction/reconciliation/interpolation (CLOSED after R1 correction)
-F1.9  Godot scalable presentation backend targeting the Gameplay Frame (NEXT)
+F1.9A Simple/Advanced display composition and real Gameplay Frame output (ACTIVE)
+F1.9B scalable Godot realization / RID / MultiMesh (PLANNED)
 F1.10 Actor representation tiers and GPU-friendly interpolation seam
 F1.11 Renderer stress consumers / vegetation prototype
 F1.12 Product dogfooding and PF6 readiness
@@ -1018,9 +1019,22 @@ it does not claim smooth motion without two usable samples.
 
 ---
 
-# 13. F1.9 - Godot scalable presentation backend
+# 13. F1.9A display composition, then F1.9B scalable realization
 
-## Goal
+F1.9A owns the physical-window-independent logical Application Resolution, real Gameplay Frame
+SubViewport, Gameplay Output Resolution, and separately scaled Internal 3D Render Resolution.
+Simple and Advanced are authoring modes over one resolved native pipeline, not two renderers.
+Simple uses finite exact-aspect presets and locks Application, Frame, Output, and Internal 3D to
+the selected resolution at 100% scale. Advanced allows bounded custom application dimensions,
+Fill/Max Fit/custom frame, aspect-matched output, and bounded internal scale. The physical window
+aspect-fits the logical application without rewriting settings or disclosing more World. Display
+settings are user-global, never server-profile overrides. F1.9A keeps the canonical 16:9 World
+envelope, Core-owned camera crop, Local/Remote semantic parity, and exact application proof.
+
+F1.9B begins only after F1.9A closes. It owns the measured node/RID/MultiMesh scalable backend
+and high-cardinality presentation below the same display composition.
+
+## F1.9B goal
 
 Make "semantic entity does not require a Godot node" an explicit implemented renderer capability. Godot rendering targets the F1.7 Gameplay Frame/SubViewport rather than implicitly owning the OS window.
 

@@ -62,6 +62,7 @@ public abstract partial class ClientRoot : Control
     private readonly ClientShellCoordinator _shell = new();
     private ClientCompositionManifest _composition;
     private ClientSettingsDocument _settings = ClientSettingsDocument.Empty;
+    private ResolvedClientDisplayConfiguration _display = ClientDisplayResolver.Resolve(ClientDisplaySettings.Default);
     private ResolvedClientSettings _resolved = ClientSettingsResolver.Resolve(ClientSettingsDocument.Empty);
     private ClientSettingsFileStore? _settingsStore;
     private ClientSettingsLoadStatus _settingsLoadStatus;
@@ -107,6 +108,15 @@ public abstract partial class ClientRoot : Control
     protected GodotSessionUiLease BeginSessionUi(string name) => UiComposition.BeginSession(name);
 
     protected ResolvedClientSettings EffectiveSettings => _resolved;
+    protected ResolvedClientDisplayConfiguration EffectiveDisplay => _display;
+
+    public override void _Input(InputEvent inputEvent)
+    {
+        // World lives in an independent SubViewport. Its gameplay input still originates in
+        // application coordinates, so session UI policy sees the same events as before.
+        if (_uiComposition is not null && _shell.Snapshot().SessionActive)
+            _uiComposition.GameplayViewport.PushInput(inputEvent, true);
+    }
 
     protected void ActivateServerProfile(
         ClientSettingsScopeKey scope,
@@ -403,6 +413,15 @@ public abstract partial class ClientRoot : Control
         ClientSettingsLoadResult loaded = _settingsStore.Load();
         _settingsLoadStatus = loaded.Status;
         _settings = loaded.Document;
+        // Deterministic native/export acceptance input only. It is not persisted, sent over
+        // Network, or accepted from a server profile.
+        if (OS.GetCmdlineUserArgs().Contains("--f1-9a-scaled-output", StringComparer.Ordinal))
+            _settings = _settings.WithDisplay(ClientDisplaySettings.Default.WithAdvancedFromSimple() with
+            {
+                AdvancedOutput = ClientPixelSize.Create(1280, 720),
+                AdvancedInternalScalePercent = 75,
+            });
+        _display = ClientDisplayResolver.Resolve(_settings.Display);
         ResolveEffectiveSettings(notify: false);
     }
 
@@ -411,10 +430,13 @@ public abstract partial class ClientRoot : Control
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         _controllerRoot = NamedNode("Controller");
         _contentCatalogRoot = NamedNode("ContentCatalogs");
+        _display = ClientDisplayResolver.Resolve(_settings.Display);
+        _uiComposition = new GodotClientUiComposition(this, _display);
+        ApplyNativeWindow(_display);
         _worldRoot = NamedNode("World");
         AddChild(_controllerRoot);
         AddChild(_contentCatalogRoot);
-        AddChild(_worldRoot);
+        _uiComposition.GameplayViewport.AddChild(_worldRoot);
 
         Node map = NamedNode("Map");
         map.AddChild(NamedNode("Terrain"));
@@ -425,7 +447,6 @@ public abstract partial class ClientRoot : Control
         _worldRoot.AddChild(NamedNode("Effects"));
         _worldRoot.AddChild(NamedNode("CameraRig"));
 
-        _uiComposition = new GodotClientUiComposition(this, ResolveGameplayOutputShape());
         _workspaceLayer = GetNode<CanvasLayer>("UILayers/Workspace");
         _worldUiLayer = _uiComposition.WorldLayer;
         _hudLayer = _uiComposition.HudLayer;
@@ -437,6 +458,56 @@ public abstract partial class ClientRoot : Control
         _hudStatus.SetAnchorsPreset(LayoutPreset.TopWide);
         _uiComposition.HudHost.AddChild(_hudStatus);
         Resized += _uiComposition.UpdateLayoutIfNeeded;
+        if (OS.GetCmdlineUserArgs().Contains("--f1-9a-scaled-output", StringComparer.Ordinal))
+        {
+            if (_display.GameplayOutputResolution != ClientPixelSize.Create(1280, 720) ||
+                _display.InternalRenderResolution != ClientPixelSize.Create(960, 540) ||
+                !ReferenceEquals(_worldRoot.GetParent(), _uiComposition.GameplayViewport))
+                throw new InvalidOperationException("The scaled native output acceptance did not compose.");
+            GD.Print("F1.9A SCALED OUTPUT PASS app=1920x1080 frame=1920x1080 " +
+                "output=1280x720 internal3D=960x540 world=SubViewport");
+        }
+    }
+
+    protected void ApplyDisplay(ResolvedClientDisplayConfiguration next)
+    {
+        ResolvedClientDisplayConfiguration previous = _display;
+        try
+        {
+            ApplyNativeWindow(next);
+            UiComposition.ApplyDisplay(next);
+            _display = next;
+        }
+        catch
+        {
+            ApplyNativeWindow(previous);
+            UiComposition.ApplyDisplay(previous);
+            throw;
+        }
+    }
+
+    private void ApplyNativeWindow(ResolvedClientDisplayConfiguration display)
+    {
+        Window window = GetWindow();
+        window.ContentScaleMode = Window.ContentScaleModeEnum.CanvasItems;
+        window.ContentScaleAspect = Window.ContentScaleAspectEnum.Keep;
+        window.ContentScaleSize = new Vector2I(
+            display.ApplicationResolution.Width, display.ApplicationResolution.Height);
+        window.Mode = display.DisplayMode switch
+        {
+            ClientDisplayMode.Windowed => Window.ModeEnum.Windowed,
+            ClientDisplayMode.BorderlessFullscreen => Window.ModeEnum.Fullscreen,
+            ClientDisplayMode.Fullscreen => Window.ModeEnum.ExclusiveFullscreen,
+            _ => throw new ArgumentOutOfRangeException(nameof(display)),
+        };
+        if (display.DisplayMode == ClientDisplayMode.Windowed &&
+            !string.Equals(DisplayServer.GetName(), "headless", StringComparison.OrdinalIgnoreCase))
+        {
+            Vector2I desktop = DisplayServer.ScreenGetUsableRect().Size;
+            window.Size = new Vector2I(
+                Math.Min(display.ApplicationResolution.Width, desktop.X),
+                Math.Min(display.ApplicationResolution.Height, desktop.Y));
+        }
     }
 
     protected void RenderCurrentSurface()
@@ -532,13 +603,15 @@ public abstract partial class ClientRoot : Control
 
     private void BuildSettingsMenu()
     {
-        VBoxContainer column = CreateScrollableCenteredColumn(420);
+        VBoxContainer column = CreateScrollableCenteredColumn(500);
         bool scoped = _activeSettingsScope.IsValid && _activeProfileRecommendation is not null;
         column.AddChild(Title(scoped ? "Server-Specific Settings" : "Client Settings"));
         if (scoped)
             column.AddChild(CenteredLabel(
                 "These user-owned overrides apply only to the verified application realm. " +
                 "The server recommendation is not copied into global settings."));
+
+        Func<ClientDisplaySettings> readDisplay = BuildDisplaySettingsControls(column);
 
         HSlider uiScale = Slider(0.5, 3, 0.05, _resolved.UiScale);
         HSlider volume = Slider(0, 1, 0.05, _resolved.MasterVolume);
@@ -618,10 +691,20 @@ public abstract partial class ClientRoot : Control
                         : _settings.Global.Bindings,
                     (int)renderDistance.Value,
                     chosenRig);
-                _settings = scoped
+                ClientSettingsDocument candidate = scoped
                     ? _settings.WithScope(_activeSettingsScope, saved)
                     : _settings.WithGlobal(saved);
-                _settingsStore!.Save(_settings);
+                candidate = candidate.WithDisplay(readDisplay());
+                ResolvedClientDisplayConfiguration nextDisplay = ClientDisplayResolver.Resolve(candidate.Display);
+                ResolvedClientDisplayConfiguration previousDisplay = _display;
+                ApplyDisplay(nextDisplay);
+                try { _settingsStore!.Save(candidate); }
+                catch
+                {
+                    ApplyDisplay(previousDisplay);
+                    throw;
+                }
+                _settings = candidate;
                 _settingsLoadStatus = ClientSettingsLoadStatus.Loaded;
                 ResolveEffectiveSettings();
                 _shell.CloseSettings();
@@ -637,11 +720,28 @@ public abstract partial class ClientRoot : Control
         reset.Name = "SettingsReset";
         ConnectDeferred(reset, () =>
         {
-            _settings = scoped
-                ? _settings.WithScope(_activeSettingsScope, ClientSettingsLayer.Empty)
-                : new ClientSettingsDocument(ClientSettingsLayer.Empty, _settings.Scopes,
-                    _settings.NamedProfiles);
-            ResolveEffectiveSettings();
+            try
+            {
+                ClientSettingsDocument candidate = scoped
+                    ? _settings.WithScope(_activeSettingsScope, ClientSettingsLayer.Empty)
+                    : new ClientSettingsDocument(ClientSettingsLayer.Empty, _settings.Scopes,
+                        _settings.NamedProfiles, ClientDisplaySettings.Default);
+                ResolvedClientDisplayConfiguration previousDisplay = _display;
+                ApplyDisplay(ClientDisplayResolver.Resolve(candidate.Display));
+                try { _settingsStore!.Save(candidate); }
+                catch
+                {
+                    ApplyDisplay(previousDisplay);
+                    throw;
+                }
+                _settings = candidate;
+                _settingsLoadStatus = ClientSettingsLoadStatus.Loaded;
+                ResolveEffectiveSettings();
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                _shell.Fail($"Settings could not be reset: {exception.Message}");
+            }
             RenderCurrentSurface();
         });
         column.AddChild(reset);
@@ -654,6 +754,149 @@ public abstract partial class ClientRoot : Control
         });
         column.AddChild(back);
         FocusFirstButton(column);
+    }
+
+    private Func<ClientDisplaySettings> BuildDisplaySettingsControls(VBoxContainer column)
+    {
+        ClientDisplaySettings current = _settings.Display;
+        column.AddChild(Title("Display (this device only)"));
+        OptionButton displayMode = EnumOptions(current.DisplayMode);
+        AddSetting(column, "Display mode", displayMode);
+        var advancedToggle = new CheckBox
+        {
+            Name = "DisplayShowAdvanced",
+            Text = "Show Advanced",
+            ButtonPressed = current.SettingsMode == ClientDisplaySettingsMode.Advanced,
+        };
+        column.AddChild(advancedToggle);
+
+        var simplePanel = new VBoxContainer { Name = "SimpleDisplaySettings" };
+        column.AddChild(simplePanel);
+        OptionButton aspect = EnumOptions(current.SimpleAspect);
+        aspect.Name = "DisplayAspect";
+        OptionButton resolution = new() { Name = "DisplayResolution" };
+        AddSetting(simplePanel, "Aspect ratio", aspect);
+        AddSetting(simplePanel, "Resolution", resolution);
+        void PopulateResolution(ClientPixelSize preferred)
+        {
+            resolution.Clear();
+            IReadOnlyList<ClientPixelSize> sizes = ClientDisplayPresetCatalog.ForAspect(
+                (ClientDisplayAspectPreset)aspect.GetSelectedId());
+            int selected = 0;
+            for (int index = 0; index < sizes.Count; index++)
+            {
+                resolution.AddItem($"{sizes[index].Width} × {sizes[index].Height}", index);
+                if (sizes[index] == preferred) selected = index;
+            }
+            resolution.Select(selected);
+        }
+        PopulateResolution(current.SimpleResolution);
+        aspect.ItemSelected += _ => PopulateResolution(default);
+
+        var advancedPanel = new VBoxContainer { Name = "AdvancedDisplaySettings" };
+        column.AddChild(advancedPanel);
+        static SpinBox Dimension(int value) => new()
+        {
+            MinValue = 1, MaxValue = ClientDisplayResolver.MaximumDimension,
+            Step = 1, Rounded = true, Value = value,
+        };
+        SpinBox applicationWidth = Dimension(current.AdvancedApplication.Width);
+        SpinBox applicationHeight = Dimension(current.AdvancedApplication.Height);
+        SpinBox frameWidth = Dimension(current.AdvancedFrameSize.Width);
+        SpinBox frameHeight = Dimension(current.AdvancedFrameSize.Height);
+        SpinBox outputWidth = Dimension(current.AdvancedOutput.Width);
+        SpinBox outputHeight = Dimension(current.AdvancedOutput.Height);
+        OptionButton frameMode = EnumOptions(current.AdvancedFrameMode);
+        SpinBox scale = new()
+        {
+            MinValue = ClientDisplayResolver.MinimumInternalScalePercent,
+            MaxValue = ClientDisplayResolver.MaximumInternalScalePercent,
+            Step = 1, Rounded = true, Value = current.AdvancedInternalScalePercent,
+        };
+        AddSetting(advancedPanel, "Application width", applicationWidth);
+        AddSetting(advancedPanel, "Application height", applicationHeight);
+        AddSetting(advancedPanel, "Gameplay Frame", frameMode);
+        var frameWidthLabel = new Label { Text = "Custom frame width" };
+        var frameHeightLabel = new Label { Text = "Custom frame height" };
+        advancedPanel.AddChild(frameWidthLabel);
+        advancedPanel.AddChild(frameWidth);
+        advancedPanel.AddChild(frameHeightLabel);
+        advancedPanel.AddChild(frameHeight);
+        AddSetting(advancedPanel, "Gameplay Output width", outputWidth);
+        AddSetting(advancedPanel, "Gameplay Output height", outputHeight);
+        AddSetting(advancedPanel, "Internal 3D render scale (%)", scale);
+        var internalSize = new Label { Name = "DisplayInternalResolution" };
+        var resolvedFrame = new Label { Name = "DisplayResolvedFrame" };
+        advancedPanel.AddChild(resolvedFrame);
+        advancedPanel.AddChild(internalSize);
+        void UpdateResolvedLabels()
+        {
+            internalSize.Text =
+                $"Internal 3D (computed): {(int)Math.Round(outputWidth.Value * scale.Value / 100d)} × " +
+                $"{(int)Math.Round(outputHeight.Value * scale.Value / 100d)}";
+            try
+            {
+                ClientPixelSize application = ClientPixelSize.Create(
+                    (int)applicationWidth.Value, (int)applicationHeight.Value);
+                ClientPixelSize output = ClientPixelSize.Create((int)outputWidth.Value, (int)outputHeight.Value);
+                GameplayFrameLayout frame = (ClientGameplayFrameMode)frameMode.GetSelectedId() switch
+                {
+                    ClientGameplayFrameMode.Fill => GameplayFrameLayout.Fill(application, output),
+                    ClientGameplayFrameMode.MaxFit => GameplayFrameLayout.MaxFitExact(application, output),
+                    _ => GameplayFrameLayout.Custom(application, output, ClientPixelSize.Create(
+                        (int)frameWidth.Value, (int)frameHeight.Value)),
+                };
+                resolvedFrame.Text = $"Gameplay Frame size (resolved): " +
+                    $"{frame.Frame.Width} × {frame.Frame.Height}";
+            }
+            catch (ArgumentException)
+            {
+                resolvedFrame.Text = "Gameplay Frame size: invalid — adjust dimensions";
+            }
+        }
+        foreach (SpinBox spin in new[] { applicationWidth, applicationHeight, frameWidth,
+                     frameHeight, outputWidth, outputHeight, scale })
+            spin.ValueChanged += _ => UpdateResolvedLabels();
+        UpdateResolvedLabels();
+        void UpdateVisibility()
+        {
+            simplePanel.Visible = !advancedToggle.ButtonPressed;
+            advancedPanel.Visible = advancedToggle.ButtonPressed;
+            bool customFrame = (ClientGameplayFrameMode)frameMode.GetSelectedId() ==
+                ClientGameplayFrameMode.Custom;
+            frameWidthLabel.Visible = customFrame;
+            frameWidth.Visible = customFrame;
+            frameHeightLabel.Visible = customFrame;
+            frameHeight.Visible = customFrame;
+            UpdateResolvedLabels();
+        }
+        frameMode.ItemSelected += _ => UpdateVisibility();
+        advancedToggle.Toggled += enabled =>
+        {
+            if (enabled && current.SettingsMode == ClientDisplaySettingsMode.Simple)
+            {
+                IReadOnlyList<ClientPixelSize> sizes = ClientDisplayPresetCatalog.ForAspect(
+                    (ClientDisplayAspectPreset)aspect.GetSelectedId());
+                ClientPixelSize selected = sizes[resolution.GetSelectedId()];
+                applicationWidth.Value = frameWidth.Value = outputWidth.Value = selected.Width;
+                applicationHeight.Value = frameHeight.Value = outputHeight.Value = selected.Height;
+                frameMode.Select((int)ClientGameplayFrameMode.Fill - 1);
+                scale.Value = 100;
+            }
+            UpdateVisibility();
+        };
+        UpdateVisibility();
+        return () => new ClientDisplaySettings(
+            advancedToggle.ButtonPressed ? ClientDisplaySettingsMode.Advanced : ClientDisplaySettingsMode.Simple,
+            (ClientDisplayMode)displayMode.GetSelectedId(),
+            (ClientDisplayAspectPreset)aspect.GetSelectedId(),
+            ClientDisplayPresetCatalog.ForAspect((ClientDisplayAspectPreset)aspect.GetSelectedId())
+                [resolution.GetSelectedId()],
+            ClientPixelSize.Create((int)applicationWidth.Value, (int)applicationHeight.Value),
+            (ClientGameplayFrameMode)frameMode.GetSelectedId(),
+            ClientPixelSize.Create((int)frameWidth.Value, (int)frameHeight.Value),
+            ClientPixelSize.Create((int)outputWidth.Value, (int)outputHeight.Value),
+            (int)scale.Value);
     }
 
     private void BuildInSessionOptions()
@@ -1006,8 +1249,7 @@ public abstract partial class ClientRoot : Control
     {
         ClientShellSnapshot shell = ShellSnapshot();
         GodotClientUiCompositionSnapshot ui = UiComposition.GetSnapshot();
-        GameplayFrameLayout frame = GameplayFrameLayout.MaxFit(
-            ui.Workspace.ApplicationSize, ui.Workspace.SelectedOutputShape);
+        GameplayFrameLayout frame = UiComposition.Layout;
         ClientCanonicalViewProjection projection =
             ClientCanonicalViewProjection.ForFrame(_resolved.CameraRig, frame);
         ClientCameraRig rig = _resolved.CameraRig;
@@ -1021,37 +1263,25 @@ public abstract partial class ClientRoot : Control
                 $"canonicalFov={rig.CanonicalFovTenths / 10f:0.#}° " +
                 $"canonicalOrtho={rig.CanonicalOrthographicSizeMillimeters / 1000f:0.###}m",
             GodotClientDebugPage.Presentation =>
-                $"Presentation\napplication={ui.Workspace.ApplicationSize.Width}x{ui.Workspace.ApplicationSize.Height}\n" +
-                $"selected={ui.Workspace.SelectedOutputShape.Width}x{ui.Workspace.SelectedOutputShape.Height}\n" +
+                $"Presentation\nphysicalWindow={GetWindow().Size.X}x{GetWindow().Size.Y} " +
+                $"mode={_display.DisplayMode} settings={_display.SettingsMode}\n" +
+                $"application={ui.Workspace.ApplicationSize.Width}x{ui.Workspace.ApplicationSize.Height}\n" +
                 $"frame={ui.Workspace.GameplayFrame.X},{ui.Workspace.GameplayFrame.Y} " +
                 $"{ui.Workspace.GameplayFrame.Width}x{ui.Workspace.GameplayFrame.Height}\n" +
+                $"output={ui.Workspace.SelectedOutputShape.Width}x{ui.Workspace.SelectedOutputShape.Height} " +
+                $"internal3D={ui.Workspace.Internal3DSize.Width}x{ui.Workspace.Internal3DSize.Height} " +
+                $"scale={_display.InternalRenderScalePercent}%\n" +
+                $"frameAspect={(double)frame.Frame.Width / frame.Frame.Height:0.####} " +
+                $"canonicalCrop=16:9\n" +
                 $"world/hud/gumps={ui.WorldHostChildren}/{ui.HudHostChildren}/{ui.Gumps.OpenWindows}\n" +
                 $"canonical=16:9 targetV={projection.TargetVerticalExtent:0.####} " +
-                $"targetH={projection.TargetHorizontalExtent:0.####}\n" +
-                $"temporaryViewportV={projection.MainViewportVerticalExtent(frame):0.####}",
+                $"targetH={projection.TargetHorizontalExtent:0.####}",
             GodotClientDebugPage.Content =>
                 $"Content\ncatalogMarkers={ContentCatalogRoot.GetChildCount()}\n" +
                 $"session={ui.SessionActive} context={ui.ContextHostChildren}\n" +
                 "resolution=User→Realm→Local→Primitive",
             _ => string.Empty,
         };
-    }
-
-    private static ClientPixelSize ResolveGameplayOutputShape()
-    {
-        foreach (string argument in OS.GetCmdlineUserArgs())
-        {
-            const string prefix = "--gameplay-output=";
-            if (!argument.StartsWith(prefix, StringComparison.Ordinal)) continue;
-            string[] parts = argument[prefix.Length..].Split('x', 'X');
-            if (parts.Length == 2 && int.TryParse(parts[0], out int width) &&
-                int.TryParse(parts[1], out int height) &&
-                ClientPixelSize.TryCreate(width, height, out ClientPixelSize selected))
-                return selected;
-            throw new InvalidOperationException(
-                "--gameplay-output requires finite WIDTHxHEIGHT dimensions.");
-        }
-        return ClientPixelSize.Create(1920, 1080);
     }
 
     private static void Validate(in ClientCompositionManifest composition)

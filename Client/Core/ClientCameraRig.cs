@@ -159,7 +159,7 @@ public readonly record struct ClientCanonicalViewProjection(
     public double TargetVerticalFovDegrees => Projection == ClientCameraProjection.Perspective
         ? 2d * Math.Atan(TargetVerticalExtent) * 180d / Math.PI : 0d;
 
-    /// <summary>Temporary F1.8 compensation while Camera3D still owns the application viewport.</summary>
+    /// <summary>Historical F1.8 main-viewport compensation; F1.9A native output does not use it.</summary>
     public double MainViewportVerticalExtent(in GameplayFrameLayout layout)
     {
         if (!layout.Frame.IsValid || !layout.Application.IsValid)

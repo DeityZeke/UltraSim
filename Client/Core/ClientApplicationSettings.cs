@@ -318,7 +318,7 @@ public readonly record struct ClientScopedSettings(
 /// </summary>
 public sealed class ClientSettingsDocument
 {
-    public const int CurrentVersion = 4;
+    public const int CurrentVersion = 5;
     public const int MaximumScopes = 128;
     private readonly ReadOnlyCollection<ClientScopedSettings> _scopes;
     private readonly ReadOnlyCollection<ClientNamedControlProfile> _namedProfiles;
@@ -326,8 +326,11 @@ public sealed class ClientSettingsDocument
     public ClientSettingsDocument(
         ClientSettingsLayer? global = null,
         IEnumerable<ClientScopedSettings>? scopes = null,
-        IEnumerable<ClientNamedControlProfile>? namedProfiles = null)
+        IEnumerable<ClientNamedControlProfile>? namedProfiles = null,
+        ClientDisplaySettings? display = null)
     {
+        Display = display ?? ClientDisplaySettings.Default;
+        _ = ClientDisplayResolver.Resolve(Display);
         Global = global ?? ClientSettingsLayer.Empty;
         ClientScopedSettings[] copy = scopes?.OrderBy(value => value.Scope.Value, StringComparer.Ordinal).ToArray() ?? [];
         if (copy.Length > MaximumScopes) throw new ArgumentOutOfRangeException(nameof(scopes));
@@ -351,6 +354,7 @@ public sealed class ClientSettingsDocument
 
     public static ClientSettingsDocument Empty { get; } = new();
     public ClientSettingsLayer Global { get; }
+    public ClientDisplaySettings Display { get; }
     public ReadOnlyCollection<ClientScopedSettings> Scopes => _scopes;
     public ReadOnlyCollection<ClientNamedControlProfile> NamedProfiles => _namedProfiles;
 
@@ -367,7 +371,7 @@ public sealed class ClientSettingsDocument
         ClientNamedControlProfile[] values = _namedProfiles
             .Where(value => !string.Equals(value.Name, profile.Name, StringComparison.OrdinalIgnoreCase))
             .Append(profile).ToArray();
-        return new ClientSettingsDocument(Global, _scopes, values);
+        return new ClientSettingsDocument(Global, _scopes, values, Display);
     }
 
     public bool TryGetScope(ClientSettingsScopeKey scope, out ClientSettingsLayer layer)
@@ -392,7 +396,10 @@ public sealed class ClientSettingsDocument
     }
 
     public ClientSettingsDocument WithGlobal(ClientSettingsLayer layer) =>
-        new(layer ?? throw new ArgumentNullException(nameof(layer)), _scopes, _namedProfiles);
+        new(layer ?? throw new ArgumentNullException(nameof(layer)), _scopes, _namedProfiles, Display);
+
+    public ClientSettingsDocument WithDisplay(ClientDisplaySettings display) =>
+        new(Global, _scopes, _namedProfiles, display);
 
     public ClientSettingsDocument WithScope(ClientSettingsScopeKey scope, ClientSettingsLayer layer)
     {
@@ -410,7 +417,7 @@ public sealed class ClientSettingsDocument
             else values.Add(value);
         }
         if (!replaced) values.Add(new ClientScopedSettings(scope, layer));
-        return new ClientSettingsDocument(Global, values, _namedProfiles);
+        return new ClientSettingsDocument(Global, values, _namedProfiles, Display);
     }
 }
 
@@ -710,6 +717,7 @@ public static class ClientSettingsJsonCodec
         var value = new DocumentDto
         {
             Version = ClientSettingsDocument.CurrentVersion,
+            Display = ToDto(document.Display),
             Global = ToDto(document.Global),
             Scopes = document.Scopes.Select(scope => new ScopeDto
             {
@@ -771,7 +779,10 @@ public static class ClientSettingsJsonCodec
                 namedProfiles.Add(new ClientNamedControlProfile(
                     named.Name ?? string.Empty, grammar, rig, layer.Bindings));
             }
-            document = new ClientSettingsDocument(global, scopes, namedProfiles);
+            ClientDisplaySettings display = value.Version >= 5
+                ? FromDto(value.Display ?? throw new JsonException("Display settings are required in v5."))
+                : ClientDisplaySettings.Default;
+            document = new ClientSettingsDocument(global, scopes, namedProfiles, display);
             ValidateDocument(document);
             error = null;
             return true;
@@ -826,6 +837,30 @@ public static class ClientSettingsJsonCodec
         }).ToList(),
     };
 
+    private static DisplayDto ToDto(ClientDisplaySettings value) => new()
+    {
+        SettingsMode = value.SettingsMode,
+        DisplayMode = value.DisplayMode,
+        SimpleAspect = value.SimpleAspect,
+        SimpleWidth = value.SimpleResolution.Width,
+        SimpleHeight = value.SimpleResolution.Height,
+        ApplicationWidth = value.AdvancedApplication.Width,
+        ApplicationHeight = value.AdvancedApplication.Height,
+        FrameMode = value.AdvancedFrameMode,
+        FrameWidth = value.AdvancedFrameSize.Width,
+        FrameHeight = value.AdvancedFrameSize.Height,
+        OutputWidth = value.AdvancedOutput.Width,
+        OutputHeight = value.AdvancedOutput.Height,
+        InternalScalePercent = value.AdvancedInternalScalePercent,
+    };
+
+    private static ClientDisplaySettings FromDto(DisplayDto value) => new(
+        value.SettingsMode, value.DisplayMode, value.SimpleAspect,
+        ClientPixelSize.Create(value.SimpleWidth, value.SimpleHeight),
+        ClientPixelSize.Create(value.ApplicationWidth, value.ApplicationHeight),
+        value.FrameMode, ClientPixelSize.Create(value.FrameWidth, value.FrameHeight),
+        ClientPixelSize.Create(value.OutputWidth, value.OutputHeight), value.InternalScalePercent);
+
     private static ClientSettingsLayer FromDto(LayerDto value)
     {
         List<ClientPhysicalBinding> bindings = [];
@@ -857,9 +892,27 @@ public static class ClientSettingsJsonCodec
     private sealed class DocumentDto
     {
         public int Version { get; set; }
+        public DisplayDto? Display { get; set; }
         public LayerDto? Global { get; set; }
         public List<ScopeDto>? Scopes { get; set; }
         public List<NamedProfileDto>? NamedProfiles { get; set; }
+    }
+
+    private sealed class DisplayDto
+    {
+        public ClientDisplaySettingsMode SettingsMode { get; set; }
+        public ClientDisplayMode DisplayMode { get; set; }
+        public ClientDisplayAspectPreset SimpleAspect { get; set; }
+        public int SimpleWidth { get; set; }
+        public int SimpleHeight { get; set; }
+        public int ApplicationWidth { get; set; }
+        public int ApplicationHeight { get; set; }
+        public ClientGameplayFrameMode FrameMode { get; set; }
+        public int FrameWidth { get; set; }
+        public int FrameHeight { get; set; }
+        public int OutputWidth { get; set; }
+        public int OutputHeight { get; set; }
+        public int InternalScalePercent { get; set; }
     }
 
     private sealed class NamedProfileDto

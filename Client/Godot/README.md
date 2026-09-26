@@ -1,5 +1,17 @@
 # UltraSim client application project
 
+F1.9A uses one display path for Local, Remote and Complete. The root owns a logical Application
+Resolution via Godot Window content scaling, while the persistent UI composition owns a real
+Gameplay Output `SubViewport`. The World root and camera live under that viewport. A `TextureRect`
+scales the output into the centered Gameplay Frame; it is used instead of a stretching
+`SubViewportContainer` so output pixels remain independent of frame dimensions. The viewport's
+3D scale supplies bounded internal 3D resolution. Application HUD, gumps, debug and context UI
+stay outside that viewport. Native pointer rays use application→frame→output mapping, and camera
+projection uses the Core target crop directly, with no main-viewport compensation. Simple mode
+locks the display layers together; Advanced mode exposes the same layers independently, not a
+second renderer. Physical window resizing scales the logical application without expanding World
+visibility. `ClientSettingsDocument` v5 is device/user-global for display choices.
+
 This is the one maintained Godot application and the only production Godot script assembly. Its
 `Adapter/`, `Shell/`, and conditionally compiled `Local/` sources replace the former `_Godot`,
 `Bootstrap.Godot`, `Local.Godot`, and `Playable.Godot` projects. Keeping all native scripts in
@@ -288,17 +300,17 @@ The pixel-exact two-texture `WorldOpaque` atlas candidate is measured but not se
 two texture objects to one page without demonstrating fewer materials or draws. Standalone derived
 resources remain production policy.
 
-F1.7 adds one persistent application workspace shared by Local and Remote composition. The default
-1920×1080 selected output shape is maximum-fit and centered inside the application window; four
-dark transitional masks cover unused workspace, the clipped World overlay host follows the frame,
+F1.7 established one persistent application workspace shared by Local and Remote composition.
+At that checkpoint, the selected output shape was maximum-fit inside the native window and four
+transitional masks covered unused workspace. F1.9A replaces the temporary main-viewport World
+realization with a real output viewport; the clipped World overlay host still follows the frame,
 and world pointer input outside the frame is rejected. Workspace, World, HUD, Menus, Debug, and
 Context/Tooltip have deterministic category order. Tooltips and the bounded Select/Interact/Cancel
 world context menu use Context; right-click no longer submits Orbit stop. F11 cycles
-Off/Client/Presentation/Content. F1.8 retains the main 3D viewport but now realizes the shared
+Off/Client/Presentation/Content. F1.8 originally retained the main 3D viewport and realized the shared
 Core camera rig through `GodotGameplayCameraRig` in both Local and Remote. The selected Gameplay
-Frame aspect crops the 16:9 canonical view; the native vertical FOV/orthographic size is temporarily
-compensated for application height/frame height before F1.9 gives the camera a frame-sized viewport.
-The output pixel count still does not change internal 3D render resolution. Native rays and outside-
+Frame aspect crops the 16:9 canonical view; F1.9A removes the temporary lens compensation because
+the camera now renders into the output viewport. Native rays and outside-
 frame pointer admission are tested; crop is presentation consistency, never server disclosure policy.
 
 F1.8A keeps the authoritative remote `_player` as the structural-window, pointer-origin, and
@@ -308,7 +320,7 @@ target relative to that origin. Public actors consume Core receipt-time interpol
 overhead Chat. This does not generate fake semantic `Updated` operations per render frame. Local
 play stays authority-first with no remote interpolation delay. The headless native T0.10 acceptance
 checks predicted actor/camera/attachments, owner reconciliation, actual replicated actor samples,
-removal, and source-generation replacement. F1.9 still owns the frame-sized SubViewport.
+removal, and source-generation replacement. F1.9A now owns the output SubViewport.
 F1.8A-R1 makes pointer nomination use the actor pose actually assigned to the native root, while
 only disclosed semantic rows supply pickable identities and Game retains final range/interaction
 authority. The resolved profile, not actor metadata, owns the realized camera pivot; orthographic

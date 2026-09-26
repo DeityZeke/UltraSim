@@ -122,7 +122,7 @@ static class ClientApplicationSettingsTests
         Equal(ClientSettingsResolver.DefaultOrbitCameraDistance,
             ClientSettingsResolver.Resolve(versionTwo).CameraDistance);
         True(ClientSettingsJsonCodec.TryRead(
-            $"{{ \"version\": {ClientSettingsDocument.CurrentVersion}, \"global\": " +
+            "{ \"version\": 4, \"global\": " +
             "{ \"cameraProfile\": \"Orbit\", \"cameraDistance\": 28 } }",
             out ClientSettingsDocument currentExplicitDistance, out _));
         Equal(28f, ClientSettingsResolver.Resolve(currentExplicitDistance).CameraDistance);
