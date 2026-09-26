@@ -29,7 +29,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
     private GodotClientSessionBoundarySnapshot _f19DisplayBaseline;
 
     protected override string SessionPresentationDiagnostics() => _cabin is null
-        ? base.SessionPresentationDiagnostics() : _cabin.GetSnapshot().Renderer.ToDiagnosticText();
+        ? base.SessionPresentationDiagnostics() : _cabin.GetPresentationSnapshot().Renderer.ToDiagnosticText();
 
     public override void _Ready()
     {
