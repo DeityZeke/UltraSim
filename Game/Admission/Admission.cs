@@ -195,7 +195,9 @@ public sealed class AdmissionService : IDisposable
                         world.PersistentWorldId,
                         world.GetOrAssignPersistentId(entity));
                 }
-                return new WorldBindingResult(created, entity, persistentKey, generationId);
+                PrefabKey prefab = default;
+                if (created) world.TryGetPrefabProvenance(entity, out prefab);
+                return new WorldBindingResult(created, entity, persistentKey, generationId, prefab);
             },
             out WorldBindingResult binding))
         {
@@ -220,11 +222,49 @@ public sealed class AdmissionService : IDisposable
             ControlledEntity = binding.PersistentKey,
             GenerationId = binding.GenerationId,
             GuestIdentity = guestIdentity,
+            GuestPrefab = binding.Prefab,
         };
         _sessions.Add(participant, session);
         AdmissionResult result = session.Snapshot();
         NotifyObservers(Entered, result);
         return result;
+    }
+
+    /// <summary>
+    /// Explicit trusted Local host policy after loading its own save. This is not automatic guest
+    /// authorization and is not a remote request surface. Only the exact expired guest binding may
+    /// resume, resolving its retained persistent key and original playable prefab in the new world.
+    /// Ordinary accountless/remote admissions still expire on every generation replacement.
+    /// </summary>
+    public bool TryResumeLocalGuestAfterRestore(
+        ParticipantId participant, ulong expiredGeneration, out AdmissionResult result)
+    {
+        EnsureOperational();
+        result = default;
+        if (!_sessions.TryGetValue(participant, out Session? session) ||
+            session.Stage != AdmissionStage.Rejected ||
+            session.Rejection != AdmissionRejection.GenerationReplaced ||
+            session.GenerationId != expiredGeneration || !session.GuestIdentity.IsValid ||
+            session.AccountId.IsValid || !session.ControlledEntity.IsValid || !session.GuestPrefab.IsValid)
+            return false;
+        if (!_runtime.TryUseActiveGeneration((world, generation) =>
+            {
+                if (generation <= expiredGeneration || world.PersistentWorldId != session.ControlledEntity.World ||
+                    !world.TryResolvePersistentEntity(session.ControlledEntity.Entity, out Entity entity) ||
+                    !world.IsAlive(entity) || !world.TryGetPrefabProvenance(entity, out PrefabKey prefab) ||
+                    prefab != session.GuestPrefab || IsPlayableAlreadyBound(entity))
+                    return (Entity.Null, 0UL);
+                return (entity, generation);
+            }, out (Entity Entity, ulong Generation) binding) || binding.Generation == 0)
+            return false;
+        session.Entity = binding.Entity;
+        session.GenerationId = binding.Generation;
+        session.Stage = AdmissionStage.Entered;
+        session.Rejection = AdmissionRejection.None;
+        session.Message = null;
+        result = session.Snapshot();
+        NotifyObservers(Entered, result);
+        return true;
     }
 
     public AdmissionResult JoinAccountBacked(
@@ -892,7 +932,8 @@ public sealed class AdmissionService : IDisposable
         bool Success,
         Entity Entity,
         PersistentEntityKey PersistentKey,
-        ulong GenerationId);
+        ulong GenerationId,
+        PrefabKey Prefab);
 
     private readonly record struct AccountSelection(
         AccountRecord Account,
@@ -943,6 +984,8 @@ public sealed class AdmissionService : IDisposable
         public string? Message { get; set; }
 
         public GameGuestIdentity GuestIdentity { get; set; }
+
+        public PrefabKey GuestPrefab { get; set; }
 
         public AdmissionResult Snapshot() => new(
             Participant,

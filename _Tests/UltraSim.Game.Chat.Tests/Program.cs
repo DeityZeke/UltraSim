@@ -30,6 +30,7 @@ var tests = new (string Name, Action Body)[]
     ("RetentionCapacityNeverOverwritesAnOccurrence", RetentionCapacityNeverOverwritesAnOccurrence),
     ("RejectedAdmissionOperationCannotEvictEnteredParticipant", RejectedAdmissionOperationCannotEvictEnteredParticipant),
     ("ActualAdmissionRejectionRemovesEnteredParticipant", ActualAdmissionRejectionRemovesEnteredParticipant),
+    ("GuestRestoreRequiresExplicitExactLocalBinding", GuestRestoreRequiresExplicitExactLocalBinding),
     ("ExistingAdmissionsAreCensusedAndWorldMismatchRejects", ExistingAdmissionsAreCensusedAndWorldMismatchRejects),
     ("MultipleAdmissionOwnersFormOneBoundedCensus", MultipleAdmissionOwnersFormOneBoundedCensus),
     ("WarmedSpeechDiscoveryAllocatesZero", WarmedSpeechDiscoveryAllocatesZero),
@@ -896,6 +897,23 @@ static void ActualAdmissionRejectionRemovesEnteredParticipant()
     Assert.Equal(0, fixture.Chat.GetSnapshot().EnteredParticipants);
     Assert.Equal(GameChatSubmissionStatus.ParticipantNotEntered,
         fixture.Chat.Submit(participant, "old authority").Status);
+}
+
+static void GuestRestoreRequiresExplicitExactLocalBinding()
+{
+    using var fixture = new ChatFixture();
+    AdmissionResult guest = fixture.Admission.JoinGuest(new ParticipantId(1),
+        new GameGuestAdmissionRequest(GameGuestBody.HumanFemale, "Restore control"));
+    Assert.True(guest.IsEntered);
+    Assert.False(fixture.Admission.TryResumeLocalGuestAfterRestore(guest.Participant, guest.GenerationId, out _));
+    fixture.ReplaceGeneration(); // Fresh, unrelated world does not contain the saved guest's durable entity.
+    Assert.True(fixture.Admission.TryGetSession(guest.Participant, out AdmissionResult expired));
+    Assert.Equal(AdmissionRejection.GenerationReplaced, expired.Rejection);
+    Assert.False(fixture.Admission.TryResumeLocalGuestAfterRestore(default, guest.GenerationId, out _));
+    Assert.False(fixture.Admission.TryResumeLocalGuestAfterRestore(guest.Participant, 0, out _));
+    Assert.False(fixture.Admission.TryResumeLocalGuestAfterRestore(guest.Participant, guest.GenerationId, out _));
+    Assert.Equal(GameChatSubmissionStatus.ParticipantNotEntered,
+        fixture.Chat.Submit(guest.Participant, "must remain expired").Status);
 }
 
 static void ExistingAdmissionsAreCensusedAndWorldMismatchRejects()

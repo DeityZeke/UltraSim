@@ -1,5 +1,11 @@
 # Game Admission
 
+Local save/load policy may explicitly call `TryResumeLocalGuestAfterRestore` for its retained
+guest after a successful generation replacement. The call requires the exact expired generation,
+guest identity, persistent world/entity and original prefab; it does not create Accounting or
+authorize a different actor. Accountless admissions still expire automatically on replacement.
+No remote request adapter invokes this trusted Local-host operation.
+
 `UltraSim.Game.Admission` owns the authoritative transition from an authenticated or local
 participant into a playable Game session. Participant, Account, durable Character, ECS Entity, and
 client display identity remain distinct contracts.

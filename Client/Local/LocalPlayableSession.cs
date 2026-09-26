@@ -607,6 +607,18 @@ public sealed class LocalPlayableSession : IDisposable
                     ref lastAdministrative, ref lastAdminSucceeded, ref lastAdminMessage,
                     ref lastAdmin, ref saveSequence, ref localMonitorRevision,
                     ref lastMonitorRefreshTick);
+                if (runtime.ActiveGenerationId != observedGeneration)
+                {
+                    if (!admission.TryResumeLocalGuestAfterRestore(
+                            entered.Participant, observedGeneration, out AdmissionResult resumed))
+                        throw new InvalidOperationException("Local save restore could not resume its exact guest admission.");
+                    entered = resumed;
+                    observedGeneration = runtime.ActiveGenerationId;
+                    recipient = CreateRecipient();
+                    _worldChannel.ResetOutstanding();
+                    worldPump.Reset();
+                    BindControl(runtime, entities);
+                }
                 ProcessChatSubmissions(runtime, chat, entered.Participant, ref lastChatSubmission);
 
                 long tickStarted = Stopwatch.GetTimestamp();
