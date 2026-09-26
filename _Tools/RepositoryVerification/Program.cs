@@ -2427,6 +2427,12 @@ foreach (string configuration in configurations)
         [
             "--headless",
             "--path", "_Tests/UltraSim.S0.Godot.Tests",
+            "--scene", "res://F111RendererStressAcceptance.tscn",
+        ]);
+        Run(root, godot,
+        [
+            "--headless",
+            "--path", "_Tests/UltraSim.S0.Godot.Tests",
             "--scene", "res://W5TwoPackHeadlessAcceptance.tscn",
         ]);
         Run(root, godot,
@@ -2516,7 +2522,7 @@ foreach (string configuration in configurations)
         [
             "--headless",
             "--path", "Client/Godot",
-            "--", "--d0-5-smoke", "--expect-edition=SinglePlayer",
+            "--", "--d0-5-smoke", "--f1-11-vegetation", "--expect-edition=SinglePlayer",
         ]);
 
         BuildClientApplication(root, configuration, "Online");
@@ -3534,6 +3540,7 @@ static void VerifyContentlessOnlineNative(
                     "--a0-8-allow-private-content",
                     "--a0-8-expect=cold",
                     "--f1-9a-scaled-output",
+                    "--f1-11-vegetation",
                     $"--w7-native-gate-trigger-file={w7Trigger}",
                     "--expect-edition=Online",
                 ]), 90_000);

@@ -52,7 +52,7 @@ public readonly record struct PresentationGenerationSnapshot(
 /// Cold/event-driven, bounded actor/texture/material presentation composition. Content truth is
 /// immutable and engine-neutral; renderer-native derived objects remain outside this type.
 /// </summary>
-public sealed class PresentationGeneration : IActorPresentationGenerationSource, IDisposable
+public sealed class PresentationGeneration : IActorPresentationGenerationSource, IWorldPresentationGenerationSource, IDisposable
 {
     private static readonly string[] s_actorIds =
     [

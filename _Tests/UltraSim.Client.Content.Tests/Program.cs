@@ -1570,6 +1570,13 @@ static void ScopeCatalogsWarmReopenAndRetireWithoutDeletingSharedBytes()
         True(ContentCache.TryOpen(root, out ContentCache? reopened, out openError), openError.ToString());
         using (reopened)
         {
+            True(reopened!.TryOpenCatalog(baseCatalog, localPlan.ScopeActivation,
+                out ContentCatalogLease? identityLocal, out _));
+            using (identityLocal) Equal(localFingerprint, identityLocal!.Catalog.Fingerprint);
+            True(reopened.TryOpenCatalog(baseCatalog, realmPlan.ScopeActivation,
+                out ContentCatalogLease? identityRealm, out _));
+            using (identityRealm) Equal(realmFingerprint, identityRealm!.Catalog.Fingerprint);
+            False(reopened.TryOpenCatalog(baseCatalog, default(ContentScopeActivationId), out _, out _));
             var localKey = new ContentScopeActivationKey(localPlan.ScopeActivation, localPlan.PlanHash);
             var realmKey = new ContentScopeActivationKey(realmPlan.ScopeActivation, realmPlan.PlanHash);
             True(reopened!.TryOpenCatalog(baseCatalog, localKey,

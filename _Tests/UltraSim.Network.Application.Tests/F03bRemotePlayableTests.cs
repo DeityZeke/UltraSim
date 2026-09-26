@@ -2265,7 +2265,7 @@ internal static class F03bRemotePlayableTests
         using ConceptDemoContentDeployment deployment = ConceptDemoContentDeployment.Create(
             realm, new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()));
         Equal(1, deployment.Authorization.Packages.Count);
-        Equal(2, deployment.PresentationAuthorization.Packages.Count);
+        Equal(3, deployment.PresentationAuthorization.Packages.Count);
         True(deployment.Snapshot.PlanHash != deployment.Snapshot.PresentationPlanHash);
         using var http = new HttpContentPackageSource(
             FixtureHttpLimits(deployment.Snapshot.ArchiveBytes, allowInsecureHttp: true));
@@ -2287,6 +2287,8 @@ internal static class F03bRemotePlayableTests
         True(before.SemanticConsumersActive);
         Equal(2, before.Presentation.Generation.PrimitiveSelections);
         Equal(0, before.Presentation.Generation.RealmSelections);
+        Equal(PresentationSourceKind.Primitive,
+            fixture.Presentation!.GetSource(ClientWorldPresentationProfile.WallTexture));
         fixture.DriveUntil(() => fixture.TryFindPublic(
             GameWorldPublicPrefabIds.Character, out _));
         True(fixture.Playable.TrySubmitCommand(new ClientWorldCommandIntent(
@@ -2306,6 +2308,15 @@ internal static class F03bRemotePlayableTests
         True(before.Presentation.Generation.Generation !=
             after.Presentation.Generation.Generation);
         Equal(2, after.Presentation.Generation.RealmSelections);
+        Equal(2, after.Presentation.Generation.TextureSelections);
+        Equal(2, after.Presentation.Generation.MaterialSelections);
+        True(fixture.Presentation!.TryResolveMaterialPresentation(ClientWorldPresentationProfile.WallMaterial,
+            out ResolvedMaterialPresentation? wall, out _));
+        using (wall)
+        {
+            Equal(PresentationSourceKind.Realm, wall!.Source);
+            Equal(PresentationSourceKind.Realm, wall.AlbedoTexture!.Source);
+        }
         using var unavailable = new BlockedActorPackageSource(
             http, deployment.Authorization.Packages[0].PackageId, rejectArt: true);
         using var noArt = RemotePlayableFixture.CreateWithConceptDeployment(
@@ -2330,6 +2341,8 @@ internal static class F03bRemotePlayableTests
         corruptArt.DriveUntil(() => corruptSource.ArtFetchStarted &&
             !corruptArt.SessionSnapshot.Presentation.Acquiring);
         Equal(2, corruptArt.SessionSnapshot.Presentation.Generation.PrimitiveSelections);
+        Equal(PresentationSourceKind.Primitive,
+            corruptArt.Presentation!.GetSource(ClientWorldPresentationProfile.WallTexture));
         Equal(semanticBefore.PlanHash, corruptArt.Content!.SemanticActivation.PlanHash);
         Equal(semanticBefore.ResolvedFingerprint,
             corruptArt.Content.SemanticActivation.ResolvedFingerprint);
@@ -2343,6 +2356,11 @@ internal static class F03bRemotePlayableTests
         withLocal.DriveUntil(() => localFallbackSource.ArtFetchStarted);
         Equal(2, withLocal.SessionSnapshot.Presentation.Generation.LocalSelections);
         Equal(0, withLocal.SessionSnapshot.Presentation.Generation.RealmSelections);
+        Equal(PresentationSourceKind.Local,
+            withLocal.Presentation!.GetSource(ClientWorldPresentationProfile.WallTexture));
+        True(withLocal.Presentation.TryResolveMaterialPresentation(ClientWorldPresentationProfile.WallMaterial,
+            out ResolvedMaterialPresentation? localWall, out _));
+        using (localWall) Equal(PresentationSourceKind.Local, localWall!.AlbedoTexture!.Source);
         Equal(semanticBefore.PlanHash, withLocal.Content!.SemanticActivation.PlanHash);
         Equal(semanticBefore.ResolvedFingerprint,
             withLocal.Content.SemanticActivation.ResolvedFingerprint);
@@ -3913,6 +3931,14 @@ internal static class F03bRemotePlayableTests
                     localCatalog!.Dispose();
                     localKey = new ContentScopeActivationKey(
                         localPlan!.ScopeActivation, localPlan.PlanHash);
+                    CabinLocalPresentationContent palette = CabinContentOracle.Create()
+                        .CreateLocalPresentation(CabinContentVariant.Default);
+                    foreach (CabinLocalContentPackage package in palette.Packages)
+                        True(cache!.TryInstallPackage(ContentScopeKey.Local, package.Manifest,
+                            package.Payloads, out _, out _));
+                    True(cache!.TryPublishCatalog(ContentBaseCatalog.Empty, palette.Plan,
+                        false, out ContentCatalogLease? paletteCatalog, out _));
+                    paletteCatalog!.Dispose();
                 }
                 var binding = new RemoteRequiredContentBinding(
                     realm, cache!, ContentBaseCatalog.Empty, source, localKey);

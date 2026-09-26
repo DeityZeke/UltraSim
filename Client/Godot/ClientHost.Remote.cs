@@ -190,6 +190,9 @@ public partial class ClientHost
                         $"{playable.OfficialPresentation.Status} realmSelections=" +
                         $"{playable.Session.Presentation.Generation.RealmSelections} localSelections=" +
                         $"{playable.Session.Presentation.Generation.LocalSelections} telemetry=" +
+                        $"worldTexture={playable.WorldWallTextureHash} worldSource={playable.WorldWallTextureSource} " +
+                        $"worldTextures={playable.WorldResources.LiveTextures} worldMaterials={playable.WorldResources.LiveMaterials} " +
+                        $"derivedDiskHits={playable.WorldResources.DiskTextureHits} " +
                         $"{playable.NativeTelemetry.Level} frames={playable.NativeTelemetry.RenderFrames} " +
                         $"frameP95us={playable.NativeTelemetry.FrameDurations.P95Microseconds}");
                     RetireCurrentSession();
@@ -820,6 +823,9 @@ public partial class ClientHost
             snapshot.Actors.AnimatedActors < 1 ||
             snapshot.ActorResources.RealizedResources < 1 ||
             snapshot.ActorResources.RealizationFailures != 0 ||
+            !snapshot.WorldWallTextureHash.IsValid ||
+            snapshot.WorldWallTextureSource != UltraSim.Client.Content.PresentationSourceKind.Realm ||
+            snapshot.WorldResources.LiveTextures != 2 || snapshot.WorldResources.LiveMaterials != 2 ||
             snapshot.Actors.VisibleNameplates < 2 || snapshot.Actors.VisibleOverheadLabels < 1 ||
             snapshot.Session.PublicPresentation.Applied == 0 ||
             snapshot.Session.PublicPresentation.ProofsQueued == 0 ||

@@ -18,6 +18,7 @@ public sealed class ConceptDemoContentDeployment : IDisposable
     private const string EastPackArchiveRoute = "/content/concept-demo-pack-east.uspkg";
     private const string ActorArchiveRoute = "/content/concept-demo-actors.uspkg";
     private const string ActorReplaceArchiveRoute = "/content/concept-demo-actor-replace.uspkg";
+    private const string WorldPresentationArchiveRoute = "/content/concept-demo-world-presentation.uspkg";
     private readonly StaticContentHttpHost _host;
 
     private ConceptDemoContentDeployment(
@@ -144,6 +145,7 @@ public sealed class ConceptDemoContentDeployment : IDisposable
                 ConceptDemoActorPresentationProfile.HumanXDefinitionId,
                 ContentDefinitionOperation.Replace,
                 "actors/replacement-human-x.glb", actorXReplacement)]);
+        ContentPackageFixture worldPresentation = CreateWorldPalettePackage();
         string? planError = null;
         ContentCatalogResolutionError catalogError = ContentCatalogResolutionError.None;
         if (!ContentActivationPlan.TryCreate(
@@ -158,13 +160,13 @@ public sealed class ConceptDemoContentDeployment : IDisposable
                 out ResolvedContentCatalog? catalog, out catalogError) ||
             !ContentActivationPlan.TryCreate(
                 realm,
-                new ContentActivationId(0x4631_2E32_2D50_5245UL, 1),
+                new ContentActivationId(0x4631_2E32_2D50_5245UL, 2),
                 ContentBaseCatalog.Empty.Fingerprint,
-                [Required(actors.Manifest), Required(actorReplacement.Manifest)],
+                [Required(actors.Manifest), Required(actorReplacement.Manifest), Required(worldPresentation.Manifest)],
                 out ContentActivationPlan? presentationPlan, out planError) ||
             !ContentCatalogResolver.TryResolve(
                 ContentBaseCatalog.Empty, presentationPlan!,
-                [actors.Verified, actorReplacement.Verified],
+                [actors.Verified, actorReplacement.Verified, worldPresentation.Verified],
                 out ResolvedContentCatalog? presentationCatalog, out catalogError) ||
             !ContentPackageArchive.TryEncodeCanonical(manifest!, payloads, out byte[] archive) ||
             !ContentPackageArchive.TryEncodeCanonical(
@@ -174,7 +176,9 @@ public sealed class ConceptDemoContentDeployment : IDisposable
             !ContentPackageArchive.TryEncodeCanonical(
                 actors.Manifest, actors.Payloads, out byte[] actorArchive) ||
             !ContentPackageArchive.TryEncodeCanonical(
-                actorReplacement.Manifest, actorReplacement.Payloads, out byte[] actorReplaceArchive))
+                actorReplacement.Manifest, actorReplacement.Payloads, out byte[] actorReplaceArchive) ||
+            !ContentPackageArchive.TryEncodeCanonical(worldPresentation.Manifest, worldPresentation.Payloads,
+                out byte[] worldPresentationArchive))
             throw new InvalidOperationException(
                 $"The Concept Demo content deployment is invalid: plan={planError}, catalog={catalogError}.");
 
@@ -194,6 +198,7 @@ public sealed class ConceptDemoContentDeployment : IDisposable
                 new StaticContentHttpResource(EastPackArchiveRoute, eastPackArchive),
                 new StaticContentHttpResource(ActorArchiveRoute, actorArchive),
                 new StaticContentHttpResource(ActorReplaceArchiveRoute, actorReplaceArchive),
+                new StaticContentHttpResource(WorldPresentationArchiveRoute, worldPresentationArchive),
             ]);
         try
         {
@@ -202,12 +207,13 @@ public sealed class ConceptDemoContentDeployment : IDisposable
                 Acquisition(manifest!, host.GetUri(ArchiveRoute)),
                 Acquisition(actors.Manifest, host.GetUri(ActorArchiveRoute)),
                 Acquisition(actorReplacement.Manifest, host.GetUri(ActorReplaceArchiveRoute)),
+                Acquisition(worldPresentation.Manifest, host.GetUri(WorldPresentationArchiveRoute)),
             ];
             RemoteContentAuthorization authorization = ProjectAuthorization(
                 plan!, catalog!.Fingerprint, [acquisitions[0]]);
             RemoteContentAuthorization presentationAuthorization = ProjectAuthorization(
                 presentationPlan!, resolvedCatalog.Fingerprint,
-                [acquisitions[1], acquisitions[2]]);
+                [acquisitions[1], acquisitions[2], acquisitions[3]]);
             var structural = new ConceptDemoStructuralContent(
                 structuralSource.Manifest,
                 Acquisition(westPack.Manifest, host.GetUri(WestPackArchiveRoute)),
@@ -219,7 +225,7 @@ public sealed class ConceptDemoContentDeployment : IDisposable
                 structural,
                 new ContentDeploymentSnapshot(
                     host.GetUri(ArchiveRoute),
-                    checked(archive.Length + actorArchive.Length + actorReplaceArchive.Length),
+                    checked(archive.Length + actorArchive.Length + actorReplaceArchive.Length + worldPresentationArchive.Length),
                     pack.Length,
                     checked(uiBytes.Length + monitorUiBytes.Length),
                     checked(actorX.Length + actorY.Length + actorXReplacement.Length),
@@ -307,6 +313,49 @@ public sealed class ConceptDemoContentDeployment : IDisposable
                 $"The Concept Demo actor manifest '{packageValue}' is invalid: {error}");
         return new ContentPackageFixture(
             manifest!, payloads, ValidatePackage(manifest!, payloads));
+    }
+
+    private static ContentPackageFixture CreateWorldPalettePackage()
+    {
+        ContentFileDescriptor[] files = []; ContentDefinitionDescriptor[] definitions = [];
+        ContentFilePayload[] payloads = [];
+        AppendWorldPalette(ref files, ref definitions, ref payloads);
+        ContentPackageId.TryCreate("server.concept-demo.world-presentation", out var id);
+        ContentNamespaceId.TryCreate("cabin", out var ns);
+        if (!ContentPackageManifest.TryCreate(1,1,id,ns,"Concept Demo diagnostic world palette","1.0.0",
+            ContentTrustClass.ServerAuthorizedPassive,files,definitions,out var manifest,out var error))
+            throw new InvalidOperationException(error);
+        return new(manifest!,payloads,ValidatePackage(manifest!,payloads));
+    }
+
+    // Existing Cabin diagnostic leaves, not final Official art. Optional advertisement only.
+    private static void AppendWorldPalette(ref ContentFileDescriptor[] files,
+        ref ContentDefinitionDescriptor[] definitions, ref ContentFilePayload[] payloads)
+    {
+        string[] pngs =
+        [
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mOYmOnxHwAFEwJCUcD00AAAAABJRU5ErkJggg==",
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mOIsVL5DwADagG6BZniIwAAAABJRU5ErkJggg==",
+        ];
+        LogicalContentId[] textures = [ClientWorldPresentationProfile.WallTexture, ClientWorldPresentationProfile.WoodTexture];
+        LogicalContentId[] materials = [ClientWorldPresentationProfile.WallMaterial, ClientWorldPresentationProfile.WoodMaterial];
+        for (int i = 0; i < 2; i++)
+        {
+            ContentFilePath.TryCreate($"textures/{(i == 0 ? "wall" : "wood")}.png", out var path);
+            byte[] bytes = Convert.FromBase64String(pngs[i]);
+            if (!ContentFileDescriptor.TryCreate(path, ContentFileKind.PngTexture, bytes.Length,
+                    ContentHash.Compute(bytes), default, out var file) ||
+                !ContentDefinitionDescriptor.TryCreateFileDefinition(textures[i], ContentDefinitionKind.Texture,
+                    ContentDefinitionOperation.Add, path, out var texture) ||
+                !ContentMaterialDefinition.TryCreate(ContentMaterialFamily.StandardLit, textures[i],
+                    i == 0 ? 0.82f : 0.68f, 0, 0, out var material) ||
+                !ContentDefinitionDescriptor.TryCreateMaterial(materials[i], ContentDefinitionOperation.Add,
+                    material, out var definition))
+                throw new InvalidOperationException("The optional world palette is invalid.");
+            files = [.. files, file];
+            definitions = [.. definitions, texture!, definition!];
+            payloads = [.. payloads, new ContentFilePayload(path, bytes)];
+        }
     }
 
     private static VerifiedContentPackage ValidatePackage(

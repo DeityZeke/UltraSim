@@ -791,6 +791,32 @@ public sealed class ContentCache : IDisposable
         }
     }
 
+    /// <summary>Reopens an already authorized activation; never discovers authorization from blobs.</summary>
+    public bool TryOpenCatalog(ContentBaseCatalog baseCatalog, ContentScopeActivationId identity,
+        out ContentCatalogLease? lease, out ContentCacheError error)
+    {
+        ArgumentNullException.ThrowIfNull(baseCatalog);
+        lock (_sync)
+        {
+            lease = null;
+            if (_disposed || !identity.IsValid)
+                return Fail(ContentCacheError.InvalidRequest, out error);
+            try
+            {
+                string path = GetActivationPath(identity.Scope, identity.Activation);
+                if (!File.Exists(path)) return Fail(ContentCacheError.ActivationNotFound, out error);
+                if (!TryReadActivation(path, identity, default, out ContentCacheActivationRecord record))
+                    return Corrupt(ContentCacheError.CorruptActivation, out error);
+                return TryOpenCatalog(baseCatalog, new ContentScopeActivationKey(identity, record.Plan.PlanHash),
+                    out lease, out error);
+            }
+            catch (Exception exception) when (IsStorageException(exception))
+            {
+                return Fail(ContentCacheError.IoFailure, out error);
+            }
+        }
+    }
+
     public bool TrySetActivationPinned(
         ContentRealmActivationKey key,
         bool pinned,

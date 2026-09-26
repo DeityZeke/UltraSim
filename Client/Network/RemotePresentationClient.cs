@@ -22,7 +22,7 @@ public readonly record struct RemotePresentationClientSnapshot(
 /// owns its own plan/proof; a missing or corrupt actor layer only changes presentation fallback.
 /// </summary>
 public sealed class RemotePresentationClient : IRemoteGameProtocolHandler,
-    IRemoteGameProtocolProgressor, IActorPresentationGenerationSource, IDisposable
+    IRemoteGameProtocolProgressor, IActorPresentationGenerationSource, IWorldPresentationGenerationSource, IDisposable
 {
     private readonly ulong _epoch;
     private readonly ApplicationRealmId _realm;
@@ -215,27 +215,45 @@ public sealed class RemotePresentationClient : IRemoteGameProtocolHandler,
         _cache.TryOpenEnabledUserResourcePacks(
             out UserResourcePackStackLease? lease, out _) ? lease : null;
 
+    public PresentationSourceKind GetSource(LogicalContentId id)
+    {
+        EnsureOperational();
+        return _generation.GetSource(id);
+    }
+
+    public bool TryResolveMaterialPresentation(LogicalContentId id,
+        out ResolvedMaterialPresentation? presentation, out PresentationResourceResolutionError error)
+    {
+        EnsureOperational();
+        return _generation.TryResolveMaterialPresentation(id, out presentation, out error);
+    }
+
+    private ContentCatalogLease? OpenLocalResources() =>
+        _cache.TryOpenCatalog(ContentBaseCatalog.Empty, ClientWorldPresentationProfile.LocalDefault,
+            out ContentCatalogLease? catalog, out _) ? catalog : null;
+
     private PresentationGeneration CreateInitialGeneration()
     {
         UserResourcePackStackLease? user = OpenUser();
         ContentCatalogLease? local = OpenLocal();
-        try { return PresentationGeneration.Create(user, null, local); }
+        try { return PresentationGeneration.CreateWithResources(user, null, local, null, OpenLocalResources()); }
         catch (InvalidDataException)
         {
             // A corrupt/incompatible selected presentation must not make semantic entry fail.
-            return PresentationGeneration.Create(null, null, OpenLocal());
+            return CreateFallbackGeneration(includeRealm: false);
         }
     }
 
     private void Publish(ContentCatalogLease? realm)
     {
         PresentationGeneration next;
-        try { next = PresentationGeneration.Create(OpenUser(), realm, OpenLocal()); }
+        try { next = PresentationGeneration.CreateWithResources(OpenUser(), realm, OpenLocal(),
+            OpenRealm(), OpenLocalResources()); }
         catch (InvalidDataException)
         {
             // The candidate is atomic. Reopen the lower layers after the failed constructor
             // retired their leases, and publish the valid authenticated fallback composition.
-            next = PresentationGeneration.Create(null, OpenRealm(), OpenLocal());
+            next = CreateFallbackGeneration(includeRealm: true);
         }
         catch
         {
@@ -249,6 +267,21 @@ public sealed class RemotePresentationClient : IRemoteGameProtocolHandler,
         _userSelectionRevision = _cache.UserResourcePackSelectionRevision;
     }
 
+    private PresentationGeneration CreateFallbackGeneration(bool includeRealm)
+    {
+        try
+        {
+            return PresentationGeneration.CreateWithResources(null,
+                includeRealm ? OpenRealm() : null, OpenLocal(),
+                includeRealm ? OpenRealm() : null, OpenLocalResources());
+        }
+        catch (InvalidDataException)
+        {
+            // Invalid optional world resources cannot prevent the existing actor fallback.
+            return PresentationGeneration.Create(null, includeRealm ? OpenRealm() : null, OpenLocal());
+        }
+    }
+
     private void RefreshUserSelectionIfChanged()
     {
         ulong revision = _cache.UserResourcePackSelectionRevision;
@@ -257,7 +290,8 @@ public sealed class RemotePresentationClient : IRemoteGameProtocolHandler,
         PresentationGeneration? candidate = null;
         try
         {
-            candidate = PresentationGeneration.Create(OpenUser(), OpenRealm(), OpenLocal());
+            candidate = PresentationGeneration.CreateWithResources(OpenUser(), OpenRealm(), OpenLocal(),
+                OpenRealm(), OpenLocalResources());
             if (candidate.StableFingerprint == _generation.StableFingerprint)
             {
                 candidate.Dispose();
@@ -304,10 +338,11 @@ public sealed class RemotePresentationClient : IRemoteGameProtocolHandler,
         if (!completion.Published || completion.Catalog is null ||
             completion.Catalog.Catalog.Fingerprint != _expectedFingerprint ||
             completion.Catalog.Catalog.Entries.Any(static entry =>
-                entry.Kind != ContentDefinitionKind.ActorPresentation))
+                entry.Kind is not (ContentDefinitionKind.ActorPresentation or ContentDefinitionKind.Texture or
+                    ContentDefinitionKind.Material)))
         {
             completion.Catalog?.Dispose();
-            _detail = "Optional Realm actor presentation was unavailable or incompatible.";
+            _detail = "Optional Realm presentation was unavailable or incompatible.";
             return;
         }
         _realmPresentationKey = new ContentScopeActivationKey(

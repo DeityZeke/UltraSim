@@ -225,7 +225,10 @@ public sealed class GodotWorldRenderer : IDisposable
     private readonly int _ownerThreadId = System.Environment.CurrentManagedThreadId;
     private readonly ClientWorldSemanticCache _cache;
     private readonly GodotWorldRendererLimits _limits;
-    private readonly IGodotWorldAssetResolver? _assets;
+    private IGodotWorldAssetResolver? _assets;
+    private readonly GodotVegetation? _vegetation;
+    private long _vegetationPreparationTicks;
+    private bool _vegetationShadows;
     private readonly IGodotWorldPublicBatchFilter? _publicBatchFilter;
     private readonly RenderChunk?[] _renderChunks;
     private readonly RenderAssociation[] _associations;
@@ -304,7 +307,8 @@ public sealed class GodotWorldRenderer : IDisposable
             GodotWorldFallbackMaterialMode.Diagnostic,
         IGodotWorldPublicBatchFilter? publicBatchFilter = null,
         GodotWorldInstanceBackend instanceBackend = GodotWorldInstanceBackend.NodeMultiMesh,
-        GodotWorldInstanceUpload instanceUpload = GodotWorldInstanceUpload.PerRow)
+        GodotWorldInstanceUpload instanceUpload = GodotWorldInstanceUpload.PerRow,
+        bool vegetationPrototype = false)
     {
         ArgumentNullException.ThrowIfNull(host);
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
@@ -350,6 +354,7 @@ public sealed class GodotWorldRenderer : IDisposable
         Root = new Node3D { Name = "UltraSimWorld" };
         host.AddChild(Root);
         _activeNodes = 1;
+        if (vegetationPrototype) { _vegetation = new GodotVegetation(); _activeResources = 3; }
     }
 
     public Node3D Root { get; }
@@ -718,6 +723,37 @@ public sealed class GodotWorldRenderer : IDisposable
         return true;
     }
 
+    public GodotVegetationSnapshot GetVegetationSnapshot()
+    {
+        EnsureOwner();
+        int chunks = 0, patches = 0, collapsed = 0; ulong writes = 0;
+        foreach (var chunk in _renderChunks)
+            if (chunk?.Vegetation is { } grass)
+            { chunks++; patches += grass.Count; collapsed += grass.CollapsedBlades; writes += grass.CutWrites; }
+        return new(chunks, patches, patches * GodotVegetation.BladesPerPatch,
+            patches * GodotVegetation.BladesPerPatch - collapsed,
+            _vegetation is null ? 0 : GodotVegetation.BladesPerPatch * GodotVegetation.VerticesPerBlade,
+            (long)patches * GodotVegetation.BladesPerPatch * GodotVegetation.VerticesPerBlade,
+            _vegetation is null ? 0 : ClientVegetationScatter.MaximumPatchesPerChunk * 20L,
+            writes, _vegetationPreparationTicks, _vegetation is not null && _vegetationShadows);
+    }
+
+    /// <summary>Diagnostic-only shadow comparison; no Game policy or vegetation state changes.</summary>
+    public void SetVegetationShadows(bool enabled)
+    {
+        EnsureOwner(); ThrowIfDisposed(); _vegetationShadows = enabled;
+        foreach (var chunk in _renderChunks)
+            if (chunk?.Vegetation is { } grass)
+                grass.Node.CastShadow = enabled ? GeometryInstance3D.ShadowCastingSetting.On : GeometryInstance3D.ShadowCastingSetting.Off;
+    }
+
+    public bool TryGetVegetation(ClientSemanticChunkHandle handle, out GodotVegetationChunk? vegetation)
+    {
+        EnsureOwner();
+        vegetation = TryFindRenderSlot(handle, out int slot) ? _renderChunks[slot]?.Vegetation : null;
+        return vegetation is not null;
+    }
+
     public GodotWorldRendererSnapshot GetSnapshot()
     {
         EnsureOwner();
@@ -870,6 +906,7 @@ public sealed class GodotWorldRenderer : IDisposable
         _retireHead = 0;
         _retireCount = 0;
         _activeNodes = 0;
+        _vegetation?.Dispose();
         _activeResources = 0;
         _disposed = true;
     }
@@ -919,6 +956,16 @@ public sealed class GodotWorldRenderer : IDisposable
         _maximumResourceCommitTicks = Math.Max(_maximumResourceCommitTicks, _lastResourceCommitTicks);
     }
 
+    /// <summary>Refreshes native resources only; residency, handles, visibility and origin are retained.</summary>
+    public void RefreshAssets(IGodotWorldAssetResolver? assets)
+    {
+        EnsureOwner();
+        ThrowIfDisposed();
+        _assets = assets;
+        for (int index = 0; index < _renderChunks.Length; index++)
+            if (_renderChunks[index] is { } chunk) Build(chunk.Handle);
+    }
+
     private void RefreshPublic(ClientSemanticChunkHandle handle)
     {
         if (!TryFindRenderSlot(handle, out int renderSlot) ||
@@ -964,6 +1011,7 @@ public sealed class GodotWorldRenderer : IDisposable
         var structural = new Node3D { Name = "Structural" };
         var nativeGroups = new List<GodotWorldInstanceGroup>();
         RenderLayer? publicLayer = null;
+        GodotVegetationChunk? vegetation = null;
         root.AddChild(structural);
         try
         {
@@ -971,6 +1019,17 @@ public sealed class GodotWorldRenderer : IDisposable
                 handle, semantic.Info.Key, out int yAnchor, out float firstTerrainY,
                 out int terrainTriangleCount);
             structural.AddChild(new MeshInstance3D { Name = "BaseTerrain", Mesh = terrainMesh });
+            if (_vegetation is not null)
+            {
+                long started = Stopwatch.GetTimestamp();
+                vegetation = _vegetation.Prepare(_cache, handle, yAnchor);
+                _vegetationPreparationTicks += Stopwatch.GetTimestamp() - started;
+                if (vegetation is not null)
+                {
+                    vegetation.Node.CastShadow = _vegetationShadows ? GeometryInstance3D.ShadowCastingSetting.On : GeometryInstance3D.ShadowCastingSetting.Off;
+                    structural.AddChild(vegetation.Node);
+                }
+            }
             int additionalTerrainTriangles = 0;
             float firstAdditionalTerrainY = float.NaN;
             for (int fragment = 0; fragment < semantic.AdditionalTerrainSurfaces.Count; fragment++)
@@ -1027,16 +1086,17 @@ public sealed class GodotWorldRenderer : IDisposable
                 terrainTriangleCount, firstStaticY,
                 preparedPublic.FirstLocalY,
                 3 + semantic.AdditionalTerrainSurfaces.Count +
-                    (_instanceBackend == GodotWorldInstanceBackend.NodeMultiMesh ? staticGroups.Count : 0),
-                1 + semantic.AdditionalTerrainSurfaces.Count + staticGroups.Count,
+                    (_instanceBackend == GodotWorldInstanceBackend.NodeMultiMesh ? staticGroups.Count : 0) + (vegetation is null ? 0 : 1),
+                1 + semantic.AdditionalTerrainSurfaces.Count + staticGroups.Count + (vegetation is null ? 0 : 1),
                 semantic.AdditionalTerrainSurfaces.Count, additionalTerrainTriangles,
                 firstAdditionalTerrainY,
                 structuralFallbacks,
                 preparedPublic.NodeCount, preparedPublic.ResourceCount, preparedPublic.Fallbacks,
-                nativeGroups.ToArray(), preparedPublic.Groups);
+                nativeGroups.ToArray(), preparedPublic.Groups, vegetation);
         }
         catch
         {
+            vegetation?.Dispose();
             foreach (GodotWorldInstanceGroup group in nativeGroups) group.Dispose();
             if (publicLayer is { } preparedPublic)
                 foreach (GodotWorldInstanceGroup group in preparedPublic.Groups) group.Dispose();
@@ -1540,6 +1600,7 @@ public sealed class GodotWorldRenderer : IDisposable
         _activeInstances -= chunk.InstanceCount;
         foreach (GodotWorldInstanceGroup group in chunk.StructuralGroups) group.Dispose();
         foreach (GodotWorldInstanceGroup group in chunk.PublicGroups) group.Dispose();
+        chunk.Vegetation?.Dispose();
         if (GodotObject.IsInstanceValid(chunk.Root)) chunk.Root.Free();
         _renderChunks[renderSlot] = null;
         int semanticIndex = checked((int)chunk.Handle.Index);
@@ -1758,7 +1819,7 @@ public sealed class GodotWorldRenderer : IDisposable
             int publicNodeCount, int publicResourceCount,
             FallbackCounts publicFallbacks,
             GodotWorldInstanceGroup[] structuralGroups,
-            GodotWorldInstanceGroup[] publicGroups)
+            GodotWorldInstanceGroup[] publicGroups, GodotVegetationChunk? vegetation)
         {
             Handle = handle;
             Key = key;
@@ -1784,6 +1845,7 @@ public sealed class GodotWorldRenderer : IDisposable
             PublicFallbacks = publicFallbacks;
             StructuralGroups = structuralGroups;
             PublicGroups = publicGroups;
+            Vegetation = vegetation;
         }
 
         internal ClientSemanticChunkHandle Handle { get; }
@@ -1810,7 +1872,8 @@ public sealed class GodotWorldRenderer : IDisposable
         internal int PublicResourceCount { get; set; }
         internal int TerrainSurfaceMeshCount => 1 + AdditionalTerrainSurfaceFragmentCount;
         internal int StaticBatchGroupCount =>
-            StructuralResourceCount - TerrainSurfaceMeshCount;
+            StructuralResourceCount - TerrainSurfaceMeshCount - (Vegetation is null ? 0 : 1);
+        internal GodotVegetationChunk? Vegetation { get; }
         internal int FallbackGroupCount =>
             GodotWorldRenderer.FallbackGroupCount(StructuralFallbacks) +
             GodotWorldRenderer.FallbackGroupCount(PublicFallbacks);

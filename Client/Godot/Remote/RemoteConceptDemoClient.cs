@@ -49,6 +49,9 @@ public readonly record struct RemoteConceptDemoClientSnapshot(
     public ClientRemoteActorInterpolationSnapshot RemoteMotion { get; init; }
     public ClientMotionPose PresentedPlayerPose { get; init; }
     public bool W7NativeJourneyComplete { get; init; }
+    public ContentHash WorldWallTextureHash { get; init; }
+    public PresentationSourceKind WorldWallTextureSource { get; init; }
+    public GodotDerivedResourceStoreSnapshot WorldResources { get; init; }
 }
 
 /// <summary>
@@ -179,6 +182,9 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private RemoteConceptDemoClientState _state = RemoteConceptDemoClientState.AwaitingContent;
     private NetworkTelemetryLevel _telemetryLevel;
     private string? _fault;
+    private GodotCatalogWorldAssetResolver? _worldAssets;
+    private GodotDerivedResourceStore? _worldDerived;
+    private GodotPresentationEnvironment? _diagnosticEnvironment;
 
     public void Configure(
         NetworkProtocolPeer peer,
@@ -349,6 +355,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 _lastPresentationGeneration = currentPresentation;
                 _ = _actorPresenter!.RefreshResolvedVisuals();
                 _actorVisuals!.ReleaseRetiredResources();
+                RefreshWorldResources();
             }
             _inputScheduler!.ObserveCompleted(snapshot.Playable.LastProcessedCommandSequence);
             _ = _inputScheduler.TryPump(Stopwatch.GetTimestamp(), TrySubmitScheduledCommand);
@@ -424,6 +431,9 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             RemoteMotion = _remoteMotion.GetSnapshot(),
             PresentedPlayerPose = _presentedPlayer,
             W7NativeJourneyComplete = _w7JourneyPhase == 11,
+            WorldWallTextureHash = _worldAssets?.WallTextureHash ?? default,
+            WorldWallTextureSource = _worldAssets?.WallTextureSource ?? PresentationSourceKind.Primitive,
+            WorldResources = _worldDerived?.GetSnapshot() ?? default,
         };
     }
 
@@ -668,6 +678,12 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         _systemChatBanner?.Dispose();
         _hoverTooltip?.Dispose();
         _renderer?.Dispose();
+        _worldAssets?.Dispose();
+        _worldDerived?.Dispose();
+        _worldAssets = null;
+        _worldDerived = null;
+        _diagnosticEnvironment?.Dispose();
+        _diagnosticEnvironment = null;
         _ = _session?.TryRequestDetach();
         _session?.Dispose();
         _source?.Dispose();
@@ -691,6 +707,30 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         _hoverTooltip = null;
         _sessionUi?.Dispose();
         _sessionUi = null;
+    }
+
+    private void RefreshWorldResources()
+    {
+        var source = _session!.Presentation!;
+        GodotCatalogWorldAssetResolver? next = null;
+        if (source.GetSource(ClientWorldPresentationProfile.WallMaterial) != PresentationSourceKind.Primitive &&
+            source.GetSource(ClientWorldPresentationProfile.WoodMaterial) != PresentationSourceKind.Primitive)
+        {
+            _worldDerived ??= new GodotDerivedResourceStore(_cache!.RootPath,
+                GodotDerivedResourcePolicy.ProductionStandalone(
+                    $"{(OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux")}-{System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant()}"));
+            if (_worldAssets is not null)
+            {
+                try { _worldAssets.Refresh(source, _worldDerived); return; }
+                catch (InvalidDataException) { /* Fall back; do not retain stale Realm native art. */ }
+            }
+            try { next = new GodotCatalogWorldAssetResolver(source, _worldDerived); }
+            catch (InvalidDataException) { /* Optional art: retain the permanent neutral substrate. */ }
+        }
+        GodotCatalogWorldAssetResolver? previous = _worldAssets;
+        _worldAssets = next;
+        _renderer?.RefreshAssets(next);
+        previous?.Dispose();
     }
 
     private void BuildWorldPresentation(in RemotePlayableClientSnapshot playable)
@@ -719,6 +759,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             _session.Presentation ?? throw new InvalidOperationException(
                 "Remote actor presentation requires an authenticated presentation source."));
         _lastPresentationGeneration = _session.Presentation!.CurrentPresentationGeneration;
+        RefreshWorldResources();
         _actorPresenter = new GodotActorPresenter(
             this, ClientActorDefinitionCatalog.ConceptDemo, 64, _actorVisuals);
         _actorPresenter.SetControlledActorPose(
@@ -727,9 +768,10 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             this,
             _session.WorldCache,
             GodotWorldRendererLimits.ForStructuralWindow(RenderRadiusChunks, 5, 32),
-            assets: null,
+            assets: _worldAssets,
             GodotWorldFallbackMaterialMode.Neutral,
-            _actorPresenter);
+            _actorPresenter,
+            vegetationPrototype: OS.GetCmdlineUserArgs().Contains("--f1-11-vegetation"));
         _window = new GodotSlidingRenderWindow(
             _session.WorldCache, _renderer, RenderRadiusChunks);
         if (!_window.TryTrackPlayer(
@@ -758,23 +800,28 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             _sessionUi?.GameplayFrame ?? GameplayFrameLayout.MaxFit(
                 ClientPixelSize.Create(1920, 1080), ClientPixelSize.Create(1920, 1080)));
         ApplyCameraProfile();
-        AddChild(new DirectionalLight3D
+        if (OS.GetCmdlineUserArgs().Contains("--f1-11-vegetation"))
+            _diagnosticEnvironment = new GodotPresentationEnvironment(this);
+        else
         {
-            Name = "RemoteSun",
-            RotationDegrees = new Vector3(-55, -35, 0),
-            LightEnergy = 1.15f,
-            ShadowEnabled = true,
-        });
-        var environment = new WorldEnvironment { Name = "RemoteEnvironment" };
-        environment.Environment = new global::Godot.Environment
-        {
-            BackgroundMode = global::Godot.Environment.BGMode.Color,
-            BackgroundColor = new Color(0.055f, 0.075f, 0.06f),
-            AmbientLightSource = global::Godot.Environment.AmbientSource.Color,
-            AmbientLightColor = new Color(0.65f, 0.72f, 0.68f),
-            AmbientLightEnergy = 0.65f,
-        };
-        AddChild(environment);
+            AddChild(new DirectionalLight3D
+            {
+                Name = "RemoteSun",
+                RotationDegrees = new Vector3(-55, -35, 0),
+                LightEnergy = 1.15f,
+                ShadowEnabled = true,
+            });
+            var environment = new WorldEnvironment { Name = "RemoteEnvironment" };
+            environment.Environment = new global::Godot.Environment
+            {
+                BackgroundMode = global::Godot.Environment.BGMode.Color,
+                BackgroundColor = new Color(0.055f, 0.075f, 0.06f),
+                AmbientLightSource = global::Godot.Environment.AmbientSource.Color,
+                AmbientLightColor = new Color(0.65f, 0.72f, 0.68f),
+                AmbientLightEnergy = 0.65f,
+            };
+            AddChild(environment);
+        }
     }
 
     private void SynchronizePresentation(in RemotePlayableClientSnapshot playable)
