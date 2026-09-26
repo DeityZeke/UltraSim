@@ -1,0 +1,731 @@
+{
+  "Schema": "client-f1.12-r1-assurance-summary/v1",
+  "Date": "2026-09-26",
+  "Status": "F1.12 ACTIVE",
+  "PF6Verdict": "NOT READY FOR PF6",
+  "Lineage": {
+    "StartingHead": "1ebde0319875e78aba6fe9bd6e180bc7361a9c15",
+    "PriorTestedHead": "ac6a81bf1f777380cdf87b62719a6204bded4a8f",
+    "TestedImplementationHead": "7590b67f0226affdbb60f20e1db12dbf208c27f7",
+    "FinalEvidenceHead": null,
+    "FinalEvidenceHeadResolution": "Exact SHA in final task handoff; git log -1 --format=%H -- _Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1.md",
+    "Commits": [
+      [
+        "960b7f52fe9b253d5d108b13a0f5162eba835ed8",
+        "device-owned settings v6 vegetation"
+      ],
+      [
+        "056c7e336b02e00bec30938b2fcc37ee02b32cf6",
+        "bounded native controls and verifier"
+      ],
+      [
+        "064ae00a9ab5e530e44be833bc97906a82886d5f",
+        "same-session installed/primitive parity"
+      ],
+      [
+        "80dddcc1f5ac487ec24b08c1604cce63704cf8bf",
+        "diagnostic declared primitive fallback"
+      ],
+      [
+        "b59ebbcbe70225d998869fc37265d6efcccd6ae9",
+        "diagnostic item prerequisite"
+      ],
+      [
+        "e76c0dc7d010e1d9c6d149f773feb173a66ef20f",
+        "bounded original wait control and real interaction"
+      ],
+      [
+        "6a5dba60eac932bbd54adda481f5b6fdc43a82a5",
+        "original Ready ordering control"
+      ],
+      [
+        "b22d0e6efd7417238a5839772655d2bfc9d22a6c",
+        "real speech refresh for retained retirement canary"
+      ],
+      [
+        "024fcee3232ace4fd251361324d5db762b37cecb",
+        "exact failure detail"
+      ],
+      [
+        "c3d85e442263500daf0cf207104171fc977c4813",
+        "focus seed before fresh edge; native camera settlement"
+      ],
+      [
+        "7590b67f0226affdbb60f20e1db12dbf208c27f7",
+        "SinglePlayer edition guard and pre-drop equipment evidence"
+      ]
+    ]
+  },
+  "Environment": {
+    "OS": "CachyOS Linux 7.2.6-1-cachyos",
+    "CPU": "AMD Ryzen 7800X3D 8C/16T",
+    "RAMBytes": 32738320384,
+    "GPU": "NVIDIA RTX 4070 Ti SUPER 16 GiB",
+    "Driver": "615.71.09",
+    "Godot": "4.7.1 Mono a13da4feb",
+    "Renderer": "Compatibility OpenGL 3.3",
+    "SDK": "8.0.131",
+    "Runtime": "8.0.31",
+    "Desktop": "KDE Wayland; exported X11 DISPLAY=:0",
+    "Affinity": "uncontrolled",
+    "ProcessArrangement": "native Complete client; Local internal authority in same process; rendered Remote against two separate Direct Connect servers",
+    "BenchmarkConcurrency": "serial"
+  },
+  "Policy": {
+    "Renderer": "NodeMultiMesh/PerRow",
+    "ActorTiers": "Detailed/BatchedPrimitive, soft64,20/28m",
+    "VegetationDefault": false,
+    "GameManifest": 33,
+    "TransportRevision": 2,
+    "WorldPackRevision": 1,
+    "StructuralManifestRevision": 1,
+    "WorldViewRevision": 2,
+    "AuthorityHz": 60,
+    "ParticipantCap": 64,
+    "Replication": "ChunkPublication shared prepared truth/body; CurrentBundled; multi-entry148 LZ4; singletonOff; cadence1/2/4; CrossLane cap2; BackgroundPlatformBatch"
+  },
+  "Capture": {
+    "PrimaryRun": 2586235,
+    "TotalPNGs": 28,
+    "CabinPNGs": 20,
+    "ProbePNGs": 1,
+    "TierPNGs": 3,
+    "RemotePNGs": 4,
+    "Mechanism": "existing GameplayOutput; process/physics crossing; subscribe pre/post; synchronous ForceDraw; texture/image dimensions+RGB validation; hashed PNG",
+    "SignalTimeoutSeconds": 8,
+    "NativeProcessTimeoutSeconds": 240,
+    "HistoricalStallReproduced": false,
+    "HistoricalStallRootCause": "not isolated; original ac6a81bf retained export and original Ready-order passive-wait control both pass today",
+    "ToolWeakness": "passive render signal wait without timeout or active request",
+    "MissingAuthoredSurfaces": [
+      "secondary room",
+      "interior doorway",
+      "window"
+    ],
+    "AestheticsCertified": false,
+    "SameSession": {
+      "ApplicationEpoch": "2",
+      "ControlEpoch": "1",
+      "AuthorityGeneration": "1",
+      "SemanticHashLow": "4884640456701042578",
+      "SemanticHashHigh": "13764519638206834015",
+      "ClassicBaseWorldFingerprint": "80DCF456AD43FD3876D6E5BB6936FD3747E0ECDA23179407753DD393DC981B57",
+      "StructuralManifest": null,
+      "PresentationGenerations": [
+        1,
+        2
+      ],
+      "Sources": [
+        "Local",
+        "Primitive"
+      ],
+      "AuthorityReset": false
+    },
+    "InstalledAndSameSessionCaptures": [
+      {
+        "name": "installed-Exterior-Noon-Temperate.png",
+        "view": "Exterior",
+        "time": "Noon",
+        "atmosphere": "Temperate",
+        "art": "installed",
+        "image": {
+          "Width": 1920,
+          "Height": 1080,
+          "minimum": 0,
+          "maximum": 255,
+          "pre": 1,
+          "post": 1,
+          "PixelHash": "FBBD20C82817DD684E18326E14D0F3C9AD811ADDD4D5256C64C1C197B98C0F72",
+          "PngHash": "FC4E898A35E02F9BBF4DEDB264D81C063A67E9D84BD284B1A444C67A6F7E3A40"
+        }
+      },
+      {
+        "name": "installed-Doorway-Noon-Temperate.png",
+        "view": "Doorway",
+        "time": "Noon",
+        "atmosphere": "Temperate",
+        "art": "installed",
+        "image": {
+          "Width": 1920,
+          "Height": 1080,
+          "minimum": 7,
+          "maximum": 255,
+          "pre": 1,
+          "post": 1,
+          "PixelHash": "51EEEC8CF1A01A52AC2464577B9ACFA43535DFE50BCB6589FCD98B1E8C8D01A2",
+          "PngHash": "1DC1FD5CD969331D9C3114AB51EAFC0B35498844E695D399D0F88D80F82752BF"
+        }
+      },
+      {
+        "name": "installed-Interior-Noon-Temperate.png",
+        "view": "Interior",
+        "time": "Noon",
+        "atmosphere": "Temperate",
+        "art": "installed",
+        "image": {
+          "Width": 1920,
+          "Height": 1080,
+          "minimum": 7,
+          "maximum": 174,
+          "pre": 1,
+          "post": 1,
+          "PixelHash": "981B4C458A7742AA1863F2F42A2148ADF3F05DCC4208423996DD27FA0DF299EB",
+          "PngHash": "03D9156066F57DFC93A7E4986924978B6BF07D1FC5FBBCE20BA3A0FBEEDF13F5"
+        }
+      },
+      {
+        "name": "installed-Shelf-Noon-Temperate.png",
+        "view": "Shelf",
+        "time": "Noon",
+        "atmosphere": "Temperate",
+        "art": "installed",
+        "image": {
+          "Width": 1920,
+          "Height": 1080,
+          "minimum": 14,
+          "maximum": 174,
+          "pre": 1,
+          "post": 1,
+          "PixelHash": "66A1B3A1E322492589AD26E8FB578654FCAAB5E3F94DAC598255FEA2A1BEB557",
+          "PngHash": "679CAFD429A285E8F5D2A605EFB00BF3A1170DF8FEA99B3ADE8EE2D868D432A3"
+        }
+      },
+      {
+        "name": "installed-Exterior-Dawn-Temperate.png",
+        "view": "Exterior",
+        "time": "Dawn",
+        "atmosphere": "Temperate",
+        "art": "installed",
+        "image": {
+          "Width": 1920,
+          "Height": 1080,
+          "minimum": 0,
+          "maximum": 255,
+          "pre": 1,
+          "post": 1,
+          "PixelHash": "331C92FB73CE7B6AB7E508BF7D078925B8C588AEE641D3D17E6602C0F74D86D8",
+          "PngHash": "90B8C3E195E824EB2043DF0A4B21A3432E192B46A631ED5D99706782CA90F60C"
+        }
+      },
+      {
+        "name": "installed-Exterior-Dusk-Temperate.png",
+        "view": "Exterior",
+        "time": "Dusk",
+        "atmosphere": "Temperate",
+        "art": "installed",
+        "image": {
+          "Width": 1920,
+          "Height": 1080,
+          "minimum": 0,
+          "maximum": 255,
+          "pre": 1,
+          "post": 1,
+          "PixelHash": "01C7E6D7E7F7583B6097A951034637C8D67CF64E7B5F9AC2615556CA82F1DBFC",
+          "PngHash": "D920274604D8FCF43240096987DA3B3F5FA5FD8719F27A401178CD7E6707E3D7"
+        }
+      },
+      {
+        "name": "installed-Exterior-Night-Temperate.png",
+        "view": "Exterior",
+        "time": "Night",
+        "atmosphere": "Temperate",
+        "art": "installed",
+        "image": {
+          "Width": 1920,
+          "Height": 1080,
+          "minimum": 0,
+          "maximum": 255,
+          "pre": 1,
+          "post": 1,
+          "PixelHash": "BDE7FBF10612DDC7CD500970742ADEE3193F245E1B02B10116FAA3694A522FFA",
+          "PngHash": "6D84BD1BE58541084062B45FDC44C419E17990E6908F7ACA2EB0860DEB863D7F"
+        }
+      },
+      {
+        "name": "installed-Exterior-Noon-Cold.png",
+        "view": "Exterior",
+        "time": "Noon",
+        "atmosphere": "Cold",
+        "art": "installed",
+        "image": {
+          "Width": 1920,
+          "Height": 1080,
+          "minimum": 0,
+          "maximum": 255,
+          "pre": 1,
+          "post": 1,
+          "PixelHash": "5CF9400056ED4D9BBC10D4F885AB76FC78BDFD8E8ACFDA58502662F6AD45CEF2",
+          "PngHash": "9A2935A58FD85311567F2746417EF7B8CD60ABD4FDA833F7CB79E2F0CE439E17"
+        }
+      },
+      {
+        "name": "primitive-same-session-Exterior-Noon-Temperate.png",
+        "view": "Exterior",
+        "time": "Noon",
+        "atmosphere": "Temperate",
+        "art": "primitive-same-session",
+        "image": {
+          "Width": 1920,
+          "Height": 1080,
+          "minimum": 0,
+          "maximum": 255,
+          "pre": 1,
+          "post": 1,
+          "PixelHash": "CA5007CBDC2120602C0637D70F8DFACE7A95C9227A4B33B5A67C0292BAC746CD",
+          "PngHash": "A7AB6B8E68CE977705B3F17543AE3D37F1EE469F9194557918FFEECE47DA2E6D"
+        }
+      },
+      {
+        "name": "primitive-same-session-Doorway-Noon-Temperate.png",
+        "view": "Doorway",
+        "time": "Noon",
+        "atmosphere": "Temperate",
+        "art": "primitive-same-session",
+        "image": {
+          "Width": 1920,
+          "Height": 1080,
+          "minimum": 29,
+          "maximum": 237,
+          "pre": 1,
+          "post": 1,
+          "PixelHash": "22795FC87C56CE207610C41B788611322D46EF265049B5DB271C703455425202",
+          "PngHash": "ECCDF6EBF3D0386E3A0EB97FE7768D3507E3945AFB9ABF8B4F8ACB0326A0DA50"
+        }
+      },
+      {
+        "name": "primitive-same-session-Interior-Noon-Temperate.png",
+        "view": "Interior",
+        "time": "Noon",
+        "atmosphere": "Temperate",
+        "art": "primitive-same-session",
+        "image": {
+          "Width": 1920,
+          "Height": 1080,
+          "minimum": 62,
+          "maximum": 79,
+          "pre": 1,
+          "post": 1,
+          "PixelHash": "780B8A4879341232D5110EAA2B72701684CCBA70A7552D1A37DDF9F43F3B8FD1",
+          "PngHash": "BEB3DBE628578A5971044C2D06647595B5BB65B49FFB2C27FBBA123405DC890D"
+        }
+      },
+      {
+        "name": "primitive-same-session-Shelf-Noon-Temperate.png",
+        "view": "Shelf",
+        "time": "Noon",
+        "atmosphere": "Temperate",
+        "art": "primitive-same-session",
+        "image": {
+          "Width": 1920,
+          "Height": 1080,
+          "minimum": 62,
+          "maximum": 79,
+          "pre": 1,
+          "post": 1,
+          "PixelHash": "0E66E9212534DB4471F080A1A2CB7E69766538F1345FA033CDC6BBAB0DBF9FFD",
+          "PngHash": "267A9EF28727F90D0249C06914C48A668F9EF5367BA53F984449E19D4B1A5DE9"
+        }
+      }
+    ],
+    "FreshPrimitiveRaw": "r1/cabin-primitive/evidence.json",
+    "Retirement": "exact clean root"
+  },
+  "Pointer": {
+    "DisplayCases": [
+      {
+        "Mode": "Simple16:9",
+        "Application": "1920x1080",
+        "Frame": "full",
+        "Output": "1920x1080",
+        "Internal": "1920x1080"
+      },
+      {
+        "Mode": "Simple4:3",
+        "Application": "1600x1200",
+        "Frame": "full",
+        "Output": "1600x1200",
+        "Internal": "1600x1200"
+      },
+      {
+        "Mode": "Advanced",
+        "Application": "1920x1080",
+        "Frame": "1280x720@320,180",
+        "Output": "960x540",
+        "Internal": "960x540"
+      },
+      {
+        "Mode": "50%",
+        "Application": "1920x1080",
+        "Frame": "full",
+        "Output": "1920x1080",
+        "Internal": "960x540"
+      }
+    ],
+    "Settings": "actual UI Save; finally restores document/store/display/focus",
+    "Targets": [
+      {
+        "Id": "3:1",
+        "Version": 1,
+        "Prefab": 4,
+        "Selection": "WoodlandAnimal"
+      },
+      {
+        "Id": "9:1",
+        "Version": 1,
+        "Prefab": 9,
+        "Selection": "IronSword"
+      },
+      {
+        "Id": "8:1",
+        "Version": 1,
+        "Prefab": 7,
+        "Selection": "FallbackLabSign",
+        "Interaction": "OutOfRange"
+      },
+      {
+        "Id": null,
+        "GroundPointMm": [
+          17500,
+          5000
+        ],
+        "Selection": "Terrain"
+      }
+    ],
+    "AuthorityUnchanged": true,
+    "Limit": "does not claim accepted destination travel for each screen shape; existing D00/item path separately proves movement/action"
+  },
+  "Actor": {
+    "Id": "3:1",
+    "Version": 1,
+    "Tiers": [
+      "Detailed",
+      "BatchedPrimitive",
+      "Detailed"
+    ],
+    "PoseAndSemanticRecordPreserved": true,
+    "CheapActorRoot": false,
+    "SameIdPicking": true,
+    "Nameplate": "actual Ctrl Woodland Animal reveal; 1->2->1 labels; no body promotion/duplicate",
+    "EquippedMainHands": 1,
+    "FeatureScope": "controlled Detailed actor; no distant non-controlled equipment claim",
+    "Raw": "r1/pointer-tiers/evidence.json"
+  },
+  "Memory": {
+    "Raw": "r1/memory/evidence.json",
+    "IndependentRepeatRaw": "r1/controls/memory-c3.json",
+    "IndependentRepeatHead": "c3d85e442263500daf0cf207104171fc977c4813",
+    "Campaigns": 2,
+    "LifetimesPerCampaign": 8,
+    "StableSecondsPerLifetime": 15,
+    "Radius": 1,
+    "Art": "installed",
+    "UIChurn": false,
+    "SamplesPerCampaign": 42,
+    "LiveRSSMiBRange": [
+      381.484375,
+      525.5078125
+    ],
+    "RetiredByteSamples": [
+      {
+        "lifetime": 0,
+        "phase": "retired-settled",
+        "rss": 466554880,
+        "private": 519217152,
+        "anonymous": 203153408,
+        "privateDirty": 247767040,
+        "file": 194048000,
+        "managed": 53624472
+      },
+      {
+        "lifetime": 1,
+        "phase": "retired-settled",
+        "rss": 533258240,
+        "private": 597499904,
+        "anonymous": 264908800,
+        "privateDirty": 314269696,
+        "file": 194179072,
+        "managed": 102296272
+      },
+      {
+        "lifetime": 2,
+        "phase": "retired-settled",
+        "rss": 551301120,
+        "private": 615153664,
+        "anonymous": 281411584,
+        "privateDirty": 332255232,
+        "file": 194244608,
+        "managed": 67831480
+      },
+      {
+        "lifetime": 3,
+        "phase": "retired-settled",
+        "rss": 527187968,
+        "private": 589398016,
+        "anonymous": 256790528,
+        "privateDirty": 308060160,
+        "file": 194310144,
+        "managed": 74603960
+      },
+      {
+        "lifetime": 4,
+        "phase": "retired-settled",
+        "rss": 536391680,
+        "private": 602030080,
+        "anonymous": 265252864,
+        "privateDirty": 317329408,
+        "file": 194310144,
+        "managed": 64500520
+      },
+      {
+        "lifetime": 5,
+        "phase": "retired-settled",
+        "rss": 532631552,
+        "private": 601251840,
+        "anonymous": 261599232,
+        "privateDirty": 313987072,
+        "file": 194310144,
+        "managed": 60093432
+      },
+      {
+        "lifetime": 6,
+        "phase": "retired-settled",
+        "rss": 526974976,
+        "private": 594481152,
+        "anonymous": 254599168,
+        "privateDirty": 307712000,
+        "file": 194510848,
+        "managed": 69960688
+      },
+      {
+        "lifetime": 7,
+        "phase": "retired-settled",
+        "rss": 533164032,
+        "private": 605847552,
+        "anonymous": 260726784,
+        "privateDirty": 313901056,
+        "file": 194510848,
+        "managed": 65089856
+      },
+      {
+        "lifetime": 8,
+        "phase": "retired-forced-gc-diagnostic",
+        "rss": 529707008,
+        "private": 596058112,
+        "anonymous": 257257472,
+        "privateDirty": 310448128,
+        "file": 194510848,
+        "managed": 8536640
+      }
+    ],
+    "WarmRetiredRSSMiBRange": [
+      502.5625,
+      511.54296875
+    ],
+    "Conclusion": "bounded high-water reuse in tested workload; no inferred global leak-freedom or exact allocator/driver attribution",
+    "LeakRepaired": false,
+    "ForcedGC": "diagnostic only after all clean retirements; managed62.075->8.141MiB, RSS508.465->505.168MiB",
+    "LiveOwners": {
+      "SemanticChunks": 25,
+      "RenderChunks": 9,
+      "RendererNodes": 81,
+      "RendererResources": 51,
+      "Actors": 2,
+      "ActorResources": 1,
+      "ActorArtifactBytes": 2213380,
+      "Textures": 2,
+      "Materials": 2,
+      "BlobPins": 9,
+      "CatalogPins": 2,
+      "GameplayOutput": 1,
+      "OpenUIViews": 0
+    },
+    "RetiredOwners": {
+      "Controllers": 0,
+      "ContentCatalogChildren": 0,
+      "WorldHostChildren": 0,
+      "OpenGumps": 0,
+      "ServerProfileActive": false,
+      "NativeNodes": 42,
+      "NativeOrphans": 0,
+      "NativeResourceMonitor": 3
+    },
+    "Caveats": [
+      "kernel/GC categories overlap and are not additive",
+      "NativeStaticBytes=0 is not zero native memory",
+      "retired presentation null does not invent pin counts",
+      "no FPS or CCU rating"
+    ]
+  },
+  "Remote": {
+    "MixedLifetimes": 8,
+    "RenderedLifetimes": 4,
+    "SamplesPerRenderedLifetime": 4,
+    "WarmReconnects": 2,
+    "ClientProduct": "Complete using actual Online capability, not standalone Online memory campaign",
+    "FreshEpochs": [
+      "13708568522983403941",
+      "11609551745309109570",
+      "6845568646586949953",
+      "2453690534571419279"
+    ],
+    "RememberedProfiles": [
+      false,
+      false,
+      true,
+      true
+    ],
+    "RenderChunks": 9,
+    "RendererNodes": 81,
+    "RendererResources": 51,
+    "Actors": 2,
+    "WorldTextures": 2,
+    "WorldMaterials": 2,
+    "Raw": "r1/mixed/evidence.json",
+    "Conclusion": "representative rendered resources/retirement; insufficient for Remote RSS plateau"
+  },
+  "Vegetation": {
+    "SettingsVersion": 6,
+    "Default": false,
+    "Owner": "device/user",
+    "ServerProfileOwned": false,
+    "Apply": "next world entry",
+    "CLI": "--f1-11-vegetation force-enables; otherwise persisted choice",
+    "Migration": "v1-v5 Off; v6 requires field; With* preserves choice",
+    "ActualAdvancedSaveTest": true,
+    "SettingsRestored": true
+  },
+  "Verification": {
+    "FocusedR1": {
+      "Result": "PASS",
+      "Head": "7590b67f0226affdbb60f20e1db12dbf208c27f7",
+      "Log": "r1/controls/f112-r1-focused7.log"
+    },
+    "Architecture": {
+      "Result": "PASS",
+      "Checks": 4,
+      "Log": "r1/controls/f112-r1-architecture-final.log",
+      "DocumentationResult": "PASS",
+      "DocumentationLog": "r1/controls/f112-r1-architecture-docs.log"
+    },
+    "CanonicalReleaseFinal": {
+      "Result": "PASS",
+      "Exit": 0,
+      "Run": 2591542,
+      "Head": "7590b67f0226affdbb60f20e1db12dbf208c27f7",
+      "Log": "r1/controls/f112-r1-release3.log",
+      "SourceFreeze": "no executable sources changed during run; docs/evidence prepared concurrently",
+      "SupersedesEarlierHTTPFailure": false
+    },
+    "EarlierRelease": [
+      {
+        "Result": "FAIL",
+        "Exit": 134,
+        "Log": "r1/controls/f112-r1-release.log",
+        "Failure": "two framework HttpListener header-finalization NREs during unchanged hosting shutdown stress",
+        "Repaired": false
+      },
+      {
+        "Result": "FAIL",
+        "Log": "r1/controls/f112-r1-release2.log",
+        "Failure": "R1 Remote diagnostic partial missing SinglePlayer edition guard",
+        "RepairHead": "7590b67f0226affdbb60f20e1db12dbf208c27f7"
+      }
+    ],
+    "HostingFocusedRetry": {
+      "Result": "PASS",
+      "Tests": 23,
+      "StressCycles": 128,
+      "Log": "r1/controls/f112-r1-hosting-repro.log",
+      "ClearsEarlierFailure": false
+    },
+    "Suites": {
+      "ClientCore": 36,
+      "ClientContent": 38,
+      "ClientBuiltInTestWorlds": 9,
+      "ClientLocal": 24,
+      "GameReplication": 181,
+      "World": 115,
+      "GameAdmission": 18,
+      "GameChat": 36,
+      "GamePersistence": 13,
+      "NetworkBots": 24,
+      "ServerHosting": 23,
+      "S0Integration": 39
+    },
+    "ProductGates": [
+      "S0 Godot including memory parser",
+      "F1.8A realUDP/motion",
+      "F1.9A/B",
+      "F1.10",
+      "F1.11",
+      "W7/W7-R1",
+      "physical SinglePlayer/Online/Complete exports",
+      "F1.12 installed/absent/primitive/vegetation journeys",
+      "F1.12 eight mixed lifetimes",
+      "Contentless Online cold/warm/profile",
+      "Complete Hosted",
+      "PF1 mixed swarm",
+      "PF2 accounting"
+    ]
+  },
+  "Findings": [
+    {
+      "Id": "F112-R1-01",
+      "Class": "assurance weakness",
+      "Disposition": "bounded explicit capture; historical trigger unisolated"
+    },
+    {
+      "Id": "F112-R1-02",
+      "Class": "coverage",
+      "Disposition": "exported pointer/tier/nameplate passes"
+    },
+    {
+      "Id": "F112-R1-03",
+      "Class": "memory investigation",
+      "Disposition": "tested high-water reuse; no leak repair"
+    },
+    {
+      "Id": "F112-R1-04",
+      "Class": "usability",
+      "Disposition": "Advanced defaultOff nextEntry v6 preference"
+    },
+    {
+      "Id": "F112-R1-05",
+      "Class": "diagnostic defects",
+      "Disposition": "prerequisite/focus/expiry/edition corrected; failed logs retained"
+    },
+    {
+      "Id": "F112-R1-06",
+      "Class": "unexpected runtime/verification failure",
+      "Location": "StaticContentHttpHost.Dispose -> HttpListener.Stop -> HttpEndPointListener.Close -> HttpConnection.Close -> HttpListenerResponse.FormatHeaders",
+      "Confidence": "high occurrence; exact interleaving unisolated",
+      "Disposition": "OPEN separate focused reproduction/repair required",
+      "PF6Blocking": true
+    }
+  ],
+  "EarlierFindingsPreserved": [
+    "F112-01",
+    "F112-02",
+    "F112-03",
+    "F112-04",
+    "F112-05"
+  ],
+  "RemainingReleaseBlockers": [
+    "unexpected HTTP shutdown failure; passing retry does not constitute repair"
+  ],
+  "Unimplemented": [
+    "PF6",
+    "W8",
+    "W9",
+    "W10"
+  ],
+  "HistoricalArtifactsUnchanged": true,
+  "UnrelatedChangesOverwritten": false,
+  "FinalWorktree": "recorded in task handoff",
+  "RawPathAliases": {
+    "r1": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1"
+  },
+  "UnmetStrictEvidenceCriteria": [
+    "historical capture-stall trigger/root cause not isolated; current native captures pass"
+  ]
+}

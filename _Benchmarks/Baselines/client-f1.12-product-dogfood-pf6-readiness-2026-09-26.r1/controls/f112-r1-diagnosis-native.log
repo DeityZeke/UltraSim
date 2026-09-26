@@ -1,0 +1,38 @@
+Godot Engine v4.7.1.stable.mono.official.a13da4feb - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 615.71.09 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce RTX 4070 Ti SUPER
+
+ERROR: System.InvalidOperationException: Native camera ray nominated wrong identity for 9.
+   at UltraSim.Client.Godot.LocalCabinClient.RunF112PointerControl(Boolean checkInteraction)
+   at UltraSim.Client.Godot.ClientRoot.RunF112PointerSettingsAcceptance(Func`1 pointer)
+   at UltraSim.Client.Godot.LocalPlayClientRoot.RunF112NativeProduct()
+   at: void UltraSim.Client.Godot.LocalPlayClientRoot+<RunF112NativeProduct>d__36.MoveNext() (:0)
+   C# backtrace (most recent call first):
+       [0] void Godot.GD.PushError(string)
+       [1] void UltraSim.Client.Godot.LocalPlayClientRoot+<RunF112NativeProduct>d__36.MoveNext()
+       [2] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1.ExecutionContextCallback(object)
+       [3] void System.Threading.ExecutionContext.RunInternal(System.Threading.ExecutionContext, System.Threading.ContextCallback, object)
+       [4] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1.MoveNext(System.Threading.Thread)
+       [5] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1.MoveNext()
+       [6] void System.Threading.Tasks.AwaitTaskContinuation.RunCallback(System.Threading.ContextCallback, object, System.Threading.Tasks.Task&)
+       [7] void System.Threading.Tasks.Task.RunContinuations(object)
+       [8] void System.Threading.Tasks.Task.FinishSlow(bool)
+       [9] bool System.Threading.Tasks.Task.TrySetException(object)
+       [10] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetException(System.Exception, System.Threading.Tasks.Task`1[TResult]&)
+       [11] void UltraSim.Client.Godot.ClientRoot+<RunF112PointerSettingsAcceptance>d__98.MoveNext()
+       [12] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1.ExecutionContextCallback(object)
+       [13] void System.Threading.ExecutionContext.RunInternal(System.Threading.ExecutionContext, System.Threading.ContextCallback, object)
+       [14] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1.MoveNext(System.Threading.Thread)
+       [15] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1.MoveNext()
+       [16] void System.Threading.Tasks.AwaitTaskContinuation.RunCallback(System.Threading.ContextCallback, object, System.Threading.Tasks.Task&)
+       [17] void System.Threading.Tasks.Task.RunContinuations(object)
+       [18] void System.Threading.Tasks.Task.FinishSlow(bool)
+       [19] bool System.Threading.Tasks.Task.TrySetException(object)
+       [20] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetException(System.Exception, System.Threading.Tasks.Task`1[TResult]&)
+       [21] void UltraSim.Client.Godot.LocalCabinClient+<RunF112PointerControl>d__246.MoveNext()
+       [22] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1.ExecutionContextCallback(object)
+       [23] void System.Threading.ExecutionContext.RunInternal(System.Threading.ExecutionContext, System.Threading.ContextCallback, object)
+       [24] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1.MoveNext(System.Threading.Thread)
+       [25] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1.MoveNext()
+       [26] void Godot.SignalAwaiter.SignalCallback(nint, Godot.NativeInterop.godot_variant**, int, Godot.NativeInterop.godot_bool*)
+ULTRASIM CLIENT READY edition=Complete capabilities=SinglePlayer,Multiplayer,Settings,Exit screen=MainMenu settings=Loaded
+T0.10 PLAYABLE CLIENT READY chunks=25 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand

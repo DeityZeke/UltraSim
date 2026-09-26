@@ -20,7 +20,11 @@ closes common Local/Remote catalog-backed world resources and native renderer st
 procedural vegetation opt-in/default Off. F1.12 is active with
 [partial dogfood evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.md):
 four mechanical product repairs, exported lifecycle journeys and uninterrupted canonical Release on
-`ac6a81bf`. Native visual/Cabin and product resource-trend coverage remain open; PF6 is NOT READY.
+`ac6a81bf`. The linked [R1 evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1.md)
+adds actual native captures, pointer/tier/nameplate coverage and repeated radius-1 retired-memory
+high-water reuse. Settings v6 exposes device-owned/default-Off Experimental Vegetation (next entry).
+An unexpected HTTP shutdown error observed in canonical Release remains unresolved; PF6 is NOT READY.
+The historical capture-stall trigger was not reproduced and is not claimed as an engine diagnosis.
 W8 remains unstarted. The initial F1.8A
 closure evidence remains historical, and the [R1 correction](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md)
 records reproduced defects, the earlier intermittent final-tree verifier failures, and corrected
@@ -2830,7 +2834,7 @@ F1.9A Simple/Advanced display composition and real Gameplay Frame output      CL
 F1.9B scalable Godot RID/MultiMesh backend                                    CLOSED (NodeMultiMesh/PerRow)
 F1.10 actor representation tiers/realization interpolation seam               CLOSED (conservative hybrid)
 F1.11 renderer stress consumers/vegetation prototype                          CLOSED (default Off)
-F1.12 product dogfooding/PF6 readiness                                        ACTIVE / EVIDENCE PENDING
+F1.12 product dogfooding/PF6 readiness                                        ACTIVE / HTTP RELEASE FAILURE OPEN
         |
         v
 PF6 external human validation                                                WAITING ON F1.12

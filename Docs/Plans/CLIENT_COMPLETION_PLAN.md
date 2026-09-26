@@ -1,6 +1,6 @@
 # UltraSim Client Completion Plan
 
-**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.11 are CLOSED; F1.12 is ACTIVE; NOT READY FOR PF6.** The [partial F1.12 evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.md) records four product repairs, exported journeys and an uninterrupted canonical Release pass on `ac6a81bf`, but native visual/product-resource coverage remains incomplete. The [F1.11 evidence](../../_Benchmarks/Baselines/client-f1.11-renderer-stress-vegetation-2026-09-25.md) closes shared Local/Remote world-resource consumption and bounded renderer stress; vegetation remains opt-in/default Off. F1.10 selects a conservative Detailed/BatchedPrimitive hybrid after the [actor-tier comparison](../../_Benchmarks/Baselines/client-f1.10-actor-representation-tiers-2026-09-25.md): distant body batching reduces Nodes/construction/retirement, not moving-update CPU. F1.9B retains NodeMultiMesh/PerRow after the [measured backend comparison](../../_Benchmarks/Baselines/client-f1.9b-scalable-godot-backend-2026-09-25.md); direct RIDs and bulk submission remain bounded comparison controls, not selected product policy. F1.9A's tested implementation and verification are recorded in the [display-composition evidence](../../_Benchmarks/Baselines/client-f1.9a-display-composition-2026-09-25.md). The original F1.8A closure claim is superseded by the [corrective evidence](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md), which records both the reproduced defects and the earlier final-tree verifier failures.
+**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.11 are CLOSED; F1.12 is ACTIVE; NOT READY FOR PF6.** The [partial F1.12 evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.md) remains immutable. Its linked [R1 assurance evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1.md) adds bounded native Cabin captures, exported pointer/tier/nameplate controls, repeated clean-retirement memory high-water reuse, and a device-owned Advanced vegetation preference. A new unexpected HTTP shutdown failure observed in canonical Release remains a concrete release blocker; a passing retry does not retire it. The historical capture-stall trigger also remains unisolated, rather than being claimed as a proven engine defect. The [F1.11 evidence](../../_Benchmarks/Baselines/client-f1.11-renderer-stress-vegetation-2026-09-25.md) closes shared Local/Remote world-resource consumption and bounded renderer stress; vegetation remains opt-in/default Off. F1.10 selects a conservative Detailed/BatchedPrimitive hybrid after the [actor-tier comparison](../../_Benchmarks/Baselines/client-f1.10-actor-representation-tiers-2026-09-25.md): distant body batching reduces Nodes/construction/retirement, not moving-update CPU. F1.9B retains NodeMultiMesh/PerRow after the [measured backend comparison](../../_Benchmarks/Baselines/client-f1.9b-scalable-godot-backend-2026-09-25.md); direct RIDs and bulk submission remain bounded comparison controls, not selected product policy. F1.9A's tested implementation and verification are recorded in the [display-composition evidence](../../_Benchmarks/Baselines/client-f1.9a-display-composition-2026-09-25.md). The original F1.8A closure claim is superseded by the [corrective evidence](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md), which records both the reproduced defects and the earlier final-tree verifier failures.
 
 **Parent architecture:** [CLIENT_PRESENTATION_ARCHITECTURE.md](CLIENT_PRESENTATION_ARCHITECTURE.md)
 
@@ -94,7 +94,7 @@ F1.9A Simple/Advanced display composition and real Gameplay Frame output (CLOSED
 F1.9B scalable Godot realization / RID / MultiMesh (CLOSED; NodeMultiMesh/PerRow retained)
 F1.10 Actor representation tiers and GPU-friendly interpolation seam (CLOSED; conservative hybrid)
 F1.11 Renderer stress consumers / vegetation prototype (CLOSED; prototype default Off)
-F1.12 Product dogfooding and PF6 readiness (ACTIVE; partial evidence accepted, visual/resource matrix open)
+F1.12 Product dogfooding and PF6 readiness (ACTIVE; R1 native/resource evidence present, HTTP release failure open)
 ~~~
 
 The dependency direction is intentional. Do not begin aesthetic menu polish before F1.7, and do not make the renderer depend on Local/Server special cases before F1.2.
@@ -1386,13 +1386,23 @@ Never move authoritative gameplay/navigation/collision into the client renderer 
 [2026-09-26 evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.md)
 preserves both repaired failures and passing controls. Durable Local save sequence, explicit exact
 Local guest restore/Chat, generation-coherent metadata copying and active Remote Settings are repaired.
-One uninterrupted canonical Release passed on `ac6a81bf`. Actual exported Local/Complete/Online
-journeys and eight mixed lifetimes passed; the native logical resource control retained stable owner
-counts but rising RSS and zero draw-call observations. The shipping built-in radius is 1; the
-harness radius-2 steady window is a separate control. Cabin post-draw captures did not complete.
-Required next work is successful native visual/pointer/actor-tier/Cabin coverage and representative
-rendered/Online resource trends, not W8 or another optimization campaign. Human motion feel and the
-historical approximately 1.4–1.67 m correction range remain ungraded.
+One uninterrupted canonical Release passed on `ac6a81bf`; that historical result is not the R1
+final-tree result. The linked [R1 companion](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1.md)
+records all later verification outcomes. R1 captures 28 real native PNGs (20 Cabin, one known-scene,
+three tier/nameplate, four Remote), exercises four actual Settings/display transforms, preserves
+identity through Detailed/Cheap/Detailed, and records two eight-lifetime radius-1 memory campaigns.
+After warmup RSS reuses an approximately 502–512 MiB retired band in the final run; logical owners
+retire cleanly, without demanding startup RSS or attributing every retained byte to a driver cache.
+The historical capture stall did not reproduce on the retained original export; the new tool
+actively requests and observes a bounded rendering boundary. Missing authored secondary-room,
+interior-doorway and window surfaces are explicit, not silently manufactured. Advanced Experimental
+Vegetation is device-owned/default Off/next-entry in settings v6.
+
+An unexpected `HttpListener` header-finalization `NullReferenceException` during unchanged hosting
+shutdown stress failed one canonical R1 run. A focused passing retry does not establish its repair.
+This concrete failure remains open, and no Server repair is hidden inside the client checkpoint.
+PF6/W8/W9/W10 remain unstarted. Human motion feel and the historical approximately 1.4–1.67 m
+correction range remain ungraded, nonblocking polish questions.
 
 ## Goal
 

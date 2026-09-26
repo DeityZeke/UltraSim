@@ -10,7 +10,8 @@ stay outside that viewport. Native pointer rays use application→frame→output
 projection uses the Core target crop directly, with no main-viewport compensation. Simple mode
 locks the display layers together; Advanced mode exposes the same layers independently, not a
 second renderer. Physical window resizing scales the logical application without expanding World
-visibility. `ClientSettingsDocument` v5 is device/user-global for display choices.
+visibility. `ClientSettingsDocument` v6 is device/user-global for display choices and the
+default-Off Experimental Vegetation preference (v1–v5 migrate with vegetation Off).
 
 F1.9B makes existing chunk-local static/Multi/public instancing an explicit native ownership seam.
 `GodotWorldInstanceGroup` borrows resolved mesh/material resources and owns a MultiMesh plus either
@@ -86,11 +87,22 @@ harness (the shipping built-in setting is 1). The verifier's
 `--f1-12-only` and `--f1-12-mixed-only` use actual exports, not a parallel harness. The eight-lifetime
 mixed journey preserves scoped Settings and fresh Remote epochs on two warm A reconnects.
 
-The optional `--f1-12-cabin-preview` is a diagnostic image probe, not new default lighting.
-It requires a real renderer and `--f1-12-cabin-evidence=<absolute-directory>`; use an outer process
-timeout until the failed native post-draw control is resolved. No successful image or native FPS
-rating is claimed in the partial evidence. Latest-frame monitors, script-driven UI probes and shared
-Local-process CPU must not be labeled whole-frame percentiles or dedicated-server cost.
+The linked [F1.12-R1 evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1.md)
+adds actual rendered Complete-export controls. `--f1-12-render-probe` uses the existing Gameplay
+Output, and `--f1-12-cabin-preview` captures Classic Cabin through native `ForceDraw`, observed
+pre/post-draw signals, validated RGB readback and PNG hashes. The preview requires
+`--f1-12-cabin-evidence=<absolute-directory>`; signal waits have eight-second bounds and the
+focused verifier supplies a process timeout. The historical stall was not reproduced; it is not
+described as a proven engine defect. `--f1-12-native-product` exercises actual Settings/pointer
+mapping and actor tiers; `--f1-12-memory` records eight shipping-radius Local lifetimes and clean
+retirement memory. `./verify.sh --f1-12-r1-only --configuration=Release` coordinates these with
+rendered Remote/mixed controls. Capture is cold diagnostic behavior, not gameplay architecture or
+a native FPS rating. Latest-frame monitors and shared Local-process CPU must not be labeled
+whole-frame percentiles or dedicated-server cost.
+
+Advanced Settings now exposes **Experimental Vegetation (prototype; applies next world entry)**.
+It is device-owned, persisted and default Off. `--f1-11-vegetation` force-enables it for diagnostics;
+otherwise Local/Remote use the saved choice at entry. This does not replace any semantic session.
 
 This is the one maintained Godot application and the only production Godot script assembly. Its
 `Adapter/`, `Shell/`, and conditionally compiled `Local/` sources replace the former `_Godot`,

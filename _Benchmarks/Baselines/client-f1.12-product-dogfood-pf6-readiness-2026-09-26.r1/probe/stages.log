@@ -1,0 +1,7 @@
+2026-09-26T21:31:46.6035510Z request display=X11 loop=True visible=True
+2026-09-26T21:31:46.6126120Z process-frame
+2026-09-26T21:31:46.6248324Z physics-frame pre=1 post=1 viewport=(1920, 1080)
+2026-09-26T21:31:46.6248559Z force-draw-start
+2026-09-26T21:31:46.6273464Z force-draw-end pre=2 post=2
+2026-09-26T21:31:46.6331791Z readback empty=False size=(1920, 1080)
+2026-09-26T21:31:46.6796487Z retired

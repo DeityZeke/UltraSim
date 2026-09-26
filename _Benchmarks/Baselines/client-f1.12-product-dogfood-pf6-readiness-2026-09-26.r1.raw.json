@@ -1,0 +1,425 @@
+{
+  "Schema": "client-f1.12-r1-raw-index/v1",
+  "PrimarySourceHead": "7590b67f0226affdbb60f20e1db12dbf208c27f7",
+  "StartingHead": "1ebde0319875e78aba6fe9bd6e180bc7361a9c15",
+  "PrimaryNativeRun": 2586235,
+  "CanonicalReleaseRun": 2591542,
+  "PathBase": "_Benchmarks/Baselines",
+  "SourceProvenance": "Primary probe/Cabin/pointer/memory/mixed at7590b67f; C3 memory repeated control atc3d85e44; original-export control atac6a81bf; development logs retain intermediate failures; consult per-file SourceHead and command logs.",
+  "RawIntegerHandling": "Raw JSON copied verbatim; UInt64 epochs/hashes are not floating-point rewritten. Machine consumers should retain exact integers.",
+  "CollectionMetadata": [
+    {
+      "Name": "probe",
+      "Path": "_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/probe/stages.log",
+      "PNGs": 1
+    },
+    {
+      "Name": "cabin-installed",
+      "Path": "_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-installed/evidence.json",
+      "PNGs": 12
+    },
+    {
+      "Name": "cabin-primitive",
+      "Path": "_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-primitive/evidence.json",
+      "PNGs": 8
+    },
+    {
+      "Name": "pointer-tiers",
+      "Path": "_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/pointer-tiers/evidence.json",
+      "PNGs": 3
+    },
+    {
+      "Name": "memory",
+      "Path": "_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/memory/evidence.json",
+      "Samples": 42,
+      "Lifetimes": 8
+    },
+    {
+      "Name": "repeat-memory-c3",
+      "Path": "_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/memory-c3.json",
+      "Samples": 42,
+      "Lifetimes": 8
+    },
+    {
+      "Name": "rendered-mixed",
+      "Path": "_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/mixed/evidence.json",
+      "PNGs": 4,
+      "RemoteSamples": 16
+    },
+    {
+      "Name": "canonical-headless-product-journeys",
+      "Path": "_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/canonical",
+      "Note": "Separate from native R1 observations"
+    }
+  ],
+  "TotalFiles": 68,
+  "TotalBytes": 7602849,
+  "PrimaryPNGCount": 28,
+  "Files": [
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-installed/primitive-same-session-Shelf-Noon-Temperate.png",
+      "Bytes": 10014,
+      "SHA256": "267a9ef28727f90d0249c06914c48a668f9ef5367ba53f984449e19d4b1a5de9"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-primitive/primitive-Shelf-Noon-Temperate.png",
+      "Bytes": 10014,
+      "SHA256": "267a9ef28727f90d0249c06914c48a668f9ef5367ba53f984449e19d4b1a5de9"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/probe/probe.png",
+      "Bytes": 10699,
+      "SHA256": "10b11e1e093bb0956896c0c805876921ea6c67979f29a69213339cca897547ef"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/memory/run.log",
+      "Bytes": 1144,
+      "SHA256": "935510a0b20264dda5d9d5ec0a2a3a6c315557097465d68b5a92f72de74edd67"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-installed/installed-Doorway-Noon-Temperate.png",
+      "Bytes": 121464,
+      "SHA256": "1dc1fd5cd969331d9c3114ab51eafc0b35498844e695d399d0f88d80f82752bf"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/canonical/SinglePlayer-primitive-default.json",
+      "Bytes": 134275,
+      "SHA256": "61c856d446adc2ed46722a6f6db14a42cdc47f17e5edeb37c43b16e10180526e"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/f112-r1-hosting-repro.log",
+      "Bytes": 1488,
+      "SHA256": "60e6a4f54729eeebe35fe7aecdfc255aa18119de0a627ccdaaebcb9d11046094"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/canonical/SinglePlayer-absent-default.json",
+      "Bytes": 149869,
+      "SHA256": "e2344447ad6a68413be2453b87ada3367262953025de58224553247eadbb3b6c"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/canonical/Complete-installed-vegetation.json",
+      "Bytes": 149897,
+      "SHA256": "d732ac79405ff7eb48dd405391b89cd540b30a606c292b45abebcb135c0dbda1"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/mixed/remote-F0.7-Remote-A.png",
+      "Bytes": 150747,
+      "SHA256": "fa89de0e6f91641898d8b61ca0a3ba0d5c1bcb7a6da548f4c34aa2c1bf8f4218"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/mixed/remote-F0.7-Remote-B.png",
+      "Bytes": 150862,
+      "SHA256": "d2df3e3c7e1fd06b56a628615d2bbd5636a6842b74798db269f5b173a98e5d49"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/mixed/remote-F0.7-Remote-A-Reconnect.png",
+      "Bytes": 152404,
+      "SHA256": "367c3c4243ed12bdfb869d7bb079d86ec0838385e9604092c853a517c9deb7fe"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/mixed/remote-F1.12-Remote-A-Warm-Two.png",
+      "Bytes": 152410,
+      "SHA256": "16ef32b1a57ae4ab6d5d9005c5e91274522ec2ea3b72fc41069b90fe757f03e1"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/f112-r1-release2.log",
+      "Bytes": 156390,
+      "SHA256": "32486fbe81ab7f620bdb6b8a0d619148169591c89e252cfaf6b77fd5abf941f8"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-primitive/primitive-Exterior-Dusk-Temperate.png",
+      "Bytes": 162521,
+      "SHA256": "7500b8506a4d5dcddf6cc3f2fc93afa6b44ea09ec6ffc46d1c7003b0ec31125d"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/f112-r1-focused3.log",
+      "Bytes": 16260,
+      "SHA256": "3b37755e2fe3cf3b73ece118be5606511c2bf02192abd2ea9f5d271491e325c0"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/f112-r1-focused.log",
+      "Bytes": 16947,
+      "SHA256": "91ce60d5b100d02ea5994d39485e382a81830d747e41699a33f802a99a969675"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/f112-r1-architecture-final.log",
+      "Bytes": 171,
+      "SHA256": "4c42596ac2f97300c3b9f86022f094fc9ff1a4675e01ede3df32ec5f48a1fb9b"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/f112-r1-architecture.log",
+      "Bytes": 171,
+      "SHA256": "4c42596ac2f97300c3b9f86022f094fc9ff1a4675e01ede3df32ec5f48a1fb9b"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/canonical/Complete-mixed.json",
+      "Bytes": 173672,
+      "SHA256": "c5d346530deec6729b08ed74292cd4c0553aee385725eeb1cbbabb0c3088823a"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-primitive/primitive-Exterior-Dawn-Temperate.png",
+      "Bytes": 175166,
+      "SHA256": "dad7b130f6a3a89b000559569845f1bd72f707556b5582fa7b1b8e1421722461"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/f112-r1-focused2.log",
+      "Bytes": 18625,
+      "SHA256": "0159fdf0cef7375fb47446bbbce64a6bc5bc2a9cf9cc33310723d39d23d4ccbb"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/f112-r1-focused5.log",
+      "Bytes": 18670,
+      "SHA256": "f648c888ce05adbef69c44add345b051fefbc20e0f199ed6c337958ab49d6ef7"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-primitive/primitive-Exterior-Noon-Cold.png",
+      "Bytes": 193092,
+      "SHA256": "5ac503985e0ad4e37ce976bdf58d84ee000d7c7903b9a43245470e8bb4be13b0"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-primitive/primitive-Exterior-Noon-Temperate.png",
+      "Bytes": 195457,
+      "SHA256": "ae627c9b80a18e22c483acd0d246836d6bb20faa3af75ae493a33eb979ad6868"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-installed/primitive-same-session-Exterior-Noon-Temperate.png",
+      "Bytes": 195467,
+      "SHA256": "a7ab6b8e68ce977705b3f17543ae3d37f1ee469f9194557918ffeece47da2e6d"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/canonical/SinglePlayer-installed-default.json",
+      "Bytes": 204486,
+      "SHA256": "c18b9209ec94c9e1844bcccb6964911502d35dcf66ac2fc3be5ea872e1af74ea"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-installed/installed-Exterior-Dusk-Temperate.png",
+      "Bytes": 209687,
+      "SHA256": "d920274604d8fcf43240096987da3b3f5fa5fd8719f27a401178cd7e6707e3d7"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/pointer-tiers/evidence.json",
+      "Bytes": 209867,
+      "SHA256": "0193af315a08368169df240e8825876ef1caf6c2fa754bd80f562883237b658c"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-primitive/primitive-Exterior-Night-Temperate.png",
+      "Bytes": 21153,
+      "SHA256": "a6bfcb2a08dc607224c3cc5ab47e05a30e72c2473e253c394b2891aabdae8a0f"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-installed/installed-Exterior-Dawn-Temperate.png",
+      "Bytes": 219373,
+      "SHA256": "90b8c3e195e824eb2043df0a4b21a3432e192b46a631ed5d99706782ca90f60c"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/f112-r1-focused6.log",
+      "Bytes": 22221,
+      "SHA256": "9990889bda7900e48d67bcfe86b3add3026d70a7d762ad75f85189e2bc87b91e"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/pointer-tiers/tier-1.png",
+      "Bytes": 229657,
+      "SHA256": "e22a0262b3b3d224b28a921e83e6a8c49505f92eb71fdc05bca4bdbbac859d57"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-installed/installed-Exterior-Noon-Temperate.png",
+      "Bytes": 229740,
+      "SHA256": "fc4e898a35e02f9bbf4dedb264d81c063a67e9d84bd284b1a444c67a6f7e3a40"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/pointer-tiers/tier-0.png",
+      "Bytes": 230729,
+      "SHA256": "a56dc7078cc2502c301af412ff8ae8e71a9740ea07c80f51caa8b4abd6052012"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/pointer-tiers/tier-2.png",
+      "Bytes": 230729,
+      "SHA256": "a56dc7078cc2502c301af412ff8ae8e71a9740ea07c80f51caa8b4abd6052012"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-installed/installed-Exterior-Noon-Cold.png",
+      "Bytes": 230988,
+      "SHA256": "9a2935a58fd85311567f2746417ef7b8cd60abd4fda833f7cb79e2f0ce439e17"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/f112-r1-focused4.log",
+      "Bytes": 28779,
+      "SHA256": "2c80f61ba4a41fb427596e0c0b7342d69910933f771ef2345ef7a4e4456b64a6"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/f112-r1-focused7.log",
+      "Bytes": 30072,
+      "SHA256": "2d32e801eb61831355006c39e53a02981e585e6719544dbb58420c80480022c7"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/probe/run.log",
+      "Bytes": 309,
+      "SHA256": "ce54cf567886dc5ef7a8609af1ac0d4ecb23abf8d4d4425539aa2d520e4a8142"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/f112-r1-release.log",
+      "Bytes": 31894,
+      "SHA256": "e10313032f0ea4ac56f3ddb4a266829cd09a750ef10a8b6b20c90184486d07e1"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-primitive/stages.log",
+      "Bytes": 3210,
+      "SHA256": "a1c451756f1c464f1eb299cc83f6f68961630453135005ecb2e374ce1083d30d"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/f112-r1-release3.log",
+      "Bytes": 321431,
+      "SHA256": "21652246b4431cf939310c57529e3971413c891bb23a7e6b67772ff5d3f5a00e"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/original-export-evidence.json",
+      "Bytes": 34616,
+      "SHA256": "f33fd1908304a1e1145f1f59af5622f73eeec04a9ab1de3d7c257ef90993f02b"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/f112-r1-diagnosis-native.log",
+      "Bytes": 3865,
+      "SHA256": "67380a48429ad1d101556f2d5c1ba427306dd08b6b0972ec2c58926066de21c8"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/f112-r1-diagnosis-native-b.log",
+      "Bytes": 3933,
+      "SHA256": "4f94a1fca8b578d6d3c78efcc4a9d09b30836330c1ceb8bba170d747411e8d11"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/probe/stages.log",
+      "Bytes": 401,
+      "SHA256": "b4f986860f7c04fddb9e61510362971fb4ed14f1d6125261c1d62bf69768af54"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-installed/installed-Exterior-Night-Temperate.png",
+      "Bytes": 40374,
+      "SHA256": "6d84bd1be58541084062b45fdc44c419e17990e6908f7aca2eb0860deb863d7f"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-primitive/evidence.json",
+      "Bytes": 40549,
+      "SHA256": "02b0651ffb2fb74d0a6e4467b1e7ba2fa5f1c2fd5211c4a94d3ac83a16359fed"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-installed/stages.log",
+      "Bytes": 4658,
+      "SHA256": "6a804f23b20256bf09d7f830481cdf9c9f950a72b4eba0fb844d6c99f1d2906d"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-primitive/run.log",
+      "Bytes": 466,
+      "SHA256": "fc1d4ebbb05a12ac389235229d3443b1632e45d991b71e19e5e2cd615a96ecb0"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-installed/run.log",
+      "Bytes": 467,
+      "SHA256": "9ab9c5e72f0b21b34925a68310b33a7ec0289320f9847251194ede943a3fc014"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/f112-r1-passive.log",
+      "Bytes": 467,
+      "SHA256": "9ab9c5e72f0b21b34925a68310b33a7ec0289320f9847251194ede943a3fc014"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/f112-r1-original-export.log",
+      "Bytes": 475,
+      "SHA256": "208fa4f442a9905e5cdbfe55a6f3b9f33e321861dc1d046dc436be97ec090e80"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/pointer-tiers/run.log",
+      "Bytes": 483,
+      "SHA256": "d92f7af4b84885ad88343e7f5e92c880da74c619e050cdfa3407ef6873f20894"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/passive-stages.log",
+      "Bytes": 4979,
+      "SHA256": "ebd4a1ba9a610e23f73e122f738a7d40c3e955f19f980d17660250f891042742"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/passive-evidence.json",
+      "Bytes": 50728,
+      "SHA256": "411cb5ad3733f5e524ce251885c1d2c37449bce7353a0ce2e834f72ef495f689"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-installed/evidence.json",
+      "Bytes": 50795,
+      "SHA256": "94c78f7884dbd6460d16ed6597de10d96b4c10eab1e8ce10b9ea6ad043b2709f"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/memory-c3.json",
+      "Bytes": 569221,
+      "SHA256": "9cebf681694258c49db7f48835d964bf6f2cecd873383eb3413c8b94aac4d538"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/memory/evidence.json",
+      "Bytes": 569236,
+      "SHA256": "6286c679bb9d6a20dd9e57c3e877f4200508819fdf851242d288b54900cc6c2e"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-primitive/primitive-Doorway-Noon-Temperate.png",
+      "Bytes": 57831,
+      "SHA256": "5b9e7366e77c27bf3ae211441451e876aa4a086ffaf493e5397cc2aba1d548d0"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-installed/installed-Interior-Noon-Temperate.png",
+      "Bytes": 57915,
+      "SHA256": "03d9156066f57dfc93a7e4986924978b6bf07d1fc5fbbce20ba3a0fbeedf13f5"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-installed/primitive-same-session-Doorway-Noon-Temperate.png",
+      "Bytes": 58060,
+      "SHA256": "eccdf6ebf3d0386e3a0eb97fe7768d3507e3945afb9abf8b4f8acb0326a0da50"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-installed/primitive-same-session-Interior-Noon-Temperate.png",
+      "Bytes": 9274,
+      "SHA256": "beb3dbe628578a5971044c2d06647595b5bb65b49ffb2c27fbba123405dc890d"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-primitive/primitive-Interior-Noon-Temperate.png",
+      "Bytes": 9274,
+      "SHA256": "beb3dbe628578a5971044c2d06647595b5bb65b49ffb2c27fbba123405dc890d"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/mixed/evidence.json",
+      "Bytes": 965550,
+      "SHA256": "47fae60319004f2f26425cfdb7b17dbaae808f338ba587f76202c991217b6816"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/cabin-installed/installed-Shelf-Noon-Temperate.png",
+      "Bytes": 96840,
+      "SHA256": "679cafd429a285e8f5d2a605efb00bf3a1170df8fea99b3ade8ee2d868d432a3"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/f112-r1-architecture-docs.log",
+      "Bytes": 171,
+      "SHA256": "4c42596ac2f97300c3b9f86022f094fc9ff1a4675e01ede3df32ec5f48a1fb9b"
+    }
+  ],
+  "PreservedHistoricalArtifacts": [
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.md",
+      "SHA256": "be1d29d57e27e67c78658f960d743addf585187035a084216d92512d5a31fcfd"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.json",
+      "SHA256": "d38a85ab173cda490da51382bb62d0762345a5b47229aea7ca952873efac6277"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.raw.json",
+      "SHA256": "5c5b35889fc653b791654971a06f2f8ac39bb7aea988f866aacf2db3207660de"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.controls.log",
+      "SHA256": "5055f8241637b3114223730dc7c4e439f83da703b5b4a3193c3421a2abe793ad"
+    },
+    {
+      "Path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.release.log",
+      "SHA256": "05e3f136d9509b3e082f16567dce7918207dd460077082356fd2becea2514da0"
+    }
+  ],
+  "Excluded": "CAS blobs, authorizations, trust stores, save data, executable exports and private credentials are not copied into this evidence collection.",
+  "SignedOffReadiness": false,
+  "PF6Verdict": "NOT READY FOR PF6"
+}

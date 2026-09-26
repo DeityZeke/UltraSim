@@ -1,0 +1,214 @@
+PASS active project dependency boundaries
+PASS built-in client presentation assets
+PASS single-project client export composition
+PASS documentation architecture and links
+> bash "/mnt/data/mega/Godot Projects/UltraSim/Client/Godot/export-client.sh" Complete "/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/UltraSimComplete.x86_64"
+  Determining projects to restore...
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Client/Core/UltraSim.Client.Core.csproj (in 197 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Composition/UltraSim.Game.Composition.csproj (in 197 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Kernels/UI/UltraSim.UI.csproj (in 197 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Physics/UltraSim.Game.Physics.csproj (in 197 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Server/Hosting/UltraSim.Server.Hosting.csproj (in 198 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Kernels/Network/UltraSim.Network.csproj (in 197 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Inventory/UltraSim.Game.Inventory.csproj (in 198 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Client/Content/UltraSim.Client.Content.csproj (in 197 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Kernels/ECS/UltraSim.ECS.csproj (in 197 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Server/ConceptDemo/UltraSim.Server.ConceptDemo.csproj (in 197 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Contracts/UltraSim.Game.Contracts.csproj (in 197 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Accounting/UltraSim.Game.Accounting.csproj (in 197 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Server/ConceptDemo.LocalHost/UltraSim.Server.ConceptDemo.LocalHost.csproj (in 197 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Admission/UltraSim.Game.Admission.csproj (in 197 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Kernels/Spatial/UltraSim.Spatial.csproj (in 197 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Server/Persistence/UltraSim.Server.Persistence.csproj (in 2 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/World/UltraSim.Game.World.csproj (in 2 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Server/Runtime/UltraSim.Server.Runtime.csproj (in 2 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/UI/UltraSim.Game.UI.csproj (in 3 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Client/StandardUi/UltraSim.Client.StandardUi.csproj (in 2 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Protocol/UltraSim.Game.Protocol.csproj (in 3 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Persistence/UltraSim.Game.Persistence.csproj (in 4 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Chat/UltraSim.Game.Chat.csproj (in 4 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Replication/UltraSim.Game.Replication.csproj (in 4 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Client/BuiltInTestWorlds/UltraSim.Client.BuiltInTestWorlds.csproj (in 4 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Client/Network/UltraSim.Client.Network.csproj (in 3 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Client/Local/UltraSim.Client.Local.csproj (in 5 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Replication.Remote/UltraSim.Game.Replication.Remote.csproj (in 6 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Client/Godot/UltraSim.Client.Application.Godot.csproj (in 224 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Kernels/Network.Generators/UltraSim.Network.Generators.csproj (in 44 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Kernels/ECS.Generators/UltraSim.ECS.Generators.csproj (in 44 ms).
+Godot Engine v4.7.1.stable.mono.official.a13da4feb - https://godotengine.org
+
+[   0% ] [90m[1mfirst_scan_filesystem[22m | Started Project initialization (5 steps)[39m[0m
+[   0% ] [90m[1mfirst_scan_filesystem[22m | Scanning file structure...[39m[0m
+[  16% ] [90m[1mfirst_scan_filesystem[22m | Loading global class names...[39m[0m
+[  33% ] [90m[1mfirst_scan_filesystem[22m | Verifying GDExtensions...[39m[0m
+[  50% ] [90m[1mfirst_scan_filesystem[22m | Creating autoload scripts...[39m[0m
+[  66% ] [90m[1mfirst_scan_filesystem[22m | Initializing plugins...[39m[0m
+[  83% ] [90m[1mfirst_scan_filesystem[22m | Starting file scan...[39m[0m
+[92m[ DONE ][39m [1mfirst_scan_filesystem[22m
+[0m
+[   0% ] [90m[1mdotnet_publish_project[22m | Started Publishing .NET project... (1 steps)[39m[0m
+[   0% ] [90m[1mdotnet_publish_project[22m | Running dotnet publish[39m[0m
+[92m[ DONE ][39m [1mdotnet_publish_project[22m
+[0m
+[   0% ] [90m[1msavepack[22m | Started Packing (102 steps)[39m[0m
+[   1% ] [90m[1msavepack[22m | Storing File: res://.godot/exported/133200997/export-dfb35b960ad52f07f1587880278069ea-Bootstrap.scn[39m[0m
+[  33% ] [90m[1msavepack[22m | Storing File: res://ClientHost.cs[39m[0m
+[  66% ] [90m[1msavepack[22m | Storing File: res://ClientHost.Remote.cs[39m[0m
+[  66% ] [90m[1msavepack[22m | Storing File: res://Bootstrap.tscn.remap[39m[0m
+[  66% ] [90m[1msavepack[22m | Storing File: res://.godot/global_script_class_cache.cfg[39m[0m
+[  66% ] [90m[1msavepack[22m | Storing File: res://.godot/uid_cache.bin[39m[0m
+[  66% ] [90m[1msavepack[22m | Storing File: res://project.binary[39m[0m
+[92m[ DONE ][39m [1msavepack[22m
+[0m
+OFFICIAL CONTENT PASS package=official.world-local.actor-presentations manifest=e4b767436784db6c42447d4fbbcf58e0c653bd168e81582fa6f1d1962821aaad plan=e6fd8000f009acf952e5f024b28e3a130fd72085e042b97a70ef36bd02b5192a archive=03f77dd361bdf7c9edf564fc92c95ced31aa71378a5d14555cc670b1cda6c554 bytes=4723829 output=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/Content/Official/ultrasim-official-actors-v1.uspkg
+> git rev-parse HEAD
+b59ebbcbe70225d998869fc37265d6efcccd6ae9
+> /mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/UltraSimComplete.x86_64 -- --expect-edition=Complete --f1-12-head=b59ebbcbe70225d998869fc37265d6efcccd6ae9 "--f1-12-save-root=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/probe/saves" "--content-cache=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/probe/content" "--f1-12-cabin-evidence=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/probe" "--f1-12-evidence=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/probe/evidence.json" --f1-12-render-probe
+Godot Engine v4.7.1.stable.mono.official.a13da4feb - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 615.71.09 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce RTX 4070 Ti SUPER
+
+ULTRASIM CLIENT READY edition=Complete capabilities=SinglePlayer,Multiplayer,Settings,Exit screen=MainMenu settings=Loaded
+PASS F1.12-R1 native probe evidence=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/probe
+> /mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/UltraSimComplete.x86_64 -- --expect-edition=Complete --f1-12-head=b59ebbcbe70225d998869fc37265d6efcccd6ae9 "--f1-12-save-root=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/cabin-installed/saves" "--content-cache=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/cabin-installed/content" "--f1-12-cabin-evidence=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/cabin-installed" "--f1-12-evidence=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/cabin-installed/evidence.json" --f1-12-cabin-preview
+Godot Engine v4.7.1.stable.mono.official.a13da4feb - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 615.71.09 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce RTX 4070 Ti SUPER
+
+ULTRASIM CLIENT READY edition=Complete capabilities=SinglePlayer,Multiplayer,Settings,Exit screen=MainMenu settings=Loaded
+T0.10 PLAYABLE CLIENT READY chunks=25 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+F1.12 CABIN NATIVE PREVIEW PASS captures=12 retirement=clean
+PASS F1.12-R1 native cabin-installed evidence=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/cabin-installed
+> /mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/UltraSimComplete.x86_64 -- --expect-edition=Complete --f1-12-head=b59ebbcbe70225d998869fc37265d6efcccd6ae9 "--f1-12-save-root=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/cabin-primitive/saves" "--content-cache=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/cabin-primitive/content" "--f1-12-cabin-evidence=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/cabin-primitive" "--f1-12-evidence=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/cabin-primitive/evidence.json" --f1-12-cabin-preview --f1-12-art=primitive
+Godot Engine v4.7.1.stable.mono.official.a13da4feb - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 615.71.09 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce RTX 4070 Ti SUPER
+
+ULTRASIM CLIENT READY edition=Complete capabilities=SinglePlayer,Multiplayer,Settings,Exit screen=MainMenu settings=Loaded
+T0.10 PLAYABLE CLIENT READY chunks=25 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+F1.12 CABIN NATIVE PREVIEW PASS captures=8 retirement=clean
+PASS F1.12-R1 native cabin-primitive evidence=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/cabin-primitive
+> /mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/UltraSimComplete.x86_64 -- --expect-edition=Complete --f1-12-head=b59ebbcbe70225d998869fc37265d6efcccd6ae9 "--f1-12-save-root=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/pointer-tiers/saves" "--content-cache=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/pointer-tiers/content" "--f1-12-cabin-evidence=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/pointer-tiers" "--f1-12-evidence=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/pointer-tiers/evidence.json" --f1-12-native-product
+Godot Engine v4.7.1.stable.mono.official.a13da4feb - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 615.71.09 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce RTX 4070 Ti SUPER
+
+ULTRASIM CLIENT READY edition=Complete capabilities=SinglePlayer,Multiplayer,Settings,Exit screen=MainMenu settings=Loaded
+T0.10 PLAYABLE CLIENT READY chunks=25 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+F1.12-R1 NATIVE PRODUCT PASS pointer=4 tiers=3 reveal=exact retirement=clean
+PASS F1.12-R1 native pointer-tiers evidence=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/pointer-tiers
+> /mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/UltraSimComplete.x86_64 -- --expect-edition=Complete --f1-12-head=b59ebbcbe70225d998869fc37265d6efcccd6ae9 "--f1-12-save-root=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/memory/saves" "--content-cache=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/memory/content" "--f1-12-cabin-evidence=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/memory" "--f1-12-evidence=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/memory/evidence.json" --f1-12-memory --f1-12-lifetimes=8 --f1-12-seconds=15
+Godot Engine v4.7.1.stable.mono.official.a13da4feb - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 615.71.09 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce RTX 4070 Ti SUPER
+
+ULTRASIM CLIENT READY edition=Complete capabilities=SinglePlayer,Multiplayer,Settings,Exit screen=MainMenu settings=Loaded
+T0.10 PLAYABLE CLIENT READY chunks=25 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+T0.10 PLAYABLE CLIENT READY chunks=25 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+T0.10 PLAYABLE CLIENT READY chunks=25 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+T0.10 PLAYABLE CLIENT READY chunks=25 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+T0.10 PLAYABLE CLIENT READY chunks=25 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+T0.10 PLAYABLE CLIENT READY chunks=25 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+T0.10 PLAYABLE CLIENT READY chunks=25 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+T0.10 PLAYABLE CLIENT READY chunks=25 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+F1.12-R1 MEMORY PASS lifetimes=8 radius=1 retirement=clean
+PASS F1.12-R1 native memory evidence=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/memory
+> dotnet run --project Server/DirectConnect/UltraSim.Server.DirectConnect.csproj -c Release -p:UltraSimNetworkFlavor=ServerOnly --no-build -- --bind=127.0.0.1:40235 --content-bind=127.0.0.1:38993 --identity-dir=/tmp/ultrasim-repository-verification/2562661/f0.7-mixed-session/deployment-a --ready-file=/tmp/ultrasim-repository-verification/2562661/f0.7-mixed-session/deployment-a-ready.json --client-profile=third-person --maximum-participants=8 --same-address-admission-burst=4 --authority-hz=60 --maximum-input-hz=60 --recommended-input-hz=30 --input-burst=10 --input-burst-window-ms=100 --network-service-delay-ms=1 --telemetry=Off
+UltraSim Direct Connect Concept Demo server ready.
+Endpoint: 127.0.0.1:40235
+Application realm: f2761ca17d7f99d9298f8ec0579829de
+Deployment key SHA-256: 0d:2f:bf:e2:91:76:99:26:32:43:2e:8a:a9:24:da:64:4e:ba:a9:21:ff:5e:25:95:eb:f0:71:ef:4c:60:4e:dd
+Content archive: http://127.0.0.1:38993/content/concept-demo.uspkg (6940770 bytes)
+Structural manifest: 41DB6F68C26AC85DF5ABEB60BEDA3F3F07DD1E76CF30A5164874446D902B6B53 (2 Packs / 144 bytes), independent Pack bytes: 531138/199910
+Actor presentation: 6936636 verified GLB bytes (X/Y Add + X Replace)
+Client profile: third-person revision=1 hash=8b4e7d42d9108f44da05e4bd296ddab824f5be5c785a67cc963522d300c286e5
+Server performance: authority=60Hz network-max-service=2000us input-max=60Hz input-recommended=30Hz burst=10/100ms revision=1 hash=49896380932a652333d5ac31d7d1debb6c4eecec999901e98ea1c13bed30d5b4
+Public ChunkPublication: representation=Message129WhenBeneficial cadence=1/2/4 compression=Lz4BlockV1 threshold=384 save=32
+Unreliable Network frames: cap=2 scope=CrossLane
+This shared endpoint admits up to 8 independent guests into one Concept Demo authority.
+Press Ctrl+C to stop.
+> dotnet run --project Server/DirectConnect/UltraSim.Server.DirectConnect.csproj -c Release -p:UltraSimNetworkFlavor=ServerOnly --no-build -- --bind=127.0.0.1:58441 --content-bind=127.0.0.1:41485 --identity-dir=/tmp/ultrasim-repository-verification/2562661/f0.7-mixed-session/deployment-b --ready-file=/tmp/ultrasim-repository-verification/2562661/f0.7-mixed-session/deployment-b-ready.json --client-profile=third-person --maximum-participants=8 --same-address-admission-burst=4 --authority-hz=60 --maximum-input-hz=60 --recommended-input-hz=30 --input-burst=10 --input-burst-window-ms=100 --network-service-delay-ms=1 --telemetry=Off
+UltraSim Direct Connect Concept Demo server ready.
+Endpoint: 127.0.0.1:58441
+Application realm: 60fc20d8be7bd36bf2dfe97e32dcc614
+Deployment key SHA-256: d5:c6:50:f3:6e:13:ad:db:3c:14:b0:71:04:c4:c8:2e:c2:c1:9f:55:e6:99:2c:8a:6e:0f:16:dd:c0:67:82:21
+Content archive: http://127.0.0.1:41485/content/concept-demo.uspkg (6940770 bytes)
+Structural manifest: 41DB6F68C26AC85DF5ABEB60BEDA3F3F07DD1E76CF30A5164874446D902B6B53 (2 Packs / 144 bytes), independent Pack bytes: 531138/199910
+Actor presentation: 6936636 verified GLB bytes (X/Y Add + X Replace)
+Client profile: third-person revision=1 hash=8b4e7d42d9108f44da05e4bd296ddab824f5be5c785a67cc963522d300c286e5
+Server performance: authority=60Hz network-max-service=2000us input-max=60Hz input-recommended=30Hz burst=10/100ms revision=1 hash=49896380932a652333d5ac31d7d1debb6c4eecec999901e98ea1c13bed30d5b4
+Public ChunkPublication: representation=Message129WhenBeneficial cadence=1/2/4 compression=Lz4BlockV1 threshold=384 save=32
+Unreliable Network frames: cap=2 scope=CrossLane
+This shared endpoint admits up to 8 independent guests into one Concept Demo authority.
+Press Ctrl+C to stop.
+> git rev-parse HEAD
+e76c0dc7d010e1d9c6d149f773feb173a66ef20f
+> /mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/UltraSimComplete.x86_64 -- --f0-7-smoke --f1-12-mixed --f1-12-rendered-mixed --f1-12-head=e76c0dc7d010e1d9c6d149f773feb173a66ef20f "--f1-12-mixed-evidence=/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-verification/2562661/Complete-mixed.json" --expect-edition=Complete --f0-7-a-endpoint=127.0.0.1:40235 --f0-7-a-fingerprint=0d2fbfe29176992632432e8aa924da644ebaa921ff5e2595ebf071ef4c604edd --f0-7-b-endpoint=127.0.0.1:58441 --f0-7-b-fingerprint=d5c650f36e13addb3c14b07104c4c82ec2c19f55e6992c8a6e0f16ddc0678221 --a0-8-cache=/tmp/ultrasim-repository-verification/2562661/f0.7-mixed-session/content-cache --a0-8-trust=/tmp/ultrasim-repository-verification/2562661/f0.7-mixed-session/client/trusted-servers.json --f0-3c-profile-decisions=/tmp/ultrasim-repository-verification/2562661/f0.7-mixed-session/client/server-profiles.json --f1-0-evidence=/tmp/ultrasim-repository-verification/2562661/f0.7-mixed-session/f1.0-client-baseline.json
+Godot Engine v4.7.1.stable.mono.official.a13da4feb - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 615.71.09 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce RTX 4070 Ti SUPER
+
+ULTRASIM CLIENT READY edition=Complete capabilities=SinglePlayer,Multiplayer,Settings,Exit screen=MainMenu settings=Loaded
+T0.10 PLAYABLE CLIENT READY chunks=25 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+F0.7 remote process loop started
+T0.10 PLAYABLE CLIENT READY chunks=25 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+F0.3a DIRECT CONNECT ESTABLISHED endpoint=127.0.0.1:40235 realm=f2761ca17d7f99d9298f8ec0579829de session=16366366536921585523 connection=0:1 fingerprint=0d2fbfe29176992632432e8aa924da644ebaa921ff5e2595ebf071ef4c604edd
+F0.3c CLIENT PROFILE APPLIED realm=f2761ca17d7f99d9298f8ec0579829de revision=1 hash=8b4e7d42d9108f44da05e4bd296ddab824f5be5c785a67cc963522d300c286e5 mode=UseServerDefaults remembered=False grammar=ThirdPersonDirect camera=Perspective/Free/Free distance=8.5 canonicalFov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT
+A0.8 remote progress state=AwaitingContent phase=0 content=AwaitingRequirement/0 world=AwaitingAppliedCatalog/0 playable=AwaitingAdmission/0 semantic=False metadata=0/0/0 actors=0 names=0 overhead=0
+ERROR: F0.7 mixed-session lifecycle failed: System.InvalidOperationException: The F0.7 remote retirement canary did not populate every surface: RemoteConceptDemoLifecycleResidueSnapshot { ApplicationSessionEpoch = 16366366536921585523, ServerGenerationId = 1, OpenUiViews = 1, ActiveActors = 2, VisibleNameplates = 2, VisibleOverheadLabels = 0, RenderedChunks = 9, RetainedActorResources = 1, ChatFocused = True, RetainedActorResourceBytes = 2213268, RendererNodes = 81, RendererResources = 51, PrimitiveFallbackActors = 1, AnimatedActors = 1, EquippedPresentations = 0, ContentCache = ContentCacheSnapshot { BlobCount = 10, BlobBytes = 7469942, ScopeCount = 2, LocalManifestCount = 2, RealmManifestCount = 5, LocalActivationCount = 2, RealmActivationCount = 2, InstalledResourcePackCount = 0, EnabledResourcePackCount = 0, LiveBlobPins = 22, LiveCatalogPins = 5, LiveResourcePackLeases = 0, ResourcePackSelectionValid = True, ResourcePackSelectionRevision = 1, QuotaBytes = 8589934592, HighWaterBytes = 7516192768, Installs = 5, ReusedBlobs = 4, CorruptionsDetected = 0, BlobsRepaired = 0, ManifestsRepaired = 0, BlobsEvicted = 0, BytesEvicted = 0, ManifestCount = 7, ActivationCount = 4 }, Ui = RemoteConceptDemoUiOwnershipSnapshot { HudHostChildren = 5, ServerUiHostChildren = 1, OpenSemanticViews = 1, ChatFocused = True, GameplayInputAllowed = True, HudOwnedBySharedHud = True, GumpsOwnedBySharedManager = True, BannerOwnedByHud = True, TooltipOwnedByContext = True } }.
+   at UltraSim.Client.Godot.RemoteConceptDemoClient.PrepareF07RetirementCanary()
+   at UltraSim.Client.Application.Godot.ClientHost.EnterF07Remote(String endpoint, String fingerprint, String displayName, GameGuestBody body)
+   at UltraSim.Client.Application.Godot.ClientHost.RunF07MixedSessionLifecycleSmoke()
+   at: void UltraSim.Client.Application.Godot.ClientHost+<RunF07MixedSessionLifecycleSmoke>d__76.MoveNext() (:0)
+   C# backtrace (most recent call first):
+       [0] void Godot.GD.PushError(string)
+       [1] void UltraSim.Client.Application.Godot.ClientHost+<RunF07MixedSessionLifecycleSmoke>d__76.MoveNext()
+       [2] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1.ExecutionContextCallback(object)
+       [3] void System.Threading.ExecutionContext.RunInternal(System.Threading.ExecutionContext, System.Threading.ContextCallback, object)
+       [4] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1.MoveNext(System.Threading.Thread)
+       [5] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1.MoveNext()
+       [6] void System.Threading.Tasks.AwaitTaskContinuation.RunCallback(System.Threading.ContextCallback, object, System.Threading.Tasks.Task&)
+       [7] void System.Threading.Tasks.Task.RunContinuations(object)
+       [8] void System.Threading.Tasks.Task.FinishSlow(bool)
+       [9] bool System.Threading.Tasks.Task.TrySetException(object)
+       [10] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetException(System.Exception, System.Threading.Tasks.Task`1[TResult]&)
+       [11] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetException(System.Exception)
+       [12] void UltraSim.Client.Application.Godot.ClientHost+<EnterF07Remote>d__77.MoveNext()
+       [13] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1.ExecutionContextCallback(object)
+       [14] void System.Threading.ExecutionContext.RunInternal(System.Threading.ExecutionContext, System.Threading.ContextCallback, object)
+       [15] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1.MoveNext(System.Threading.Thread)
+       [16] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1.MoveNext()
+       [17] void Godot.SignalAwaiter.SignalCallback(nint, Godot.NativeInterop.godot_variant**, int, Godot.NativeInterop.godot_bool*)
+Unhandled exception. System.InvalidOperationException: '/mnt/data/mega/Godot Projects/UltraSim/.output/f1.12-r1-verification/2562661/UltraSimComplete.x86_64' exited with code 1:
+Godot Engine v4.7.1.stable.mono.official.a13da4feb - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 615.71.09 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce RTX 4070 Ti SUPER
+
+ULTRASIM CLIENT READY edition=Complete capabilities=SinglePlayer,Multiplayer,Settings,Exit screen=MainMenu settings=Loaded
+T0.10 PLAYABLE CLIENT READY chunks=25 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+F0.7 remote process loop started
+T0.10 PLAYABLE CLIENT READY chunks=25 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+F0.3a DIRECT CONNECT ESTABLISHED endpoint=127.0.0.1:40235 realm=f2761ca17d7f99d9298f8ec0579829de session=16366366536921585523 connection=0:1 fingerprint=0d2fbfe29176992632432e8aa924da644ebaa921ff5e2595ebf071ef4c604edd
+F0.3c CLIENT PROFILE APPLIED realm=f2761ca17d7f99d9298f8ec0579829de revision=1 hash=8b4e7d42d9108f44da05e4bd296ddab824f5be5c785a67cc963522d300c286e5 mode=UseServerDefaults remembered=False grammar=ThirdPersonDirect camera=Perspective/Free/Free distance=8.5 canonicalFov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT
+A0.8 remote progress state=AwaitingContent phase=0 content=AwaitingRequirement/0 world=AwaitingAppliedCatalog/0 playable=AwaitingAdmission/0 semantic=False metadata=0/0/0 actors=0 names=0 overhead=0
+ERROR: F0.7 mixed-session lifecycle failed: System.InvalidOperationException: The F0.7 remote retirement canary did not populate every surface: RemoteConceptDemoLifecycleResidueSnapshot { ApplicationSessionEpoch = 16366366536921585523, ServerGenerationId = 1, OpenUiViews = 1, ActiveActors = 2, VisibleNameplates = 2, VisibleOverheadLabels = 0, RenderedChunks = 9, RetainedActorResources = 1, ChatFocused = True, RetainedActorResourceBytes = 2213268, RendererNodes = 81, RendererResources = 51, PrimitiveFallbackActors = 1, AnimatedActors = 1, EquippedPresentations = 0, ContentCache = ContentCacheSnapshot { BlobCount = 10, BlobBytes = 7469942, ScopeCount = 2, LocalManifestCount = 2, RealmManifestCount = 5, LocalActivationCount = 2, RealmActivationCount = 2, InstalledResourcePackCount = 0, EnabledResourcePackCount = 0, LiveBlobPins = 22, LiveCatalogPins = 5, LiveResourcePackLeases = 0, ResourcePackSelectionValid = True, ResourcePackSelectionRevision = 1, QuotaBytes = 8589934592, HighWaterBytes = 7516192768, Installs = 5, ReusedBlobs = 4, CorruptionsDetected = 0, BlobsRepaired = 0, ManifestsRepaired = 0, BlobsEvicted = 0, BytesEvicted = 0, ManifestCount = 7, ActivationCount = 4 }, Ui = RemoteConceptDemoUiOwnershipSnapshot { HudHostChildren = 5, ServerUiHostChildren = 1, OpenSemanticViews = 1, ChatFocused = True, GameplayInputAllowed = True, HudOwnedBySharedHud = True, GumpsOwnedBySharedManager = True, BannerOwnedByHud = True, TooltipOwnedByContext = True } }.
+   at UltraSim.Client.Godot.RemoteConceptDemoClient.PrepareF07RetirementCanary()
+   at UltraSim.Client.Application.Godot.ClientHost.EnterF07Remote(String endpoint, String fingerprint, String displayName, GameGuestBody body)
+   at UltraSim.Client.Application.Godot.ClientHost.RunF07MixedSessionLifecycleSmoke()
+   at: void UltraSim.Client.Application.Godot.ClientHost+<RunF07MixedSessionLifecycleSmoke>d__76.MoveNext() (:0)
+   C# backtrace (most recent call first):
+       [0] void Godot.GD.PushError(string)
+       [1] void UltraSim.Client.Application.Godot.ClientHost+<RunF07MixedSessionLifecycleSmoke>d__76.MoveNext()
+       [2] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1.ExecutionContextCallback(object)
+       [3] void System.Threading.ExecutionContext.RunInternal(System.Threading.ExecutionContext, System.Threading.ContextCallback, object)
+       [4] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1.MoveNext(System.Threading.Thread)
+       [5] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1.MoveNext()
+       [6] void System.Threading.Tasks.AwaitTaskContinuation.RunCallback(System.Threading.ContextCallback, object, System.Threading.Tasks.Task&)
+       [7] void System.Threading.Tasks.Task.RunContinuations(object)
+       [8] void System.Threading.Tasks.Task.FinishSlow(bool)
+       [9] bool System.Threading.Tasks.Task.TrySetException(object)
+       [10] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetException(System.Exception, System.Threading.Tasks.Task`1[TResult]&)
+       [11] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetException(System.Exception)
+       [12] void UltraSim.Client.Application.Godot.ClientHost+<EnterF07Remote>d__77.MoveNext()
+       [13] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1.ExecutionContextCallback(object)
+       [14] void System.Threading.ExecutionContext.RunInternal(System.Threading.ExecutionContext, System.Threading.ContextCallback, object)
+       [15] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1.MoveNext(System.Threading.Thread)
+       [16] void System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1.MoveNext()
+       [17] void Godot.SignalAwaiter.SignalCallback(nint, Godot.NativeInterop.godot_variant**, int, Godot.NativeInterop.godot_bool*)
+
+   at Program.<<Main>$>g__RunCaptured|0_54(String root, String executable, IEnumerable`1 arguments, Int32 timeoutMilliseconds) in /mnt/data/mega/Godot Projects/UltraSim/_Tools/RepositoryVerification/Program.cs:line 5638
+   at Program.<<Main>$>g__VerifyMixedSessionLifecycleNative|0_46(String root, String configuration, String godot, String exportedComplete, Boolean rendered) in /mnt/data/mega/Godot Projects/UltraSim/_Tools/RepositoryVerification/Program.cs:line 5138
+   at Program.<Main>$(String[] args) in /mnt/data/mega/Godot Projects/UltraSim/_Tools/RepositoryVerification/Program.cs:line 60

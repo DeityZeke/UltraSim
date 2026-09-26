@@ -4,8 +4,11 @@
 The earlier PF5 readiness statements below remain historical subsystem conclusions. The active
 [Client Completion plan](CLIENT_COMPLETION_PLAN.md) now governs readiness. Its
 [partial F1.12 evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.md)
-records repaired product mechanics and canonical Release success, with native visual/Cabin and
-representative product resource coverage still open. W8/W9/W10 and PF6 are unstarted.
+records repaired product mechanics and historical canonical Release success. Its linked
+[R1 companion](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1.md)
+adds native Cabin/pointer/tier/nameplate assurance and repeated memory high-water reuse, but preserves
+a new unexpected HTTP shutdown failure from canonical Release as an unresolved release blocker.
+No passing retry is represented as a repair. W8/W9/W10 and PF6 are unstarted.
 
 **Status:** active campaign. PF0 records the exact feature-complete candidate, PF1 closes the
 real headless ClientOnly Network bot plus mixed exported-client correctness gate, and PF2 closes
@@ -2364,7 +2367,9 @@ companion, and the human-readable report.
 
 **Status: WAITING ON F1.12.** PF5-R8's earlier measurement closure was not the later client-dogfood
 readiness gate; see the current disposition above. PF5-R2-R2 repaired the HTTP-host
-shutdown race and retained complete unexpected-worker-failure reporting. PF5-R3 leaves Game,
+shutdown race and retained complete unexpected-worker-failure reporting. That historical closure
+does not dismiss the later F1.12-R1 framework header-finalization shutdown failure recorded above.
+PF5-R3 leaves Game,
 replication, proof, wire, cadence, AOI, compression, aggregation, and participant policy exact;
 its selected physical egress is covered by focused lifecycle, external Hosted, and full export
 verification. PF5-R4 removes redundant recipient preparation/encoding while retaining the same

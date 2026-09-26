@@ -34,6 +34,12 @@ the same reduced aspect; native dimensions are capped at 4096 per side and 8,294
 v1–v4 settings migrate to Simple 1920×1080 without discarding controls or scoped profiles. Display
 settings are never server-recommended or realm-scoped.
 
+F1.12-R1 advances settings to v6 for the device-owned `ExperimentalVegetation` preference.
+It defaults Off; v1–v5 migrate with it Off, and v6 requires the field. Advanced Settings exposes
+the prototype with an explicit next-world-entry label. The debug `--f1-11-vegetation` flag
+force-enables it; otherwise Local and Remote capture the persisted preference at entry. Server
+profiles cannot set it. Radius changes do not change that session's frozen vegetation choice.
+
 `GameplayFrameLayout` is renderer-neutral: it supports full, max-fit and centered custom frames,
 half-open pointer admission and application→frame→output mapping. F1.8's `ClientCameraRig` and
 `ClientCanonicalViewProjection` still own finite camera meaning and the 16:9 canonical envelope.
