@@ -615,13 +615,18 @@ public abstract partial class ClientRoot : Control
         var vegetation = new CheckBox
         {
             Name = "SettingsExperimentalVegetation",
-            Text = "Experimental Vegetation (prototype; applies next world entry)",
+            Text = "Experimental Vegetation / grass (next world entry)",
             ButtonPressed = _settings.ExperimentalVegetation,
             Visible = _settings.Display.SettingsMode == ClientDisplaySettingsMode.Advanced,
         };
         column.AddChild(vegetation);
         var advanced = column.FindChild("DisplayShowAdvanced", true, false) as CheckBox;
-        if (advanced is not null) advanced.Toggled += enabled => vegetation.Visible = enabled;
+        if (advanced is not null)
+        {
+            // Keep the existing option discoverable instead of below all Advanced dimensions.
+            column.MoveChild(vegetation, advanced.GetIndex() + 1);
+            advanced.Toggled += enabled => vegetation.Visible = enabled;
+        }
 
         HSlider uiScale = Slider(0.5, 3, 0.05, _resolved.UiScale);
         uiScale.Name = "SettingsUiScale";

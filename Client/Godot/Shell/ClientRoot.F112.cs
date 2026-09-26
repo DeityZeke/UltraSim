@@ -78,6 +78,12 @@ public abstract partial class ClientRoot
         {
             await Open();
             Control<CheckBox>("DisplayShowAdvanced").ButtonPressed = true;
+            await Frame();
+            CheckBox vegetation = Control<CheckBox>("SettingsExperimentalVegetation");
+            CheckBox advanced = Control<CheckBox>("DisplayShowAdvanced");
+            if (!vegetation.IsVisibleInTree() || vegetation.GetParent() != advanced.GetParent() ||
+                vegetation.GetIndex() != advanced.GetIndex() + 1 || !vegetation.Text.Contains("grass"))
+                throw new InvalidOperationException("Advanced grass preference is not discoverable beside Show Advanced.");
             Control<SpinBox>("DisplayApplicationWidth").Value = 1920;
             Control<SpinBox>("DisplayApplicationHeight").Value = 1080;
             Control<OptionButton>("DisplayFrameMode").Select((int)ClientGameplayFrameMode.Custom - 1);
@@ -97,6 +103,8 @@ public abstract partial class ClientRoot
 
             await Open();
             Control<CheckBox>("DisplayShowAdvanced").ButtonPressed = false;
+            if (Control<CheckBox>("SettingsExperimentalVegetation").Visible)
+                throw new InvalidOperationException("Experimental grass preference leaked into Simple Settings.");
             OptionButton aspect = Control<OptionButton>("DisplayAspect");
             aspect.Select((int)ClientDisplayAspectPreset.FourThree - 1);
             aspect.EmitSignal(OptionButton.SignalName.ItemSelected, aspect.Selected);
