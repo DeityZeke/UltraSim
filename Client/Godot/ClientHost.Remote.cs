@@ -1114,7 +1114,10 @@ public partial class ClientHost
         string CatalogFingerprint,
         RemoteConceptDemoClientSnapshot Snapshot,
         GodotClientSessionBoundarySnapshot ActiveBoundary,
-        RemoteConceptDemoLifecycleResidueSnapshot Residue);
+        RemoteConceptDemoLifecycleResidueSnapshot Residue)
+    {
+        public object? RenderedControl { get; init; }
+    }
 
     private async void RunF07MixedSessionLifecycleSmoke()
     {
@@ -1314,6 +1317,21 @@ public partial class ClientHost
             ClientDirectConnectSnapshot connected = _remoteSession.GetSnapshot();
             RemoteClientProfileSnapshot profile = _remoteProfile.GetSnapshot();
             snapshot = playable.CaptureF10BaselineSnapshot();
+            object? renderedControl = null;
+            if (OS.GetCmdlineUserArgs().Contains("--f1-12-rendered-mixed"))
+            {
+                if (DisplayServer.GetName() == "headless") throw new InvalidOperationException("Rendered mixed requires native display.");
+                var samples = new List<object>(4);
+                for (int sample = 0; sample < 4; sample++)
+                {
+                    await ToSignal(GetTree().CreateTimer(1), SceneTreeTimer.SignalName.Timeout);
+                    samples.Add(new { sample, Memory = GodotDiagnosticProcessMemory.Capture(),
+                        Presentation = playable.GetSnapshot(), Workspace = UiComposition.GetSnapshot() });
+                }
+                string directory = Path.GetDirectoryName(ReadRequiredF07Argument("--f1-12-mixed-evidence="))!;
+                string imagePath = Path.Combine(directory, $"remote-{displayName.Replace(' ', '-')}.png");
+                renderedControl = new { samples, Image = CaptureF112Output(imagePath, _ => { }), ImagePath = imagePath };
+            }
             RemoteConceptDemoLifecycleResidueSnapshot residue =
                 playable.PrepareF07RetirementCanary();
             return new F07RemoteLifetime(
@@ -1326,7 +1344,7 @@ public partial class ClientHost
                 snapshot.Session.Content.ResolvedCatalogFingerprint.ToString(),
                 snapshot,
                 CaptureSessionBoundary(),
-                residue);
+                residue) { RenderedControl = renderedControl };
         }
         throw new TimeoutException(
             $"The F0.7 remote session '{displayName}' did not converge in 90 seconds.");

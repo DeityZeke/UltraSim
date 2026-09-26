@@ -9,6 +9,30 @@ namespace UltraSim.Client.Godot;
 
 public partial class LocalCabinClient
 {
+    public object SetF112CabinView(string view)
+    {
+        if (_camera is null || _cache is null) throw new InvalidOperationException("Cabin is not ready.");
+        (Vector3 from, Vector3 target) = view switch
+        {
+            "Exterior" => (new Vector3(8, 6, 1), new Vector3(16, 1, 12)),
+            "Doorway" => (new Vector3(16, 1.6f, 6), new Vector3(16, 1.4f, 12)),
+            "Interior" => (new Vector3(16, 1.6f, 10), new Vector3(16, 1.4f, 14)),
+            "Shelf" => (new Vector3(16.5f, 1.6f, 12.5f), new Vector3(18.5f, 1.2f, 14)),
+            _ => throw new ArgumentOutOfRangeException(nameof(view)),
+        };
+        Vector3 origin = new(_player.GlobalXMillimeters * .001f, _player.YMillimeters * .001f,
+            _player.GlobalZMillimeters * .001f);
+        _camera.Position = from - origin;
+        _camera.LookAt(target - origin);
+        LocalPlayableAuthorityView authority = ReadF112Authority();
+        return new { ApplicationEpoch = _localSession!.ApplicationSessionEpoch,
+            ControlEpoch = _localSession.ControlSession.Value, authority.GenerationId,
+            Manifest = authority.PreparedComposition?.Manifest.Fingerprint.ToString(),
+            Catalog = _resolvedContent!.Catalog.Fingerprint.ToString(),
+            Presentation = GetPresentationSnapshot().PresentationGeneration,
+            SemanticHash = _cache.GetSnapshot().WorldSemanticHash,
+            Camera = from.ToString(), Target = target.ToString() };
+    }
     public GodotPresentationEnvironmentSnapshot ApplyF112EnvironmentPreview(
         GodotDiagnosticTimeOfDay time, GodotDiagnosticAtmosphere atmosphere)
     {

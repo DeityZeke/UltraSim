@@ -22,6 +22,12 @@ public partial class T010PlayableWorldAcceptance : Node3D
     {
         try
         {
+            var memoryFields = GodotDiagnosticProcessMemory.ParseFields(
+                ["VmRSS:\t450 kB", "RssFile: 30 kB", "Bogus: 999 kB", "Swap: bad kB"],
+                ["VmRSS", "RssFile", "Swap", "Absent"]);
+            Expect(memoryFields.Count == 4 && memoryFields["VmRSS"] == 450 * 1024L &&
+                memoryFields["RssFile"] == 30 * 1024L && memoryFields["Swap"] is null &&
+                memoryFields["Absent"] is null, "Diagnostic Linux memory units/availability parsing changed.");
             RunAcceptance();
             RunJoinedInputAuthorityAcceptance();
             RunRemotePublicActorAcceptance();

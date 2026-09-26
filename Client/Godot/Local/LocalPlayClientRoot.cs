@@ -36,6 +36,21 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
     {
         base._Ready();
         string[] arguments = OS.GetCmdlineUserArgs();
+        if (arguments.Contains("--f1-12-native-product", StringComparer.Ordinal))
+        {
+            RunF112NativeProduct();
+            return;
+        }
+        if (arguments.Contains("--f1-12-memory", StringComparer.Ordinal))
+        {
+            RunF112MemoryControl();
+            return;
+        }
+        if (arguments.Contains("--f1-12-render-probe", StringComparer.Ordinal))
+        {
+            RunF112RenderProbe();
+            return;
+        }
         if (arguments.Contains("--f1-12-cabin-preview", StringComparer.Ordinal))
         {
             RunF112CabinPreview();

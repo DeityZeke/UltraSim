@@ -10,56 +10,220 @@ namespace UltraSim.Client.Godot;
 
 public abstract partial class LocalPlayClientRoot
 {
+    private async void RunF112NativeProduct()
+    {
+        var baseline = CaptureSessionBoundary();
+        string directory = ReadLocalArgument("--f1-12-cabin-evidence=") ??
+            throw new InvalidOperationException("Native product evidence directory required.");
+        System.IO.Directory.CreateDirectory(directory);
+        try
+        {
+            if (DisplayServer.GetName() == "headless") throw new InvalidOperationException("Actual native rendering required.");
+            await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
+            StartLocalCabin(CabinContentVariant.Default, CabinHumanBody.XBot, useConceptDemoWorld: true);
+            await AwaitF112Boundary(GetTree(), SceneTree.SignalName.PhysicsFrame);
+            object pointer = await RunF112PointerSettingsAcceptance(_cabin!.RunF112PointerControl);
+            await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
+            await AwaitF112Boundary(GetTree(), SceneTree.SignalName.PhysicsFrame);
+            var tiers = new List<object>(3);
+            foreach (bool far in new[] { false, true, false })
+            {
+                object tier = _cabin.RunF112TierControl(far);
+                object targets = await _cabin.RunF112PointerControl();
+                var visible = _cabin.SetF112Reveal(true);
+                object image = CaptureF112Output(System.IO.Path.Combine(directory, $"tier-{tiers.Count}.png"), _ => { });
+                var hidden = _cabin.SetF112Reveal(false);
+                tiers.Add(new { tier, targets, image, visible, hidden });
+            }
+            _cabin.SetPhysicsProcess(true);
+            _cabin.PrepareF112CentralControl();
+            _cabin.RunF112ItemAcceptance(); // maintained equipped/action feature-required Detailed acceptance
+            var equipment = _cabin.GetPresentationSnapshot();
+            RetireCurrentSession(); ReturnToMainMenu("Native product control retired.");
+            await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
+            RequireCleanSessionBoundary(in baseline, "F1.12-R1 native pointer/tier");
+            File.WriteAllText(System.IO.Path.Combine(directory, "evidence.json"), JsonSerializer.Serialize(new
+            { Schema = "client-f1.12-r1-native-product/v1", SourceHead = ReadLocalArgument("--f1-12-head="),
+                Display = DisplayServer.GetName(), pointer, tiers, equipment, FinalBoundary = CaptureSessionBoundary() },
+                new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter() } }));
+            GD.Print("F1.12-R1 NATIVE PRODUCT PASS pointer=4 tiers=3 reveal=exact retirement=clean");
+            GetTree().Quit();
+        }
+        catch (Exception error) { GD.PushError(error.ToString()); RetireCurrentSession(); GetTree().Quit(1); }
+    }
+    // Cold, explicit native assurance. Uses the shipping GameplayOutput, never a screenshot viewport.
+    private async void RunF112RenderProbe()
+    {
+        string directory = ReadLocalArgument("--f1-12-cabin-evidence=") ?? "/tmp/ultrasim-f112-render-probe";
+        System.IO.Directory.CreateDirectory(directory);
+        void Stage(string value) => System.IO.File.AppendAllText(System.IO.Path.Combine(directory, "stages.log"),
+            $"{DateTime.UtcNow:O} {value}\n");
+        int pre = 0, post = 0;
+        void Pre() => pre++;
+        void Post() => post++;
+        RenderingServer.FramePreDraw += Pre;
+        RenderingServer.FramePostDraw += Post;
+        try
+        {
+            Stage($"request display={DisplayServer.GetName()} loop={RenderingServer.IsRenderLoopEnabled()} visible={GetWindow().Visible}");
+            if (DisplayServer.GetName() == "headless") throw new InvalidOperationException("Native display required.");
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            Stage("process-frame");
+            var scene = new Node3D { Name = "F112KnownScene" };
+            WorldRoot.AddChild(scene);
+            var camera = new Camera3D { Position = new Vector3(0, 0, 4), Current = true };
+            scene.AddChild(camera);
+            var mesh = new MeshInstance3D { Mesh = new BoxMesh(), MaterialOverride = new StandardMaterial3D
+            { ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded, AlbedoColor = new Color(1, .2f, .05f) } };
+            scene.AddChild(mesh);
+            await ToSignal(GetTree(), SceneTree.SignalName.PhysicsFrame);
+            Stage($"physics-frame pre={pre} post={post} viewport={UiComposition.GameplayViewport.Size}");
+            // Documented synchronous native rendering boundary, not a timing delay.
+            Stage("force-draw-start");
+            RenderingServer.ForceDraw();
+            Stage($"force-draw-end pre={pre} post={post}");
+            using Image image = UiComposition.GameplayViewport.GetTexture().GetImage();
+            Stage($"readback empty={image.IsEmpty()} size={image.GetSize()}");
+            if (image.IsEmpty() || image.SavePng(System.IO.Path.Combine(directory, "probe.png")) != Error.Ok)
+                throw new InvalidOperationException("Native readback failed.");
+            scene.Free();
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            Stage("retired");
+            GetTree().Quit(0);
+        }
+        catch (Exception exception) { Stage(exception.ToString()); GetTree().Quit(1); }
+        finally { RenderingServer.FramePreDraw -= Pre; RenderingServer.FramePostDraw -= Post; }
+    }
+
     private async void RunF112CabinPreview()
     {
         GodotClientSessionBoundarySnapshot baseline = CaptureSessionBoundary();
+        string directory = ReadLocalArgument("--f1-12-cabin-evidence=") ??
+            throw new InvalidOperationException("Cabin preview needs an isolated output directory.");
+        System.IO.Directory.CreateDirectory(directory);
+        void Stage(string text) => System.IO.File.AppendAllText(System.IO.Path.Combine(directory, "stages.log"),
+            $"{DateTime.UtcNow:O} {text}\n");
         try
         {
+            Stage("request");
             if (DisplayServer.GetName() == "headless")
                 throw new InvalidOperationException("Cabin image evidence requires a real native renderer.");
-            string directory = ReadLocalArgument("--f1-12-cabin-evidence=") ??
-                throw new InvalidOperationException("Cabin preview needs an isolated output directory.");
-            System.IO.Directory.CreateDirectory(directory);
+            bool passiveReadyControl = OS.GetCmdlineUserArgs().Contains("--f1-12-passive-ready-control");
+            if (!passiveReadyControl)
+            {
+                await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
+                Stage("initial-process-frame");
+            }
             StartLocalCabin(CabinContentVariant.Default, CabinHumanBody.XBot, useConceptDemoWorld: false);
+            Stage("session-entered");
             LocalCabinClient cabin = _cabin!;
             cabin.RunF02Acceptance();
-            LocalCabinPresentationSnapshot before = cabin.GetPresentationSnapshot();
-            var captures = new List<object>(12);
-            foreach (GodotDiagnosticTimeOfDay time in Enum.GetValues<GodotDiagnosticTimeOfDay>())
-            foreach (GodotDiagnosticAtmosphere atmosphere in Enum.GetValues<GodotDiagnosticAtmosphere>())
+            Stage("acceptance-complete");
+            if (passiveReadyControl)
             {
-                GodotPresentationEnvironmentSnapshot environment = cabin.ApplyF112EnvironmentPreview(time, atmosphere);
-                for (int frame = 0; frame < 3; frame++)
-                    await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
-                string name = $"{time}-{atmosphere}.png";
-                using Image image = UiComposition.GameplayViewport.GetTexture().GetImage();
-                if (image.IsEmpty() || image.SavePng(System.IO.Path.Combine(directory, name)) != Error.Ok)
-                    throw new InvalidOperationException("The native Gameplay Frame image did not save.");
-                captures.Add(new { time, atmosphere, name, Width = image.GetWidth(), Height = image.GetHeight(), environment });
+                Stage("passive-ready-post-draw-wait");
+                await AwaitF112Boundary(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+                Stage("passive-ready-post-draw-complete");
             }
+            cabin.SetPhysicsProcess(false); // retain this exact semantic projection across lighting/camera previews
+            await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
+            Stage("process-frame");
+            await AwaitF112Boundary(GetTree(), SceneTree.SignalName.PhysicsFrame);
+            Stage("physics-frame");
+            LocalCabinPresentationSnapshot before = cabin.GetPresentationSnapshot();
+            var captures = new List<object>(10);
+            foreach (string view in new[] { "Exterior", "Doorway", "Interior", "Shelf" })
+                await Capture(view, GodotDiagnosticTimeOfDay.Noon, GodotDiagnosticAtmosphere.Temperate);
+            foreach (GodotDiagnosticTimeOfDay time in new[]
+                { GodotDiagnosticTimeOfDay.Dawn, GodotDiagnosticTimeOfDay.Dusk, GodotDiagnosticTimeOfDay.Night })
+                await Capture("Exterior", time, GodotDiagnosticAtmosphere.Temperate);
+            await Capture("Exterior", GodotDiagnosticTimeOfDay.Noon, GodotDiagnosticAtmosphere.Cold);
             LocalCabinPresentationSnapshot after = cabin.GetPresentationSnapshot();
             if (before.ApplicationSessionEpoch != after.ApplicationSessionEpoch ||
                 before.ControlSessionEpoch != after.ControlSessionEpoch)
                 throw new InvalidOperationException("Environment preview replaced the authoritative session.");
             RetireCurrentSession();
             ReturnToMainMenu("F1.12 Cabin preview retired.");
-            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
             RequireCleanSessionBoundary(in baseline, "F1.12 Cabin preview");
+            Stage("retirement-clean");
             System.IO.File.WriteAllText(System.IO.Path.Combine(directory, "evidence.json"),
-                JsonSerializer.Serialize(new { Schema = "client-f1.12-cabin-preview/v1",
+                JsonSerializer.Serialize(new { Schema = "client-f1.12-cabin-preview/v2",
                     SourceHead = ReadLocalArgument("--f1-12-head="),
                     Art = ReadLocalArgument("--f1-12-art=") ?? "installed", DisplayBackend = DisplayServer.GetName(),
-                    before, after, captures, FinalBoundary = CaptureSessionBoundary(), HumanFeelRated = false },
+                    before, after, captures, MissingAuthoredGeometry = new[] { "Secondary room", "Interior doorway", "Window" },
+                    FinalBoundary = CaptureSessionBoundary(), HumanFeelRated = false },
                     new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter() } }));
-            GD.Print("F1.12 CABIN NATIVE PREVIEW PASS captures=12 retirement=clean");
+            GD.Print("F1.12 CABIN NATIVE PREVIEW PASS captures=8 retirement=clean");
             GetTree().Quit(0);
+
+            async Task Capture(string view, GodotDiagnosticTimeOfDay time, GodotDiagnosticAtmosphere atmosphere)
+            {
+                GodotPresentationEnvironmentSnapshot environment = cabin.ApplyF112EnvironmentPreview(time, atmosphere);
+                object truth = cabin.SetF112CabinView(view);
+                Stage($"environment-applied view={view} time={time} atmosphere={atmosphere}");
+                await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
+                string name = $"{view}-{time}-{atmosphere}.png";
+                object image = CaptureF112Output(System.IO.Path.Combine(directory, name), Stage);
+                captures.Add(new { view, time, atmosphere, name, image, truth,
+                    Environment = new { SunRotation = environment.SunRotationDegrees.ToString(), environment.SunEnergy,
+                        environment.Shadows, Background = environment.BackgroundColor.ToHtml(),
+                        Ambient = environment.AmbientColor.ToHtml(), environment.AmbientEnergy } });
+            }
         }
         catch (Exception exception)
         {
+            Stage(exception.ToString());
             GD.PushError($"F1.12 Cabin preview failed: {exception}");
             RetireCurrentSession();
             GetTree().Quit(1);
         }
+    }
+
+    private async Task AwaitF112Boundary(GodotObject source, StringName signal)
+    {
+        var ready = new TaskCompletionSource();
+        Callable callback = Callable.From(() => ready.TrySetResult());
+        source.Connect(signal, callback);
+        try
+        {
+            if (await Task.WhenAny(ready.Task, Task.Delay(TimeSpan.FromSeconds(8))) != ready.Task)
+                throw new TimeoutException($"F1.12 native boundary {signal} did not complete within 8 seconds.");
+            await ready.Task;
+        }
+        finally { source.Disconnect(signal, callback); }
+    }
+
+    protected object CaptureF112Output(string path, Action<string> stage)
+    {
+        int pre = 0, post = 0;
+        void Pre() { pre++; stage("native-pre-draw"); }
+        void Post() { post++; stage("native-post-draw"); }
+        RenderingServer.FramePreDraw += Pre;
+        RenderingServer.FramePostDraw += Post;
+        try
+        {
+            stage("render-request");
+            RenderingServer.ForceDraw(); // synchronous native boundary, includes the real GameplayOutput
+            if (pre == 0 || post == 0) throw new InvalidOperationException("Native draw boundary was not observed.");
+            ViewportTexture texture = UiComposition.GameplayViewport.GetTexture();
+            stage($"texture-valid={texture.GetRid().IsValid}");
+            using Image image = texture.GetImage();
+            stage("readback-complete");
+            if (image.IsEmpty()) throw new InvalidOperationException("Native GameplayOutput is empty.");
+            byte[] pixels = image.GetData();
+            byte minimum = 255, maximum = 0;
+            // Alpha is excluded: an opaque black texture is not acceptable rendered evidence.
+            image.Convert(Image.Format.Rgb8);
+            foreach (byte value in image.GetData()) { minimum = Math.Min(minimum, value); maximum = Math.Max(maximum, value); }
+            if (maximum - minimum < 8) throw new InvalidOperationException("Native image has no meaningful color variation.");
+            if (image.SavePng(path) != Error.Ok) throw new InvalidOperationException("Native PNG save failed.");
+            stage("png-saved");
+            return new { Width = image.GetWidth(), Height = image.GetHeight(), minimum, maximum, pre, post,
+                PixelHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(pixels)),
+                PngHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.IO.File.ReadAllBytes(path))) };
+        }
+        finally { RenderingServer.FramePreDraw -= Pre; RenderingServer.FramePostDraw -= Post; }
     }
 
     private async void RunF112ProductDogfood()

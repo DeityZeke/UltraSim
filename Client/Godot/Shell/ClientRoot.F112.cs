@@ -5,6 +5,68 @@ namespace UltraSim.Client.Godot;
 
 public abstract partial class ClientRoot
 {
+    /// <summary>Actual product Settings + Save, with caller-owned native ray nomination after each realization.</summary>
+    protected async Task<object> RunF112PointerSettingsAcceptance(Func<Task<object>> pointer)
+    {
+        ClientSettingsDocument original = _settings;
+        ResolvedClientDisplayConfiguration originalDisplay = _display;
+        var rows = new List<object>(4);
+        try
+        {
+            for (int index = 0; index < 4; index++)
+            {
+                _shell.OpenSettings(); RenderCurrentSurface(); await Frame();
+                C<OptionButton>("DisplayWindowMode").Select((int)ClientDisplayMode.Windowed - 1);
+                C<CheckBox>("DisplayShowAdvanced").ButtonPressed = index >= 2;
+                OptionButton aspect = C<OptionButton>("DisplayAspect");
+                aspect.Select((int)(index == 1 ? ClientDisplayAspectPreset.FourThree :
+                    ClientDisplayAspectPreset.SixteenNine) - 1);
+                aspect.EmitSignal(OptionButton.SignalName.ItemSelected, aspect.Selected);
+                OptionButton resolution = C<OptionButton>("DisplayResolution");
+                IReadOnlyList<ClientPixelSize> presets = ClientDisplayPresetCatalog.ForAspect(
+                    index == 1 ? ClientDisplayAspectPreset.FourThree : ClientDisplayAspectPreset.SixteenNine);
+                int selected = 0;
+                for (int item = 0; item < presets.Count; item++)
+                    if (presets[item] == ClientPixelSize.Create(index == 1 ? 1600 : 1920, index == 1 ? 1200 : 1080)) selected = item;
+                resolution.Select(selected);
+                C<SpinBox>("DisplayApplicationWidth").Value = 1920;
+                C<SpinBox>("DisplayApplicationHeight").Value = 1080;
+                C<OptionButton>("DisplayFrameMode").Select((int)ClientGameplayFrameMode.Custom - 1);
+                C<SpinBox>("DisplayFrameWidth").Value = index == 2 ? 1280 : 1920;
+                C<SpinBox>("DisplayFrameHeight").Value = index == 2 ? 720 : 1080;
+                C<SpinBox>("DisplayOutputWidth").Value = index == 2 ? 960 : 1920;
+                C<SpinBox>("DisplayOutputHeight").Value = index == 2 ? 540 : 1080;
+                C<SpinBox>("DisplayInternalScale").Value = index == 3 ? 50 : 100;
+                C<Button>("SettingsSave").EmitSignal(BaseButton.SignalName.Pressed);
+                await Frame(); await Frame();
+                if (_shell.Snapshot().Screen != ClientShellScreen.InSessionOptions)
+                    throw new InvalidOperationException("Pointer matrix failed actual Settings Save.");
+                _shell.ResumeSession(); RenderCurrentSurface(); await Frame();
+                rows.Add(new { index, Display = _display, Workspace = UiComposition.GetSnapshot(), Results = await pointer() });
+            }
+            // Explicit device preference is user-owned even when a remote profile is active.
+            _shell.OpenSettings(); RenderCurrentSurface(); await Frame();
+            C<CheckBox>("DisplayShowAdvanced").ButtonPressed = true;
+            C<CheckBox>("SettingsExperimentalVegetation").ButtonPressed = true;
+            C<Button>("SettingsSave").EmitSignal(BaseButton.SignalName.Pressed);
+            await Frame(); await Frame();
+            if (!_settings.ExperimentalVegetation || !_settingsStore!.Load().Document.ExperimentalVegetation)
+                throw new InvalidOperationException("Vegetation Settings did not persist through Save.");
+            _shell.ResumeSession(); RenderCurrentSurface();
+            return new { rows, VegetationSaved = true, AppliesNextEntry = true };
+        }
+        finally
+        {
+            _settingsStore!.Save(original); _settings = original;
+            ApplyDisplay(originalDisplay); ResolveEffectiveSettings();
+            if (_shell.Snapshot().Screen == ClientShellScreen.Settings) _shell.CloseSettings();
+            if (_shell.Snapshot().Screen == ClientShellScreen.InSessionOptions) _shell.ResumeSession();
+            RenderCurrentSurface();
+        }
+        async Task Frame() => await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        T C<T>(string name) where T : Node => FindChild(name, true, false) as T ??
+            throw new InvalidOperationException($"Missing actual product control {name}.");
+    }
     /// <summary>Exercises real Settings controls and their Save callbacks, not just the resolver.</summary>
     protected async Task RunF112SettingsAcceptance()
     {
