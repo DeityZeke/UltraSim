@@ -23,24 +23,25 @@ public partial class LocalCabinClient
             throw new InvalidOperationException("Cabin capture presentation mode was not realized.");
     }
 
-    public void SetF112PrimitivePreview(bool primitive)
+    public void UseF112PrimitivePreview()
     {
         if (_presentationGeneration is null || _assetResolver is null || _actorVisuals is null ||
             _actorPresenter is null || _derivedResources is null)
             throw new InvalidOperationException("Same-session preview requires installed presentation resources.");
-        PresentationGeneration candidate = PresentationGeneration.CreateWithResources(
-            primitive ? null : OpenUserResourcePacks(), null,
-            primitive ? null : OpenLocalPresentationCatalog(), null,
-            primitive ? null : OpenCabinResourceCatalog());
+        PresentationGeneration candidate = PresentationGeneration.CreateWithResources(null, null, null, null, null);
         var previous = _presentationGeneration;
-        _assetResolver.Refresh(candidate, _derivedResources);
+        var previousResolver = _assetResolver;
+        // The exact Cabin material resolver intentionally rejects a catalog without its wall.
+        // Primitive realization uses the existing renderer fallback, not an empty exact resolver.
+        _assetResolver = null;
         _presentationGeneration = candidate;
         _actorVisuals.UpdateSource(candidate);
         _ = _actorPresenter.RefreshResolvedVisuals();
         _actorVisuals.ReleaseRetiredResources();
-        previous.Dispose();
-        _primitiveOnlyPresentation = primitive;
+        _primitiveOnlyPresentation = true;
         RebuildClientProjection(ReadF112Authority(), preserveSemanticCache: true);
+        previousResolver.Dispose();
+        previous.Dispose();
     }
     public object SetF112CabinView(string view)
     {

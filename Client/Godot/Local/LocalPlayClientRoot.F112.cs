@@ -141,7 +141,7 @@ public abstract partial class LocalPlayClientRoot
             await Capture("Exterior", GodotDiagnosticTimeOfDay.Noon, GodotDiagnosticAtmosphere.Cold);
             if (art == "installed")
             {
-                cabin.SetF112PrimitivePreview(true);
+                cabin.UseF112PrimitivePreview();
                 art = "primitive-same-session";
                 foreach (string view in new[] { "Exterior", "Doorway", "Interior", "Shelf" })
                     await Capture(view, GodotDiagnosticTimeOfDay.Noon, GodotDiagnosticAtmosphere.Temperate);
