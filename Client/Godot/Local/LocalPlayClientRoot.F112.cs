@@ -119,10 +119,12 @@ public abstract partial class LocalPlayClientRoot
             StartLocalCabin(CabinContentVariant.Default, CabinHumanBody.XBot, useConceptDemoWorld: false);
             Stage("session-entered");
             LocalCabinClient cabin = _cabin!;
-            cabin.PrepareF112CabinCapture();
+            if (passiveReadyControl) cabin.RunF02Acceptance(); // reproduce the original Ready-time ordering
+            else cabin.PrepareF112CabinCapture();
             Stage("acceptance-complete");
             if (passiveReadyControl)
             {
+                _ = cabin.ApplyF112EnvironmentPreview(GodotDiagnosticTimeOfDay.Dawn, GodotDiagnosticAtmosphere.Temperate);
                 for (int draw = 0; draw < 3; draw++)
                 {
                     Stage($"passive-ready-post-draw-wait-{draw}");
