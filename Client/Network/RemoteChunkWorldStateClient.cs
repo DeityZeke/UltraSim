@@ -31,6 +31,9 @@ public readonly record struct RemoteChunkWorldStateClientSnapshot(
     public ulong InterestRetirementsProcessed { get; init; }
     public ulong MissingResidentDeliveryAttempts { get; init; }
     public ulong MissingResidentPreparedChunkAttempts { get; init; }
+    /// <summary>Subset of missing-resident attempts rejected at segmented Snapshot Begin,
+    /// accounted in RejectedSnapshots rather than RejectedDeliveries.</summary>
+    public ulong MissingResidentSnapshotBeginAttempts { get; init; }
 }
 
 /// <summary>
@@ -71,6 +74,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
     private ulong _rejectedDeliveries;
     private ulong _missingResidentDeliveryAttempts;
     private ulong _missingResidentPreparedChunkAttempts;
+    private ulong _missingResidentSnapshotBeginAttempts;
     private ulong _capacityFailures;
     private ulong _contradictoryDeliveries;
     private ulong _malformedDeliveries;
@@ -350,6 +354,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
             InterestRetirementsProcessed = _interestRetirementsProcessed,
             MissingResidentDeliveryAttempts = _missingResidentDeliveryAttempts,
             MissingResidentPreparedChunkAttempts = _missingResidentPreparedChunkAttempts,
+            MissingResidentSnapshotBeginAttempts = _missingResidentSnapshotBeginAttempts,
         };
     }
 
@@ -460,6 +465,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         InterestRetirementsProcessed = _interestRetirementsProcessed,
         MissingResidentDeliveryAttempts = _missingResidentDeliveryAttempts,
         MissingResidentPreparedChunkAttempts = _missingResidentPreparedChunkAttempts,
+        MissingResidentSnapshotBeginAttempts = _missingResidentSnapshotBeginAttempts,
     };
 
     private static ulong Difference(ulong before, ulong after) =>
@@ -1011,6 +1017,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         {
             QueueSnapshotProof(in begin, RemoteChunkPublicationApplyStatus.Rejected);
             SaturatingIncrement(ref _rejectedSnapshots);
+            SaturatingIncrement(ref _missingResidentSnapshotBeginAttempts);
             return;
         }
         DeliveryLineageDecision lineage = CompareLineage(

@@ -3562,7 +3562,9 @@ static void VerifyContentlessOnlineNative(
                 !TryReadNamedCount(passLine, "rejectedPublic=", out ulong rejected) ||
                 !TryReadNamedCount(passLine, "missingResident=", out ulong missing) ||
                 !TryReadNamedCount(passLine, "missingPrepared=", out ulong prepared) ||
-                rejected > 4 || rejected != missing || rejected != prepared ||
+                !TryReadNamedCount(passLine, "missingSnapshotBegin=", out ulong missingSnapshotBegin) ||
+                rejected + missingSnapshotBegin > 4 || rejected + missingSnapshotBegin != missing || missing != prepared ||
+                !passLine.Contains("contradictory=0 malformed=0 capacity=0", StringComparison.Ordinal) ||
                 !ContainsPositiveNamedCount(journey, "rendererChunks=") ||
                 !journey.Contains(" actors=1 publicActor=", StringComparison.Ordinal))
                 throw new InvalidOperationException(

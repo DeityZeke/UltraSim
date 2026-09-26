@@ -1262,6 +1262,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 $"rejectedAfterReturn={_w7RejectedAfterReturn} " +
                 $"missingResident={snapshot.World.MissingResidentDeliveryAttempts} " +
                 $"missingPrepared={snapshot.World.MissingResidentPreparedChunkAttempts} " +
+                $"missingSnapshotBegin={snapshot.World.MissingResidentSnapshotBeginAttempts} " +
+                $"contradictory={snapshot.World.ContradictoryDeliveries} malformed={snapshot.World.MalformedDeliveries} capacity={snapshot.World.CapacityFailures} " +
                 $"rejectedPublic={snapshot.World.RejectedDeliveries}");
         }
     }

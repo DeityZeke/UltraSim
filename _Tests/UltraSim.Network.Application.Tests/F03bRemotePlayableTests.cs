@@ -31,7 +31,7 @@ internal static class F03bRemotePlayableTests
     internal const int A06TestCount = 2;
     internal const int A07TestCount = 2;
     internal const int F12TestCount = 1;
-    internal const int W7TestCount = 15;
+    internal const int W7TestCount = 16;
     internal const int F15TestCount = 1;
     internal const int F04TestCount = 2;
     internal const int F05TestCount = 1;
@@ -41,6 +41,7 @@ internal static class F03bRemotePlayableTests
 
     internal static void RunW7R1Only()
     {
+        Run("W7MissingResidentSnapshotBeginHasIndependentAccounting", W7MissingResidentSnapshotBeginHasIndependentAccounting);
         Run("W7SeamStartAcquiresBothPacksBeforeInitialWindow",
             W7SeamStartAcquiresBothPacksBeforeInitialWindow);
         Run("W7ThirdPackRequestRetainsEarlierRetirementObligation",
@@ -57,6 +58,7 @@ internal static class F03bRemotePlayableTests
 
     internal static void RunAll()
     {
+        Run("W7MissingResidentSnapshotBeginHasIndependentAccounting", W7MissingResidentSnapshotBeginHasIndependentAccounting);
         Run("RemotePlayableProtocolIsCanonicalAndTrustMinimal",
             RemotePlayableProtocolIsCanonicalAndTrustMinimal);
         Run("RemoteGuestAdmissionRejectsInvalidIdentityBeforeControl",
@@ -1380,11 +1382,17 @@ internal static class F03bRemotePlayableTests
             $"stale_inflight_rejections={worldSnapshot.RejectedDeliveries} " +
             $"missing_resident={worldSnapshot.MissingResidentDeliveryAttempts} " +
             $"missing_prepared={worldSnapshot.MissingResidentPreparedChunkAttempts}");
-        Equal(worldSnapshot.RejectedDeliveries,
+        // Segmented Snapshot Begin rejection belongs to RejectedSnapshots, not RejectedDeliveries.
+        ulong rejectedAttempts = worldSnapshot.RejectedDeliveries + worldSnapshot.MissingResidentSnapshotBeginAttempts;
+        Equal(rejectedAttempts,
             worldSnapshot.MissingResidentDeliveryAttempts);
-        Equal(worldSnapshot.RejectedDeliveries,
+        Equal(rejectedAttempts,
             worldSnapshot.MissingResidentPreparedChunkAttempts);
-        True(worldSnapshot.RejectedDeliveries <= 4);
+        True(worldSnapshot.MissingResidentSnapshotBeginAttempts <= worldSnapshot.RejectedSnapshots);
+        True(rejectedAttempts <= 4);
+        Equal(0UL, worldSnapshot.ContradictoryDeliveries);
+        Equal(0UL, worldSnapshot.MalformedDeliveries);
+        Equal(0UL, worldSnapshot.CapacityFailures);
 
         void MoveTo(WorldPosition destination)
         {
@@ -1414,6 +1422,55 @@ internal static class F03bRemotePlayableTests
                 out WorldPosition position));
             return position;
         }
+    }
+
+    private static void W7MissingResidentSnapshotBeginHasIndependentAccounting()
+    {
+        ApplicationRealmId realm = new(0xF111, 0x11);
+        using var deployment = ConceptDemoContentDeployment.Create(realm,
+            new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()));
+        using var source = new HttpContentPackageSource(
+            FixtureHttpLimits(deployment.Snapshot.ArchiveBytes, allowInsecureHttp: true));
+        using var fixture = RemotePlayableFixture.CreateWithConceptDeployment(realm, deployment, source);
+        fixture.DriveUntil(() => fixture.SessionSnapshot.StructuralPacks.InitialReady);
+        var key = new SpatialChunkKey(GameWorldState.DefaultSpace, 3, 0);
+        False(fixture.Cache.TryGetResidentHandle(key, out _));
+        True(fixture.Cache.TryProbeStructuralChunk(key, out var probe));
+        Equal(WorldStructuralChunkStatus.PreparedChunk, probe.Status);
+        var before = fixture.World.GetSnapshot();
+        var semantic = fixture.Cache.GetSnapshot().WorldSemanticHash;
+        ulong epoch = fixture.SessionSnapshot.Playable.ApplicationSessionEpoch;
+        byte[] canonical = new byte[UltraSimGameProtocol.GetChunkSnapshotEncodedBytes(0)];
+        True(UltraSimGameProtocol.TryWriteChunkSnapshot(canonical, epoch, 111, 999,
+            key.Space.Value, key.Coord.X, key.Coord.Z, 1, 1, [], out int bytes));
+        True(UltraSimGameProtocol.TryReadChunkSnapshot(canonical.AsSpan(0, bytes),
+            out var inner, [], out _));
+        int segmentPayload = fixture.ClientPeer.MaximumUnfragmentedMessageBytes - RemoteChunkSnapshotSegmentHeaderCodec.EncodedSize;
+        var begin = new RemoteChunkSnapshotBeginMessage
+        {
+            ApplicationSessionEpoch = epoch, PublicationEpoch = 111, DeliveryId = 999,
+            SpatialSpaceId = key.Space.Value, ChunkX = key.Coord.X, ChunkZ = key.Coord.Z,
+            SchemaFingerprint = inner.SchemaFingerprint, Revision = 1, HistoryFloor = 1,
+            ContentHash = inner.ContentHash, EncodedBytes = (uint)bytes, RecordCount = 0,
+            SegmentCount = (ushort)((bytes + segmentPayload - 1) / segmentPayload),
+            SegmentPayloadBytes = (ushort)segmentPayload,
+        };
+        byte[] payload = new byte[RemoteChunkSnapshotBeginMessageCodec.EncodedSize];
+        True(UltraSimGameProtocol.TryWriteChunkSnapshotBegin(payload, in begin, out int written));
+        var descriptor = RemoteChunkSnapshotBeginMessageCodec.Descriptor;
+        var delivered = new NetworkDeliveredMessage(NetworkLane.Bulk, descriptor.Id, descriptor.Version, default, written);
+        True(fixture.World.TryProcess(in delivered, payload.AsSpan(0, written)));
+        var after = fixture.World.GetSnapshot();
+        Equal(before.RejectedDeliveries, after.RejectedDeliveries);
+        Equal(before.RejectedSnapshots + 1, after.RejectedSnapshots);
+        Equal(before.MissingResidentSnapshotBeginAttempts + 1, after.MissingResidentSnapshotBeginAttempts);
+        Equal(before.MissingResidentDeliveryAttempts + 1, after.MissingResidentDeliveryAttempts);
+        Equal(before.MissingResidentPreparedChunkAttempts + 1, after.MissingResidentPreparedChunkAttempts);
+        Equal(before.PendingProofs + 1, after.PendingProofs);
+        False(after.SnapshotCandidateActive);
+        Equal(semantic, fixture.Cache.GetSnapshot().WorldSemanticHash);
+        Console.WriteLine("EVIDENCE W7 missing_snapshot_begin rejected_delivery_delta=0 rejected_snapshot_delta=1 " +
+            "missing_resident_delta=1 pending_negative_proof_delta=1 semantic_mutation=0");
     }
 
     private static void W7SeamStartAcquiresBothPacksBeforeInitialWindow()
