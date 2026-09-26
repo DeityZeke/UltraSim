@@ -1,6 +1,6 @@
 # UltraSim Client Completion Plan
 
-**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.9A are CLOSED; F1.9B scalable realization is NEXT.** F1.9A's tested implementation and verification are recorded in the [display-composition evidence](../../_Benchmarks/Baselines/client-f1.9a-display-composition-2026-09-25.md). The original F1.8A closure claim is superseded by the [corrective evidence](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md), which records both the reproduced defects and the earlier final-tree verifier failures.
+**Status:** active implementation plan for the pre-PF6 client architecture/productization campaign. **F1.0–F1.9B are CLOSED; F1.10 actor representation tiers is NEXT.** F1.9B retains NodeMultiMesh/PerRow after the [measured backend comparison](../../_Benchmarks/Baselines/client-f1.9b-scalable-godot-backend-2026-09-25.md); direct RIDs and bulk submission remain bounded comparison controls, not selected product policy. F1.9A's tested implementation and verification are recorded in the [display-composition evidence](../../_Benchmarks/Baselines/client-f1.9a-display-composition-2026-09-25.md). The original F1.8A closure claim is superseded by the [corrective evidence](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md), which records both the reproduced defects and the earlier final-tree verifier failures.
 
 **Parent architecture:** [CLIENT_PRESENTATION_ARCHITECTURE.md](CLIENT_PRESENTATION_ARCHITECTURE.md)
 
@@ -91,8 +91,8 @@ F1.7  Application workspace, Gameplay Frame, shared UI/gump composition (CLOSED)
 F1.8  Declarative camera/control rig and canonical gameplay-view crop (CLOSED)
 F1.8A Remote motion prediction/reconciliation/interpolation (CLOSED after R1 correction)
 F1.9A Simple/Advanced display composition and real Gameplay Frame output (CLOSED)
-F1.9B scalable Godot realization / RID / MultiMesh (NEXT)
-F1.10 Actor representation tiers and GPU-friendly interpolation seam
+F1.9B scalable Godot realization / RID / MultiMesh (CLOSED; NodeMultiMesh/PerRow retained)
+F1.10 Actor representation tiers and GPU-friendly interpolation seam (NEXT; unstarted)
 F1.11 Renderer stress consumers / vegetation prototype
 F1.12 Product dogfooding and PF6 readiness
 ~~~
@@ -1149,6 +1149,33 @@ Record:
 Require semantic/picking equivalence with the existing path.
 
 Select direct RID/bulk realization only where evidence justifies it.
+
+## Closure — measured backend selection
+
+The [F1.9B evidence](../../_Benchmarks/Baselines/client-f1.9b-scalable-godot-backend-2026-09-25.md)
+compares the maintained chunk-local NodeMultiMesh backend with direct RenderingServer instances,
+and per-row with bounded bulk submission, at 100/1,000/5,000/10,000 realized records. A concrete
+native group owner holds the MultiMesh/visual lifetime below existing grouping; neither native
+slots nor RIDs become semantic identities. Direct groups explicitly bind the Gameplay Output
+scenario and synchronize global transform/visibility; scenario replacement and high/low rebase
+have real-native coverage. Public refresh remains a whole-layer rebuild, not an incremental slot
+map. Terrain, detailed actors, equipment and nameplates remain on their existing paths.
+
+**Outcome B:** retain NodeMultiMesh/PerRow. Direct reduces actual renderer Nodes from 91 to 37
+for the 54-group fixture, but does not reduce the native group count or consistently improve
+realization/refresh CPU; it increases idle/rebase service and ownership complexity. No bulk
+crossover was measured through 1,024 rows, so no threshold is selected. All four bounded controls
+remain available to acceptance tests, with no user-facing toggle. Warmed empty-frame renderer
+service allocates zero managed bytes in all 48 comparison rows; that is not a whole-client claim.
+
+The uninterrupted canonical Release run passed on `be36ff502081b560bad9e0b2257bbc83a006540b`,
+including exports, Local/Remote parity, W7 seam/corner controls and mixed lifecycle retirement.
+The report preserves an earlier debug-hook compilation failure and an intermittent unchanged
+F1.8A loss-case assertion before the final pass. Headless tests certify lifecycle but cannot
+certify native transforms/culling; the real OpenGL matrix covers those separately. Cold build
+residuals, short GPU diagnostics, and the Remote catalog world-material consumer gap remain
+explicit limitations, not claims that rendering is already minimal. F1.10 and W8 are unstarted;
+PF6 still waits for F1.12.
 
 ---
 

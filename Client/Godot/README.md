@@ -12,6 +12,27 @@ locks the display layers together; Advanced mode exposes the same layers indepen
 second renderer. Physical window resizing scales the logical application without expanding World
 visibility. `ClientSettingsDocument` v5 is device/user-global for display choices.
 
+F1.9B makes existing chunk-local static/Multi/public instancing an explicit native ownership seam.
+`GodotWorldInstanceGroup` borrows resolved mesh/material resources and owns a MultiMesh plus either
+its Node or direct visual RID. Production remains **NodeMultiMesh / PerRow** after the
+[measured comparison](../../_Benchmarks/Baselines/client-f1.9b-scalable-godot-backend-2026-09-25.md):
+direct RIDs reduce group Nodes but not native group resources or consistent realization CPU;
+bulk upload has no selected crossover through the tested 1,024 rows. Constructor controls allow
+bounded comparisons without a user-facing setting. Direct groups bind the output World3D,
+synchronize scenario/global transform/visibility, and retire the visual before the MultiMesh.
+Both paths set exact transformed mesh bounds; public refresh still replaces the full layer.
+Terrain and detailed actors are unchanged. The existing Presentation debug page reports backend,
+group/instance/RID counts, upload calls/bytes, scratch reservation and preparation counters only
+on request; native handles never become semantic picking identities.
+
+`F19bWorldBackendAcceptance.tscn` is the maintained native comparison scene. Build its test project
+with `-c Debug -p:Optimize=true` before an editor-host run; the canonical verifier does this to
+avoid stale Debug assemblies even when product verification is Release. Headless mode runs bounded
+lifecycle checks and explicitly does not certify transform readback/culling/GPU timings. A real
+renderer run exercises the full 100/1,000/5,000/10,000 matrix, display/scenario changes, high/low
+rebases and native frame boundaries. Pass an absolute `--evidence=` path after `--` to retain raw
+samples. The evidence records exact commands and source provenance; it is not a product CCU rating.
+
 This is the one maintained Godot application and the only production Godot script assembly. Its
 `Adapter/`, `Shell/`, and conditionally compiled `Local/` sources replace the former `_Godot`,
 `Bootstrap.Godot`, `Local.Godot`, and `Playable.Godot` projects. Keeping all native scripts in

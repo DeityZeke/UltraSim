@@ -10,9 +10,10 @@ Complete-hosted deployment shapes. I0.12 human-play hardening prevents visible e
 remaining a pointer-nominated world pickup, and I0.13 replaces its temporary cold property text
 with bounded typed Inspection Properties plus content-sized world-hover/Inventory presentation.
 
-F1.0-F1.9A are closed after the F1.8A-R1 corrective checkpoint and the
-[F1.9A display-composition evidence](../../_Benchmarks/Baselines/client-f1.9a-display-composition-2026-09-25.md);
-F1.9B scalable realization is next. The initial F1.8A
+F1.0-F1.9B are closed after the F1.8A-R1 corrective checkpoint, the
+[F1.9A display-composition evidence](../../_Benchmarks/Baselines/client-f1.9a-display-composition-2026-09-25.md),
+and the [F1.9B backend comparison](../../_Benchmarks/Baselines/client-f1.9b-scalable-godot-backend-2026-09-25.md).
+F1.10 actor representation tiers is next and unstarted. The initial F1.8A
 closure evidence remains historical, and the [R1 correction](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md)
 records reproduced defects, the earlier intermittent final-tree verifier failures, and corrected
 verification. F1.2 separates the required remote WorldPack/UI activation and its exact application proof
@@ -2818,8 +2819,8 @@ F1.7 application workspace/Gameplay Frame/shared UI/gump manager             CLO
 F1.8 declarative camera/control rig + canonical gameplay-view crop            CLOSED
 F1.8A remote motion prediction/reconciliation/interpolation                   CLOSED after R1
 F1.9A Simple/Advanced display composition and real Gameplay Frame output      CLOSED
-F1.9B scalable Godot RID/MultiMesh backend                                    NEXT
-F1.10 actor representation tiers/realization interpolation seam               PLANNED
+F1.9B scalable Godot RID/MultiMesh backend                                    CLOSED (NodeMultiMesh/PerRow)
+F1.10 actor representation tiers/realization interpolation seam               NEXT / UNSTARTED
 F1.11 renderer stress consumers/vegetation prototype                          PLANNED
 F1.12 product dogfooding/PF6 readiness                                        PLANNED
         |
@@ -2853,7 +2854,14 @@ transitional. F1.8 now owns canonical centered camera crop without disclosing mo
 introduces a stable logical Application Resolution between physical window and Gameplay Frame,
 then puts World in a real frame-presented SubViewport. Simple locks Application/Frame/Output/Internal
 3D together like a conventional resolution selector; Advanced exposes those same layers
-independently and is not a separate renderer. F1.9B retains the scalable backend work.
+independently and is not a separate renderer. F1.9B adds an explicit chunk-local native group
+owner and measured direct-RID/bulk controls below existing semantic grouping. Production retains
+NodeMultiMesh/per-row submission: the direct candidate removes group Nodes without a consistent
+realization CPU gain, while requiring higher idle/rebase service. No bulk threshold is selected
+on the measured host. Public refresh remains a complete layer rebuild; terrain and detailed
+actor paths are unchanged. Native transforms/AABBs, picking, fallback, display changes, scenario
+replacement, rebasing and retirement have acceptance evidence. Headless lifecycle and real-renderer
+geometry results are distinguished, and cold-preparation residuals remain an investigation area.
 F1.8A now owns controlled-remote horizontal prediction/reconciliation and non-controlled-remote
 receipt-time interpolation. It selects a pose, while F1.10 may optimize its realization.
 Neither temporal pose is semantic or client-side authority. The current client-local 6 m/s

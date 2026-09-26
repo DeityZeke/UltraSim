@@ -39,6 +39,12 @@ half-open pointer admission and application→frame→output mapping. F1.8's `Cl
 `ClientCanonicalViewProjection` still own finite camera meaning and the 16:9 canonical envelope.
 Pixel count changes fidelity, not World visibility. Godot alone owns the output SubViewport.
 
+F1.9B compares NodeMultiMesh and direct-RID realization entirely below the existing semantic cache
+and presentation-window seam. Core owns no renderer-backend choice, native slot map, RIDs, upload
+buffers or Godot resources. Public identity/picking and cache hashes do not change with a native
+group representation. The measured production path retains NodeMultiMesh/per-row uploads; F1.10
+actor tiers and W8 live composition changes remain unstarted.
+
 F1.8A adds `ClientMotionPose`, `ClientControlledMotionPresentation`, and
 `ClientRemoteActorInterpolation`. These are renderer-neutral, bounded presentation state beside
 exact semantic owner/public records. The controlled controller accepts only sequenced semantic

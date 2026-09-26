@@ -1,0 +1,1959 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "F1.9B",
+  "date": "2026-09-25",
+  "status": "closed",
+  "lineage": {
+    "startingHead": "e2ea4dd96951379b638a83128576625bf19825b0",
+    "measurementHead": "7b73f0d8f4896f0ba0db6bbdc8e765e1069d0f02",
+    "testedImplementationHead": "be36ff502081b560bad9e0b2257bbc83a006540b",
+    "finalEvidenceHead": "commit containing this artifact; resolve with git log",
+    "productionSelection": "NodeMultiMesh/PerRow",
+    "gameSemanticsChanged": false,
+    "adapterAndFixtureEqualAcrossMeasurementAndCorrection": true
+  },
+  "sourceSha256": {
+    "Client/Godot/Adapter/GodotWorldInstanceGroup.cs": "764c77076d56d4b920e9ef3c0ae25febb0544834cddfd1bb7780a97cef4a51c8",
+    "Client/Godot/Adapter/GodotWorldRenderer.cs": "2b3d81a4d1504f81c874b646a4d5e85e2d4e7666855bbb86715e19a756bd1f0b",
+    "_Tests/UltraSim.S0.Godot.Tests/F19bWorldBackendAcceptance.cs": "41424323cd5803bd505de320909ffac0ab112b356ab96799c995e92308857a5d"
+  },
+  "environment": {
+    "os": "CachyOS Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D",
+    "cores": 8,
+    "logicalProcessors": 16,
+    "memoryGiB": 30,
+    "dotnetSdk": "8.0.131",
+    "dotnetRuntime": "8.0.31",
+    "godot": "4.7.1.stable.mono.official.a13da4feb",
+    "renderer": "OpenGL Compatibility",
+    "gpu": "NVIDIA GeForce RTX 4070 Ti SUPER",
+    "driver": "615.71.09",
+    "nativeHost": "optimized Debug editor executable; JIT optimizer enabled",
+    "processArrangement": "one native renderer fixture process, serial backend runs; canonical native products/servers use maintained arrangements",
+    "affinityControlled": false,
+    "gpuClocksControlled": false,
+    "desktopApplicationsPresent": true
+  },
+  "versions": {
+    "clientSettings": 5,
+    "gameManifest": 33,
+    "transport": 2,
+    "worldPack": 1,
+    "worldStructuralManifest": 1,
+    "worldview": 2
+  },
+  "fixture": {
+    "chunks": 9,
+    "structuralFamilies": 4,
+    "publicFamilies": 2,
+    "multiRoots": 9,
+    "scalePoints": [
+      100,
+      1000,
+      5000,
+      10000
+    ],
+    "split": {
+      "frozen": 0.5,
+      "multiFragments": 0.25,
+      "publicProps": 0.25
+    },
+    "objectYMillimeters": [
+      -1000000,
+      1000,
+      1000000
+    ],
+    "terrainYMillimeters": 1000,
+    "worldPackBlind": true,
+    "disclosedCache": true,
+    "detailedActorsChanged": false
+  },
+  "timingBoundaries": {
+    "unit": "elapsed owner-thread wall time; not thread CPU or GPU",
+    "initial": "nine enclosing ProcessFrame calls plus bounded snapshots",
+    "build": "same-cohort sum of mesh/group creation/upload intervals",
+    "commit": "same-cohort sum of root/tree/scenario commit intervals",
+    "grouping": "exclusive child inside build",
+    "groupPreparation": "exclusive child inside build; AABB/instance allocation/submission",
+    "outsideBuildCommit": "signed initial-build-commit same-row residual, not attribution to native/security",
+    "refresh": "three whole-public-layer refreshes; per-dirty samples in raw",
+    "steady": "512 warmed ProcessFrame(0,0) calls excluding frame drawing",
+    "rebase": "256 high/low/local-origin changes",
+    "retirement": "nine-chunk cohort excluding subsequent native-boundary assertions",
+    "gpu": "separate four-boundary warmup plus eight viewport frames/run",
+    "percentilesAdded": false
+  },
+  "selection": {
+    "outcome": "B",
+    "backend": "NodeMultiMesh",
+    "upload": "PerRow",
+    "bulkThreshold": null,
+    "bulkCrossoverObservedThrough": 1024,
+    "reason": "direct materially reduces Nodes but not native group resources or consistent realization cost; higher rebase/idle cost and ownership burden; bulk submission slower in tested cases",
+    "scope": "measured fixture/host/API, not theoretical minimum or universal policy",
+    "userFacingToggleAdded": false,
+    "directCandidateRetained": true,
+    "terrainChanged": false,
+    "actorsChanged": false
+  },
+  "memoryInterpretation": {
+    "coarseResources": "54 MultiMeshes + 9 terrain meshes; excludes borrowed assets and visual RIDs",
+    "groupVisualRids": 54,
+    "terrainVisualInstances": 9,
+    "managedReservation": "semantic cache payload and upload scratch, not full heap/native memory",
+    "allocatedWindow": "initial renderer cohort, excludes constructor/cache staging",
+    "warmedAllocation": "renderer empty-frame method only; not entire client",
+    "nativeRowBytes": 48
+  },
+  "assurance": {
+    "realNativeAllModesAllScales": "pass",
+    "canonicalTransforms": "all native rows/control and independent structural/public expectations, Godot float tolerance",
+    "aabbAndFrustum": "pass actual camera frustum inside/outside + refreshed bounds",
+    "picking": "pass disclosed exact lifetimes, not native slots",
+    "semanticHashInvariant": "pass",
+    "sourceGeometryReplacement": "pass",
+    "fallbackStates": "four availability states pass",
+    "displayMatrix": "1920x1080/100,1280x720 output,1920x1080/50 pass",
+    "scenarioReplacement": "pass",
+    "ancestorTransformAndVerticalRebase": "pass",
+    "rowRewriteOnRebase": false,
+    "emptyGroupsRetired": true,
+    "cancellation": "pass",
+    "activePendingDispose": "pass",
+    "repeatedDispose": "pass",
+    "headless": "100-record lifecycle all four modes; native transforms/culling/GPU explicitly unavailable",
+    "gpuPositiveSamplesPerModeScale": 24,
+    "observedGlobalDrawCalls": 53
+  },
+  "nonClosureRuns": [
+    {
+      "head": "7b73f0d8f4896f0ba0db6bbdc8e765e1069d0f02",
+      "command": "./verify.sh --configuration=Release",
+      "result": "failed",
+      "cause": "new Local debug method name GetSnapshot unavailable; repaired at be36ff50"
+    },
+    {
+      "head": "be36ff502081b560bad9e0b2257bbc83a006540b",
+      "command": "./verify.sh --configuration=Release",
+      "result": "failed",
+      "cause": "unchanged F03bRemotePlayableTests.MeasureMotion line 394, loss+jitter InterpolatedFrames > 0; intermittent cause not established"
+    },
+    {
+      "head": "be36ff502081b560bad9e0b2257bbc83a006540b",
+      "command": "dotnet run --project _Tests/UltraSim.Network.Application.Tests/UltraSim.Network.Application.Tests.csproj -c Release",
+      "result": "passed unchanged",
+      "disposition": "isolated pass is not canonical closure"
+    },
+    {
+      "head": "7b73f0d8f4896f0ba0db6bbdc8e765e1069d0f02",
+      "result": "development evidence-path failure",
+      "cause": "relative JSON path resolved under Godot project; final measurement uses absolute path"
+    }
+  ],
+  "verification": {
+    "clientCoreRelease": "35 passed",
+    "completeProductReleaseBuild": "pass; zero warnings/errors",
+    "focusedNativeOpenGl": "pass, 48 rows and 90 primitive samples",
+    "focusedHeadless": "pass, 12 lifecycle rows",
+    "architectureOnImplementation": "pass",
+    "architectureFinalDocumentation": "pass",
+    "canonicalRelease": "pass; uninterrupted, exit 0, PASS repository verification",
+    "canonicalCommand": "./verify.sh --configuration=Release",
+    "canonicalHead": "be36ff502081b560bad9e0b2257bbc83a006540b",
+    "hostLocalCanonicalLogSha256": "d2ca8643cb1c482fd32469a7b1c1084d8abad97b5a8d15a6d3e83c7698e393f7",
+    "hostLocalMeasurementLogSha256": "a85fd951934fc11ea545ff1225d80b2aa94568dca204e439cdf9a1317e0dbeb7",
+    "summaryMeanMedianValuesRecomputed": 416,
+    "summaryRecomputationMismatches": 0,
+    "nativeAndExports": "S08/T08/T010, SinglePlayer/Online/Complete exports, Contentless Online cold/warm, F0.8 composition passed",
+    "userAndDerivedResources": "existing F1.5/F1.6 selected-path replacement/leases/semantic invariance gates passed",
+    "w7": "exported 127/128/127, managed seam-start/third-Pack/four-Pack corner passed; stalePreparedWindowDeliveries=0",
+    "mixedSwarm": "PF1/PF2 mixed exported-client/bot impairment and accounting passed",
+    "mixedLifecycle": "F0.7/F1.0 passed; six clean boundaries, fresh remote lifetimes, profileReuse=False/False/True",
+    "finalClientBaseline": {
+      "localSemanticChunks": 49,
+      "localRenderedChunks": 25,
+      "localStaticBatches": 64,
+      "localPublicBatches": 7,
+      "remoteColdBytes": 1958,
+      "remoteWarmReusedPackages": [1, 3],
+      "remoteActorResources": 1,
+      "remoteActorResourceBytes": 2213268,
+      "retirementBoundaries": 6
+    }
+  },
+  "remainingLimitations": [
+    "Initial outside-build/commit residual is not fully attributed; no minimum-cost claim",
+    "Native GPU measurements are short diagnostics with uncontrolled power state",
+    "Full renderer/process retained memory not measured",
+    "Remote catalog world-material consumer gap unchanged (assets:null)",
+    "Existing motion loss-case intermittent assertion retained; no motion/Network weakening",
+    "F1.8A historical quality tails remain F1.12 work"
+  ],
+  "f110Started": false,
+  "w8Started": false,
+  "rawArtifact": "client-f1.9b-scalable-godot-backend-2026-09-25.raw.json",
+  "measurement": {
+    "configuration": "Debug",
+    "jitOptimizerDisabled": false,
+    "timestampFrequency": 1000000000,
+    "rows": 48,
+    "matrix": [
+      {
+        "scale": 100,
+        "backend": "NodeMultiMesh",
+        "upload": "PerRow",
+        "repetitions": 3,
+        "nodes": 91,
+        "groups": 54,
+        "coarseResourceCount": 63,
+        "groupVisualRids": 54,
+        "terrainMeshes": 9,
+        "distinctGroupMeshes": 3,
+        "distinctMaterialOverrides": 1,
+        "semanticReservedBytes": 92301,
+        "uploadScratchBytes": 0,
+        "bulkUploads": 0,
+        "targetedRows": 100,
+        "uploadedRows": 100,
+        "bulkBytes": 0,
+        "drawCalls": 53,
+        "steadyAllocated": [
+          0,
+          0,
+          0
+        ],
+        "metrics": {
+          "initialUs": {
+            "mean": 36766.28966666667,
+            "median": 27757.138,
+            "min": 26282.372,
+            "max": 56259.359
+          },
+          "buildUs": {
+            "mean": 35644.998999999996,
+            "median": 27438.76,
+            "min": 25999.612,
+            "max": 53496.625
+          },
+          "commitUs": {
+            "mean": 561.4783333333334,
+            "median": 62.39,
+            "min": 58.03,
+            "max": 1564.015
+          },
+          "groupingUs": {
+            "mean": 1445.063,
+            "median": 91.14,
+            "min": 78.809,
+            "max": 4165.24
+          },
+          "groupPreparationUs": {
+            "mean": 1104.238,
+            "median": 467.381,
+            "min": 434.606,
+            "max": 2410.727
+          },
+          "refreshTotalUs": {
+            "mean": 337.9526666666667,
+            "median": 183.817,
+            "min": 176.047,
+            "max": 653.994
+          },
+          "retireUs": {
+            "mean": 350.41,
+            "median": 318.607,
+            "min": 304.227,
+            "max": 428.396
+          },
+          "rebaseNsPerCall": {
+            "mean": 1187.6315104166667,
+            "median": 1130.18359375,
+            "min": 1070.65234375,
+            "max": 1362.05859375
+          },
+          "steadyNsPerFrame": {
+            "mean": 53.612630208333336,
+            "median": 47.79296875,
+            "min": 47.7734375,
+            "max": 65.271484375
+          },
+          "buildAllocated": {
+            "mean": 1270914.6666666667,
+            "median": 1143976,
+            "min": 1143976,
+            "max": 1524792
+          },
+          "gpuMeanMs": {
+            "mean": 0.08270833307566743,
+            "median": 0.08212500065565109,
+            "min": 0.07300000032410026,
+            "max": 0.09299999824725091
+          },
+          "renderCpuMeanMs": {
+            "mean": 0.17604166641831398,
+            "median": 0.15687499940395355,
+            "min": 0.15262499637901783,
+            "max": 0.21862500347197056
+          },
+          "initialOutsideBuildCommitUs": {
+            "mean": 559.8123333333318,
+            "median": 260.34800000000064
+          }
+        }
+      },
+      {
+        "scale": 100,
+        "backend": "NodeMultiMesh",
+        "upload": "Bulk",
+        "repetitions": 3,
+        "nodes": 91,
+        "groups": 54,
+        "coarseResourceCount": 63,
+        "groupVisualRids": 54,
+        "terrainMeshes": 9,
+        "distinctGroupMeshes": 3,
+        "distinctMaterialOverrides": 1,
+        "semanticReservedBytes": 92301,
+        "uploadScratchBytes": 864,
+        "bulkUploads": 54,
+        "targetedRows": 0,
+        "uploadedRows": 100,
+        "bulkBytes": 4800,
+        "drawCalls": 53,
+        "steadyAllocated": [
+          0,
+          0,
+          0
+        ],
+        "metrics": {
+          "initialUs": {
+            "mean": 26137.796666666665,
+            "median": 25806.137,
+            "min": 25440.38,
+            "max": 27166.873
+          },
+          "buildUs": {
+            "mean": 25890.971,
+            "median": 25557.338,
+            "min": 25208.01,
+            "max": 26907.565
+          },
+          "commitUs": {
+            "mean": 51.35633333333334,
+            "median": 55.21,
+            "min": 40.47,
+            "max": 58.389
+          },
+          "groupingUs": {
+            "mean": 68.30866666666667,
+            "median": 64.818,
+            "min": 59.08,
+            "max": 81.028
+          },
+          "groupPreparationUs": {
+            "mean": 742.9126666666666,
+            "median": 400.354,
+            "min": 379.907,
+            "max": 1448.477
+          },
+          "refreshTotalUs": {
+            "mean": 172.746,
+            "median": 166.198,
+            "min": 157.66,
+            "max": 194.38
+          },
+          "retireUs": {
+            "mean": 458.31233333333336,
+            "median": 401.416,
+            "min": 317.797,
+            "max": 655.724
+          },
+          "rebaseNsPerCall": {
+            "mean": 1118.9739583333333,
+            "median": 1073.15234375,
+            "min": 1021.1640625,
+            "max": 1262.60546875
+          },
+          "steadyNsPerFrame": {
+            "mean": 49.537109375,
+            "median": 47.7734375,
+            "min": 46.091796875,
+            "max": 54.74609375
+          },
+          "buildAllocated": {
+            "mean": 1219242.6666666667,
+            "median": 1242496,
+            "min": 1143976,
+            "max": 1271256
+          },
+          "gpuMeanMs": {
+            "mean": 0.048041667245949306,
+            "median": 0.03262500022538006,
+            "min": 0.03187500033527613,
+            "max": 0.07962500117719173
+          },
+          "renderCpuMeanMs": {
+            "mean": 0.15762499968210855,
+            "median": 0.16124999895691872,
+            "min": 0.1354999989271164,
+            "max": 0.17612500116229057
+          },
+          "initialOutsideBuildCommitUs": {
+            "mean": 195.46933333333416,
+            "median": 193.58899999999906
+          }
+        }
+      },
+      {
+        "scale": 100,
+        "backend": "DirectRid",
+        "upload": "PerRow",
+        "repetitions": 3,
+        "nodes": 37,
+        "groups": 54,
+        "coarseResourceCount": 63,
+        "groupVisualRids": 54,
+        "terrainMeshes": 9,
+        "distinctGroupMeshes": 3,
+        "distinctMaterialOverrides": 1,
+        "semanticReservedBytes": 92301,
+        "uploadScratchBytes": 0,
+        "bulkUploads": 0,
+        "targetedRows": 100,
+        "uploadedRows": 100,
+        "bulkBytes": 0,
+        "drawCalls": 53,
+        "steadyAllocated": [
+          0,
+          0,
+          0
+        ],
+        "metrics": {
+          "initialUs": {
+            "mean": 26537.96266666667,
+            "median": 27047.815,
+            "min": 25314.061,
+            "max": 27252.012
+          },
+          "buildUs": {
+            "mean": 25984.120666666666,
+            "median": 25960.615,
+            "min": 25061.771,
+            "max": 26929.976
+          },
+          "commitUs": {
+            "mean": 200.492,
+            "median": 70.009,
+            "min": 46.85,
+            "max": 484.617
+          },
+          "groupingUs": {
+            "mean": 87.94,
+            "median": 95.99,
+            "min": 61.28,
+            "max": 106.55
+          },
+          "groupPreparationUs": {
+            "mean": 363.7423333333333,
+            "median": 280.138,
+            "min": 237.886,
+            "max": 573.203
+          },
+          "refreshTotalUs": {
+            "mean": 218.071,
+            "median": 162.887,
+            "min": 156.149,
+            "max": 335.177
+          },
+          "retireUs": {
+            "mean": 255.12766666666667,
+            "median": 247.558,
+            "min": 230.048,
+            "max": 287.777
+          },
+          "rebaseNsPerCall": {
+            "mean": 10893.190104166666,
+            "median": 10656.890625,
+            "min": 10208.41796875,
+            "max": 11814.26171875
+          },
+          "steadyNsPerFrame": {
+            "mean": 4338.982421875,
+            "median": 4310.173828125,
+            "min": 4255.466796875,
+            "max": 4451.306640625
+          },
+          "buildAllocated": {
+            "mean": 1135362.6666666667,
+            "median": 1133392,
+            "min": 1133176,
+            "max": 1139520
+          },
+          "gpuMeanMs": {
+            "mean": 0.07149999961256981,
+            "median": 0.0840000007301569,
+            "min": 0.03187500033527613,
+            "max": 0.0986249977722764
+          },
+          "renderCpuMeanMs": {
+            "mean": 0.16512499998013178,
+            "median": 0.15100000239908695,
+            "min": 0.1497499980032444,
+            "max": 0.194624999538064
+          },
+          "initialOutsideBuildCommitUs": {
+            "mean": 353.3499999999993,
+            "median": 252.02700000000004
+          }
+        }
+      },
+      {
+        "scale": 100,
+        "backend": "DirectRid",
+        "upload": "Bulk",
+        "repetitions": 3,
+        "nodes": 37,
+        "groups": 54,
+        "coarseResourceCount": 63,
+        "groupVisualRids": 54,
+        "terrainMeshes": 9,
+        "distinctGroupMeshes": 3,
+        "distinctMaterialOverrides": 1,
+        "semanticReservedBytes": 92301,
+        "uploadScratchBytes": 864,
+        "bulkUploads": 54,
+        "targetedRows": 0,
+        "uploadedRows": 100,
+        "bulkBytes": 4800,
+        "drawCalls": 53,
+        "steadyAllocated": [
+          0,
+          0,
+          0
+        ],
+        "metrics": {
+          "initialUs": {
+            "mean": 26578.919333333335,
+            "median": 25703.588,
+            "min": 25544.569,
+            "max": 28488.601
+          },
+          "buildUs": {
+            "mean": 26207.695666666667,
+            "median": 25395.49,
+            "min": 25271.352,
+            "max": 27956.245
+          },
+          "commitUs": {
+            "mean": 60.769,
+            "median": 58.98,
+            "min": 52.629,
+            "max": 70.698
+          },
+          "groupingUs": {
+            "mean": 83.649,
+            "median": 82.729,
+            "min": 66.62,
+            "max": 101.598
+          },
+          "groupPreparationUs": {
+            "mean": 315.15666666666664,
+            "median": 290.756,
+            "min": 273.786,
+            "max": 380.928
+          },
+          "refreshTotalUs": {
+            "mean": 155.58866666666668,
+            "median": 157.839,
+            "min": 147.659,
+            "max": 161.268
+          },
+          "retireUs": {
+            "mean": 247.18766666666667,
+            "median": 227.818,
+            "min": 219.428,
+            "max": 294.317
+          },
+          "rebaseNsPerCall": {
+            "mean": 9808.553385416666,
+            "median": 9964.4375,
+            "min": 9385.41796875,
+            "max": 10075.8046875
+          },
+          "steadyNsPerFrame": {
+            "mean": 3680.3567708333335,
+            "median": 3432.25390625,
+            "min": 3422.01953125,
+            "max": 4186.796875
+          },
+          "buildAllocated": {
+            "mean": 1135560,
+            "median": 1133392,
+            "min": 1133176,
+            "max": 1140112
+          },
+          "gpuMeanMs": {
+            "mean": 0.04599999962374568,
+            "median": 0.03324999916367233,
+            "min": 0.03237500018440187,
+            "max": 0.07237499952316284
+          },
+          "renderCpuMeanMs": {
+            "mean": 0.14666666804502407,
+            "median": 0.14687500149011612,
+            "min": 0.14000000152736902,
+            "max": 0.1531250011175871
+          },
+          "initialOutsideBuildCommitUs": {
+            "mean": 310.4546666666661,
+            "median": 237.39999999999816
+          }
+        }
+      },
+      {
+        "scale": 1000,
+        "backend": "NodeMultiMesh",
+        "upload": "PerRow",
+        "repetitions": 3,
+        "nodes": 91,
+        "groups": 54,
+        "coarseResourceCount": 63,
+        "groupVisualRids": 54,
+        "terrainMeshes": 9,
+        "distinctGroupMeshes": 3,
+        "distinctMaterialOverrides": 1,
+        "semanticReservedBytes": 292685,
+        "uploadScratchBytes": 0,
+        "bulkUploads": 0,
+        "targetedRows": 1000,
+        "uploadedRows": 1000,
+        "bulkBytes": 0,
+        "drawCalls": 53,
+        "steadyAllocated": [
+          0,
+          0,
+          0
+        ],
+        "metrics": {
+          "initialUs": {
+            "mean": 27924.384000000002,
+            "median": 27893.397,
+            "min": 27784.798,
+            "max": 28094.957
+          },
+          "buildUs": {
+            "mean": 26778.758,
+            "median": 26756.418,
+            "min": 26688.968,
+            "max": 26890.888
+          },
+          "commitUs": {
+            "mean": 50.083333333333336,
+            "median": 49.06,
+            "min": 40.94,
+            "max": 60.25
+          },
+          "groupingUs": {
+            "mean": 409.28299999999996,
+            "median": 414.477,
+            "min": 388.823,
+            "max": 424.549
+          },
+          "groupPreparationUs": {
+            "mean": 1034.8836666666668,
+            "median": 1020.532,
+            "min": 998.632,
+            "max": 1085.487
+          },
+          "refreshTotalUs": {
+            "mean": 534.495,
+            "median": 535.097,
+            "min": 532.674,
+            "max": 535.714
+          },
+          "retireUs": {
+            "mean": 319.5303333333333,
+            "median": 322.197,
+            "min": 313.917,
+            "max": 322.477
+          },
+          "rebaseNsPerCall": {
+            "mean": 1128.9739583333333,
+            "median": 1028.77734375,
+            "min": 1010.6953125,
+            "max": 1347.44921875
+          },
+          "steadyNsPerFrame": {
+            "mean": 47.78515625,
+            "median": 47.791015625,
+            "min": 47.771484375,
+            "max": 47.79296875
+          },
+          "buildAllocated": {
+            "mean": 1362136,
+            "median": 1362136,
+            "min": 1362136,
+            "max": 1362136
+          },
+          "gpuMeanMs": {
+            "mean": 0.17491666755328575,
+            "median": 0.18124999850988388,
+            "min": 0.09500000160187483,
+            "max": 0.24850000254809856
+          },
+          "renderCpuMeanMs": {
+            "mean": 0.1417083339765668,
+            "median": 0.1426250021904707,
+            "min": 0.13975000102072954,
+            "max": 0.14274999871850014
+          },
+          "initialOutsideBuildCommitUs": {
+            "mean": 1095.5426666666656,
+            "median": 1087.9189999999994
+          }
+        }
+      },
+      {
+        "scale": 1000,
+        "backend": "NodeMultiMesh",
+        "upload": "Bulk",
+        "repetitions": 3,
+        "nodes": 91,
+        "groups": 54,
+        "coarseResourceCount": 63,
+        "groupVisualRids": 54,
+        "terrainMeshes": 9,
+        "distinctGroupMeshes": 3,
+        "distinctMaterialOverrides": 1,
+        "semanticReservedBytes": 292685,
+        "uploadScratchBytes": 8064,
+        "bulkUploads": 54,
+        "targetedRows": 0,
+        "uploadedRows": 1000,
+        "bulkBytes": 48000,
+        "drawCalls": 53,
+        "steadyAllocated": [
+          0,
+          0,
+          0
+        ],
+        "metrics": {
+          "initialUs": {
+            "mean": 28512.096,
+            "median": 28441.683,
+            "min": 27709.48,
+            "max": 29385.125
+          },
+          "buildUs": {
+            "mean": 27398.012666666666,
+            "median": 27331.343,
+            "min": 26593.651,
+            "max": 28269.044
+          },
+          "commitUs": {
+            "mean": 54.07566666666667,
+            "median": 55.289,
+            "min": 49.568,
+            "max": 57.37
+          },
+          "groupingUs": {
+            "mean": 405.16533333333336,
+            "median": 405.766,
+            "min": 396.055,
+            "max": 413.675
+          },
+          "groupPreparationUs": {
+            "mean": 1373.0653333333332,
+            "median": 1170.882,
+            "min": 1157.85,
+            "max": 1790.464
+          },
+          "refreshTotalUs": {
+            "mean": 557.3246666666666,
+            "median": 543.684,
+            "min": 541.636,
+            "max": 586.654
+          },
+          "retireUs": {
+            "mean": 318.474,
+            "median": 321.058,
+            "min": 310.077,
+            "max": 324.287
+          },
+          "rebaseNsPerCall": {
+            "mean": 1104.5872395833333,
+            "median": 1065.890625,
+            "min": 1035.9296875,
+            "max": 1211.94140625
+          },
+          "steadyNsPerFrame": {
+            "mean": 50.220703125,
+            "median": 47.79296875,
+            "min": 47.771484375,
+            "max": 55.09765625
+          },
+          "buildAllocated": {
+            "mean": 1364981.3333333333,
+            "median": 1362136,
+            "min": 1362136,
+            "max": 1370672
+          },
+          "gpuMeanMs": {
+            "mean": 0.20058333408087492,
+            "median": 0.2058749981224537,
+            "min": 0.18487499933689833,
+            "max": 0.21100000478327274
+          },
+          "renderCpuMeanMs": {
+            "mean": 0.13970833520094553,
+            "median": 0.13999999966472387,
+            "min": 0.13412500265985727,
+            "max": 0.14500000327825546
+          },
+          "initialOutsideBuildCommitUs": {
+            "mean": 1060.0076666666655,
+            "median": 1058.7109999999984
+          }
+        }
+      },
+      {
+        "scale": 1000,
+        "backend": "DirectRid",
+        "upload": "PerRow",
+        "repetitions": 3,
+        "nodes": 37,
+        "groups": 54,
+        "coarseResourceCount": 63,
+        "groupVisualRids": 54,
+        "terrainMeshes": 9,
+        "distinctGroupMeshes": 3,
+        "distinctMaterialOverrides": 1,
+        "semanticReservedBytes": 292685,
+        "uploadScratchBytes": 0,
+        "bulkUploads": 0,
+        "targetedRows": 1000,
+        "uploadedRows": 1000,
+        "bulkBytes": 0,
+        "drawCalls": 53,
+        "steadyAllocated": [
+          0,
+          0,
+          0
+        ],
+        "metrics": {
+          "initialUs": {
+            "mean": 27168.143666666667,
+            "median": 27222.133,
+            "min": 26707.428,
+            "max": 27574.87
+          },
+          "buildUs": {
+            "mean": 26035.28366666667,
+            "median": 26086.433,
+            "min": 25593.628,
+            "max": 26425.79
+          },
+          "commitUs": {
+            "mean": 54.672333333333334,
+            "median": 55.729,
+            "min": 45.919,
+            "max": 62.369
+          },
+          "groupingUs": {
+            "mean": 409.103,
+            "median": 410.475,
+            "min": 391.327,
+            "max": 425.507
+          },
+          "groupPreparationUs": {
+            "mean": 920.759,
+            "median": 929.372,
+            "min": 890.523,
+            "max": 942.382
+          },
+          "refreshTotalUs": {
+            "mean": 539.0776666666667,
+            "median": 528.314,
+            "min": 527.684,
+            "max": 561.235
+          },
+          "retireUs": {
+            "mean": 266.91433333333333,
+            "median": 249.067,
+            "min": 235.058,
+            "max": 316.618
+          },
+          "rebaseNsPerCall": {
+            "mean": 10684.203125,
+            "median": 10691,
+            "min": 10630.6484375,
+            "max": 10730.9609375
+          },
+          "steadyNsPerFrame": {
+            "mean": 3540.28125,
+            "median": 3504.890625,
+            "min": 3494.2265625,
+            "max": 3621.7265625
+          },
+          "buildAllocated": {
+            "mean": 1351336,
+            "median": 1351336,
+            "min": 1351336,
+            "max": 1351336
+          },
+          "gpuMeanMs": {
+            "mean": 0.19295833259820938,
+            "median": 0.20287499763071537,
+            "min": 0.102250000461936,
+            "max": 0.2737499997019768
+          },
+          "renderCpuMeanMs": {
+            "mean": 0.14225000080962977,
+            "median": 0.1366250030696392,
+            "min": 0.13037499971687794,
+            "max": 0.15974999964237213
+          },
+          "initialOutsideBuildCommitUs": {
+            "mean": 1078.187666666666,
+            "median": 1079.9710000000007
+          }
+        }
+      },
+      {
+        "scale": 1000,
+        "backend": "DirectRid",
+        "upload": "Bulk",
+        "repetitions": 3,
+        "nodes": 37,
+        "groups": 54,
+        "coarseResourceCount": 63,
+        "groupVisualRids": 54,
+        "terrainMeshes": 9,
+        "distinctGroupMeshes": 3,
+        "distinctMaterialOverrides": 1,
+        "semanticReservedBytes": 292685,
+        "uploadScratchBytes": 8064,
+        "bulkUploads": 54,
+        "targetedRows": 0,
+        "uploadedRows": 1000,
+        "bulkBytes": 48000,
+        "drawCalls": 53,
+        "steadyAllocated": [
+          0,
+          0,
+          0
+        ],
+        "metrics": {
+          "initialUs": {
+            "mean": 27974.380666666668,
+            "median": 27657.2,
+            "min": 27257.363,
+            "max": 29008.579
+          },
+          "buildUs": {
+            "mean": 26838.256999999998,
+            "median": 26517.859,
+            "min": 26136.982,
+            "max": 27859.93
+          },
+          "commitUs": {
+            "mean": 55.863,
+            "median": 59.54,
+            "min": 45.04,
+            "max": 63.009
+          },
+          "groupingUs": {
+            "mean": 404.087,
+            "median": 408.207,
+            "min": 384.814,
+            "max": 419.24
+          },
+          "groupPreparationUs": {
+            "mean": 1212.589,
+            "median": 1081.969,
+            "min": 1058.251,
+            "max": 1497.547
+          },
+          "refreshTotalUs": {
+            "mean": 529.3919999999999,
+            "median": 528.224,
+            "min": 527.287,
+            "max": 532.665
+          },
+          "retireUs": {
+            "mean": 260.228,
+            "median": 261.368,
+            "min": 246.968,
+            "max": 272.348
+          },
+          "rebaseNsPerCall": {
+            "mean": 10111.580729166666,
+            "median": 10105.96875,
+            "min": 10080.8515625,
+            "max": 10147.921875
+          },
+          "steadyNsPerFrame": {
+            "mean": 3507.8795572916665,
+            "median": 3461.845703125,
+            "min": 3454.16796875,
+            "max": 3607.625
+          },
+          "buildAllocated": {
+            "mean": 1351336,
+            "median": 1351336,
+            "min": 1351336,
+            "max": 1351336
+          },
+          "gpuMeanMs": {
+            "mean": 0.18987499984602133,
+            "median": 0.2168749999254942,
+            "min": 0.13512500002980232,
+            "max": 0.2176249995827675
+          },
+          "renderCpuMeanMs": {
+            "mean": 0.16145833333333334,
+            "median": 0.133500000461936,
+            "min": 0.13274999894201756,
+            "max": 0.21812500059604645
+          },
+          "initialOutsideBuildCommitUs": {
+            "mean": 1080.2606666666677,
+            "median": 1079.8010000000004
+          }
+        }
+      },
+      {
+        "scale": 5000,
+        "backend": "NodeMultiMesh",
+        "upload": "PerRow",
+        "repetitions": 3,
+        "nodes": 91,
+        "groups": 54,
+        "coarseResourceCount": 63,
+        "groupVisualRids": 54,
+        "terrainMeshes": 9,
+        "distinctGroupMeshes": 3,
+        "distinctMaterialOverrides": 1,
+        "semanticReservedBytes": 1178869,
+        "uploadScratchBytes": 0,
+        "bulkUploads": 0,
+        "targetedRows": 5000,
+        "uploadedRows": 5000,
+        "bulkBytes": 0,
+        "drawCalls": 53,
+        "steadyAllocated": [
+          0,
+          0,
+          0
+        ],
+        "metrics": {
+          "initialUs": {
+            "mean": 50678.133,
+            "median": 50032.806,
+            "min": 48960.334,
+            "max": 53041.259
+          },
+          "buildUs": {
+            "mean": 29503.472333333335,
+            "median": 29320.665,
+            "min": 28375.853,
+            "max": 30813.899
+          },
+          "commitUs": {
+            "mean": 51.98,
+            "median": 51.2,
+            "min": 49.69,
+            "max": 55.05
+          },
+          "groupingUs": {
+            "mean": 1825.3909999999998,
+            "median": 1791.227,
+            "min": 1779.966,
+            "max": 1904.98
+          },
+          "groupPreparationUs": {
+            "mean": 3759.167,
+            "median": 3696.076,
+            "min": 3614.407,
+            "max": 3967.018
+          },
+          "refreshTotalUs": {
+            "mean": 7844.042,
+            "median": 7527.895,
+            "min": 7507.434,
+            "max": 8496.797
+          },
+          "retireUs": {
+            "mean": 344.83366666666666,
+            "median": 338.187,
+            "min": 329.457,
+            "max": 366.857
+          },
+          "rebaseNsPerCall": {
+            "mean": 988.5065104166666,
+            "median": 969.875,
+            "min": 964.40625,
+            "max": 1031.23828125
+          },
+          "steadyNsPerFrame": {
+            "mean": 46.320963541666664,
+            "median": 45.703125,
+            "min": 45.46875,
+            "max": 47.791015625
+          },
+          "buildAllocated": {
+            "mean": 3062904,
+            "median": 3062904,
+            "min": 3062904,
+            "max": 3062904
+          },
+          "gpuMeanMs": {
+            "mean": 0.22487499890848994,
+            "median": 0.2707499973475933,
+            "min": 0.05687500024214387,
+            "max": 0.34699999913573265
+          },
+          "renderCpuMeanMs": {
+            "mean": 0.14495833280185857,
+            "median": 0.14549999870359898,
+            "min": 0.1342500001192093,
+            "max": 0.1551249995827675
+          },
+          "initialOutsideBuildCommitUs": {
+            "mean": 21122.680666666667,
+            "median": 20662.450999999997
+          }
+        }
+      },
+      {
+        "scale": 5000,
+        "backend": "NodeMultiMesh",
+        "upload": "Bulk",
+        "repetitions": 3,
+        "nodes": 91,
+        "groups": 54,
+        "coarseResourceCount": 63,
+        "groupVisualRids": 54,
+        "terrainMeshes": 9,
+        "distinctGroupMeshes": 3,
+        "distinctMaterialOverrides": 1,
+        "semanticReservedBytes": 1178869,
+        "uploadScratchBytes": 40032,
+        "bulkUploads": 54,
+        "targetedRows": 0,
+        "uploadedRows": 5000,
+        "bulkBytes": 240000,
+        "drawCalls": 53,
+        "steadyAllocated": [
+          0,
+          0,
+          0
+        ],
+        "metrics": {
+          "initialUs": {
+            "mean": 51204.578,
+            "median": 50417.061,
+            "min": 49310.452,
+            "max": 53886.221
+          },
+          "buildUs": {
+            "mean": 29926.892999999996,
+            "median": 29478.141,
+            "min": 28673.813,
+            "max": 31628.725
+          },
+          "commitUs": {
+            "mean": 50.75266666666667,
+            "median": 52.07,
+            "min": 41.799,
+            "max": 58.389
+          },
+          "groupingUs": {
+            "mean": 1825.0339999999999,
+            "median": 1770.204,
+            "min": 1762.404,
+            "max": 1942.494
+          },
+          "groupPreparationUs": {
+            "mean": 4326.528666666666,
+            "median": 4482.11,
+            "min": 3993.525,
+            "max": 4503.951
+          },
+          "refreshTotalUs": {
+            "mean": 7553.4310000000005,
+            "median": 7465.255,
+            "min": 7381.585,
+            "max": 7813.453
+          },
+          "retireUs": {
+            "mean": 334.93699999999995,
+            "median": 337.037,
+            "min": 316.997,
+            "max": 350.777
+          },
+          "rebaseNsPerCall": {
+            "mean": 1139.9778645833333,
+            "median": 1073.3125,
+            "min": 981.3984375,
+            "max": 1365.22265625
+          },
+          "steadyNsPerFrame": {
+            "mean": 45.755208333333336,
+            "median": 45.21484375,
+            "min": 44.2578125,
+            "max": 47.79296875
+          },
+          "buildAllocated": {
+            "mean": 3062200,
+            "median": 3062200,
+            "min": 3062200,
+            "max": 3062200
+          },
+          "gpuMeanMs": {
+            "mean": 0.2176666654025515,
+            "median": 0.28262499906122684,
+            "min": 0.06624999921768904,
+            "max": 0.3041249979287386
+          },
+          "renderCpuMeanMs": {
+            "mean": 0.1544583346694708,
+            "median": 0.15275000035762787,
+            "min": 0.1401250008493662,
+            "max": 0.1705000028014183
+          },
+          "initialOutsideBuildCommitUs": {
+            "mean": 21226.932333333334,
+            "median": 20897.121000000003
+          }
+        }
+      },
+      {
+        "scale": 5000,
+        "backend": "DirectRid",
+        "upload": "PerRow",
+        "repetitions": 3,
+        "nodes": 37,
+        "groups": 54,
+        "coarseResourceCount": 63,
+        "groupVisualRids": 54,
+        "terrainMeshes": 9,
+        "distinctGroupMeshes": 3,
+        "distinctMaterialOverrides": 1,
+        "semanticReservedBytes": 1178869,
+        "uploadScratchBytes": 0,
+        "bulkUploads": 0,
+        "targetedRows": 5000,
+        "uploadedRows": 5000,
+        "bulkBytes": 0,
+        "drawCalls": 53,
+        "steadyAllocated": [
+          0,
+          0,
+          0
+        ],
+        "metrics": {
+          "initialUs": {
+            "mean": 52189.01333333333,
+            "median": 53049.579,
+            "min": 50035.955,
+            "max": 53481.506
+          },
+          "buildUs": {
+            "mean": 30099.94233333333,
+            "median": 30610.244,
+            "min": 28889.35,
+            "max": 30800.233
+          },
+          "commitUs": {
+            "mean": 56.528999999999996,
+            "median": 59.41,
+            "min": 48.379,
+            "max": 61.798
+          },
+          "groupingUs": {
+            "mean": 1848.6546666666666,
+            "median": 1870.192,
+            "min": 1792.366,
+            "max": 1883.406
+          },
+          "groupPreparationUs": {
+            "mean": 3753.654,
+            "median": 3736.868,
+            "min": 3572.359,
+            "max": 3951.735
+          },
+          "refreshTotalUs": {
+            "mean": 7956.970333333334,
+            "median": 7822.231,
+            "min": 7582.944,
+            "max": 8465.736
+          },
+          "retireUs": {
+            "mean": 264.844,
+            "median": 258.038,
+            "min": 239.597,
+            "max": 296.897
+          },
+          "rebaseNsPerCall": {
+            "mean": 10022.4765625,
+            "median": 10094.75390625,
+            "min": 9784.9921875,
+            "max": 10187.68359375
+          },
+          "steadyNsPerFrame": {
+            "mean": 3443.9674479166665,
+            "median": 3414.033203125,
+            "min": 3304.287109375,
+            "max": 3613.58203125
+          },
+          "buildAllocated": {
+            "mean": 3051869.3333333335,
+            "median": 3052104,
+            "min": 3051400,
+            "max": 3052104
+          },
+          "gpuMeanMs": {
+            "mean": 0.20854166770974794,
+            "median": 0.2776250038295984,
+            "min": 0.05962499976158142,
+            "max": 0.288374999538064
+          },
+          "renderCpuMeanMs": {
+            "mean": 0.14304166690756878,
+            "median": 0.1447500018402934,
+            "min": 0.1362499985843897,
+            "max": 0.14812500029802322
+          },
+          "initialOutsideBuildCommitUs": {
+            "mean": 22032.542,
+            "median": 22390.956
+          }
+        }
+      },
+      {
+        "scale": 5000,
+        "backend": "DirectRid",
+        "upload": "Bulk",
+        "repetitions": 3,
+        "nodes": 37,
+        "groups": 54,
+        "coarseResourceCount": 63,
+        "groupVisualRids": 54,
+        "terrainMeshes": 9,
+        "distinctGroupMeshes": 3,
+        "distinctMaterialOverrides": 1,
+        "semanticReservedBytes": 1178869,
+        "uploadScratchBytes": 40032,
+        "bulkUploads": 54,
+        "targetedRows": 0,
+        "uploadedRows": 5000,
+        "bulkBytes": 240000,
+        "drawCalls": 53,
+        "steadyAllocated": [
+          0,
+          0,
+          0
+        ],
+        "metrics": {
+          "initialUs": {
+            "mean": 51498.73933333333,
+            "median": 51358.714,
+            "min": 49524.41,
+            "max": 53613.094
+          },
+          "buildUs": {
+            "mean": 30159.564333333332,
+            "median": 30173.577,
+            "min": 29116.637,
+            "max": 31188.479
+          },
+          "commitUs": {
+            "mean": 50.419000000000004,
+            "median": 48.759,
+            "min": 45.26,
+            "max": 57.238
+          },
+          "groupingUs": {
+            "mean": 2004.7169999999999,
+            "median": 1874.255,
+            "min": 1783.706,
+            "max": 2356.19
+          },
+          "groupPreparationUs": {
+            "mean": 4169.670333333333,
+            "median": 4128.954,
+            "min": 3874.536,
+            "max": 4505.521
+          },
+          "refreshTotalUs": {
+            "mean": 7638.097333333334,
+            "median": 7481.495,
+            "min": 7383.046,
+            "max": 8049.751
+          },
+          "retireUs": {
+            "mean": 246.11433333333332,
+            "median": 246.638,
+            "min": 241.218,
+            "max": 250.487
+          },
+          "rebaseNsPerCall": {
+            "mean": 9610.802083333334,
+            "median": 9415.38671875,
+            "min": 9394.29296875,
+            "max": 10022.7265625
+          },
+          "steadyNsPerFrame": {
+            "mean": 3321.9700520833335,
+            "median": 3278.349609375,
+            "min": 3177.765625,
+            "max": 3509.794921875
+          },
+          "buildAllocated": {
+            "mean": 3053173.3333333335,
+            "median": 3051400,
+            "min": 3051400,
+            "max": 3056720
+          },
+          "gpuMeanMs": {
+            "mean": 0.19333333506559333,
+            "median": 0.24062500335276127,
+            "min": 0.059874999802559614,
+            "max": 0.2795000020414591
+          },
+          "renderCpuMeanMs": {
+            "mean": 0.15737499917546907,
+            "median": 0.13337500113993883,
+            "min": 0.1331249987706542,
+            "max": 0.2056249976158142
+          },
+          "initialOutsideBuildCommitUs": {
+            "mean": 21288.756,
+            "median": 21127.898999999998
+          }
+        }
+      },
+      {
+        "scale": 10000,
+        "backend": "NodeMultiMesh",
+        "upload": "PerRow",
+        "repetitions": 3,
+        "nodes": 91,
+        "groups": 54,
+        "coarseResourceCount": 63,
+        "groupVisualRids": 54,
+        "terrainMeshes": 9,
+        "distinctGroupMeshes": 3,
+        "distinctMaterialOverrides": 1,
+        "semanticReservedBytes": 2289357,
+        "uploadScratchBytes": 0,
+        "bulkUploads": 0,
+        "targetedRows": 10000,
+        "uploadedRows": 10000,
+        "bulkBytes": 0,
+        "drawCalls": 53,
+        "steadyAllocated": [
+          0,
+          0,
+          0
+        ],
+        "metrics": {
+          "initialUs": {
+            "mean": 117430.962,
+            "median": 116681.365,
+            "min": 115729.274,
+            "max": 119882.247
+          },
+          "buildUs": {
+            "mean": 34743.23066666666,
+            "median": 34540.219,
+            "min": 33754.696,
+            "max": 35934.777
+          },
+          "commitUs": {
+            "mean": 59.79266666666666,
+            "median": 58.959,
+            "min": 56.3,
+            "max": 64.119
+          },
+          "groupingUs": {
+            "mean": 3576.0453333333335,
+            "median": 3562.98,
+            "min": 3481.709,
+            "max": 3683.447
+          },
+          "groupPreparationUs": {
+            "mean": 7171.331999999999,
+            "median": 7043.708,
+            "min": 7033.561,
+            "max": 7436.727
+          },
+          "refreshTotalUs": {
+            "mean": 28905.184666666668,
+            "median": 28765.42,
+            "min": 28376.303,
+            "max": 29573.831
+          },
+          "retireUs": {
+            "mean": 387.56333333333333,
+            "median": 401.917,
+            "min": 357.507,
+            "max": 403.266
+          },
+          "rebaseNsPerCall": {
+            "mean": 957.5182291666666,
+            "median": 960.421875,
+            "min": 950.3828125,
+            "max": 961.75
+          },
+          "steadyNsPerFrame": {
+            "mean": 44.341145833333336,
+            "median": 44.490234375,
+            "min": 43.80859375,
+            "max": 44.724609375
+          },
+          "buildAllocated": {
+            "mean": 5014498.666666667,
+            "median": 5014264,
+            "min": 5014264,
+            "max": 5014968
+          },
+          "gpuMeanMs": {
+            "mean": 0.23500000002483526,
+            "median": 0.25187499821186066,
+            "min": 0.16174999997019768,
+            "max": 0.29137500189244747
+          },
+          "renderCpuMeanMs": {
+            "mean": 0.14154166790346304,
+            "median": 0.14487500116229057,
+            "min": 0.13175000064074993,
+            "max": 0.14800000190734863
+          },
+          "initialOutsideBuildCommitUs": {
+            "mean": 82627.93866666667,
+            "median": 82084.846
+          }
+        }
+      },
+      {
+        "scale": 10000,
+        "backend": "NodeMultiMesh",
+        "upload": "Bulk",
+        "repetitions": 3,
+        "nodes": 91,
+        "groups": 54,
+        "coarseResourceCount": 63,
+        "groupVisualRids": 54,
+        "terrainMeshes": 9,
+        "distinctGroupMeshes": 3,
+        "distinctMaterialOverrides": 1,
+        "semanticReservedBytes": 2289357,
+        "uploadScratchBytes": 80064,
+        "bulkUploads": 54,
+        "targetedRows": 0,
+        "uploadedRows": 10000,
+        "bulkBytes": 480000,
+        "drawCalls": 53,
+        "steadyAllocated": [
+          0,
+          0,
+          0
+        ],
+        "metrics": {
+          "initialUs": {
+            "mean": 117598.59999999999,
+            "median": 117444.458,
+            "min": 117121.651,
+            "max": 118229.691
+          },
+          "buildUs": {
+            "mean": 35279.23366666667,
+            "median": 35229.226,
+            "min": 34760.077,
+            "max": 35848.398
+          },
+          "commitUs": {
+            "mean": 57.97333333333333,
+            "median": 59.1,
+            "min": 54.95,
+            "max": 59.87
+          },
+          "groupingUs": {
+            "mean": 3564.092666666667,
+            "median": 3574.307,
+            "min": 3540.509,
+            "max": 3577.462
+          },
+          "groupPreparationUs": {
+            "mean": 8069.469999999998,
+            "median": 8090.829,
+            "min": 7847.843,
+            "max": 8269.738
+          },
+          "refreshTotalUs": {
+            "mean": 28632.928,
+            "median": 28353.425,
+            "min": 28332.783,
+            "max": 29212.576
+          },
+          "retireUs": {
+            "mean": 416.65000000000003,
+            "median": 408.467,
+            "min": 377.097,
+            "max": 464.386
+          },
+          "rebaseNsPerCall": {
+            "mean": 1230.4713541666667,
+            "median": 1294.91015625,
+            "min": 940.5390625,
+            "max": 1455.96484375
+          },
+          "steadyNsPerFrame": {
+            "mean": 44.186197916666664,
+            "median": 44.2578125,
+            "min": 44.0234375,
+            "max": 44.27734375
+          },
+          "buildAllocated": {
+            "mean": 5014264,
+            "median": 5014264,
+            "min": 5014264,
+            "max": 5014264
+          },
+          "gpuMeanMs": {
+            "mean": 0.297499996299545,
+            "median": 0.2954999953508377,
+            "min": 0.2828749995678663,
+            "max": 0.3141249939799309
+          },
+          "renderCpuMeanMs": {
+            "mean": 0.13912500037501255,
+            "median": 0.13599999994039536,
+            "min": 0.13437499944120646,
+            "max": 0.14700000174343586
+          },
+          "initialOutsideBuildCommitUs": {
+            "mean": 82261.393,
+            "median": 82306.624
+          }
+        }
+      },
+      {
+        "scale": 10000,
+        "backend": "DirectRid",
+        "upload": "PerRow",
+        "repetitions": 3,
+        "nodes": 37,
+        "groups": 54,
+        "coarseResourceCount": 63,
+        "groupVisualRids": 54,
+        "terrainMeshes": 9,
+        "distinctGroupMeshes": 3,
+        "distinctMaterialOverrides": 1,
+        "semanticReservedBytes": 2289357,
+        "uploadScratchBytes": 0,
+        "bulkUploads": 0,
+        "targetedRows": 10000,
+        "uploadedRows": 10000,
+        "bulkBytes": 0,
+        "drawCalls": 53,
+        "steadyAllocated": [
+          0,
+          0,
+          0
+        ],
+        "metrics": {
+          "initialUs": {
+            "mean": 117888.61066666666,
+            "median": 118185.652,
+            "min": 116089.41,
+            "max": 119390.77
+          },
+          "buildUs": {
+            "mean": 34722.04466666666,
+            "median": 34898.687,
+            "min": 33903.956,
+            "max": 35363.491
+          },
+          "commitUs": {
+            "mean": 72.27933333333333,
+            "median": 70.3,
+            "min": 69.718,
+            "max": 76.82
+          },
+          "groupingUs": {
+            "mean": 3618.1323333333335,
+            "median": 3666.339,
+            "min": 3520.547,
+            "max": 3667.511
+          },
+          "groupPreparationUs": {
+            "mean": 7187.467666666666,
+            "median": 7193.448,
+            "min": 6986.78,
+            "max": 7382.175
+          },
+          "refreshTotalUs": {
+            "mean": 28717.52633333333,
+            "median": 28687.59,
+            "min": 28541.851,
+            "max": 28923.138
+          },
+          "retireUs": {
+            "mean": 314.5306666666667,
+            "median": 312.488,
+            "min": 308.747,
+            "max": 322.357
+          },
+          "rebaseNsPerCall": {
+            "mean": 9679.420572916666,
+            "median": 9386.44140625,
+            "min": 9317.33984375,
+            "max": 10334.48046875
+          },
+          "steadyNsPerFrame": {
+            "mean": 3288.056640625,
+            "median": 3307.001953125,
+            "min": 3201.142578125,
+            "max": 3356.025390625
+          },
+          "buildAllocated": {
+            "mean": 5003698.666666667,
+            "median": 5003464,
+            "min": 5003464,
+            "max": 5004168
+          },
+          "gpuMeanMs": {
+            "mean": 0.29387500137090683,
+            "median": 0.33375000208616257,
+            "min": 0.18012500181794167,
+            "max": 0.36775000020861626
+          },
+          "renderCpuMeanMs": {
+            "mean": 0.1424583327025175,
+            "median": 0.14649999886751175,
+            "min": 0.13362500071525574,
+            "max": 0.14724999852478504
+          },
+          "initialOutsideBuildCommitUs": {
+            "mean": 83094.28666666667,
+            "median": 83217.247
+          }
+        }
+      },
+      {
+        "scale": 10000,
+        "backend": "DirectRid",
+        "upload": "Bulk",
+        "repetitions": 3,
+        "nodes": 37,
+        "groups": 54,
+        "coarseResourceCount": 63,
+        "groupVisualRids": 54,
+        "terrainMeshes": 9,
+        "distinctGroupMeshes": 3,
+        "distinctMaterialOverrides": 1,
+        "semanticReservedBytes": 2289357,
+        "uploadScratchBytes": 80064,
+        "bulkUploads": 54,
+        "targetedRows": 0,
+        "uploadedRows": 10000,
+        "bulkBytes": 480000,
+        "drawCalls": 53,
+        "steadyAllocated": [
+          0,
+          0,
+          0
+        ],
+        "metrics": {
+          "initialUs": {
+            "mean": 119120.844,
+            "median": 118672.988,
+            "min": 117859.865,
+            "max": 120829.679
+          },
+          "buildUs": {
+            "mean": 35976.45933333333,
+            "median": 35927.166,
+            "min": 35088.165,
+            "max": 36914.047
+          },
+          "commitUs": {
+            "mean": 69.90933333333334,
+            "median": 68.539,
+            "min": 67.559,
+            "max": 73.63
+          },
+          "groupingUs": {
+            "mean": 3575.2780000000002,
+            "median": 3581.388,
+            "min": 3493.707,
+            "max": 3650.739
+          },
+          "groupPreparationUs": {
+            "mean": 8272.952333333335,
+            "median": 8211.208,
+            "min": 7812.664,
+            "max": 8794.985
+          },
+          "refreshTotalUs": {
+            "mean": 28721.880333333334,
+            "median": 28515.852,
+            "min": 28331.974,
+            "max": 29317.815
+          },
+          "retireUs": {
+            "mean": 308.661,
+            "median": 296.348,
+            "min": 272.928,
+            "max": 356.707
+          },
+          "rebaseNsPerCall": {
+            "mean": 9386.703125,
+            "median": 9292.61328125,
+            "min": 9291.9140625,
+            "max": 9575.58203125
+          },
+          "steadyNsPerFrame": {
+            "mean": 3231.2096354166665,
+            "median": 3216.18359375,
+            "min": 3213.52734375,
+            "max": 3263.91796875
+          },
+          "buildAllocated": {
+            "mean": 5003464,
+            "median": 5003464,
+            "min": 5003464,
+            "max": 5003464
+          },
+          "gpuMeanMs": {
+            "mean": 0.27670833220084506,
+            "median": 0.29799999855458736,
+            "min": 0.193249998614192,
+            "max": 0.3388749994337559
+          },
+          "renderCpuMeanMs": {
+            "mean": 0.1389166663090388,
+            "median": 0.13687499798834324,
+            "min": 0.13337499927729368,
+            "max": 0.14650000166147947
+          },
+          "initialOutsideBuildCommitUs": {
+            "mean": 83074.47533333335,
+            "median": 82704.14100000002
+          }
+        }
+      }
+    ],
+    "primitive": [
+      {
+        "count": 1,
+        "dirty": 1,
+        "perRowMedianNs": 42.379,
+        "bulkMedianNs": 501.985,
+        "allocationBytes": 0
+      },
+      {
+        "count": 4,
+        "dirty": 1,
+        "perRowMedianNs": 41.83,
+        "bulkMedianNs": 461.785,
+        "allocationBytes": 0
+      },
+      {
+        "count": 4,
+        "dirty": 4,
+        "perRowMedianNs": 138.568,
+        "bulkMedianNs": 720.703,
+        "allocationBytes": 0
+      },
+      {
+        "count": 16,
+        "dirty": 1,
+        "perRowMedianNs": 35.01,
+        "bulkMedianNs": 453.576,
+        "allocationBytes": 0
+      },
+      {
+        "count": 16,
+        "dirty": 4,
+        "perRowMedianNs": 137.459,
+        "bulkMedianNs": 730.933,
+        "allocationBytes": 0
+      },
+      {
+        "count": 16,
+        "dirty": 16,
+        "perRowMedianNs": 541.165,
+        "bulkMedianNs": 1847.942,
+        "allocationBytes": 0
+      },
+      {
+        "count": 64,
+        "dirty": 1,
+        "perRowMedianNs": 34.13,
+        "bulkMedianNs": 573.445,
+        "allocationBytes": 0
+      },
+      {
+        "count": 64,
+        "dirty": 4,
+        "perRowMedianNs": 133.729,
+        "bulkMedianNs": 847.992,
+        "allocationBytes": 0
+      },
+      {
+        "count": 64,
+        "dirty": 64,
+        "perRowMedianNs": 2140.43,
+        "bulkMedianNs": 6427.739,
+        "allocationBytes": 0
+      },
+      {
+        "count": 256,
+        "dirty": 1,
+        "perRowMedianNs": 33.73,
+        "bulkMedianNs": 1568.086,
+        "allocationBytes": 0
+      },
+      {
+        "count": 256,
+        "dirty": 4,
+        "perRowMedianNs": 132.339,
+        "bulkMedianNs": 1840.293,
+        "allocationBytes": 0
+      },
+      {
+        "count": 256,
+        "dirty": 256,
+        "perRowMedianNs": 9124.564,
+        "bulkMedianNs": 25034.474,
+        "allocationBytes": 0
+      },
+      {
+        "count": 1024,
+        "dirty": 1,
+        "perRowMedianNs": 34.28,
+        "bulkMedianNs": 5917.074,
+        "allocationBytes": 0
+      },
+      {
+        "count": 1024,
+        "dirty": 4,
+        "perRowMedianNs": 134.169,
+        "bulkMedianNs": 6179.081,
+        "allocationBytes": 0
+      },
+      {
+        "count": 1024,
+        "dirty": 1024,
+        "perRowMedianNs": 34444.805,
+        "bulkMedianNs": 100360.682,
+        "allocationBytes": 0
+      }
+    ]
+  }
+}

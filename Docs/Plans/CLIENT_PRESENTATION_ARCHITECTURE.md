@@ -1210,6 +1210,32 @@ A server may advertise compatible/recommended presentation settings, but the ren
 
 ---
 
+## Measured world-group realization (F1.9B)
+
+The [F1.9B comparison](../../_Benchmarks/Baselines/client-f1.9b-scalable-godot-backend-2026-09-25.md)
+keeps the existing chunk-local static/Multi/public grouping and places a concrete Godot native
+group owner below it. Mesh/material resources are borrowed from the resolved resource owner;
+the group owns its MultiMesh and either a MultiMeshInstance3D Node or a direct visual RID.
+Direct candidates explicitly own scenario assignment, combined transformed mesh AABB, global
+transform/visibility synchronization and release before borrowed resources retire. Native slots
+and RIDs remain diagnostics, not public identity or interaction authority. The semantic cache
+and bounds picker are independent from this choice.
+
+The measured production selection is **NodeMultiMesh/PerRow**. Direct RIDs substantially reduce
+SceneTree Nodes in the fixture but do not consistently improve complete realization CPU and
+increase idle/rebase service. Full bulk encoding/submission did not beat per-row setters through
+1,024 rows; no crossover threshold is selected. Both controls remain bounded constructor/test
+choices, not user settings or Game profiles. Public refresh still replaces the complete layer;
+there is no incremental entity-slot map, new terrain backend, or actor-tier implementation here.
+
+Real-native tests cover transforms, AABB/frustum culling, semantic picking, source replacement,
+fallback, display/scenario changes, high/low rebasing and disposal. Dummy headless tests certify
+only the explicitly available lifecycle behavior. Short GPU diagnostics and cold-build residuals
+do not establish a global minimum or sustained frame-rate rating. F1.10 and vegetation remain
+future work; the separate Remote world-material resolver integration gap is not closed by this seam.
+
+---
+
 # 27. BotW-style grass/vegetation: compact truth, huge presentation
 
 UltraSim should support dense decorative/interactable vegetation without representing each grass blade as an ECS entity.
