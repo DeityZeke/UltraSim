@@ -31,7 +31,25 @@ public readonly record struct GodotActorPresenterSnapshot(
     ulong PrimaryCuesPresented,
     ulong InteractCuesPresented,
     ulong LandingCuesPresented,
-    ulong VisualReplacements);
+    ulong VisualReplacements)
+{
+    public int DetailedActors { get; init; }
+    public int BatchedPrimitiveActors { get; init; }
+    public int CheapBatchGroups { get; init; }
+    public int CheapBatchRows { get; init; }
+    public int NativeBodyNodes { get; init; }
+    public int NativePresentationNodes { get; init; }
+    public ulong TierPromotions { get; init; }
+    public ulong TierDemotions { get; init; }
+    public ulong CheapTransformWrites { get; init; }
+    public ulong CheapBoundsWrites { get; init; }
+    public int CheapOwnedResources { get; init; }
+    public long CheapReservedPayloadBytes { get; init; }
+    public long RepresentationReservedPayloadBytes { get; init; }
+    public string ToDiagnosticText() => $"Actors detailed/cheap={DetailedActors}/{BatchedPrimitiveActors} " +
+        $"fallback={PrimitiveFallbackActors} batches/rows={CheapBatchGroups}/{CheapBatchRows} " +
+        $"promote/demote={TierPromotions}/{TierDemotions}";
+}
 
 public enum GodotActorMotionPhase : byte
 {
@@ -50,8 +68,9 @@ public readonly record struct GodotActorPresentationDiagnostics(
     bool InteractCueActive);
 
 /// <summary>
-/// Native realization of engine-neutral actor state. One actor root is earned by moving/nameplate/
-/// overhead anchors; terrain cells and ordinary public objects remain batched by the world renderer.
+/// Native realization of engine-neutral actor state. Semantic identity and presented pose survive
+/// transitions between Detailed hierarchy and bounded primitive MultiMesh rows. Labels do not
+/// mandate Detailed bodies; controlled/equipment/action/overhead features do.
 /// </summary>
 public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposable
 {
@@ -76,6 +95,12 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
     private readonly ClientActorDefinitionCatalog _catalog;
     private readonly IGodotActorVisualResolver? _visuals;
     private readonly ActorSlot[] _slots;
+    private readonly GodotPrimitiveActorBatches _batches;
+    private readonly ClientActorRepresentationSelector _selector;
+    private readonly ClientActorRepresentationCandidate[] _tierCandidates;
+    private readonly ClientActorRepresentationTier[] _tierResults;
+    private readonly int[] _tierOwners;
+    private ulong _promotions, _demotions;
     private readonly int _ownerThreadId = System.Environment.CurrentManagedThreadId;
     private bool _revealHeld;
     private WorldPublicEntityId _controlledActor;
@@ -102,18 +127,25 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         Node3D host,
         ClientActorDefinitionCatalog catalog,
         int maximumActors = 256,
-        IGodotActorVisualResolver? visuals = null)
+        IGodotActorVisualResolver? visuals = null,
+        ClientActorRepresentationPolicy? representationPolicy = null)
     {
         ArgumentNullException.ThrowIfNull(host);
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
-        if (maximumActors <= 0) throw new ArgumentOutOfRangeException(nameof(maximumActors));
+        if (maximumActors is < 1 or > 256) throw new ArgumentOutOfRangeException(nameof(maximumActors));
         _visuals = visuals;
         _slots = new ActorSlot[maximumActors];
+        _selector = new(maximumActors, representationPolicy ?? ClientActorRepresentationPolicy.ConceptDemo);
+        _tierCandidates = new ClientActorRepresentationCandidate[maximumActors];
+        _tierResults = new ClientActorRepresentationTier[maximumActors];
+        _tierOwners = new int[maximumActors];
         Root = new Node3D { Name = "Actors" };
         host.AddChild(Root);
+        _batches = new(Root, maximumActors);
     }
 
     public Node3D Root { get; }
+    public ClientActorRepresentationPolicy RepresentationPolicy => _selector.Policy;
 
     public bool ShouldBatch(in WorldPublicRecord record) =>
         !_catalog.TryGet(record.PrefabId, out _) &&
@@ -134,6 +166,8 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
     {
         EnsureOperational();
         if (!id.IsValid) throw new ArgumentOutOfRangeException(nameof(id));
+        int slot = Find(id);
+        if (slot >= 0) EnsureDetailed(slot); // prepare before changing the controlled lifetime
         bool newControlLifetime = !_controlledPoseAvailable || id != _controlledActor;
         _controlledActor = id;
         _controlledPosition = position;
@@ -145,10 +179,11 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
                 ulong.MaxValue - ControlledNameplateGraceMilliseconds
                     ? nowMilliseconds + ControlledNameplateGraceMilliseconds
                     : ulong.MaxValue;
-        int slot = Find(id);
         if (slot >= 0)
+        {
             ObserveMotion(
                 ref _slots[slot], position, _slots[slot].Record.VerticalPhase, nowMilliseconds);
+        }
         RefreshNameplates();
     }
 
@@ -223,7 +258,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         for (int index = 0; index < _slots.Length; index++)
         {
             ref ActorSlot slot = ref _slots[index];
-            if (!slot.Used) continue;
+            if (!slot.Used || slot.Tier != ClientActorRepresentationTier.Detailed) continue;
             ClientActorDefinition definition = slot.Record.Definition;
             Node3D? visual = _visuals.Instantiate(in definition);
             bool primitive = visual is null;
@@ -245,7 +280,9 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         if (!occurrence.CanPresentOverhead(currentServerGenerationId) ||
             expiresAtMilliseconds == 0 || Find(occurrence.PublicAnchor) < 0)
             return false;
-        ref ActorSlot slot = ref _slots[Find(occurrence.PublicAnchor)];
+        int index = Find(occurrence.PublicAnchor);
+        EnsureDetailed(index);
+        ref ActorSlot slot = ref _slots[index];
         slot.Overhead!.Text = occurrence.Text;
         slot.Overhead.Visible = true;
         slot.OverheadExpiresAtMilliseconds = expiresAtMilliseconds;
@@ -267,17 +304,41 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         if (index < 0) return false;
         ref ActorSlot slot = ref _slots[index];
         if (commandSequence <= slot.LastActionSequence) return false;
+        EnsureDetailed(index);
         slot.LastActionSequence = commandSequence;
         return PresentAction(
             ref slot, ClientPublicActorActionKind.Primary, commandSequence, nowMilliseconds);
     }
 
+    /// <summary>Detailed-only native feature/diagnostic access. Never required for identity or pose.</summary>
     public bool TryGetActorRoot(WorldPublicEntityId id, out Node3D? root)
     {
         EnsureOperational();
         int slot = Find(id);
         root = slot >= 0 ? _slots[slot].Root : null;
         return root is not null;
+    }
+
+    public bool TryGetRepresentationTier(WorldPublicEntityId id, out ClientActorRepresentationTier tier)
+    {
+        EnsureOperational(); int index = Find(id);
+        tier = index < 0 ? default : _slots[index].Tier;
+        return index >= 0;
+    }
+
+    public bool TryGetCheapActorDiagnostics(WorldPublicEntityId id, out GodotCheapActorDiagnostics diagnostics)
+    {
+        EnsureOperational(); int index = Find(id);
+        diagnostics = default;
+        return index >= 0 && _batches.TryGet(index, out diagnostics);
+    }
+
+    /// <summary>Diagnostic copy of the retained semantic input, never changed by tier/temporal selection.</summary>
+    public bool TryGetActorRecord(WorldPublicEntityId id, out ClientActorPresentationRecord record)
+    {
+        EnsureOperational(); int index = Find(id);
+        record = index < 0 ? default : _slots[index].Record;
+        return index >= 0;
     }
 
     /// <summary>
@@ -331,7 +392,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         int nameplates = 0;
         int overhead = 0;
         int primaryCues = 0;
-        int interactCues = 0;
+        int interactCues = 0, nodes = 1 + _batches.GroupCount, bodyNodes = _batches.GroupCount;
         for (int index = 0; index < _slots.Length; index++)
         {
             if (!_slots[index].Used) continue;
@@ -339,12 +400,28 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             if (_slots[index].Overhead?.Visible == true) overhead++;
             if (_slots[index].PrimaryCueStartedAtMilliseconds != 0) primaryCues++;
             if (_slots[index].InteractCue?.Visible == true) interactCues++;
+            nodes += _slots[index].NativeNodes;
+            bodyNodes += _slots[index].NativeBodyNodes;
+            if (_slots[index].Tier == ClientActorRepresentationTier.BatchedPrimitive &&
+                _slots[index].Nameplate is not null) nodes++;
         }
         return new GodotActorPresenterSnapshot(
             _active, _primitive, _animated, _equippedMainHands,
             nameplates, overhead, primaryCues, interactCues, _revealHeld,
             _added, _updated, _removed, _primaryCuesPresented,
-            _interactCuesPresented, _landingCuesPresented, _visualReplacements);
+            _interactCuesPresented, _landingCuesPresented, _visualReplacements)
+        {
+            DetailedActors = _active - _batches.Count, BatchedPrimitiveActors = _batches.Count,
+            CheapBatchGroups = _batches.GroupCount, CheapBatchRows = _batches.Count,
+            NativeBodyNodes = bodyNodes, NativePresentationNodes = nodes,
+            TierPromotions = _promotions, TierDemotions = _demotions,
+            CheapTransformWrites = _batches.TransformWrites, CheapBoundsWrites = _batches.BoundsWrites,
+            CheapOwnedResources = _batches.GroupCount * 3,
+            CheapReservedPayloadBytes = _batches.ReservedPayloadBytes,
+            RepresentationReservedPayloadBytes = (long)_slots.Length *
+                (System.Runtime.CompilerServices.Unsafe.SizeOf<ClientActorRepresentationCandidate>() +
+                 sizeof(byte) + sizeof(int) * 2 + sizeof(double)),
+        };
     }
 
     public void Dispose()
@@ -354,6 +431,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         _disposed = true;
         for (int index = 0; index < _slots.Length; index++)
             if (_slots[index].Used) Release(index);
+        _batches.Dispose();
         if (GodotObject.IsInstanceValid(Root))
         {
             Root.GetParent()?.RemoveChild(Root);
@@ -363,93 +441,115 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
 
     private void Add(in ClientActorPresentationRecord actor)
     {
-        if (Find(actor.Id) >= 0)
-            throw new InvalidOperationException("An actor presentation was added twice.");
+        if (Find(actor.Id) >= 0) throw new InvalidOperationException("An actor presentation was added twice.");
         int index = FindFree();
         if (index < 0) throw new InvalidOperationException("The native actor presentation is full.");
-        Node3D root = new() { Name = $"Actor_{actor.Id.Index}_{actor.Id.Generation}" };
-        ClientActorDefinition definition = actor.Definition;
-        Node3D? visual = _visuals?.Instantiate(in definition);
-        bool primitive = visual is null;
-        visual ??= CreatePrimitive(actor.Definition.VisualKind);
-        visual.Name = "Visual";
-        float scale = actor.Definition.VisualScalePermille / 1_000f;
-        visual.Scale *= new Vector3(scale, scale, scale);
-        root.AddChild(visual);
-        AnimationPlayer? animations = FindFirst<AnimationPlayer>(visual);
-        if (animations is not null)
+        var retained = new ActorSlot
         {
-            ConfigureAuthoritativeRootMotion(visual, animations);
-            ConfigureAnimationLoops(animations);
-        }
-        var nameplate = new Label3D
-        {
-            Name = "Nameplate",
-            Text = actor.DisplayLabel,
-            Position = new Vector3(
-                0, actor.Definition.NameplateHeightMillimeters * MillimetersToMeters, 0),
-            Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
-            NoDepthTest = true,
-            FontSize = 32,
-        };
-        root.AddChild(nameplate);
-        var effectsAnchor = new Marker3D
-        {
-            Name = "EffectsAnchor",
-            Position = new Vector3(
-                0, actor.Definition.EffectsHeightMillimeters * MillimetersToMeters, 0),
-        };
-        root.AddChild(effectsAnchor);
-        var overhead = new Label3D
-        {
-            Name = "OverheadSpeech",
-            Position = new Vector3(
-                0, (actor.Definition.NameplateHeightMillimeters + 400) * MillimetersToMeters, 0),
-            Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
-            NoDepthTest = true,
-            FontSize = 28,
-            Visible = false,
-            Modulate = new Color(1f, 1f, 0.86f),
-        };
-        root.AddChild(overhead);
-        Node3D mainHandSocket = CreateMainHandSocket(
-            root, visual, out Skeleton3D? mainHandSkeleton, out int mainHandBone);
-        Node3D primaryCue = CreateMainHandPresentation(out Node3D primaryActionPivot);
-        mainHandSocket.AddChild(primaryCue);
-        Node3D interactCue = CreateInteractCue();
-        effectsAnchor.AddChild(interactCue);
-        Root.AddChild(root);
-        SynchronizeMainHandSocketPosition(
-            root, mainHandSocket, mainHandSkeleton, mainHandBone);
-        NormalizeMainHandPresentationScale(mainHandSocket, primaryCue);
-        _slots[index] = new ActorSlot
-        {
-            Used = true,
-            Record = actor,
-            Root = root,
-            Visual = visual,
-            BaseVisualScale = visual.Scale,
-            Nameplate = nameplate,
-            Overhead = overhead,
-            PrimaryCue = primaryCue,
-            PrimaryActionPivot = primaryActionPivot,
-            MainHandSocket = mainHandSocket,
-            MainHandSkeleton = mainHandSkeleton,
-            MainHandBone = mainHandBone,
-            InteractCue = interactCue,
-            AnimationPlayer = animations,
-            PrimitiveFallback = primitive,
-            LastActionSequence = actor.ActionSequence,
-            LastVerticalPhase = actor.VerticalPhase,
+            Used = true, Record = actor, Tier = ClientActorRepresentationTier.Detailed,
+            LastActionSequence = actor.ActionSequence, LastVerticalPhase = actor.VerticalPhase,
             MotionPhase = ToMotionPhase(actor.VerticalPhase),
         };
-        _active++;
-        if (primitive) _primitive++;
-        if (animations is not null) _animated++;
-        SynchronizeMainHand(ref _slots[index], actor.MainHandPrefabId);
-        PlayMotionAnimation(ref _slots[index], _slots[index].MotionPhase, force: true);
-        SaturatingIncrement(ref _added);
-        ApplySlot(index, nowMilliseconds: 0);
+        bool mandatory = _controlledPoseAvailable && actor.Id == _controlledActor || actor.MainHandPrefabId != 0;
+        ClientMotionPose pose = ClientMotionPose.FromAuthority(actor.Position, actor.Orientation);
+        ClientMotionPose viewer = ClientMotionPose.FromAuthority(
+            _controlledPoseAvailable ? _controlledPosition : _origin, WorldYaw.Zero);
+        if (_selector.Policy.Enabled && !mandatory &&
+            ClientMotionPose.SpatialDistanceMillimeters(pose, viewer) > _selector.Policy.DemotionDistanceMillimeters)
+        {
+            _batches.Add(index, actor.Id, actor.Definition, ActorTransform(pose));
+            retained.Tier = ClientActorRepresentationTier.BatchedPrimitive;
+            _slots[index] = retained;
+        }
+        else
+        {
+            _slots[index] = PrepareDetailed(in retained);
+            CountDetailed(in _slots[index], 1);
+            _slots[index].Root!.Visible = true;
+        }
+        _active++; SaturatingIncrement(ref _added);
+        ApplySlot(index, 0);
+    }
+
+    // Hidden candidate construction cannot expose duplicate bodies at a native boundary.
+    // Only successful construction is committed; a failure leaves the old cheap identity intact.
+    private ActorSlot PrepareDetailed(in ActorSlot retained)
+    {
+        ClientActorPresentationRecord actor = retained.Record;
+        Node3D root = new() { Name = $"Actor_{actor.Id.Index}_{actor.Id.Generation}", Visible = false };
+        try
+        {
+            ClientActorDefinition definition = actor.Definition;
+            Node3D? visual = _visuals?.Instantiate(in definition);
+            bool primitive = visual is null;
+            visual ??= CreatePrimitive(actor.Definition.VisualKind);
+            visual.Name = "Visual";
+            float scale = actor.Definition.VisualScalePermille / 1_000f;
+            visual.Scale *= new Vector3(scale, scale, scale);
+            root.AddChild(visual);
+            AnimationPlayer? animations = FindFirst<AnimationPlayer>(visual);
+            if (animations is not null)
+            {
+                ConfigureAuthoritativeRootMotion(visual, animations);
+                ConfigureAnimationLoops(animations);
+            }
+            var nameplate = new Label3D
+            {
+                Name = "Nameplate",
+                Text = actor.DisplayLabel,
+                Position = new Vector3(
+                    0, actor.Definition.NameplateHeightMillimeters * MillimetersToMeters, 0),
+                Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
+                NoDepthTest = true,
+                FontSize = 32,
+            };
+            root.AddChild(nameplate);
+            var effectsAnchor = new Marker3D
+            {
+                Name = "EffectsAnchor",
+                Position = new Vector3(
+                    0, actor.Definition.EffectsHeightMillimeters * MillimetersToMeters, 0),
+            };
+            root.AddChild(effectsAnchor);
+            var overhead = new Label3D
+            {
+                Name = "OverheadSpeech",
+                Position = new Vector3(
+                    0, (actor.Definition.NameplateHeightMillimeters + 400) * MillimetersToMeters, 0),
+                Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
+                NoDepthTest = true,
+                FontSize = 28,
+                Visible = false,
+                Modulate = new Color(1f, 1f, 0.86f),
+            };
+            root.AddChild(overhead);
+            Node3D mainHandSocket = CreateMainHandSocket(
+                root, visual, out Skeleton3D? mainHandSkeleton, out int mainHandBone);
+            Node3D primaryCue = CreateMainHandPresentation(out Node3D primaryActionPivot);
+            mainHandSocket.AddChild(primaryCue);
+            Node3D interactCue = CreateInteractCue();
+            effectsAnchor.AddChild(interactCue);
+            Root.AddChild(root);
+            SynchronizeMainHandSocketPosition(
+                root, mainHandSocket, mainHandSkeleton, mainHandBone);
+            NormalizeMainHandPresentationScale(mainHandSocket, primaryCue);
+            ActorSlot slot = retained;
+            slot.Tier = ClientActorRepresentationTier.Detailed;
+            slot.Root = root; slot.Visual = visual; slot.BaseVisualScale = visual.Scale;
+            slot.Nameplate = nameplate; slot.Overhead = overhead;
+            slot.PrimaryCue = primaryCue; slot.PrimaryActionPivot = primaryActionPivot;
+            slot.MainHandSocket = mainHandSocket; slot.MainHandSkeleton = mainHandSkeleton;
+            slot.MainHandBone = mainHandBone; slot.InteractCue = interactCue;
+            slot.AnimationPlayer = animations; slot.PrimitiveFallback = primitive;
+            slot.PlayedMotionPhase = (GodotActorMotionPhase)byte.MaxValue;
+            slot.MainHandPrefabId = actor.MainHandPrefabId;
+            primaryCue.Visible = actor.MainHandPrefabId != 0 || slot.PrimaryCueStartedAtMilliseconds != 0;
+            PlayMotionAnimation(ref slot, slot.MotionPhase, force: true);
+            slot.NativeNodes = CountNative(root, includeLabels: true);
+            slot.NativeBodyNodes = CountNative(root, includeLabels: false);
+            return slot;
+        }
+        catch { if (GodotObject.IsInstanceValid(root)) root.Free(); throw; }
     }
 
     private void ReplaceVisual(int index, ref ActorSlot slot, Node3D visual, bool primitive)
@@ -503,6 +603,8 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         primaryCue.Visible = slot.MainHandPrefabId != 0 ||
             slot.PrimaryCueStartedAtMilliseconds != 0;
         PlayMotionAnimation(ref slot, slot.MotionPhase, force: true);
+        slot.NativeNodes = CountNative(root, includeLabels: true);
+        slot.NativeBodyNodes = CountNative(root, includeLabels: false);
         ApplySlot(index, _currentTimeMilliseconds);
     }
 
@@ -516,25 +618,26 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         if (slot.Record.Definition.VisualKind != actor.Definition.VisualKind ||
             slot.Record.Definition.VisualScalePermille != actor.Definition.VisualScalePermille)
         {
-            bool overheadVisible = slot.Overhead?.Visible == true;
-            string overheadText = slot.Overhead?.Text ?? string.Empty;
-            ulong overheadExpiry = slot.OverheadExpiresAtMilliseconds;
-            Release(index);
-            Add(in actor);
-            index = Find(actor.Id);
-            if (overheadVisible && index >= 0)
+            // Keep identity, temporal pose, sequence/expiry state even when the visual family changes.
+            if (slot.Tier == ClientActorRepresentationTier.BatchedPrimitive) _batches.Remove(index);
+            slot.Record = actor;
+            if (slot.Tier == ClientActorRepresentationTier.BatchedPrimitive)
+                _batches.Add(index, actor.Id, actor.Definition, ActorTransform(PresentedPose(in slot)));
+            else
             {
-                _slots[index].Overhead!.Text = overheadText;
-                _slots[index].Overhead!.Visible = true;
-                _slots[index].OverheadExpiresAtMilliseconds = overheadExpiry;
+                Node3D? visual = _visuals?.Instantiate(actor.Definition);
+                bool primitive = visual is null;
+                ReplaceVisual(index, ref slot, visual ?? CreatePrimitive(actor.Definition.VisualKind), primitive);
             }
-            return;
         }
         slot.Record = actor;
-        slot.Nameplate!.Text = actor.DisplayLabel;
-        slot.Nameplate.Position = new Vector3(
+        if (slot.Nameplate is not null) slot.Nameplate.Text = actor.DisplayLabel;
+        if (slot.Tier == ClientActorRepresentationTier.BatchedPrimitive &&
+            (actor.MainHandPrefabId != 0 || actor.ActionSequence > slot.LastActionSequence))
+            EnsureDetailed(index);
+        if (slot.Nameplate is not null) slot.Nameplate.Position = new Vector3(
             0, actor.Definition.NameplateHeightMillimeters * MillimetersToMeters, 0);
-        slot.Overhead!.Position = new Vector3(
+        if (slot.Overhead is not null) slot.Overhead.Position = new Vector3(
             0, (actor.Definition.NameplateHeightMillimeters + 400) * MillimetersToMeters, 0);
         if (previous.MainHandPrefabId != actor.MainHandPrefabId)
             SynchronizeMainHand(ref slot, actor.MainHandPrefabId);
@@ -559,22 +662,108 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
     {
         ref ActorSlot slot = ref _slots[index];
         if (!slot.Used) return;
-        if (slot.Root is not null && GodotObject.IsInstanceValid(slot.Root))
+        if (slot.Tier == ClientActorRepresentationTier.BatchedPrimitive)
         {
-            slot.Root.GetParent()?.RemoveChild(slot.Root);
-            slot.Root.Free();
+            _batches.Remove(index); slot.Nameplate?.Free();
         }
-        if (slot.PrimitiveFallback) _primitive--;
-        if (slot.AnimationPlayer is not null) _animated--;
-        if (slot.MainHandPrefabId != 0) _equippedMainHands--;
+        else RetireDetailed(ref slot);
         _active--;
         slot = default;
     }
 
     private void UpdateTransformsAndLifetimes(ulong nowMilliseconds)
     {
+        // F1.8A has already selected poses. Motion/cue eligibility is observed before tier selection.
+        int count = 0;
+        for (int index = 0; index < _slots.Length; index++)
+        {
+            ref ActorSlot slot = ref _slots[index];
+            if (!slot.Used) continue;
+            ClientMotionPose pose = PresentedPose(in slot);
+            if (nowMilliseconds != 0 && pose.TryGetWorldPosition(out WorldPosition position))
+                ObserveMotion(ref slot, position, slot.Record.VerticalPhase, nowMilliseconds);
+            bool mandatory = _controlledPoseAvailable && slot.Record.Id == _controlledActor ||
+                slot.Record.MainHandPrefabId != 0 ||
+                IsCueActive(slot.PrimaryCueStartedAtMilliseconds, PrimaryCueDurationMilliseconds) ||
+                IsCueActive(slot.InteractCueStartedAtMilliseconds, InteractCueDurationMilliseconds) ||
+                IsCueActive(slot.LandingCueStartedAtMilliseconds, LandingCueDurationMilliseconds) ||
+                slot.OverheadExpiresAtMilliseconds > _currentTimeMilliseconds;
+            _tierOwners[count] = index;
+            _tierCandidates[count++] = new(slot.Record.Id, pose, slot.Tier, mandatory);
+        }
+        ClientMotionPose viewer = ClientMotionPose.FromAuthority(
+            _controlledPoseAvailable ? _controlledPosition : _origin, WorldYaw.Zero);
+        _selector.Select(_tierCandidates.AsSpan(0, count), viewer, _tierResults);
+        for (int i = 0; i < count; i++)
+        {
+            int index = _tierOwners[i];
+            if (_tierResults[i] == ClientActorRepresentationTier.Detailed) EnsureDetailed(index);
+            else EnsureCheap(index);
+        }
         for (int index = 0; index < _slots.Length; index++)
             if (_slots[index].Used) ApplySlot(index, nowMilliseconds);
+        _batches.UpdateBounds();
+    }
+
+    private bool IsCueActive(ulong started, ulong duration) => started != 0 &&
+        _currentTimeMilliseconds >= started && _currentTimeMilliseconds - started < duration;
+
+    private ClientMotionPose PresentedPose(in ActorSlot slot) =>
+        ClientMotionPose.FromAuthority(_controlledPoseAvailable && slot.Record.Id == _controlledActor
+                ? _controlledPosition : slot.HasPresentedPose ? slot.PresentedPosition : slot.Record.Position,
+            _controlledPoseAvailable && slot.Record.Id == _controlledActor ? _controlledOrientation :
+                slot.HasPresentedPose ? slot.PresentedOrientation : slot.Record.Orientation);
+
+    private Transform3D ActorTransform(in ClientMotionPose pose) => new(
+        new Basis(Vector3.Up, pose.Orientation.Units * (MathF.Tau / WorldYaw.UnitsPerTurn)),
+        new Vector3(checked(pose.GlobalXMillimeters - _origin.GlobalXMillimeters) * MillimetersToMeters,
+            checked(pose.YMillimeters - _origin.YMillimeters) * MillimetersToMeters,
+            checked(pose.GlobalZMillimeters - _origin.GlobalZMillimeters) * MillimetersToMeters));
+
+    private void CountDetailed(in ActorSlot slot, int direction)
+    {
+        if (slot.PrimitiveFallback) _primitive += direction;
+        if (slot.AnimationPlayer is not null) _animated += direction;
+        if (slot.MainHandPrefabId != 0) _equippedMainHands += direction;
+    }
+
+    private void RetireDetailed(ref ActorSlot slot)
+    {
+        CountDetailed(in slot, -1);
+        slot.Root?.Free();
+        slot.Root = slot.Visual = slot.PrimaryCue = slot.PrimaryActionPivot = slot.MainHandSocket =
+            slot.InteractCue = null;
+        slot.Nameplate = slot.Overhead = null; slot.AnimationPlayer = null; slot.MainHandSkeleton = null;
+        slot.NativeNodes = slot.NativeBodyNodes = 0; slot.PrimitiveFallback = false;
+    }
+
+    private void EnsureDetailed(int index)
+    {
+        ref ActorSlot slot = ref _slots[index];
+        if (slot.Tier == ClientActorRepresentationTier.Detailed) return;
+        ActorSlot candidate = PrepareDetailed(in slot);
+        Label3D? oldNameplate = slot.Nameplate;
+        _batches.Remove(index); oldNameplate?.Free();
+        slot = candidate; CountDetailed(in slot, 1);
+        slot.Root!.Transform = ActorTransform(PresentedPose(in slot));
+        slot.Root.Visible = true;
+        SaturatingIncrement(ref _promotions);
+    }
+
+    private void EnsureCheap(int index)
+    {
+        ref ActorSlot slot = ref _slots[index];
+        if (slot.Tier == ClientActorRepresentationTier.BatchedPrimitive) return;
+        _batches.Add(index, slot.Record.Id, slot.Record.Definition, ActorTransform(PresentedPose(in slot)));
+        RetireDetailed(ref slot); slot.Tier = ClientActorRepresentationTier.BatchedPrimitive;
+        SaturatingIncrement(ref _demotions);
+    }
+
+    private static int CountNative(Node node, bool includeLabels)
+    {
+        int count = includeLabels || node is not Label3D ? 1 : 0;
+        foreach (Node child in node.GetChildren()) count += CountNative(child, includeLabels);
+        return count; // cold realization/visual replacement only, never a frame tree census
     }
 
     private void ApplySlot(int index, ulong nowMilliseconds)
@@ -586,8 +775,29 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             slot.HasPresentedPose ? slot.PresentedPosition : actor.Position;
         WorldYaw orientation = controlled ? _controlledOrientation :
             slot.HasPresentedPose ? slot.PresentedOrientation : actor.Orientation;
-        if (nowMilliseconds != 0)
-            ObserveMotion(ref slot, position, actor.VerticalPhase, nowMilliseconds);
+        bool controlledNameGrace = controlled &&
+            _currentTimeMilliseconds < _controlledNameplateExpiresAtMilliseconds;
+        bool showName = actor.NameplateEligible && (_revealHeld || controlledNameGrace);
+        if (slot.Tier == ClientActorRepresentationTier.BatchedPrimitive)
+        {
+            _batches.SetTransform(index, actor.Definition, ActorTransform(PresentedPose(in slot)));
+            if (showName && slot.Nameplate is null)
+            {
+                slot.Nameplate = new Label3D { Name = "CheapActorNameplate", Text = actor.DisplayLabel,
+                    Billboard = BaseMaterial3D.BillboardModeEnum.Enabled, NoDepthTest = true, FontSize = 32 };
+                Root.AddChild(slot.Nameplate);
+            }
+            if (!showName && slot.Nameplate is not null) { slot.Nameplate.Free(); slot.Nameplate = null; }
+            if (slot.Nameplate is not null)
+                slot.Nameplate.Position = ActorTransform(PresentedPose(in slot)).Origin +
+                    Vector3.Up * actor.Definition.NameplateHeightMillimeters * MillimetersToMeters;
+            // Expired feature clocks do not become new obligations after a later promotion.
+            if (!IsCueActive(slot.PrimaryCueStartedAtMilliseconds, PrimaryCueDurationMilliseconds)) slot.PrimaryCueStartedAtMilliseconds = 0;
+            if (!IsCueActive(slot.InteractCueStartedAtMilliseconds, InteractCueDurationMilliseconds)) slot.InteractCueStartedAtMilliseconds = 0;
+            if (!IsCueActive(slot.LandingCueStartedAtMilliseconds, LandingCueDurationMilliseconds)) slot.LandingCueStartedAtMilliseconds = 0;
+            if (slot.OverheadExpiresAtMilliseconds <= _currentTimeMilliseconds) slot.OverheadExpiresAtMilliseconds = 0;
+            return;
+        }
         slot.Root!.Position = new Vector3(
             checked(position.GlobalXMillimeters - _origin.GlobalXMillimeters) *
                 MillimetersToMeters,
@@ -597,10 +807,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         slot.Root.Rotation = new Vector3(
             0, orientation.Units * (MathF.Tau / WorldYaw.UnitsPerTurn), 0);
         SynchronizeMainHandSocketPosition(ref slot);
-        bool controlledNameGrace = controlled &&
-            _currentTimeMilliseconds < _controlledNameplateExpiresAtMilliseconds;
-        slot.Nameplate!.Visible = actor.NameplateEligible &&
-            (_revealHeld || controlledNameGrace);
+        slot.Nameplate!.Visible = showName;
         if (nowMilliseconds != 0 && slot.OverheadExpiresAtMilliseconds != 0 &&
             nowMilliseconds >= slot.OverheadExpiresAtMilliseconds)
         {
@@ -1110,6 +1317,8 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
     private struct ActorSlot
     {
         internal bool Used;
+        internal ClientActorRepresentationTier Tier;
+        internal int NativeNodes, NativeBodyNodes;
         internal ClientActorPresentationRecord Record;
         internal bool HasPresentedPose;
         internal WorldPosition PresentedPosition;

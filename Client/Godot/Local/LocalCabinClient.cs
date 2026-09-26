@@ -3745,8 +3745,7 @@ public partial class LocalCabinClient : Node3D
             {
                 ref readonly ClientActorPresentationRecord actor = ref _actorRows[index];
                 if (actor.PrefabId == prefabId &&
-                    _actorPresenter.TryGetActorRoot(actor.Id, out Node3D? root) &&
-                    root?.Visible == true && CountMeshInstances(root) != 0)
+                    _actorPresenter.TryGetPresentedPose(actor.Id, out _))
                     matched++;
             }
             return matched;

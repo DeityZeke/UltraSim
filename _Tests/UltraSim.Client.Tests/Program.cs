@@ -38,6 +38,7 @@ var tests = new (string Name, Action Body)[]
     ("DisplayModesResolveAndMigrateWithoutServerOwnership", ClientDisplayConfigurationTests.Run),
     ("CanonicalCameraRigsCropWithoutExpandingView", ClientCameraRigTests.Run),
     ("RemoteTemporalMotionIsBoundedAndAuthoritySeparate", ClientTemporalMotionTests.Run),
+    ("ActorRepresentationIsDeterministicBoundedAndTemporal", ClientActorRepresentationTests.Run),
     ("CapabilityMenuMatchesComposition", CapabilityMenuMatchesComposition),
 };
 

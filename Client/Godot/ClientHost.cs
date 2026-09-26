@@ -48,7 +48,8 @@ public partial class ClientHost :
     {
 #if ULTRASIM_ONLINE || ULTRASIM_COMPLETE
         if (_remotePlayable is not null)
-            return _remotePlayable.GetSnapshot().Renderer.ToDiagnosticText();
+            return _remotePlayable.GetSnapshot().Renderer.ToDiagnosticText() + "\n" +
+                _remotePlayable.GetSnapshot().Actors.ToDiagnosticText();
 #endif
         return base.SessionPresentationDiagnostics();
     }

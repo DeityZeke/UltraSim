@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource path="res://F110ActorTierAcceptance.cs" type="Script" id="1"]
+
+[node name="F110ActorTierAcceptance" type="Node3D"]
+script = ExtResource("1")

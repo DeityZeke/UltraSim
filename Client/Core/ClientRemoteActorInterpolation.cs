@@ -103,7 +103,15 @@ public sealed class ClientRemoteActorInterpolation
     public bool TrySample(WorldPublicEntityId id, long nowMicroseconds,
         out ClientResolvedMotionPose result)
     {
-        result = default;
+        bool available = TrySampleTemporal(id, nowMicroseconds, out var temporal);
+        result = temporal.Resolved;
+        return available;
+    }
+
+    public bool TrySampleTemporal(WorldPublicEntityId id, long nowMicroseconds,
+        out ClientActorTemporalPresentation temporal)
+    {
+        temporal = default;
         if (nowMicroseconds <= 0) return false;
         int index = Find(id);
         if (index < 0) return false;
@@ -119,11 +127,12 @@ public sealed class ClientRemoteActorInterpolation
         Sample first = GetSample(index, 0);
         if (actor.Count == 1 || target <= first.ReceivedMicroseconds)
         {
-            result = new ClientResolvedMotionPose(first.Pose,
+            var result = new ClientResolvedMotionPose(first.Pose,
                 actor.SnapPending ? ClientMotionPoseProvenance.DiscontinuitySnap :
                     ClientMotionPoseProvenance.HeldRemote);
             actor.SnapPending = false;
             Increment(ref _heldFrames);
+            temporal = Describe(id, first, first, target, result);
             return true;
         }
         for (int sampleIndex = 1; sampleIndex < actor.Count; sampleIndex++)
@@ -131,7 +140,7 @@ public sealed class ClientRemoteActorInterpolation
             Sample next = GetSample(index, sampleIndex);
             if (target > next.ReceivedMicroseconds) continue;
             Sample previous = GetSample(index, sampleIndex - 1);
-            result = new ClientResolvedMotionPose(
+            var result = new ClientResolvedMotionPose(
                 ClientMotionPose.Interpolate(previous.Pose, next.Pose,
                     target - previous.ReceivedMicroseconds,
                     next.ReceivedMicroseconds - previous.ReceivedMicroseconds),
@@ -139,15 +148,23 @@ public sealed class ClientRemoteActorInterpolation
                     ClientMotionPoseProvenance.InterpolatedRemote);
             actor.SnapPending = false;
             Increment(ref _interpolatedFrames);
+            temporal = Describe(id, previous, next, target, result);
             return true;
         }
-        result = new ClientResolvedMotionPose(GetSample(index, actor.Count - 1).Pose,
+        Sample newest = GetSample(index, actor.Count - 1);
+        var held = new ClientResolvedMotionPose(newest.Pose,
             actor.SnapPending ? ClientMotionPoseProvenance.DiscontinuitySnap :
                 ClientMotionPoseProvenance.HeldRemote);
         actor.SnapPending = false;
         Increment(ref _heldFrames);
+        temporal = Describe(id, newest, newest, target, held);
         return true;
     }
+
+    private ClientActorTemporalPresentation Describe(WorldPublicEntityId id,
+        in Sample previous, in Sample current, long target, in ClientResolvedMotionPose resolved) =>
+        new(_serverGeneration, id, previous.Version, current.Version, previous.Pose, current.Pose,
+            previous.ReceivedMicroseconds, current.ReceivedMicroseconds, target, resolved);
 
     public ClientRemoteActorInterpolationSnapshot GetSnapshot() => new(
         _serverGeneration, MaximumActors, SamplesPerActor, _active, _highWater,

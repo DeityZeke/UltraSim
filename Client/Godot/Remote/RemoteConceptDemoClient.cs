@@ -1679,8 +1679,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         {
             WorldPublicEntityId id = _actorMotionRows[index].Id;
             if (id == playable.PublicActor) continue;
-            if (_remoteMotion.TrySample(id, now, out ClientResolvedMotionPose pose))
-                _ = _actorPresenter.SetPresentedPose(id, pose.Pose);
+            if (_remoteMotion.TrySampleTemporal(id, now, out ClientActorTemporalPresentation temporal))
+                _ = _actorPresenter.SetPresentedPose(id, temporal.Resolved.Pose);
         }
         _actorPresenter.UpdateOriginAndLifetimes(_player, nowMilliseconds);
     }

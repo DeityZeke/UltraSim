@@ -710,6 +710,15 @@ public partial class T010PlayableWorldAcceptance : Node3D
                         completeResources.RetainedArtifactBytes == xBytes.Length + yBytes.Length,
                         "The content-backed X/Y native resource set was not exact and bounded.");
 
+                    // A policy-selected cheap body holds no hidden detailed instance across a
+                    // REAL User/Realm presentation-generation replacement.
+                    using var tieredPresenter = new GodotActorPresenter(this, definitions, 2, visuals);
+                    WorldPosition.TryFromGlobalMillimeters(130_000, 1_000, 5_000, out var farPosition);
+                    var tierId = new WorldPublicEntityId(902, 4);
+                    var tierActor = actor with { Id = tierId, Position = farPosition, MainHandPrefabId = 0 };
+                    tieredPresenter.Apply([new(ClientActorPresentationChangeKind.Added, tierId, tierActor)], position, 2_000);
+                    Expect(tieredPresenter.GetSnapshot() is { DetailedActors: 0, BatchedPrimitiveActors: 1 } &&
+                        !tieredPresenter.TryGetActorRoot(tierId, out _), "Cheap content actor retained a hidden root.");
                     byte[] userX = TintActorArtifact(xBytes);
                     ActorContentFixture userPack = CreateUserActorOverrideFixture(userX);
                     Expect(cache.TryInstallUserResourcePack(
@@ -748,6 +757,18 @@ public partial class T010PlayableWorldAcceptance : Node3D
                           VisibleOverheadLabels: 1, VisualReplacements: 2 },
                         "The User hot replacement discarded actor-local presentation state.");
 
+                    Expect(tieredPresenter.RefreshResolvedVisuals() == 0,
+                        "A cheap actor needlessly instantiated the User visual offscreen.");
+                    tieredPresenter.SetPresentedPose(tierId, ClientMotionPose.FromAuthority(position, WorldYaw.Zero));
+                    tieredPresenter.UpdateOriginAndLifetimes(position, 3_000);
+                    Expect(tieredPresenter.TryGetActorRoot(tierId, out Node3D? tierRoot) &&
+                        tierRoot is not null && tieredPresenter.GetSnapshot().AnimatedActors == 1 &&
+                        visuals.TryGetDiagnostics(ClientActorVisualKind.HumanX, out var promotedUser) &&
+                        promotedUser.FileHash == userResource.FileHash && promotedUser.Source == PresentationSourceKind.User,
+                        "Promotion resurrected pre-User actor content.");
+                    tieredPresenter.SetPresentedPose(tierId, ClientMotionPose.FromAuthority(farPosition, WorldYaw.Zero));
+                    tieredPresenter.UpdateOriginAndLifetimes(position, 4_000);
+
                     Expect(cache.TrySetEnabledUserResourcePacks([], out var disableError),
                         $"The user actor override could not be disabled: {disableError}.");
                     Expect(cache.TryOpenEnabledUserResourcePacks(
@@ -767,6 +788,14 @@ public partial class T010PlayableWorldAcceptance : Node3D
                         restoredResource.Source == PresentationSourceKind.Realm &&
                         restoredResource.FileHash == resource.FileHash,
                         "Disabling the user override did not restore the exact Realm presentation.");
+
+                    tieredPresenter.SetPresentedPose(tierId, ClientMotionPose.FromAuthority(position, WorldYaw.Zero));
+                    tieredPresenter.UpdateOriginAndLifetimes(position, 5_000);
+                    Expect(tieredPresenter.GetSnapshot().AnimatedActors == 1 &&
+                        visuals.TryGetDiagnostics(ClientActorVisualKind.HumanX, out var promotedRealm) &&
+                        promotedRealm.FileHash == resource.FileHash && promotedRealm.Source == PresentationSourceKind.Realm,
+                        "Post-disable promotion resurrected the User generation.");
+                    GD.Print("F1.10 REAL CONTENT TRANSITION PASS cheap=user-replaced promotion=current-user disable=current-realm");
 
                     GD.Print(
                         $"EVIDENCE D0.7b actor_root_preserved=true primitive_to_content=true " +
