@@ -562,6 +562,13 @@ public partial class T010PlayableWorldAcceptance : Node3D
             !xSocket.Basis.IsEqualApprox(idleHandBasis) &&
             xSocket.Basis.Scale.IsEqualApprox(Vector3.One),
             "Walk animation did not carry the equipped item with the complete hand transform.");
+        var walkingGrip = FindNamedDescendant(xRoot, "MainHandPresentation") as Node3D;
+        Vector3 expectedGripAxis = new Vector3(-0.20f, 0.34f, 0.92f).Normalized();
+        Expect(walkingGrip is not null && walkingGrip.GetParent() == xSocket &&
+            walkingGrip.Basis.Y.Normalized().IsEqualApprox(expectedGripAxis) &&
+            walkingGrip.GlobalBasis.Y.Normalized().IsEqualApprox(
+                (xRoot.GlobalBasis * walkingHandBasis * expectedGripAxis).Normalized()),
+            "Animated sword assurance must compare hand-local grip, not assume a world-down blade.");
         GD.Print("EVIDENCE D0.7a baked_bodies=2 bones_each=65 clips=Idle,Walk,Jump " +
             "animated=2 primitive=0 main_hand_socket=true scale_free_hand_basis=true " +
             "walk_transition=true");

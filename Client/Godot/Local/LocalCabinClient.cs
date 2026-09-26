@@ -3513,13 +3513,20 @@ public partial class LocalCabinClient : Node3D
         Vector2 tipPlanar = new(
             bladeTip.X - presentedActor.GlobalPosition.X,
             bladeTip.Z - presentedActor.GlobalPosition.Z);
+        // The grip is hand-local. A real Idle/Walk pose may rotate it away from world-down;
+        // asserting world-down here contradicted the native animated-hand contract and made
+        // this synchronous canary depend on whether it ran before the first native frame.
+        Vector3 expectedGripAxis = new Vector3(-0.20f, 0.34f, 0.92f).Normalized();
+        bool animatedHand = presentedActor.FindChild(
+            "Skeleton3D", recursive: true, owned: false) is Skeleton3D;
         if (!Mathf.IsEqualApprox(bladeSize.X, 0.055f) ||
             !Mathf.IsEqualApprox(bladeSize.Y, expectedBladeLengthMeters) ||
             !Mathf.IsEqualApprox(bladeSize.Z, 0.018f) ||
             !Mathf.IsEqualApprox(bladeTip.DistanceTo(bladeBase), expectedBladeLengthMeters) ||
             gripCenter.DistanceTo(presentedSocket.GlobalPosition) > 0.02f ||
-            bladeTip.Y > presentedSocket.GlobalPosition.Y - 0.65f ||
-            tipPlanar.Length() < socketPlanar.Length() + 0.10f)
+            !presentedSocket.Basis.Y.Normalized().IsEqualApprox(expectedGripAxis) ||
+            !animatedHand && (bladeTip.Y > presentedSocket.GlobalPosition.Y - 0.65f ||
+                tipPlanar.Length() < socketPlanar.Length() + 0.10f))
             throw new InvalidOperationException(
                 $"The equipped sword lost its one-handed proportions or outward/downward mount: " +
                 $"aabb={presentedBlade.Mesh.GetAabb()}, socket={presentedSocket.GlobalPosition}, " +
