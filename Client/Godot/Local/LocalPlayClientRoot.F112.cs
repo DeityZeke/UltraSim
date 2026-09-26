@@ -37,6 +37,7 @@ public abstract partial class LocalPlayClientRoot
             }
             _cabin.SetPhysicsProcess(true);
             _cabin.PrepareF112CentralControl();
+            _cabin.RunD00Acceptance(); // establish the existing authoritative pickup/equip prerequisite
             _cabin.RunF112ItemAcceptance(); // maintained equipped/action feature-required Detailed acceptance
             var equipment = _cabin.GetPresentationSnapshot();
             RetireCurrentSession(); ReturnToMainMenu("Native product control retired.");
