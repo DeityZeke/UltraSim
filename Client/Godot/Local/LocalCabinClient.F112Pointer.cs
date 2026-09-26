@@ -47,6 +47,11 @@ public partial class LocalCabinClient
             Vector2 application = ToApplication(output);
             GetTree().Root.WarpMouse(application);
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            // A late native resize may reapply the camera profile while crossing this frame.
+            // Reestablish the diagnostic view before exercising the shipping nomination.
+            _camera.Position = center + new Vector3(0, 6, 6);
+            _camera.LookAt(center);
+            _camera.ForceUpdateTransform();
             UpdatePointerWorldPoint(); // the shipping mouse->frame->output->camera nomination, not just math
             if (!_sessionUi.TryToOutput(application, out Vector2 mapped) ||
                 !TryPickPresentedPublicObject(_camera.ProjectRayOrigin(mapped),
@@ -58,6 +63,7 @@ public partial class LocalCabinClient
             string? interaction = null;
             if (checkInteraction && prefab == GameWorldPublicPrefabIds.InformationalSign)
             {
+                SubmitF112Stop(); // seed restored focus before the fresh press; refocus must not manufacture edges
                 if (!_sequencer!.TryCreateSemanticCommand(new ClientWorldCommandIntent(
                         GameLocomotionUpdate.Stop, GamePlayerActions.Interact, true), out GamePlayerCommand use))
                     throw new InvalidOperationException("Mapped sign interaction could not be formed.");
