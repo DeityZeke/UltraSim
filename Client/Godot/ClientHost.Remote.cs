@@ -111,7 +111,7 @@ public partial class ClientHost
                     }
                 }
                 if (playable.State == RemoteConceptDemoClientState.Active &&
-                    ShellSnapshot().Screen != ClientShellScreen.InSession)
+                    ShellSnapshot().Screen == ClientShellScreen.Loading)
                     CommitSession("Remote Concept Demo active.");
                 if (IsRemoteSmoke() && !_remoteSmokeDisconnectStarted &&
                     (_remoteSmokeValidated ||
