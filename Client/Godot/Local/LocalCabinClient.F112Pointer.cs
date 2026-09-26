@@ -2,6 +2,7 @@ using Godot;
 using UltraSim.Client.Core;
 using UltraSim.Client.Local;
 using UltraSim.Game.Composition;
+using UltraSim.Game.Input;
 using UltraSim.Game.World;
 
 namespace UltraSim.Client.Godot;
@@ -21,11 +22,12 @@ public partial class LocalCabinClient
         return _actorPresenter!.GetSnapshot();
     }
     /// <summary>Cold native product control: nominate through the actual frame mapping and camera ray.</summary>
-    public async Task<object> RunF112PointerControl()
+    public async Task<object> RunF112PointerControl(bool checkInteraction = false)
     {
         if (_camera is null || _sessionUi is null || _actorPresenter is null)
             throw new InvalidOperationException("Native pointer consumer is unavailable.");
         SetPhysicsProcess(false); // one exact retained disclosure/pose, no synthetic entities
+        LocalPlayableAuthorityView initialAuthority = ReadF112Authority();
         var results = new List<object>(4);
         foreach (uint prefab in new[] { GameWorldPublicPrefabIds.WoodlandAnimal,
             GameWorldPublicPrefabIds.IronSword, GameWorldPublicPrefabIds.InformationalSign })
@@ -53,10 +55,25 @@ public partial class LocalCabinClient
                 throw new InvalidOperationException($"Native camera ray nominated wrong identity for {prefab}.");
             _pointerTarget = id; _pointerTargetPrefab = picked; _pointerPoint = point; _pointerPointValid = true;
             Select(point); // unchanged product semantic selection path; Game still authorizes Interact
+            string? interaction = null;
+            if (checkInteraction && prefab == GameWorldPublicPrefabIds.InformationalSign)
+            {
+                if (!_sequencer!.TryCreateSemanticCommand(new ClientWorldCommandIntent(
+                        GameLocomotionUpdate.Stop, GamePlayerActions.Interact, true), out GamePlayerCommand use))
+                    throw new InvalidOperationException("Mapped sign interaction could not be formed.");
+                ApplyCommand(use, false, default, false);
+                DriveLocalUntil(() => ReadF112Authority().LastCommandSequence == use.Sequence);
+                interaction = ReadF112Authority().LastCommandResult.Interaction.ToString();
+                // This disclosed fallback-lab sign is deliberately beyond reach at PlayerStart.
+                if (ReadF112Authority().LastCommandResult.Interaction != GameWorldActionStatus.OutOfRange)
+                    throw new InvalidOperationException("Display mapping changed the authoritative sign range result.");
+                SubmitF112Stop();
+            }
             results.Add(new { Kind = "Public", record.Id, record.EntityPublicVersion, prefab,
                 Application = application.ToString(), ObservedMouse = GetTree().Root.GetMousePosition().ToString(),
                 Output = mapped.ToString(), Selection = _selection.ToString(),
-                Point = point, Tier = _actorPresenter.TryGetRepresentationTier(id, out var tier) ? tier.ToString() : null });
+                Point = point, interaction,
+                Tier = _actorPresenter.TryGetRepresentationTier(id, out var tier) ? tier.ToString() : null });
         }
         Vector3 ground = new(2, 0, -2);
         _camera.Position = ground + new Vector3(0, 6, 6); _camera.LookAt(ground);
@@ -75,7 +92,14 @@ public partial class LocalCabinClient
         Select(_pointerPoint);
         results.Add(new { Kind = "Ground", Application = groundApplication.ToString(),
             Output = groundOutput.ToString(), Point = _pointerPoint, Selection = _selection.ToString() });
-        return new { Results = results, Snapshot = GetPresentationSnapshot() };
+        LocalPlayableAuthorityView finalAuthority = ReadF112Authority();
+        if (initialAuthority.PlayerPosition != finalAuthority.PlayerPosition ||
+            initialAuthority.PublicActor != finalAuthority.PublicActor ||
+            initialAuthority.GenerationId != finalAuthority.GenerationId ||
+            initialAuthority.MainHandPrefabId != finalAuthority.MainHandPrefabId)
+            throw new InvalidOperationException("Native pointer/display changed authoritative actor state.");
+        return new { Results = results, InitialAuthority = initialAuthority.PlayerPosition,
+            FinalAuthority = finalAuthority.PlayerPosition, Snapshot = GetPresentationSnapshot() };
 
         Vector2 ToApplication(Vector2 output)
         {

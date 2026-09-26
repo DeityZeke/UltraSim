@@ -22,7 +22,7 @@ public abstract partial class LocalPlayClientRoot
             await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
             StartLocalCabin(CabinContentVariant.Default, CabinHumanBody.XBot, useConceptDemoWorld: true);
             await AwaitF112Boundary(GetTree(), SceneTree.SignalName.PhysicsFrame);
-            object pointer = await RunF112PointerSettingsAcceptance(_cabin!.RunF112PointerControl);
+            object pointer = await RunF112PointerSettingsAcceptance(() => _cabin!.RunF112PointerControl(checkInteraction: true));
             await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
             await AwaitF112Boundary(GetTree(), SceneTree.SignalName.PhysicsFrame);
             var tiers = new List<object>(3);
@@ -31,6 +31,7 @@ public abstract partial class LocalPlayClientRoot
                 object tier = _cabin.RunF112TierControl(far);
                 object targets = await _cabin.RunF112PointerControl();
                 var visible = _cabin.SetF112Reveal(true);
+                await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
                 object image = CaptureF112Output(System.IO.Path.Combine(directory, $"tier-{tiers.Count}.png"), _ => { });
                 var hidden = _cabin.SetF112Reveal(false);
                 tiers.Add(new { tier, targets, image, visible, hidden });
@@ -122,9 +123,15 @@ public abstract partial class LocalPlayClientRoot
             Stage("acceptance-complete");
             if (passiveReadyControl)
             {
-                Stage("passive-ready-post-draw-wait");
-                await AwaitF112Boundary(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
-                Stage("passive-ready-post-draw-complete");
+                for (int draw = 0; draw < 3; draw++)
+                {
+                    Stage($"passive-ready-post-draw-wait-{draw}");
+                    Task original = OriginalDrawWait();
+                    if (await Task.WhenAny(original, Task.Delay(TimeSpan.FromSeconds(8))) != original)
+                        throw new TimeoutException($"Original FramePostDraw await {draw} stalled for 8 seconds.");
+                    await original;
+                    Stage($"passive-ready-post-draw-complete-{draw}");
+                }
             }
             cabin.SetPhysicsProcess(false); // retain this exact semantic projection across lighting/camera previews
             await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
@@ -180,6 +187,8 @@ public abstract partial class LocalPlayClientRoot
                         environment.Shadows, Background = environment.BackgroundColor.ToHtml(),
                         Ambient = environment.AmbientColor.ToHtml(), environment.AmbientEnergy } });
             }
+            async Task OriginalDrawWait() =>
+                await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
         }
         catch (Exception exception)
         {
