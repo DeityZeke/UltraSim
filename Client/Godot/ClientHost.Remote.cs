@@ -1331,6 +1331,9 @@ public partial class ClientHost
                 string directory = Path.GetDirectoryName(ReadRequiredF07Argument("--f1-12-mixed-evidence="))!;
                 string imagePath = Path.Combine(directory, $"remote-{displayName.Replace(' ', '-')}.png");
                 renderedControl = new { samples, Image = CaptureF112Output(imagePath, _ => { }), ImagePath = imagePath };
+                // The four-second observation outlives smoke speech. Recreate the surface through
+                // real Chat instead of weakening the existing retirement-canary requirement.
+                await playable.RefreshF112RetirementSpeech();
             }
             RemoteConceptDemoLifecycleResidueSnapshot residue =
                 playable.PrepareF07RetirementCanary();
