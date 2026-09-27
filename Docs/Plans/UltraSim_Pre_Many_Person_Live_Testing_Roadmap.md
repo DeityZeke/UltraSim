@@ -646,6 +646,7 @@ Required first-stage capabilities:
 - explicit package/module lifecycle hooks such as registration/configuration/initialization rather than arbitrary static side effects;
 - standard registration seams for commands/actions, Control Plane providers, definition facets, definitions, ECS systems, Engine capabilities, and UI/control providers;
 - one sample server/shard package that demonstrates the complete author workflow.
+- use first-party/reference content/packages to dogfood the same public authoring seams expected of external server authors; do not maintain a privileged hidden authoring path for stock Game content without an explicit architectural reason.
 
 This is normal C# authoring. Do not replace it with a limited pseudo-language merely to make dynamic loading easier.
 
@@ -1443,7 +1444,7 @@ Liquid authority remains separate from rendering. A body can semantically contai
 
 This work may be pulled forward in parallel with P1–P4 when World/content authoring needs real water; it is not required to wait for every Framework/Engine extraction checkpoint if its contract remains narrow and typed.
 
-The broader Forge-inspired Engine/modding catalog is tracked separately in [FUTURE_ENGINE_MODDING_BACKLOG.md](FUTURE_ENGINE_MODDING_BACKLOG.md). Only items explicitly promoted into this roadmap become current campaign requirements.
+The broader authoring/extensibility catalog is tracked separately in [FUTURE_CONTENT_AND_ENGINE_EXTENSIBILITY.md](FUTURE_CONTENT_AND_ENGINE_EXTENSIBILITY.md). It studies useful lessons from Forge/RunUO-style extension layers, but the objective is to improve UltraSim's normal first-party content/Engine authoring path rather than create a separate Mod API. Only items explicitly promoted into this roadmap become current campaign requirements.
 
 ---
 
@@ -1676,6 +1677,7 @@ Prove removable Engine Cores and cross-Engine definition composition without lat
 - explicit required-capability semantics.
 - semantic asset IDs.
 - representative cross-feature item definitions.
+- prove at least one representative first-party Game definition/content addition uses the same facet/tag/contract seams intended for external packages.
 
 ### Representative proof
 
@@ -2092,9 +2094,13 @@ Do not build full historical V2 credentials/RBAC merely because it existed if Mo
 
 ## PF6 — Closed external human validation
 
-PF6 is not the mass live test.
+PF6 is not the mass live test, and it is not a claim that “the game is complete.”
 
-It is a bounded closed validation with enough representative product quality that humans can judge things automation cannot.
+It is a bounded closed validation of a representative real slice: enough architecture, authoring/composition, product behavior and presentation must exist together that humans can judge whether the platform is stable and usable under an intended scenario rather than merely passing isolated subsystem tests.
+
+By PF6, the project should have exercised its own normal content-authoring seams substantially enough that, after PF6 defects are repaired, expanding UltraSim increasingly means adding definitions, profiles, scripts, packages and content rather than repeatedly inventing bespoke engine hooks.
+
+It has enough representative product quality that humans can judge things automation cannot.
 
 ### Human evaluation focus
 
