@@ -59,7 +59,7 @@ persistence/migration
 presentation/audio contracts
 ~~~
 
-Do not expose arbitrary internals merely because a mod author asks for access.
+Do not expose arbitrary internals merely because a first-party or community author asks for access.
 
 ---
 
@@ -448,7 +448,7 @@ Hooks must have explicit owner, bounds, ordering and failure semantics.
 
 # 3. Runtime capability / attachment model
 
-A Forge-like capability/attachment idea maps well to UltraSim's hybrid OOP + ECS architecture, but should remain strongly typed.
+Capability/attachment patterns seen in Forge-like extension layers map well to UltraSim's hybrid OOP + ECS architecture, but should be adopted as normal strongly typed authoring/runtime seams rather than as a separate mod-only mechanism.
 
 Potential attachment owners:
 
@@ -939,7 +939,7 @@ Cold generation is acceptable if it produces a small predictable runtime machine
 
 ## 7.2 Package-authored scenario tests
 
-A future GameTest-like authoring surface would be valuable.
+A future package-authored scenario-test surface, inspired by GameTest-style workflows, would be valuable for both first-party and community packages.
 
 Example:
 
