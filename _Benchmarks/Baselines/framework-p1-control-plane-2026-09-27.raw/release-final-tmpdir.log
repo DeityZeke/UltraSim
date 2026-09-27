@@ -1,0 +1,11 @@
+PASS active project dependency boundaries
+PASS built-in client presentation assets
+PASS single-project client export composition
+PASS documentation architecture and links
+VERIFY configuration=Release
+> dotnet run --project _Tools/NetworkFlavorProbe/UltraSim.NetworkFlavorProbe.csproj -c Release -- "/mnt/data/mega/Godot Projects/UltraSim/.output/p1-controls/p1-release.0wQdul/ultrasim-repository-verification/2835857/Release/network-capabilities/Full.json"
+Unhandled exception. System.InvalidOperationException: 'dotnet' exited with code 135.
+   at Program.<<Main>$>g__Run|0_65(String root, String executable, IEnumerable`1 arguments, IReadOnlyDictionary`2 environment) in /mnt/data/mega/Godot Projects/UltraSim/_Tools/RepositoryVerification/Program.cs:line 6377
+   at Program.<>c__DisplayClass0_4.<<Main>$>g__RunProbe|162(String flavor, Boolean explicitSelection) in /mnt/data/mega/Godot Projects/UltraSim/_Tools/RepositoryVerification/Program.cs:line 2822
+   at Program.<<Main>$>g__VerifyNetworkCapabilityArtifacts|0_19(String root, String configuration) in /mnt/data/mega/Godot Projects/UltraSim/_Tools/RepositoryVerification/Program.cs:line 2718
+   at Program.<Main>$(String[] args) in /mnt/data/mega/Godot Projects/UltraSim/_Tools/RepositoryVerification/Program.cs:line 2438

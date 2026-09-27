@@ -675,7 +675,8 @@ HTTP is a transport. Neither a website database schema nor client-private DTO de
 Future projections should be committed/bounded snapshots, not direct access to mutable authority.
 
 **Current sequencing after [R3 closure](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3.md):**
-F1.12/Gate 0 closed; P1 Framework Control Plane next;
+F1.12/Gate 0 closed; P1 Framework Control Plane active with its
+[canonical native export gate open](../../_Benchmarks/Baselines/framework-p1-control-plane-2026-09-27.md);
 P2–P11 and Gate 1 planned. PF6 remains planned/not ready/not started until the broader
 productization and identity/character-mode gate. Many-player live testing is not ready.
 The integrated production candidate is `cc937185ce630fdb707e51bdee6372f550ff77b0` (uninterrupted

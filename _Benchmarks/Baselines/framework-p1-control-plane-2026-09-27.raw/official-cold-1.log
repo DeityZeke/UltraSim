@@ -1,0 +1,5 @@
+Godot Engine v4.7.1.stable.mono.official.a13da4feb - https://godotengine.org
+
+ULTRASIM CLIENT READY edition=Single Player capabilities=SinglePlayer,Settings,Exit screen=MainMenu settings=Loaded
+T0.10 PLAYABLE CLIENT READY chunks=49 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+F1.4 OFFICIAL LOCAL PASS mode=installed manifest=e4b767436784db6c42447d4fbbcf58e0c653bd168e81582fa6f1d1962821aaad plan=e6fd8000f009acf952e5f024b28e3a130fd72085e042b97a70ef36bd02b5192a actors=2 animated=1 primitive=1 localSelections=2 blobs=5 livePins=9/2

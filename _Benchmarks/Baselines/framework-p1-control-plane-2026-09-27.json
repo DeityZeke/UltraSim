@@ -1,0 +1,87 @@
+{
+  "checkpoint": "P1 Framework Control Plane",
+  "date": "2026-09-27",
+  "status": "active_canonical_release_not_passed",
+  "startingHead": "fe57d9295fd4ff149ff1f96f849ca0fe6bca434a",
+  "interveningDocsOnlyHead": "9c3bb78a47ff95ccc8ce0f2750ada535df15587e",
+  "gate0ProductionHead": "e3a63ea21f8f5ea4fa69e3768a055c409edc8616",
+  "implementationCommit": "2efff975cfa40f3fbdf2746f1fca6a24d72f513d",
+  "testedSourceCommit": "942398c8378fa41c07f4f6ead0ff21d74203fc32",
+  "environment": {
+    "os": "Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D 8-core/16-thread",
+    "configuration": "Release",
+    "dotnetSdk": "8.0.131",
+    "dotnetRuntime": "8.0.31",
+    "godot": "4.7.1 Mono"
+  },
+  "contracts": {
+    "valueKinds": ["Bool", "Int64", "UInt64", "Float64", "Text", "Option"],
+    "publicationKinds": ["Diagnostic", "Control", "Action", "Collection"],
+    "maximumProviders": 64,
+    "maximumPublicationsPerProvider": 512,
+    "maximumIdCharacters": 96,
+    "maximumCategoryCharacters": 192,
+    "maximumCategoryDepth": 8,
+    "maximumTextCharacters": 1024,
+    "maximumOptions": 32,
+    "maximumBatchMutations": 32,
+    "maximumActionArguments": 16,
+    "maximumCollectionColumns": 24,
+    "maximumCollectionRows": 1024,
+    "genericViewerHasEcsBranch": false,
+    "ecsKernelReferencesControlPlane": false,
+    "productExportsIncludeControlPlaneAdapters": false,
+    "hotPathControlPlaneHook": false
+  },
+  "verification": {
+    "focusedControlPlane": { "passed": 19, "total": 19 },
+    "existingEcs": { "passed": 221, "total": 221 },
+    "existingServerRuntime": { "passed": 25, "total": 25 },
+    "existingClientCore": { "passed": 36, "total": 36 },
+    "existingClientContent": { "passed": 38, "total": 38 },
+    "architectureOnly": "passed",
+    "integratedAcceptanceBeforeExportFailure": { "passed": 39, "total": 39 },
+    "canonicalRelease": "failed",
+    "canonicalAttempts": [
+      { "source": "2efff975cfa40f3fbdf2746f1fca6a24d72f513d", "status": "intentionally_interrupted_obsolete_candidate", "raw": "framework-p1-control-plane-2026-09-27.raw/release-1.log" },
+      { "source": "942398c8378fa41c07f4f6ead0ff21d74203fc32", "status": "failed", "cause": "tmpfs_no_space_during_export_copy", "raw": "framework-p1-control-plane-2026-09-27.raw/release-final.log" },
+      { "source": "942398c8378fa41c07f4f6ead0ff21d74203fc32", "status": "failed", "cause": "child_dotnet_sigbus_while_tmpfs_full", "raw": "framework-p1-control-plane-2026-09-27.raw/release-final-tmpdir.log" },
+      { "source": "942398c8378fa41c07f4f6ead0ff21d74203fc32", "status": "failed", "cause": "exported_single_player_warm_official_content_sigsegv", "raw": "framework-p1-control-plane-2026-09-27.raw/release-final-isolated.log" }
+    ]
+  },
+  "idleEcsControl": {
+    "measuredTicksPerArm": 20000,
+    "registeredProviderObservationsDuringTicks": 0,
+    "plainWarmedManagedAllocationBytes": 0,
+    "registeredWarmedManagedAllocationBytes": 0,
+    "timingInterpretation": "unpaired_diagnostic_only"
+  },
+  "nativeCrashAudit": {
+    "signal": "SIGSEGV",
+    "thread": ".NET Finalizer",
+    "sharedNativeOffsets": ["0xb55d75", "0x2c47b24", "0xb4a5dc"],
+    "currentCoredumpPid": 2859884,
+    "unchangedPreP1CoredumpPid": 2870188,
+    "preP1Source": "9c3bb78a47ff95ccc8ce0f2750ada535df15587e",
+    "minimalComposition": { "passes": 50, "attempts": 50 },
+    "warmRuns": [
+      { "label": "current_deep_path", "passes": 6, "attempts": 10 },
+      { "label": "current_short_cache", "passes": 9, "attempts": 10 },
+      { "label": "current_short_executable", "passes": 7, "attempts": 10 },
+      { "label": "pre_p1_original_location", "passes": 10, "attempts": 10 },
+      { "label": "same_pre_p1_binary_copied_under_current_repository", "passes": 6, "attempts": 10 }
+    ],
+    "coldCurrentOfficialContent": { "passes": 5, "attempts": 5 },
+    "provenanceConclusion": "same_native_failure_reproduces_without_p1_source",
+    "rootCause": "unresolved",
+    "releaseGateDisposition": "not_waived"
+  },
+  "roadmap": {
+    "P1": "active",
+    "P2": "held_not_started",
+    "Gate1": "planned",
+    "PF6": "planned_not_ready_not_started",
+    "W8W9W10": "not_started"
+  }
+}
