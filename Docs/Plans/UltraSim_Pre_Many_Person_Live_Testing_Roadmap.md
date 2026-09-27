@@ -1455,7 +1455,7 @@ The exact checkpoint numbering may evolve, but preserve the dependency order.
 
 ## Gate 0 — F1.12 product dogfood / architecture-readiness closure
 
-**Status at this document's baseline:** NEXT / not yet closed.
+**Status:** CLOSED by F1.12-R3 / Gate 0 closure at production final `e3a63ea21f8f5ea4fa69e3768a055c409edc8616`. P1 is NEXT.
 
 ### Goal
 
