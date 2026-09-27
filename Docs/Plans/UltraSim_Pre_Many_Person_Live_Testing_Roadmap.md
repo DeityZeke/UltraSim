@@ -1751,8 +1751,10 @@ definition/presentation contract with the UO-inspired visual primitives document
   deterministic fallback;
 - image-backed Toggle/checkbox visuals;
 - exclusive/radio-choice semantics when a real first-party surface uses them;
-- dynamic admitted semantic image references so Game-level item/portrait/icon helpers do not leak
-  domain types into the UI kernel;
+- dynamic admitted semantic presentation references `DefinitionDomainId + StableDefinitionId + PresentationRoleId` so Game-level item/portrait/icon helpers do not leak domain types into the UI kernel;
+- 3D-derived portrait realization as the normal fallback when a definition has World presentation but no dedicated 2D portrait; dedicated icons remain optional overrides;
+- bounded derived portrait caching and compatibility with the UI/Icon atlas path;
+- bounded optional Live Portrait / Inspection presentation vocabulary without one live 3D scene per visible UI item;
 - bounded image tint/opacity/clipping semantics;
 - per-control TextInput maximum length and text overflow policy where earned;
 - renderer-neutral per-element tooltip/help binding where earned.
@@ -1826,6 +1828,10 @@ Make the intended D2-ish Inventory presentation real and human-testable.
 - viewer-profile contract.
 - formal List viewer.
 - D2 Grid viewer.
+- item cells/rows resolve `PresentationRole.InventoryPortrait` through the generic semantic presentation reference.
+- prove a representative 3D-only item definition (no hand-authored icon) derives and caches a stable Inventory portrait.
+- prove missing portrait-specific art falls through World presentation / primitive fallback rather than hiding a valid item.
+- keep live/animated portrait realizations bounded; normal multi-item inventory display remains cached-image based.
 - preferred viewer User control.
 - compatibility resolver/fallback.
 - live switching.
@@ -1839,6 +1845,7 @@ Make the intended D2-ish Inventory presentation real and human-testable.
 ### Exit criteria
 
 - D2 Grid is credible as intended UltraSim default.
+- representative inventory items can display from semantic presentation identity without requiring bespoke 2D icons.
 - List remains usable alternate/fallback.
 - authoritative placement/state remains exact across switches.
 - semantic outcomes equivalent across supported viewers.
