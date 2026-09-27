@@ -1461,6 +1461,74 @@ off-topic
 
 One platform account participates in forums, My Servers, and account/security.
 
+## 28.1 Forums as architecture/design intake
+
+The forums are also intended to be a high-context place where content/server/package authors can explain a **need or use case** that the current architecture does not serve cleanly.
+
+The objective is not to accumulate an unofficial compatibility layer or UltraSim “Script Extender.”
+
+Preferred loop:
+
+```text
+author wants capability X
+    ↓
+describes desired outcome + current limitation
+    ↓
+community/core review asks what semantic seam is actually missing
+    ↓
+existing clean solution?
+    → document/example it
+
+package-local behavior?
+    → keep it package-local
+
+missing operation in an existing Engine?
+    → extend that Engine contract deliberately
+
+several unrelated packages need the same primitive?
+    → evaluate Framework/Kernel/shared-contract seam
+
+new reusable gameplay capability?
+    → candidate Engine Core
+
+requested mechanism violates invariants?
+    → reject/redesign mechanism while solving the underlying goal
+```
+
+A useful proposal should describe:
+
+```text
+goal / user-visible outcome
+current approach
+why current approach is inadequate
+expected scale
+authority implications
+persistence implications
+network implications
+example package/content
+candidate general semantic solution
+```
+
+Once accepted, the solution should be treated as ordinary UltraSim architecture rather than a special mod-only hook:
+
+```text
+real use case
+    ↓
+architecture review
+    ↓
+typed/general solution
+    ↓
+tests + documentation + diagnostics
+    ↓
+official contract/seam
+    ↓
+first-party Game content and external packages use the same path
+```
+
+Forums are suitable for exploratory design/support discussion. GitHub issues and pull requests remain the durable implementation/change-review record.
+
+This feedback loop is intentionally conservative: not every requested callback belongs in Framework/Core. The useful question is what **general semantic need** the proposal reveals.
+
 ---
 
 # 29. Forum package releases are not package identity
