@@ -16,7 +16,9 @@ public sealed class EcsControlProvider : IControlProvider
     private readonly Dictionary<ControlId, (int Row, string Field)> _controls = new();
     private readonly HashSet<ControlId> _overrides = new();
     private readonly Dictionary<DiagnosticId, Func<SchedulerRuntimeSnapshot, ControlValue>> _diagnostics = new();
-    private readonly string[] _coldMetadata;
+    private readonly ColdMetadata[] _coldMetadata;
+    private readonly record struct ColdMetadata(string Requires, string Reads, string Writes, string Structural,
+        int ParallelThreshold, int MinimumPartition, string RandomAccessPolicy);
     private SystemRuntimeSnapshot[]? _previous;
     private SchedulerRuntimeSnapshot _previousScheduler;
     private SchedulerRunMode _previousMode;
@@ -34,7 +36,7 @@ public sealed class EcsControlProvider : IControlProvider
             throw new ArgumentException("Bind the complete bounded scheduler set.");
         _rows = new SystemRuntimeSnapshot[world.SystemCount];
         Refresh();
-        _coldMetadata = new string[_bindings.Length];
+        _coldMetadata = new ColdMetadata[_bindings.Length];
         var descriptors = new List<ControlDescriptor>();
         var boolSchema = new ControlValueSchema(ControlValueKind.Bool);
         var periodSchema = new ControlValueSchema(ControlValueKind.Int64, ControlValue.Int64(1), ControlValue.Int64(int.MaxValue));
@@ -44,8 +46,13 @@ public sealed class EcsControlProvider : IControlProvider
             var b = _bindings[i];
             var row = Row(i);
             if (row.Key != b.Definition.Key) throw new ArgumentException("Cold binding does not match live system.");
-            _coldMetadata[i] = $"requires={string.Join(',', b.Definition.Requires)}; reads={string.Join(',', b.Definition.AdditionalReads)}; writes={string.Join(',', b.Definition.AdditionalWrites)}; structural={string.Join(',', b.Definition.StructuralComponents)}; threshold={b.Definition.ParallelRowThreshold}; partition={b.Definition.MinimumRowsPerPartition}";
-            if (_coldMetadata[i].Length > ControlLimits.Text) throw new ArgumentException("Cold metadata exceeds bounded text.");
+            _coldMetadata[i] = new(string.Join(',', b.Definition.Requires), string.Join(',', b.Definition.AdditionalReads),
+                string.Join(',', b.Definition.AdditionalWrites), string.Join(',', b.Definition.StructuralComponents),
+                b.Definition.ParallelRowThreshold, b.Definition.MinimumRowsPerPartition,
+                b.Definition.ParallelRandomAccessPolicy.ToString());
+            var cold = _coldMetadata[i];
+            if (new[] { cold.Requires, cold.Reads, cold.Writes, cold.Structural, cold.RandomAccessPolicy }
+                .Any(text => text.Length > ControlLimits.Text)) throw new ArgumentException("Cold metadata exceeds bounded text.");
             Add(i, "enabled", boolSchema, ControlValue.Bool(row.Enabled));
             Add(i, "period", periodSchema, ControlValue.Int64(row.PeriodTicks));
             Add(i, "offset", offsetSchema, ControlValue.Int64(row.StartOffset));
@@ -78,11 +85,14 @@ public sealed class EcsControlProvider : IControlProvider
         Diagnostic("merge-ticks", s => s.StructuralMergeTimestampTicks);
         Diagnostic("post-barrier-ticks", s => s.PostBarrierTimestampTicks);
         string[] names = ["key", "stage", "enabled", "manual", "period", "offset", "policy", "wave", "parallel",
-            "last-tick", "runs", "last-us", "average-us", "peak-us", "rows", "chunks", "work-items", "cold-graph"];
+            "last-tick", "runs", "last-us", "average-us", "peak-us", "rows", "chunks", "work-items",
+            "requires", "reads", "writes", "structural", "parallel-threshold", "minimum-partition", "random-access-policy"];
         ControlValueKind[] kinds = [ControlValueKind.Text, ControlValueKind.Text, ControlValueKind.Bool, ControlValueKind.Bool,
             ControlValueKind.Int64, ControlValueKind.Int64, ControlValueKind.Text, ControlValueKind.Int64, ControlValueKind.Bool,
             ControlValueKind.UInt64, ControlValueKind.UInt64, ControlValueKind.Float64, ControlValueKind.Float64,
-            ControlValueKind.Float64, ControlValueKind.Int64, ControlValueKind.Int64, ControlValueKind.Int64, ControlValueKind.Text];
+            ControlValueKind.Float64, ControlValueKind.Int64, ControlValueKind.Int64, ControlValueKind.Int64,
+            ControlValueKind.Text, ControlValueKind.Text, ControlValueKind.Text, ControlValueKind.Text,
+            ControlValueKind.Int64, ControlValueKind.Int64, ControlValueKind.Text];
         Definition = new(new("ecs.runtime"), descriptors,
             _diagnostics.Keys.Select(id => new DiagnosticDescriptor(id, new("ECS/Scheduler"), id.Value!, "",
                 new(ControlValueKind.Int64), Read)),
@@ -92,6 +102,9 @@ public sealed class EcsControlProvider : IControlProvider
     private SystemRuntimeSnapshot Row(int index) => _rows.First(r => r.Id == _bindings[index].System);
     private void Refresh()
     {
+        // During graph execution the last idle snapshot remains readable, but no live scheduler
+        // capture or management mutation may cross that boundary.
+        if (_world.IsSystemExecutionActive) return;
         Observations++;
         _world.CopySystemRuntimeSnapshots(_rows);
         var scheduler = _world.GetSchedulerRuntimeSnapshot();
@@ -111,40 +124,45 @@ public sealed class EcsControlProvider : IControlProvider
     {
         Refresh();
         ControlValue value;
-        if (id.Value == "run-mode") value = ControlValue.Option(new(_world.SchedulerRunMode == SchedulerRunMode.Serial ? "serial" : "parallel"));
+        if (id.Value == "run-mode") value = ControlValue.Option(new(_previousMode == SchedulerRunMode.Serial ? "serial" : "parallel"));
         else
         {
             var c = _controls[id]; var row = Row(c.Row);
             value = c.Field switch { "enabled" => ControlValue.Bool(row.Enabled),
                 "period" => ControlValue.Int64(row.PeriodTicks), _ => ControlValue.Int64(row.StartOffset) };
         }
-        bool writable = _world.IsRunning;
+        bool executing = _world.IsSystemExecutionActive;
+        bool writable = !executing && _world.IsRunning;
         var provenance = new ControlProvenance(_overrides.Contains(id)
             ? ControlProvenanceKind.AdminRuntimeOverride : ControlProvenanceKind.ServerColdConfig);
         return new(value, value, null, provenance, provenance, null, writable,
             writable ? ControlResultCode.Accepted : ControlResultCode.Disabled,
-            writable ? "" : "ECS world is not running.");
+            writable ? "" : executing ? "ECS graph is executing." : "ECS world is not running.");
     }
-    public ControlValue Capture(DiagnosticId id) { Refresh(); return _diagnostics[id](_world.GetSchedulerRuntimeSnapshot()); }
+    public ControlValue Capture(DiagnosticId id) { Refresh(); return _diagnostics[id](_previousScheduler); }
     public IEnumerable<ControlCollectionRow> Capture(ControlCollectionId id)
     {
         Refresh();
         if (id.Value != "systems") throw new ArgumentException("Unknown collection.");
         return _bindings.Select((b, i) =>
         {
-            var s = Row(i);
+            var s = Row(i); var cold = _coldMetadata[i];
             return new ControlCollectionRow(new(b.Id.Value!), [
                 ControlValue.Text(s.Key), ControlValue.Text(s.Stage.ToString()), ControlValue.Bool(s.Enabled), ControlValue.Bool(s.Manual),
                 ControlValue.Int64(s.PeriodTicks), ControlValue.Int64(s.StartOffset), ControlValue.Text(s.ExecutionPolicy.ToString()),
                 ControlValue.Int64(s.CompiledWave), ControlValue.Bool(s.LastExecutionWasParallel), ControlValue.UInt64(s.LastRunTick),
                 ControlValue.UInt64(s.RunCount), ControlValue.Float64(s.LastMicroseconds), ControlValue.Float64(s.AverageMicroseconds),
                 ControlValue.Float64(s.PeakMicroseconds), ControlValue.Int64(s.LastRows), ControlValue.Int64(s.LastChunks),
-                ControlValue.Int64(s.LastWorkItems), ControlValue.Text(_coldMetadata[i])]);
+                ControlValue.Int64(s.LastWorkItems), ControlValue.Text(cold.Requires), ControlValue.Text(cold.Reads),
+                ControlValue.Text(cold.Writes), ControlValue.Text(cold.Structural), ControlValue.Int64(cold.ParallelThreshold),
+                ControlValue.Int64(cold.MinimumPartition), ControlValue.Text(cold.RandomAccessPolicy)]);
         }).ToArray();
     }
     public ControlOwnerResult Set(ControlRequestContext context, IReadOnlyList<ControlMutation> mutations)
     {
         Refresh();
+        if (_world.IsSystemExecutionActive)
+            return ControlOwnerResult.Reject(ControlResultCode.Disabled, "ECS graph is executing.");
         if (!_world.IsRunning) return ControlOwnerResult.Reject(ControlResultCode.Disabled, "ECS is not running.");
         // Validate all coupled schedules and worker policy before any setter is invoked.
         var schedules = _bindings.Select((b, i) => (Period: Row(i).PeriodTicks, Offset: Row(i).StartOffset)).ToArray();

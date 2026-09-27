@@ -73,10 +73,10 @@ public sealed class ControlPlaneRegistry
         }
         finally { _dispatch = false; }
     }
-    private ControlResultCode Lookup(ControlProviderId id, ulong generation, out Entry? entry)
+    private ControlResultCode Lookup(ControlProviderId id, out Entry? entry)
     {
         if (!_providers.TryGetValue(id, out entry)) return ControlResultCode.UnknownProvider;
-        return entry.Generation == generation ? ControlResultCode.Accepted : ControlResultCode.StaleGeneration;
+        return ControlResultCode.Accepted;
     }
     private static ControlResultCode Access(ControlPublicationDescriptor? d, ControlPrincipal p)
     {
@@ -98,10 +98,11 @@ public sealed class ControlPlaneRegistry
         Enter(); state = null;
         try
         {
-            var code = Lookup(provider, generation, out Entry? e);
+            var code = Lookup(provider, out Entry? e);
             if (code != ControlResultCode.Accepted) return code;
             var d = e!.Definition.Controls.FirstOrDefault(d => d.Id == id);
             code = Access(d, principal);
+            if (code == ControlResultCode.Accepted && e.Generation != generation) code = ControlResultCode.StaleGeneration;
             if (code == ControlResultCode.Accepted) state = State(e, d!);
             return code;
         }
@@ -113,11 +114,12 @@ public sealed class ControlPlaneRegistry
         Enter(); snapshot = null;
         try
         {
-            var code = Lookup(provider, generation, out Entry? e);
+            var code = Lookup(provider, out Entry? e);
             if (code != ControlResultCode.Accepted) return code;
             var d = e!.Definition.Diagnostics.FirstOrDefault(d => d.Id == id);
             code = Access(d, principal);
             if (code != ControlResultCode.Accepted) return code;
+            if (e.Generation != generation) return ControlResultCode.StaleGeneration;
             var value = e.Provider.Capture(id);
             if (!d!.Schema.Accepts(value)) throw new InvalidOperationException("Invalid owner diagnostic.");
             snapshot = new(e.Generation, e.Provider.Revision, value); return code;
@@ -130,11 +132,12 @@ public sealed class ControlPlaneRegistry
         Enter(); snapshot = null;
         try
         {
-            var code = Lookup(provider, generation, out Entry? e);
+            var code = Lookup(provider, out Entry? e);
             if (code != ControlResultCode.Accepted) return code;
             var d = e!.Definition.Collections.FirstOrDefault(d => d.Id == id);
             code = Access(d, principal);
             if (code != ControlResultCode.Accepted) return code;
+            if (e.Generation != generation) return ControlResultCode.StaleGeneration;
             var rows = ControlLimits.Copy(e.Provider.Capture(id), d!.MaximumRows);
             if (rows.Any(r => r is null) || rows.Select(r => r.Id).Distinct().Count() != rows.Length)
                 throw new InvalidOperationException("Invalid owner rows.");
@@ -163,7 +166,7 @@ public sealed class ControlPlaneRegistry
         {
             ValidateContext(request.Context);
             string reason = "";
-            var code = Lookup(request.Provider, request.ExpectedProviderGeneration, out Entry? e);
+            var code = Lookup(request.Provider, out Entry? e);
             if (code == ControlResultCode.Accepted)
             {
                 if (request.Mutations is null || request.Mutations.Count is < 1 or > ControlLimits.Batch ||
@@ -175,7 +178,14 @@ public sealed class ControlPlaneRegistry
                     code = Access(d, request.Context.Principal);
                     if (code != ControlResultCode.Accepted) break;
                     if (!request.Context.Principal.Has(d!.WriteCapability)) code = ControlResultCode.Unauthorized;
-                    else if (!d.Schema.Accepts(m.Value)) code = ControlResultCode.InvalidValue;
+                    if (code != ControlResultCode.Accepted) break;
+                }
+                if (code == ControlResultCode.Accepted && e!.Generation != request.ExpectedProviderGeneration)
+                    code = ControlResultCode.StaleGeneration;
+                if (code == ControlResultCode.Accepted) foreach (var m in request.Mutations!)
+                {
+                    var d = e!.Definition.Controls.First(d => d.Id == m.Id);
+                    if (!d.Schema.Accepts(m.Value)) code = ControlResultCode.InvalidValue;
                     else
                     {
                         var state = State(e, d);
@@ -191,7 +201,9 @@ public sealed class ControlPlaneRegistry
                     code = ControlResultCode.StaleRevision;
             }
             ControlResult result;
-            if (code != ControlResultCode.Accepted) result = Result(request.Context, e, ControlOwnerResult.Reject(code, reason));
+            if (code != ControlResultCode.Accepted) result = Result(request.Context,
+                code is ControlResultCode.Unauthorized or ControlResultCode.NotVisible or ControlResultCode.UnknownPublication or ControlResultCode.InvalidValue ? null : e,
+                ControlOwnerResult.Reject(code, reason));
             else
             {
                 ControlOwnerResult outcome;
@@ -216,7 +228,7 @@ public sealed class ControlPlaneRegistry
         try
         {
             ValidateContext(request.Context);
-            var code = Lookup(request.Provider, request.ExpectedProviderGeneration, out Entry? e);
+            var code = Lookup(request.Provider, out Entry? e);
             if (code == ControlResultCode.Accepted)
             {
                 var d = e!.Definition.Actions.FirstOrDefault(d => d.Id == request.Action);
@@ -224,6 +236,7 @@ public sealed class ControlPlaneRegistry
                 if (code == ControlResultCode.Accepted)
                 {
                     if (!request.Context.Principal.Has(d!.InvokeCapability)) code = ControlResultCode.Unauthorized;
+                    else if (e.Generation != request.ExpectedProviderGeneration) code = ControlResultCode.StaleGeneration;
                     else if (request.Arguments is null || request.Arguments.Count != d.Arguments.Count ||
                         request.Arguments.Count > ControlLimits.Arguments ||
                         request.Arguments.Where((a, i) => !d.Arguments[i].Accepts(a)).Any()) code = ControlResultCode.InvalidValue;
@@ -235,7 +248,9 @@ public sealed class ControlPlaneRegistry
             else try { outcome = e!.Provider.Invoke(request.Context, request.Action, request.Arguments!); }
             catch (Exception failure)
             { AuditFailure(request.Context, request.Provider, request.Action, [], request.Arguments!, e!, failure); throw; }
-            var result = Result(request.Context, e, outcome);
+            var result = Result(request.Context,
+                code is ControlResultCode.Unauthorized or ControlResultCode.NotVisible or ControlResultCode.UnknownPublication or ControlResultCode.InvalidValue ? null : e,
+                outcome);
             _audit?.Observe(new(request.Context, request.Provider, request.Action, Array.AsReadOnly(Array.Empty<ControlMutation>()),
                 request.Arguments ?? Array.AsReadOnly(Array.Empty<ControlValue>()), result));
             return result;

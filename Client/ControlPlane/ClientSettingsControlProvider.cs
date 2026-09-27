@@ -92,14 +92,22 @@ public sealed class ClientSettingsControlProvider : IControlProvider
         var resolvedWithConsent = Value(ClientSettingsResolver.Resolve(doc, _scope, _recommendation, _consent), f);
         if (actual != resolvedWithConsent) actualProvenance = new(ControlProvenanceKind.RuntimeConstraint, "actual consumer state");
         bool pending = f == "vegetation" && requested != actual;
+        bool scopeFull = f != "vegetation" && _scope.IsValid && doc.Scopes.Count == ClientSettingsDocument.MaximumScopes &&
+            !doc.TryGetScope(_scope, out _);
         return new(requested, actual, pending ? requested : null, provenance, actualProvenance,
-            pending ? provenance : null, true);
+            pending ? provenance : null, !scopeFull,
+            scopeFull ? ControlResultCode.OwnerRejected : ControlResultCode.Accepted,
+            scopeFull ? "Realm settings scope capacity exhausted." : "");
     }
     public ControlOwnerResult Set(ControlRequestContext context, IReadOnlyList<ControlMutation> mutations)
     {
         var (doc, _) = Refresh();
-        ClientSettingsLayer old = _scope.IsValid && doc.TryGetScope(_scope, out var scoped) ? scoped : _scope.IsValid ? ClientSettingsLayer.Empty : doc.Global;
         var values = mutations.ToDictionary(m => m.Id.Value!, m => m.Value, StringComparer.Ordinal);
+        bool changesLayer = values.Keys.Any(static key => key != "vegetation");
+        if (changesLayer && _scope.IsValid && doc.Scopes.Count == ClientSettingsDocument.MaximumScopes &&
+            !doc.TryGetScope(_scope, out _))
+            return ControlOwnerResult.Reject(ControlResultCode.OwnerRejected, "Realm settings scope capacity exhausted.");
+        ClientSettingsLayer old = _scope.IsValid && doc.TryGetScope(_scope, out var scoped) ? scoped : _scope.IsValid ? ClientSettingsLayer.Empty : doc.Global;
         float? Float(string id, float? prior) => values.TryGetValue(id, out var v) ? (float)v.AsFloat64() : prior;
         bool? invert = values.TryGetValue("invert-y", out var y) ? y.AsBool() : old.InvertY;
         ClientControlGrammar? grammar = old.ControlGrammar;
@@ -110,7 +118,7 @@ public sealed class ClientSettingsControlProvider : IControlProvider
         var layer = new ClientSettingsLayer(Float("ui-scale", old.UiScale), Float("volume", old.MasterVolume),
             Float("pointer-sensitivity", old.PointerSensitivity), invert, grammar, old.CameraProfile,
             old.CameraDistance, old.CameraFovDegrees, old.Bindings, distance, old.CameraRig);
-        var candidate = _scope.IsValid ? doc.WithScope(_scope, layer) : doc.WithGlobal(layer);
+        var candidate = changesLayer ? _scope.IsValid ? doc.WithScope(_scope, layer) : doc.WithGlobal(layer) : doc;
         if (values.TryGetValue("vegetation", out var vegetation)) candidate = candidate.WithExperimentalVegetation(vegetation.AsBool());
         // Exercise the existing exact resolver before the owner commits/persists anything.
         _ = ClientSettingsResolver.Resolve(candidate, _scope, _recommendation, _consent);

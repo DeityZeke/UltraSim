@@ -8,6 +8,20 @@ public sealed partial class EcsWorld
         get { EnsureOwnerThread(); return _scheduler is not null; }
     }
 
+    /// <summary>
+    /// Cold owner-bound execution-state probe for management adapters. Unlike ordinary facade
+    /// access, this may only answer whether a graph is active; it cannot capture or mutate it.
+    /// </summary>
+    public bool IsSystemExecutionActive
+    {
+        get
+        {
+            if (Environment.CurrentManagedThreadId != _ownerThreadId)
+                throw new InvalidOperationException("ECS execution state requires the world owner thread.");
+            return _scheduler?.IsExecuting ?? false;
+        }
+    }
+
     public ulong TickCount
     {
         get { EnsureOwnerThread(); return RequireScheduler().TickCount; }

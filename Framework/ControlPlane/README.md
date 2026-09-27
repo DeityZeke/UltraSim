@@ -52,7 +52,8 @@ Trusted composition creates ControlPrincipal with bounded identity/context and c
 Principal categories supply audience filtering, not privilege. Discovery requires both visibility
 and read capability. Explicit reads/writes/actions enforce read and write/invoke capabilities,
 even for known IDs. Never deserialize an untrusted capability claim into a trusted principal.
-No wire/admin protocol is added.
+Authorization precedes generation disclosure for a known publication; denied or malformed
+requests do not disclose provider generation/revision. No wire/admin protocol is added.
 
 Single requests and provider-local batches perform generic authorization/schema/lifetime/writable
 checks before invoking mutation. The owner receives the complete candidate and owns coupled
@@ -67,10 +68,12 @@ their own bounded retention and safe-data policy.
 ## Real adapters and generic viewer
 
 - Bridges/ControlPlane.ECS depends on this Framework and ECS, not vice versa. Explicit cold
-  system bindings publish existing scheduler/system snapshots, cold graph text and idle-owner
+  system bindings publish existing scheduler/system snapshots, bounded typed cold graph columns and idle-owner
   Enabled/Period/Offset/RunMode controls. All coupled schedules/worker policy validate before
   any setter. Maximum 120 bound systems. No private scheduler objects escape. Graph facts remain
-  Collection cells, not controls. Observations occur only on management requests.
+  Collection cells, not controls. Observations occur only on management requests. During graph
+  execution, the owner may inspect only the narrow execution-state probe; the adapter serves
+  its last idle snapshot and rejects writes without touching live scheduler state.
 - Bridges/ControlPlane.ServerRuntime depends on Framework and ServerRuntime. A narrow public
   owner-thread snapshot reports actual options, active generation/clock and idle state. Fixed
   playback/frequency descriptors are ReadOnly; variable policies permit existing setters only

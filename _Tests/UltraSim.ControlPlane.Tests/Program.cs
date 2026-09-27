@@ -21,11 +21,13 @@ var tests = new (string, Action)[]
     ("Ownership_NoCrossThreadOrReentrantRetirement", Ownership),
     ("ECS_GenericPanelAndPublicSnapshotParity", EcsPanel),
     ("ECS_ScheduleEnableGenerationAndReadOnlyFacts", EcsControls),
+    ("ECS_ExecutingGraphDisablesManagementWithoutCapturingLiveScheduler", EcsExecuting),
     ("ECS_RegisteredIdleZeroHotPathCallsAndAllocation", HotPath),
     ("Runtime_FixedAndVariablePolicies", Runtime),
     ("Runtime_UnsafeBoundaryRemainsDisabled", RuntimeUnsafe),
     ("Settings_BatchPersistenceGlobalRealmAndProvenance", Settings),
-    ("Settings_ConsentIsNotWriteAuthorityAndPendingIsReal", SettingsConsent)
+    ("Settings_ConsentIsNotWriteAuthorityAndPendingIsReal", SettingsConsent),
+    ("Settings_FullRealmCapacityDoesNotBlockDeviceVegetation", SettingsCapacity)
 };
 foreach (var (name, test) in tests) { test(); Console.WriteLine("PASS P1 " + name); }
 Console.WriteLine($"All {tests.Length} P1 Control Plane tests passed.");
@@ -95,9 +97,17 @@ static void Authorization()
     var none = new ControlPrincipal("untrusted", ControlPrincipalKind.RemoteOperator, []);
     Equal(0, registry.Discover(none).Count);
     Equal(ControlResultCode.Unauthorized, registry.Read(none, new("proof"), g, new ControlId("live"), out _));
+    Equal(ControlResultCode.Unauthorized, registry.Read(none, new("proof"), g + 1, new ControlId("live"), out _));
     var read = new ControlPrincipal("reader", ControlPrincipalKind.LocalUser, [new("proof.read")]);
     Check(registry.Discover(read)[0].Definition.Controls.All(c => c.Id.Value != "secret"));
     Equal(ControlResultCode.NotVisible, registry.Read(read, new("proof"), g, new ControlId("secret"), out _));
+    Equal(ControlResultCode.NotVisible, registry.Read(read, new("proof"), g + 1, new ControlId("secret"), out _));
+    var denied = Set(registry, g + 1, "live", ControlValue.Int64(3), none);
+    Equal(ControlResultCode.Unauthorized, denied.Outcome.Code); Equal(0UL, denied.ProviderGeneration); Equal(0UL, denied.Revision);
+    denied = Set(registry, g + 1, "secret", ControlValue.Int64(3), read);
+    Equal(ControlResultCode.NotVisible, denied.Outcome.Code); Equal(0UL, denied.ProviderGeneration); Equal(0UL, denied.Revision);
+    denied = registry.Set(SetControlsRequest.Create(Context(none), new("proof"), g + 1, []));
+    Equal(ControlResultCode.InvalidValue, denied.Outcome.Code); Equal(0UL, denied.ProviderGeneration); Equal(0UL, denied.Revision);
     Equal(ControlResultCode.Unauthorized, Set(registry, g, "live", ControlValue.Int64(3), read).Outcome.Code);
     Equal(ControlResultCode.Unauthorized, registry.Set(SetControlsRequest.Create(Context(read), new("proof"), g,
         [new(new("live"), ControlValue.Int64(3))], ulong.MaxValue)).Outcome.Code);
@@ -224,7 +234,10 @@ static void EcsPanel()
         var row = collection.Rows[i];
         Equal(native[i].Key, row.Values[0].AsText()); Equal(native[i].RunCount, row.Values[10].AsUInt64());
         Equal(native[i].LastMicroseconds, row.Values[11].AsFloat64()); Equal(native[i].LastRows, (int)row.Values[14].AsInt64());
-        Check(row.Values[17].AsText().Contains("threshold="));
+        Equal(24, row.Values.Count);
+        Equal(f.Bindings[i].Definition.ParallelRowThreshold, (int)row.Values[21].AsInt64());
+        Equal(f.Bindings[i].Definition.MinimumRowsPerPartition, (int)row.Values[22].AsInt64());
+        Equal(f.Bindings[i].Definition.ParallelRandomAccessPolicy.ToString(), row.Values[23].AsText());
     }
     r.Read(Principal(), new("ecs.runtime"), g, new DiagnosticId("reserved-bytes"), out var reserved);
     Equal(f.World.GetSchedulerRuntimeSnapshot().ReservedPayloadBytes, reserved!.Value.AsInt64());
@@ -236,7 +249,8 @@ static void EcsPanel()
         {
             id = row.Id.Value, key = row.Values[0].AsText(), stage = row.Values[1].AsText(),
             period = row.Values[4].AsInt64(), runs = row.Values[10].AsUInt64(),
-            lastMicroseconds = row.Values[11].AsFloat64(), workItems = row.Values[16].AsInt64()
+            lastMicroseconds = row.Values[11].AsFloat64(), workItems = row.Values[16].AsInt64(),
+            parallelThreshold = row.Values[21].AsInt64(), minimumPartition = row.Values[22].AsInt64()
         }).ToArray(),
         reservedBytes = reserved.Value.AsInt64()
     }));
@@ -264,6 +278,35 @@ static void EcsControls()
     r.TryRegister(new EcsControlProvider(cold.World, cold.Bindings), out var coldGeneration, out _);
     r.Read(Principal(), new("ecs.runtime"), coldGeneration, new ControlId("movement.enabled"), out var disabled);
     Check(!disabled!.Writable);
+}
+static void EcsExecuting()
+{
+    ControlPlaneRegistry? registry = null;
+    ulong generation = 0;
+    EcsControlProvider? provider = null;
+    bool observed = false;
+    EcsFixture? fixture = null;
+    using var f = new EcsFixture(onMovement: () =>
+    {
+        Check(fixture!.World.IsSystemExecutionActive);
+        ulong before = provider!.Observations;
+        Equal(ControlResultCode.Accepted, registry!.Read(Principal(), new("ecs.runtime"), generation,
+            new ControlId("movement.enabled"), out var state));
+        Check(!state!.Writable && state.DisabledReason.Contains("executing"));
+        Equal(before, provider.Observations);
+        var refused = registry.Set(SetControlsRequest.Create(Context(), new("ecs.runtime"), generation,
+            [new(new("movement.enabled"), ControlValue.Bool(false))]));
+        Equal(ControlResultCode.Disabled, refused.Outcome.Code);
+        Equal(before, provider.Observations);
+        observed = true;
+    });
+    fixture = f;
+    registry = new ControlPlaneRegistry(); provider = new EcsControlProvider(f.World, f.Bindings);
+    Check(registry.TryRegister(provider, out generation, out _));
+    f.World.Tick(1d / 60);
+    Check(observed); Check(!f.World.IsSystemExecutionActive);
+    var rows = new SystemRuntimeSnapshot[3]; f.World.CopySystemRuntimeSnapshots(rows);
+    Check(rows[0].Enabled);
 }
 static void HotPath()
 {
@@ -388,6 +431,48 @@ static void SettingsConsent()
     Check(applied!.Pending is null && applied.Effective.AsBool()); Check(applied.Revision > pending.Revision);
     Check(p.Definition.Controls.First(c => c.Id.Value == "volume").Description.Contains("no Audio"));
 }
+static void SettingsCapacity()
+{
+    string root = Path.Combine(Path.GetTempPath(), "ultrasim-p1-capacity-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(root);
+    try
+    {
+        var store = new ClientSettingsFileStore(Path.Combine(root, "settings.json"));
+        var scopes = Enumerable.Range(0, ClientSettingsDocument.MaximumScopes).Select(i =>
+        {
+            Check(ClientSettingsScopeKey.TryCreate("realm-" + i, out var key));
+            return new ClientScopedSettings(key, ClientSettingsLayer.Empty);
+        }).ToArray();
+        var doc = new ClientSettingsDocument(scopes: scopes);
+        store.Save(doc);
+        Check(ClientSettingsScopeKey.TryCreate("realm-extra", out var extra));
+        var effective = ClientSettingsResolver.Resolve(doc, extra);
+        int commits = 0;
+        void Commit(ClientSettingsDocument candidate)
+        {
+            store.Save(candidate); doc = candidate; commits++;
+            // Vegetation is intentionally next-world-entry, so the active consumer remains unchanged.
+        }
+        var provider = new ClientSettingsControlProvider(() => doc, () => effective, Commit, extra);
+        var registry = new ControlPlaneRegistry(); Check(registry.TryRegister(provider, out var generation, out _));
+        registry.Read(Principal(), new("client.settings"), generation, new ControlId("ui-scale"), out var full);
+        Check(!full!.Writable); Equal(ControlResultCode.OwnerRejected, full.DisabledCode);
+        var vegetation = registry.Set(SetControlsRequest.Create(Context(), new("client.settings"), generation,
+            [new(new("vegetation"), ControlValue.Bool(true))]));
+        Equal(ControlResultStatus.Accepted, vegetation.Outcome.Status); Equal(1, commits);
+        Equal(ClientSettingsDocument.MaximumScopes, doc.Scopes.Count);
+        Check(!doc.TryGetScope(extra, out _));
+        Check(store.Load().Document.ExperimentalVegetation);
+        registry.Read(Principal(), new("client.settings"), generation, new ControlId("vegetation"), out var pending);
+        Check(pending!.Pending.HasValue && !pending.Effective.AsBool());
+        string bytes = File.ReadAllText(store.Path);
+        var refused = registry.Set(SetControlsRequest.Create(Context(), new("client.settings"), generation,
+            [new(new("ui-scale"), ControlValue.Float64(1.5))]));
+        Equal(ControlResultCode.OwnerRejected, refused.Outcome.Code); Equal(1, commits);
+        Equal(bytes, File.ReadAllText(store.Path));
+    }
+    finally { Directory.Delete(root, recursive: true); }
+}
 
 static EcsWorldOptions Options() => new(new EntityCapacity(16), maximumArchetypes: 1, maximumPreparedPlans: 0,
     maximumStructuralCommands: 0, scheduler: new EcsSchedulerOptions(maximumSystems: 4, maximumDependencies: 4,
@@ -457,7 +542,7 @@ sealed class ProofProvider : IControlProvider
 }
 sealed class EcsFixture : IDisposable
 {
-    public EcsFixture(bool running = true)
+    public EcsFixture(bool running = true, Action? onMovement = null)
     {
         var schema = ComponentSchema.Create(new SchemaId(0x71, 0x01), ReadOnlySpan<ComponentRegistration>.Empty);
         World = new EcsWorld(schema, new(new EntityCapacity(16), maximumArchetypes: 1, maximumPreparedPlans: 0,
@@ -470,7 +555,7 @@ sealed class EcsFixture : IDisposable
         for (int i = 0; i < 3; i++)
         {
             var d = new SystemDefinition(names[i], stages[i], new SystemSchedule(periodTicks: i + 1), SystemExecutionPolicy.Serial);
-            var id = World.RegisterRangeSystem<WorkSystem, WorkJob>(d, new());
+            var id = World.RegisterRangeSystem<WorkSystem, WorkJob>(d, new(i == 0 ? onMovement : null));
             Bindings[i] = new(id, new(names[i]), d);
         }
         World.Seal();
@@ -482,10 +567,17 @@ sealed class EcsFixture : IDisposable
 }
 sealed class WorkSystem : IRangeSystemRuntime<WorkJob>
 {
+    private readonly Action? _onExecute;
+    public WorkSystem(Action? onExecute = null) => _onExecute = onExecute;
     public int GetRangeCount(in SystemPrepareContext context) => 1;
-    public WorkJob Prepare(in SystemPrepareContext context) => new();
+    public WorkJob Prepare(in SystemPrepareContext context) => new(_onExecute);
 }
-struct WorkJob : IRangeJob { public void Execute(in SystemJobContext context, int start, int count) { } }
+struct WorkJob : IRangeJob
+{
+    private readonly Action? _onExecute;
+    public WorkJob(Action? onExecute) => _onExecute = onExecute;
+    public void Execute(in SystemJobContext context, int start, int count) => _onExecute?.Invoke();
+}
 sealed class Composition : IServerComposition
 {
     public ComponentSchema Schema { get; } = ComponentSchema.Create(new SchemaId(0x71, 0x02), ReadOnlySpan<ComponentRegistration>.Empty);
