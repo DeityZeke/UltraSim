@@ -257,6 +257,13 @@ internal static class M00SharedAuthorityTests
                 authority.GetPublicItemPresentationView();
             Equal(1, publicItems.Count);
             WorldPublicEntityId swordId = publicItems[0].Id;
+            var swordRevisionBeforeMutation = new ulong[clients.Count];
+            for (int index = 0; index < clients.Count; index++)
+            {
+                True(clients[index].Session.PublicPresentationState.TryGet(
+                    swordId, out ClientPublicPresentationMetadata original));
+                swordRevisionBeforeMutation[index] = original.Revision;
+            }
             Entity swordEntity = Entity.Null;
             True(authority.Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
                 (world, _, game) =>
@@ -303,10 +310,15 @@ internal static class M00SharedAuthorityTests
                                 : default,
                         out firstReintroducedSwordId) || !firstReintroducedSwordId.IsValid)
                     return false;
-                return clients.All(client =>
+                // Pickup/drop can coalesce before a simulation commit and preserve public ID.
+                // The old positive metadata is not evidence of reintroduction: it can still be
+                // awaiting a legitimate Remove while this predicate first runs. Require new
+                // per-recipient truth, not merely presence, before the proof-wakeup checkpoint.
+                return clients.Select((client, index) =>
                     client.Session.PublicPresentationState.TryGet(
                         firstReintroducedSwordId, out ClientPublicPresentationMetadata metadata) &&
-                    (metadata.Flags & ClientPublicPresentationFlags.ItemProperties) != 0);
+                    (metadata.Flags & ClientPublicPresentationFlags.ItemProperties) != 0 &&
+                    metadata.Revision > swordRevisionBeforeMutation[index]).All(static ready => ready);
             });
             swordId = firstReintroducedSwordId;
             DriveUntil(host, authority, clients, () =>
