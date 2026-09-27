@@ -1,8 +1,8 @@
 # UltraSim Pre–Many-Player Live Test Roadmap
 
 **Proposed status:** Candidate canonical roadmap / architecture checklist\
-**Current reference baseline:** `main` at F1.11 closure — `e96af793046afc21dcd0a4f164a9eaec7e8ad2bc`\
-**Immediate gate:** F1.12 product dogfood / PF6-readiness checkpoint is still the next unfinished client gate at this baseline.\
+**Current reference baseline:** F1.12-R3 / Gate 0 production closure — `e3a63ea21f8f5ea4fa69e3768a055c409edc8616`; documentation-only commits may advance `main` beyond that closure SHA.\
+**Immediate checkpoint:** P1 Framework Control Plane is **NEXT**. P2–P11 and Gate 1 remain **PLANNED**; PF6 remains **PLANNED / NOT READY / NOT STARTED**.\
 **End state of this document:** UltraSim is ready to move from individual/trusted dogfooding and closed validation into a many-player live test where human feedback is primarily about the intended game rather than known development-harness limitations.
 
 ---
@@ -1383,6 +1383,70 @@ Do not smuggle W8–W10 into productization unless a specific live-test requirem
 
 ---
 
+# 14.1 Near-term Liquid Bodies / Water capability
+
+Water is needed sooner than most of the future Engine backlog because oceans, lakes, ponds, puddles and pools are ordinary World/content needs.
+
+Do **not** implement a Water-only primitive.
+
+The reusable capability should begin as a narrow Liquid/Fluid contract:
+
+```text
+Liquid.Contracts
+    LiquidId
+    LiquidBodyId
+    surface / depth / occupancy queries
+    amount / capacity / level vocabulary
+
+Liquid.Core
+    bounded body ownership
+    finite vs source/unbounded semantics
+    fill/drain/transfer only as earned
+
+Game Implementation
+    Water
+    Lava
+    Honey
+    Acid
+    LiquidMagic
+    ...
+```
+
+Permanent rule:
+
+> **Water is content. Liquid is the Engine capability.**
+
+The first Liquid Bodies MVP should be sufficient to author and query:
+
+```text
+ocean
+lake
+pond
+puddle
+pool / basin
+```
+
+with arbitrary `LiquidId`, surface level, body shape/depth relationship, and finite or source/unbounded policy.
+
+It does **not** initially require:
+
+```text
+cell-by-cell flow
+pressure
+pipes
+flood simulation
+mixing/chemistry
+temperature/phase simulation
+```
+
+Liquid authority remains separate from rendering. A body can semantically contain Water, Honey or Lava even if presentation falls back to a debug material.
+
+This work may be pulled forward in parallel with P1–P4 when World/content authoring needs real water; it is not required to wait for every Framework/Engine extraction checkpoint if its contract remains narrow and typed.
+
+The broader Forge-inspired Engine/modding catalog is tracked separately in [FUTURE_ENGINE_MODDING_BACKLOG.md](FUTURE_ENGINE_MODDING_BACKLOG.md). Only items explicitly promoted into this roadmap become current campaign requirements.
+
+---
+
 # 15. Implementation campaign
 
 The exact checkpoint numbering may evolve, but preserve the dependency order.
@@ -1481,6 +1545,8 @@ Create deterministic RunUO-like startup composition **and an actual C# server-au
 
 - Package manifest format.
 - Stable package IDs/versions.
+- Definition/package alias and migration/remap policy for renamed or removed persistent identities; runtime dense IDs are never the persistence compatibility contract.
+- Deterministic migration ordering/conflict detection so required remaps complete before World/server authority starts.
 - required/optional/provided capability vocabulary.
 - dependency graph validation.
 - deterministic load/compile order.
@@ -1509,6 +1575,7 @@ Create deterministic RunUO-like startup composition **and an actual C# server-au
   - definitions/content declarations;
   - ECS systems;
   - Engine capabilities;
+  - typed subsystem-owned hook/event subscriptions and publications, with explicit observe/modify/cancel/order/failure semantics where earned;
   - server-composed UI/control providers.
 - Make compile/cache manifests diagnosable through the Control Plane/operator product.
 - Ensure failed compilation or registration leaves no partially authoritative composition.
@@ -1598,10 +1665,13 @@ Prove removable Engine Cores and cross-Engine definition composition without lat
 
 - formal Engine package structure: Contracts/Core/(optional profiles/scripts).
 - typed facet registration seam.
-- stable/dense facet IDs as appropriate.
+- typed Definition Tag/Set registration so unrelated packages can contribute members to shared semantic groups without lateral Core dependencies.
+- stable/dense facet and tag/set IDs as appropriate.
 - typed stores.
 - builder extension pattern.
 - duplicate/conflict validation.
+- deterministic tag/set contribution diagnostics and optional cross-package membership without hidden hard dependencies.
+- definition alias/remap integration for persisted authored identities.
 - dormant optional facet semantics.
 - explicit required-capability semantics.
 - semantic asset IDs.
@@ -2145,6 +2215,8 @@ Unless separately promoted to blockers, the following are not required merely to
 - final graphics settings matrix;
 - final production art for the whole game;
 - web administration portal;
+- full fluid/flow/pressure/chemistry simulation beyond the narrow Liquid Bodies MVP unless independently promoted by World/game requirements;
+- the broader future Engine/modding backlog merely because it has been documented;
 - perfect low-end optimization for every experimental feature;
 - dynamic replacement of persistent/network/component schemas at runtime;
 - final GI/lighting technology;
@@ -2889,9 +2961,9 @@ A package that fails this test does not automatically need to move repos. It nee
 This compact board is intended to sit near the top of active implementation notes.
 
 ```
-[ ] Gate 0  F1.12 product dogfood/readiness
+[x] Gate 0  F1.12 product dogfood/readiness
 
-[ ] P1      Framework Control Plane
+[ ] P1      Framework Control Plane — NEXT
 [ ] P2      Runtime/Module Host + C# Server Authoring Environment
 [ ] P3      Framework adapter/runtime boundary migration
 [ ] P4      Engine Contracts + typed definition facets
