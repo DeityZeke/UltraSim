@@ -1,0 +1,517 @@
+{
+  "schema": "client-f1.12-r3-framework-http-kestrel-closure/v1",
+  "disposition": "F1.12 CLOSED / Gate 0 CLOSED",
+  "startingHead": "efdd43e13be2ecd8323d36d78e8aa20b220f0cea",
+  "startingMainClean": true,
+  "implementationCommits": [
+    {
+      "sha": "cc3d2c3f19b1a03cdfc966f7b36d04c563fb32df",
+      "role": "Framework/Bridge/provider/composition and initial assurance"
+    },
+    {
+      "sha": "4fa5197af91ea2943ebf39ba01d39c95613239ae",
+      "role": "Real HTTP fixtures and proven initial traversal baseline"
+    },
+    {
+      "sha": "65efff932649780f2e2209c1df05cf1c516d7fce",
+      "role": "Startup/cleanup failure retention"
+    },
+    {
+      "sha": "a0bf158111c04d3ac196bfcec4031f409141ef33",
+      "role": "New-revision sword reintroduction checkpoint"
+    },
+    {
+      "sha": "cc937185ce630fdb707e51bdee6372f550ff77b0",
+      "role": "Atomic active ownership / tested integrated candidate"
+    }
+  ],
+  "testedImplementationHead": "cc937185ce630fdb707e51bdee6372f550ff77b0",
+  "finalEvidenceHeadResolution": "git log -1 --format=%H -- _Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3.md",
+  "environment": {
+    "configuration": "Release",
+    "sdk": "8.0.131",
+    "coreRuntime": "8.0.31",
+    "aspNetRuntime": "8.0.31",
+    "runtimeInstallation": "task-owned .output/f112-r3-runtime; system unchanged",
+    "os": "CachyOS Linux",
+    "kernel": "7.2.6-1-cachyos",
+    "cpu": "Ryzen 7800X3D",
+    "ramGiB": 32,
+    "gpu": "RTX 4070 Ti SUPER",
+    "driver": "NVIDIA 615.71.09",
+    "godot": "4.7.1 Mono a13da4feb",
+    "nativeDisplay": "X11",
+    "nativeRenderer": "OpenGL Compatibility",
+    "affinityControlled": false,
+    "desktopAndEditorActivity": true,
+    "unownedServersLeftUntouched": 2,
+    "performanceRatingClaimed": false
+  },
+  "architecture": {
+    "frameworkProject": "Framework/Http/Endpoint/UltraSim.Framework.Http.Endpoint.csproj",
+    "frameworkReferences": [],
+    "bridgeProject": "Bridges/Http.Kestrel/UltraSim.Bridges.Http.Kestrel.csproj",
+    "bridgeProjectReferences": [
+      "Framework.Http.Endpoint"
+    ],
+    "bridgeFrameworkReference": "Microsoft.AspNetCore.App",
+    "productionProvider": "Server.Hosting.StaticContentHttpService",
+    "productionComposition": "Server.ConceptDemo.ConceptDemoContentDeployment",
+    "facade": "StaticContentHttpHost: composition only",
+    "frameworkGameClientServerDependencies": false,
+    "bridgeGameClientServerDependencies": false,
+    "productionHttpListenerUse": false,
+    "privateRuntimeHooks": false,
+    "nreSuppression": false,
+    "outboundHttpImplemented": false,
+    "dynamicProvidersImplemented": false,
+    "discoveryImplemented": false,
+    "generalFrameworkMigrationStarted": false
+  },
+  "historicalFinding": {
+    "finding": "F112-R1-06 / F112-R2-01",
+    "historicalRuntimeBugStillValid": true,
+    "affectedBackendRetired": true,
+    "literalNreDeterministicallyReproduced": false,
+    "r1FailureLog": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1/controls/f112-r1-release.log",
+    "sha256": "e10313032f0ea4ac56f3ddb4a266829cd09a750ef10a8b6b20c90184486d07e1",
+    "r1R2EvidenceUnchanged": true,
+    "r2ApplicationOwnershipFindingsRetainedInHistory": true
+  },
+  "limits": {
+    "staticContent": {
+      "resources": 4096,
+      "bytes": 805306368,
+      "active": 4,
+      "queued": 8,
+      "timeoutMs": 30000
+    },
+    "endpointServicesMaximum": 32,
+    "kestrelConnections": 1024,
+    "requestBodyBytes": 0,
+    "requestHeaderBytes": 8192,
+    "requestHeaders": 32,
+    "requestLineBytes": 2048,
+    "requestHeadersTimeoutMs": 5000,
+    "keepAliveTimeoutMs": 30000,
+    "nativeGracefulShutdownMs": 100,
+    "frameworkBackendFailureDeadlineMs": 5000,
+    "frameworkWorkerFailureDeadlineMs": 5000
+  },
+  "staticContentParity": {
+    "copiesImmutableCallerBytes": true,
+    "statuses": {
+      "exactGet": 200,
+      "unknown": 404,
+      "wrongMethod": 404,
+      "query": 404,
+      "overflow": 503
+    },
+    "contentType": "application/vnd.ultrasim.content-package",
+    "cacheControl": "public, immutable, max-age=31536000",
+    "exactContentLength": true,
+    "exactContentBytes": true,
+    "clientSourceAuthorizationUnchanged": true,
+    "casAndFingerprintsUnchanged": true
+  },
+  "serviceIsolation": {
+    "realSockets": true,
+    "sameBoundEndpoint": true,
+    "contentActive": 2,
+    "contentQueued": 2,
+    "contentOverflowStatus": 503,
+    "independentService": "test-only status/proof-like",
+    "independentActiveLimit": 1,
+    "independentQueueLimit": 1,
+    "independentStatus": 200,
+    "contentStillSaturated": true
+  },
+  "lifecycle": {
+    "actualHandlerWriteAndCompletionOwnActiveSlot": true,
+    "cancellationAwaitsActualOperation": true,
+    "orphanAcceptWrapper": false,
+    "idempotentAbortPerExchange": true,
+    "expectedNativeWriteFailureHandledAtOrigin": true,
+    "unexpectedHandlerFailuresRetained": true,
+    "allIndependentWorkerFailuresRetained": true,
+    "allIndependentBridgeFailuresRetained": true,
+    "startupAndCleanupFailuresRetained": true,
+    "repeatedConcurrentCallersSeeSameRetainedFailure": true,
+    "locksHeldAcrossIoOrJoins": false,
+    "uncooperativeHandlerDisposition": "Faulted/retirement failure; resources remain owned rather than falsely disposed",
+    "privateCallbacksIndividuallyInstrumented": false,
+    "proofBoundary": "supported Kestrel lifecycle + observable zero owners + old-socket EOF/frozen snapshot + same-port reuse"
+  },
+  "focusedVerification": {
+    "independentFinalCandidateProcesses": 3,
+    "topLevelHostingTestsPerProcess": 18,
+    "r3SubcontrolsPerProcess": 11,
+    "stressCyclesPerProcess": 1024,
+    "stressBeforeCanonical": 3072,
+    "samePortCyclesPerProcess": 16,
+    "samePortCyclesBeforeCanonical": 48,
+    "additionalCanonicalStress": 1024,
+    "additionalCanonicalSamePortCycles": 16,
+    "unexpectedFailuresInFinalControls": 0,
+    "topologies": [
+      {
+        "workers": 1,
+        "queue": 1
+      },
+      {
+        "workers": 2,
+        "queue": 2
+      },
+      {
+        "workers": 3,
+        "queue": 4
+      },
+      {
+        "workers": 8,
+        "queue": 128
+      }
+    ],
+    "concurrentCompletionRequestsPerProcess": 1024,
+    "retirement": {
+      "state": "Disposed",
+      "nativeRequests": 0,
+      "activeServiceResponses": 0,
+      "queuedServiceResponses": 0,
+      "workersRetired": true,
+      "cancellationDisposed": true,
+      "admittedEqualsCompletedAbortedFaulted": true
+    },
+    "startupCatchMutation": {
+      "expectedFailure": true,
+      "exitCode": 134,
+      "regression": "StartupAndCleanupFailuresAreBothRetained"
+    }
+  },
+  "verificationInvestigations": [
+    {
+      "issue": "W7 preflight fixture relocation before initial world proof",
+      "priorFailure": "11 stale rejection attempts versus <=4",
+      "repair": "await initial proof / zero world debt / no snapshot transfer before manual traversal setup",
+      "assertionBoundUnchanged": true,
+      "productionGameNetworkChange": false,
+      "control": "R2 serial original-backend suite also passed; initial parallel build sharing error separately retained"
+    },
+    {
+      "issue": "M00 canonical sword-presence checkpoint accepted old positive metadata",
+      "canonicalExitCode": 134,
+      "focusedFailureAttempt": 8,
+      "currentPublicId": "8:1",
+      "clientRemoved": 1,
+      "repair": "require per-recipient revision strictly newer than before pickup/drop",
+      "repairedIndependentM00Runs": 5,
+      "productionPresentationChange": false
+    },
+    {
+      "issue": "startup cleanup hid original startup exception",
+      "repair": "retain both while attempting remaining cleanup",
+      "controlledMutationFails": true
+    },
+    {
+      "issue": "mixed atomic/locked active-owner updates",
+      "repair": "atomic increment/decrement with gated peak update",
+      "classification": "diagnostic correctness; no optimization or policy change"
+    }
+  ],
+  "canonicalRuns": [
+    {
+      "log": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/release-1-failed.log",
+      "head": "4fa5197af91ea2943ebf39ba01d39c95613239ae",
+      "result": "FAILED",
+      "exitCode": 134,
+      "cause": "M00 line 320"
+    },
+    {
+      "log": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/release-2-stopped-for-accounting-repair.log",
+      "head": "a0bf158111c04d3ac196bfcec4031f409141ef33",
+      "result": "INTENTIONALLY INTERRUPTED; NOT A PASS",
+      "exitCode": 143
+    },
+    {
+      "log": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/release-3.log",
+      "head": "cc937185ce630fdb707e51bdee6372f550ff77b0",
+      "result": "PASS",
+      "exitCode": 0,
+      "uninterrupted": true
+    }
+  ],
+  "architectureOnly": {
+    "result": "PASS",
+    "gates": 4
+  },
+  "productControls": {
+    "contentlessOnlineColdWarmProfileChange": "PASS",
+    "warmRefetchBytes": 0,
+    "completeHosted": {
+      "result": "PASS",
+      "product": "actual export",
+      "remoteProducts": "actual exports",
+      "remoteClients": 2,
+      "humansPerClient": 3,
+      "localAuthorityPath": "packet-free",
+      "detach": "clean"
+    },
+    "mixedLifetime": {
+      "lifetimes": 8,
+      "warmReconnects": 2,
+      "result": "PASS",
+      "residue": "none"
+    },
+    "pf1": {
+      "bots": 8,
+      "exportedClients": 2,
+      "seed": 104729,
+      "joins": 11,
+      "leaves": 11,
+      "result": "PASS"
+    },
+    "pf2": {
+      "bots": 8,
+      "exportedClients": 2,
+      "seed": 130363,
+      "reconciled": true,
+      "retired": true,
+      "result": "PASS"
+    },
+    "exports": {
+      "singlePlayerUltraSimAssemblies": 22,
+      "singlePlayerNetwork": false,
+      "singlePlayerKestrel": false,
+      "onlineUltraSimAssemblies": 13,
+      "onlineNetwork": "ClientOnly",
+      "onlineAuthority": false,
+      "onlineKestrel": false,
+      "completeUltraSimAssemblies": 31,
+      "completeNetwork": "Full",
+      "completePrivateKestrel": true
+    },
+    "completeBinarySha256": "b42d017c95c87b61ae00cb1b3328597f13e4b072391c3275374986eb30f8092a"
+  },
+  "nativeRegression": {
+    "result": "PASS",
+    "captureCount": 12,
+    "mode": "installed with primitive-same-session transition",
+    "realGameplayOutput": true,
+    "processBoundSeconds": 90,
+    "applicationEpochs": [
+      2,
+      2
+    ],
+    "controlEpochs": [
+      1,
+      1
+    ],
+    "actorsBefore": {
+      "active": 2,
+      "animated": 1,
+      "primitive": 1
+    },
+    "actorsAfter": {
+      "active": 2,
+      "animated": 0,
+      "primitive": 2
+    },
+    "retirement": "clean",
+    "realizedDeviceRenderRadius": 3,
+    "humanFeelRated": false,
+    "fullR1MatrixRepeated": false
+  },
+  "carryForward": {
+    "r1PointerTierNameplateEvidenceUnchanged": true,
+    "r1MemoryPlateauEvidenceUnchanged": true,
+    "obsoleteCaptureHarnessTriggerUnknown": true,
+    "currentBoundedCapturePassedAgain": true,
+    "vegetation": {
+      "version": 6,
+      "default": "Off",
+      "owner": "device",
+      "apply": "next world entry",
+      "location": "beside Show Advanced"
+    }
+  },
+  "versions": {
+    "settings": 6,
+    "gameManifest": 33,
+    "networkTransport": 2,
+    "worldPack": 1,
+    "worldStructuralManifest": 1,
+    "worldview": 2,
+    "participantCap": 64
+  },
+  "closure": {
+    "f112": "CLOSED",
+    "gate0": "CLOSED",
+    "p1": "NEXT — Framework Control Plane",
+    "p2ThroughP11": "PLANNED",
+    "gate1": "PLANNED",
+    "pf6": "PLANNED / NOT READY / NOT STARTED",
+    "manyPlayer": "NOT READY",
+    "w8W9W10": "NOT STARTED",
+    "currentCategory1Findings": [],
+    "currentBlockingCategory2Findings": [],
+    "integratedCandidateApprovedToStartPf6": false
+  },
+  "worktree": {
+    "trackedCheckpointChangesCommitted": true,
+    "overallClean": false,
+    "preservedUnrelatedUntracked": [
+      "Docs/Plans/UltraSim_Pre_Many_Person_Live_Testing_Roadmap.md",
+      "Docs/Plans/UltraSim_Web_Discovery_Registry_Portal_Ecosystem.md"
+    ],
+    "includedInCheckpoint": false
+  },
+  "artifacts": [
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/architecture-final-candidate.log",
+      "sha256": "4c42596ac2f97300c3b9f86022f094fc9ff1a4675e01ede3df32ec5f48a1fb9b"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/cabin-native.log",
+      "sha256": "9ab9c5e72f0b21b34925a68310b33a7ec0289320f9847251194ede943a3fc014"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/hosting-final-candidate-1.log",
+      "sha256": "52958ae3eae360814cc7383e8abdb6d6f3bd9ffd9e7460b22a4c0f72619cfacb"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/hosting-final-candidate-2.log",
+      "sha256": "c381f16f4ab31f2df31892efc56aefe7da31b2fb5b63ecf2170e1c31446f5a07"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/hosting-final-candidate-3.log",
+      "sha256": "4e4db072ed8c6066243708a30a2385aa652349483ce0f7725ac847b45ea7aca5"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/m00-diagnostic-8.log",
+      "sha256": "589a0465da072410bf6aa51e0e38cbe011ff73711c92a8f982b310c87a2f81f4"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/m00-revision-gated-1.log",
+      "sha256": "124c23827da455e0828aa139f3d35b90a2a8ee2f0eac3ead415e78a0b8695135"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/m00-revision-gated-2.log",
+      "sha256": "438c044de8141286ab8713a5d47a08f4895230e258793898cd6c7418b68d70de"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/m00-revision-gated-3.log",
+      "sha256": "64a942107a1b3754c4c401b6145f4dc7cd703cec5712e7f19ebc8fe77488fc70"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/m00-revision-gated-4.log",
+      "sha256": "eb90213867c2b99d499680d1ada4797993ee4aadbc4b16c90432889f504a8fe4"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/m00-revision-gated-5.log",
+      "sha256": "64a942107a1b3754c4c401b6145f4dc7cd703cec5712e7f19ebc8fe77488fc70"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/network-baseline-gated.log",
+      "sha256": "bcb6e3a5811e13ffd4a2c544f0d9829cf3f1e827b1cce502ca622cc2196e4732"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/network-current-full.log",
+      "sha256": "6f9c5858ae80f9d0402184b55cd6f1689d54af50564c90b0105c83078e465315"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/network-r2-control-serial-build.log",
+      "sha256": "01a7e52462acbbd79312a18dca1be162a7042b70bd811d86853f8f4c9374b7d0"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/network-r2-control.log",
+      "sha256": "e9c1096ff3a94fac09b581ac030df862b1d42fd09abb4767f2db3eca3479ce8c"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/release-1-failed.log",
+      "sha256": "4c70b76cbd1016fef77b2add1f7d4467dda66779ff69d4591c1a81fabd9fff5b"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/release-2-stopped-for-accounting-repair.log",
+      "sha256": "1a862cb99660c5cb7017d1875d8041cb2b896e379f0463c09e5eeb2fcb0cbc9e"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/release-3.log",
+      "sha256": "b790bb8cfaf9c8e8397bd0348158879471649fc896272e4829fef55115c09309"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/controls/startup-retention-mutant-failed.log",
+      "sha256": "09f890dc147fe786e85f78da5b4e3f5f2719ea1ca0d81818ef2b6e637fdc3857"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/native/cabin/evidence.json",
+      "sha256": "520eeebe604f64e70e63b4b22b6266eacb724f0f2221acc269ee29a667eda3ec"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/native/cabin/installed-Doorway-Noon-Temperate.png",
+      "sha256": "d08a58005cc9ee69fdf7c7a59581610f2ee88f85146653d1b7e57c553d5252e1"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/native/cabin/installed-Exterior-Dawn-Temperate.png",
+      "sha256": "61600086fb6f10b901b677613275009d4c6327e4d9753baabd054a74ff7d2378"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/native/cabin/installed-Exterior-Dusk-Temperate.png",
+      "sha256": "e6159d2ce7ab07e10ffb9b2957607b74de939b1c34f990335fcb0dd646b51345"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/native/cabin/installed-Exterior-Night-Temperate.png",
+      "sha256": "cb9a7d49504508e6ade91afadc7660de5500eb85ae0f02da86dda3d912c2d1a7"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/native/cabin/installed-Exterior-Noon-Cold.png",
+      "sha256": "49327a0bb09061009c1af00aae8fa0ec0b3e3b095bbe7ef622d89333b9bf458b"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/native/cabin/installed-Exterior-Noon-Temperate.png",
+      "sha256": "7403d90c5a3215a6094624f99afe874d9ac3e1d250ec080a2bb2743314a83d15"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/native/cabin/installed-Interior-Noon-Temperate.png",
+      "sha256": "64466f5f53cf7450da33f5806bf261f5a7ba3c403fc1d80f91d5744bfdbe774e"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/native/cabin/installed-Shelf-Noon-Temperate.png",
+      "sha256": "c7a6d4ece0c736513162b87f4e99fb821174f6c4442601d6cb012ea50ad244db"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/native/cabin/primitive-same-session-Doorway-Noon-Temperate.png",
+      "sha256": "498244939ad48ba2055206dbadf011e62d6b3d71c2d5a11424428e1a8258e709"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/native/cabin/primitive-same-session-Exterior-Noon-Temperate.png",
+      "sha256": "7a1788a4a42089c204a31962a79c200ea4f0d0cddd6810bb952e3b4650556a76"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/native/cabin/primitive-same-session-Interior-Noon-Temperate.png",
+      "sha256": "f3c966fa039d6453bdb7ec3edbb0d18987b183c7e8cd4ebf32d7eb4ce2504d24"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/native/cabin/primitive-same-session-Shelf-Noon-Temperate.png",
+      "sha256": "16b2ae3c81cf33c084b0dcfcdbdc65c68f69dd77bdb5901240ae568bee995daf"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/product/Complete-installed-vegetation.json",
+      "sha256": "b0607b65d78e7034f2215981697b9365ebfbd6b2a9bf2e3c5e47f4898cd5cd04"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/product/Complete-mixed.json",
+      "sha256": "9e2178711ef09edbfd8c4d3523abf60969dbb5cf23ba9bfcfaae2faeabe7a5a0"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/product/SinglePlayer-absent-default.json",
+      "sha256": "287ab0697d98cfea01b6895b19c82613d9f1000b174625feb2bcad97e0bbbeae"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/product/SinglePlayer-installed-default.json",
+      "sha256": "85fab27ed48aff162d319c3632ccb6863af793f5341ed7bd7f165398d449ecd0"
+    },
+    {
+      "path": "client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3/product/SinglePlayer-primitive-default.json",
+      "sha256": "25bbca1610e6b9979382c91de2a6a84fc40bfb9e5a807ab04beea662c9ea9859"
+    }
+  ]
+}

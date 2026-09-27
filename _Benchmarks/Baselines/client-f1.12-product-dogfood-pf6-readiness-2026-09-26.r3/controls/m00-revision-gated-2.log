@@ -1,0 +1,5 @@
+EVIDENCE M0.0 dedicated_shared generation=1 participants=3/3 joins=4 leaves=1 ticks=57 public_actors=3 chat_recipients=3 independent_commands=pass reconnect=pass item_world_inventory_equip_primary_drop_other_owner=pass monitor_rows=3 sanitized=pass marker_start_complete=pass
+PASS M00OneDedicatedAuthorityServesThreeIndependentRemoteSessions
+PASS PF5R10SharedPresentationPreparationIsSharedAndProofWakeDeliversNewerState
+EVIDENCE M0.0 embedded_hosted generation=1 host_path=packet-free remote_path=udp participants=3 chat=three_recipient metadata=4 owner_ui=isolated reconnect=pass stop_host_world_survives=pass
+PASS M00ExistingLocalAuthorityAddsAndRetiresRemoteRecipients
