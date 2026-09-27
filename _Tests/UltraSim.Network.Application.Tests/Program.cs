@@ -24,6 +24,12 @@ internal static class Program
 {
     public static void Main(string[] args)
     {
+        string? contentTest = args.FirstOrDefault(static value => value.StartsWith("--f03b-test=", StringComparison.Ordinal));
+        if (contentTest is not null)
+        {
+            F03bRemotePlayableTests.RunNamedOnly(contentTest["--f03b-test=".Length..]);
+            return;
+        }
         if (args.Contains("--m0-0-only", StringComparer.Ordinal))
         {
             M00SharedAuthorityTests.RunAll();

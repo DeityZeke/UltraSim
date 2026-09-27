@@ -22,6 +22,8 @@ using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
 using UltraSim.UI;
 
+using UltraSim.Framework.Http.Endpoint;
+using UltraSim.Bridges.Http.Kestrel;
 internal static class F03bRemotePlayableTests
 {
     internal const int F03bTestCount = 5;
@@ -1304,6 +1306,13 @@ internal static class F03bRemotePlayableTests
         fixture.EnableStructuralTracking();
         fixture.DriveUntil(() => fixture.SessionSnapshot.StructuralPacks.InitialReady);
         fixture.Admit("Gate Traveller", GameGuestBody.HumanFemale);
+        // Owner admission is not completion of the independently scheduled initial public
+        // baseline. This traversal control starts from proven public truth, not a race between
+        // manual setup relocation and the initial snapshot cohort. Cold-start/backlog tests
+        // above still exercise that independent lifecycle without this gate.
+        fixture.DriveUntil(() => fixture.ServerSnapshot.World.AppliedProofs > 0 &&
+            fixture.ServerSnapshot.World.OutstandingDeliveries == 0 &&
+            !fixture.ServerSnapshot.World.SnapshotTransferActive);
         ClientWorldSemanticCache cache = fixture.Cache;
         WorldStructuralManifestFingerprint manifest = cache.PreparedComposition!.Manifest.Fingerprint;
         WorldCompositionRevision revision = cache.PreparedComposition.Revision;
@@ -2707,12 +2716,11 @@ internal static class F03bRemotePlayableTests
     {
         CabinContentOracle oracle = CabinContentOracle.Create();
         byte[] archive = Archive(oracle.ReplacePackage);
-        using var host = new StaticContentHttpHost(
-            new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()),
-            [new StaticContentHttpResource("/content/cabin-replace.uspkg", archive)]);
+        var httpService = new StaticContentHttpService([new StaticContentHttpResource("/content/cabin-replace.uspkg", archive)]);
+        using var host = new HttpEndpointHost(new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()), [httpService.Definition], new KestrelHttpEndpointBackend());
         var acquisition = Acquisition(
             oracle.ReplacePackage, ContentSourceKind.ServerHostedStatic,
-            host.GetUri("/content/cabin-replace.uspkg").ToString());
+            httpService.GetUri(host.BaseUri, "/content/cabin-replace.uspkg").ToString());
         using var source = new HttpContentPackageSource(
             FixtureHttpLimits(archive.Length, allowInsecureHttp: true));
         using var fixture = RemotePlayableFixture.CreateWithContent(
@@ -2726,7 +2734,7 @@ internal static class F03bRemotePlayableTests
         Equal(oracle.ReplacePackage.Payloads.Sum(static value => (long)value.Bytes.Length),
             content.Acquisition.BytesFetched);
         Equal((long)archive.Length, source.GetSnapshot().ArchiveBytesRead);
-        Equal(1UL, host.GetSnapshot().Served);
+        Equal(1UL, httpService.GetSnapshot(host).Served);
         AssertBasicRemoteGameUnaffected(fixture, "HTTP Replace Guest");
         Console.WriteLine(
             $"EVIDENCE A0.4 scenario=Replace source=ServerHostedStatic " +
@@ -2833,12 +2841,11 @@ internal static class F03bRemotePlayableTests
         CabinContentOracle oracle = CabinContentOracle.Create();
         byte[] archive = Archive(oracle.ReplacePackage);
         archive[^1] ^= 0x7F;
-        using var host = new StaticContentHttpHost(
-            new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()),
-            [new StaticContentHttpResource("/content/damaged.uspkg", archive)]);
+        var httpService = new StaticContentHttpService([new StaticContentHttpResource("/content/damaged.uspkg", archive)]);
+        using var host = new HttpEndpointHost(new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()), [httpService.Definition], new KestrelHttpEndpointBackend());
         var acquisition = Acquisition(
             oracle.ReplacePackage, ContentSourceKind.ServerHostedStatic,
-            host.GetUri("/content/damaged.uspkg").ToString());
+            httpService.GetUri(host.BaseUri, "/content/damaged.uspkg").ToString());
 
         using (var denied = new HttpContentPackageSource())
         {
@@ -2897,8 +2904,10 @@ internal static class F03bRemotePlayableTests
             resources.Add(new StaticContentHttpResource(
                 $"/content/add/blobs/{descriptor.Sha256}.blob", payload.Bytes));
         }
-        using var host = new StaticContentHttpHost(
-            new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()), resources);
+        var httpService = new StaticContentHttpService(resources);
+        using var host = new HttpEndpointHost(
+            new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()),
+            [httpService.Definition], new KestrelHttpEndpointBackend());
         string root = new Uri(host.BaseUri, "content/add/").ToString();
         var acquisition = Acquisition(
             oracle.AddPackage, ContentSourceKind.ServerHostedStatic, root);
@@ -2960,12 +2969,11 @@ internal static class F03bRemotePlayableTests
                 Equal(0, unavailable.Fetches);
             }
 
-            using var httpHost = new StaticContentHttpHost(
-                new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()),
-                [new StaticContentHttpResource("/content/inventory.uspkg", archive)]);
+            var httpService = new StaticContentHttpService([new StaticContentHttpResource("/content/inventory.uspkg", archive)]);
+            using var httpHost = new HttpEndpointHost(new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()), [httpService.Definition], new KestrelHttpEndpointBackend());
             var httpAcquisition = Acquisition(
                 fixture.Manifest, ContentSourceKind.ServerHostedStatic,
-                httpHost.GetUri("/content/inventory.uspkg").ToString());
+                httpService.GetUri(httpHost.BaseUri, "/content/inventory.uspkg").ToString());
             using var httpSource = new HttpContentPackageSource(
                 FixtureHttpLimits(archive.Length, allowInsecureHttp: true));
             ResolveUiDefinition(
@@ -3008,12 +3016,11 @@ internal static class F03bRemotePlayableTests
         CabinContentOracle oracle = CabinContentOracle.Create();
         UiContentFixture content = CreateInventoryUiContent(oracle);
         byte[] archive = Archive(content.Manifest, content.Payloads);
-        using var host = new StaticContentHttpHost(
-            new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()),
-            [new StaticContentHttpResource("/content/inventory.uspkg", archive)]);
+        var httpService = new StaticContentHttpService([new StaticContentHttpResource("/content/inventory.uspkg", archive)]);
+        using var host = new HttpEndpointHost(new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()), [httpService.Definition], new KestrelHttpEndpointBackend());
         ContentPackageAcquisition acquisition = Acquisition(
             content.Manifest, ContentSourceKind.ServerHostedStatic,
-            host.GetUri("/content/inventory.uspkg").ToString());
+            httpService.GetUri(host.BaseUri, "/content/inventory.uspkg").ToString());
         using var source = new HttpContentPackageSource(
             FixtureHttpLimits(archive.Length, allowInsecureHttp: true));
         using var remote = RemotePlayableFixture.CreateWithContent(
@@ -3055,12 +3062,11 @@ internal static class F03bRemotePlayableTests
         CabinContentOracle oracle = CabinContentOracle.Create();
         WorldContentFixture world = CreateConceptWorldContent(oracle);
         byte[] archive = Archive(world.Manifest, world.Payloads);
-        using var host = new StaticContentHttpHost(
-            new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()),
-            [new StaticContentHttpResource("/content/concept-world.uspkg", archive)]);
+        var httpService = new StaticContentHttpService([new StaticContentHttpResource("/content/concept-world.uspkg", archive)]);
+        using var host = new HttpEndpointHost(new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()), [httpService.Definition], new KestrelHttpEndpointBackend());
         ContentPackageAcquisition acquisition = Acquisition(
             world.Manifest, ContentSourceKind.ServerHostedStatic,
-            host.GetUri("/content/concept-world.uspkg").ToString());
+            httpService.GetUri(host.BaseUri, "/content/concept-world.uspkg").ToString());
         using var source = new HttpContentPackageSource(
             FixtureHttpLimits(archive.Length, allowInsecureHttp: true));
         var requiredWorld = new RemoteRequiredWorldBinding(
@@ -3126,12 +3132,11 @@ internal static class F03bRemotePlayableTests
         CabinContentOracle oracle = CabinContentOracle.Create();
         WorldContentFixture world = CreateConceptWorldContent(oracle);
         byte[] archive = Archive(world.Manifest, world.Payloads);
-        using var host = new StaticContentHttpHost(
-            new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()),
-            [new StaticContentHttpResource("/content/concept-world.uspkg", archive)]);
+        var httpService = new StaticContentHttpService([new StaticContentHttpResource("/content/concept-world.uspkg", archive)]);
+        using var host = new HttpEndpointHost(new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()), [httpService.Definition], new KestrelHttpEndpointBackend());
         ContentPackageAcquisition acquisition = Acquisition(
             world.Manifest, ContentSourceKind.ServerHostedStatic,
-            host.GetUri("/content/concept-world.uspkg").ToString());
+            httpService.GetUri(host.BaseUri, "/content/concept-world.uspkg").ToString());
         using var source = new HttpContentPackageSource(
             FixtureHttpLimits(archive.Length, allowInsecureHttp: true));
         var requiredWorld = new RemoteRequiredWorldBinding(
@@ -3479,8 +3484,18 @@ internal static class F03bRemotePlayableTests
         return path;
     }
 
+    private static string? _selectedTest;
+    private static int _selectedRuns;
+    internal static void RunNamedOnly(string name)
+    {
+        _selectedTest = name;
+        RunAll();
+        if (_selectedRuns != 1) throw new ArgumentException("Unknown F0.3b content test.");
+    }
     private static void Run(string name, Action body)
     {
+        if (_selectedTest is not null && name != _selectedTest) return;
+        _selectedRuns++;
         body();
         Console.WriteLine($"PASS {name}");
     }
