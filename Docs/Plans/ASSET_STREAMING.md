@@ -256,6 +256,12 @@ CONTENT CATALOG PUBLICATION AND GODOT RESOURCE REALIZATION ARE SEPARATE GENERATI
 
 UI SCHEMAS, PRESENTATION ASSETS, AND STRUCTURAL WORLD CONTENT MAY SHARE CACHE/TRANSFER INFRASTRUCTURE WITHOUT SHARING SEMANTIC IDENTITY.
 
+A DEDICATED 2D ITEM ICON IS OPTIONAL. A SEMANTIC PRESENTATION ROLE MAY DERIVE A UI PORTRAIT FROM AN AUTHORIZED WORLD/OBJECT PRESENTATION AND CACHE THE RESULT AS DISPOSABLE DERIVED OUTPUT.
+
+SEMANTIC PRESENTATION REFERENCES USE STABLE TYPED DOMAIN + DEFINITION + ROLE IDENTITY; DENSE RUNTIME IDS AND ATLAS REGIONS ARE NOT DURABLE CONTENT IDENTITY.
+
+DERIVED PORTRAIT CACHE LOSS NEVER CHANGES GAME/CONTENT TRUTH; IT ONLY REQUIRES REGENERATION OR FALLBACK.
+
 TERRAIN/STATIC CHUNK REVISION IS NOT AN ITEM/MOBILE/TEXTURE LOGICAL CONTENT ID.
 
 ASSET STREAMING CARRIES WORLD-OWNED CANONICAL ARTIFACTS; IT DOES NOT INVENT WORLD ARTIFACT OR
@@ -1426,6 +1432,44 @@ Logical-id resolver domain:
 - presentation metadata.
 
 Default/Replace/Add naturally apply here.
+
+### Semantic presentation roles and derived portraits
+
+A Game/UI consumer may reference a presentable definition through stable semantic identity:
+
+```text
+DefinitionDomainId
+StableDefinitionId
+PresentationRoleId
+```
+
+Representative roles include World, InventoryPortrait, VendorPortrait, CraftingPortrait,
+CharacterPortrait, BestiaryPortrait, Inspection, and Thumbnail.
+
+A dedicated raster icon is optional. When a role-specific image is absent, the client may derive a
+portrait from the same authorized 3D World/object presentation using a bounded portrait profile
+(camera/framing, orientation, scale/autofit, lighting, pose or sampled animation frame).
+
+Generated portraits are **derived renderer resources**, not package/Game authority.
+
+A conceptual derived key is:
+
+```text
+resolved semantic presentation identity
++ PresentationRole
++ portrait profile/version
++ relevant selected immutable source asset hashes
++ renderer/platform profile
+= DerivedPortraitKey
+```
+
+Normal multi-item UI should consume the cached derived image. A separately bounded live portrait
+may animate/rotate on hover or selection; an Inspection role may open a larger interactive 3D view.
+Those live realizations do not alter the underlying item/creature/object and are not required to
+remain resident after the interaction ends.
+
+Derived portrait textures may participate in a compatible UI/Icon atlas. Deleting portrait or atlas
+derived caches loses no content truth and simply requires regeneration/fallback.
 
 ## UI schema content
 
