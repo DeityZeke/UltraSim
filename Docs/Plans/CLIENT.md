@@ -1019,6 +1019,12 @@ RunUO/GumpStudio authoring vocabulary—image backgrounds, resizeable tiled fram
 state-image controls, item/icon-like semantic images, tooltips—without copying old flat packet
 commands or exposing Godot controls. Current nested layout builders remain canonical.
 
+“Display item/creature/definition” should resolve through a generic semantic presentation
+reference (definition domain + stable definition + presentation role), not through domain-specific
+UI-kernel element kinds. A dedicated 2D icon is optional: Inventory/vendor/crafting/bestiary
+presentation may derive and cache a portrait from the same 3D World presentation, with separately
+bounded live hover/inspection realization where a profile enables it.
+
 ---
 
 # 14. Nameplates: cached presentation, never server polling
