@@ -16,7 +16,7 @@ When wording conflicts, use the current canonical meaning from:
 
 - [UltraSim Pre–Many-Player Live Test Roadmap](UltraSim_Pre_Many_Person_Live_Testing_Roadmap.md)
 - [UltraSim Architecture](../ARCHITECTURE.md)
-- [Future Engine & Modding Backlog](FUTURE_ENGINE_MODDING_BACKLOG.md)
+- [Future Content & Engine Extensibility](FUTURE_CONTENT_AND_ENGINE_EXTENSIBILITY.md)
 
 In particular:
 
@@ -35,8 +35,13 @@ Engine
 The Framework may host conventional C# sidecar/runtime objects, ECS-backed state, or hybrids.
 ECS is a scalable realization, not the mandatory gameplay object model.
 
-The future/modding backlog is deliberately separate from the active P1–P11 campaign. Documenting
+The future authoring/extensibility backlog is deliberately separate from the active P1–P11 campaign. Documenting
 a candidate Engine or hook does not automatically promote it into current implementation scope.
+
+The objective is not a separate Mod API layered over a closed game. UltraSim's own Game Implementation should
+use the same typed definitions, facets, profiles, scripts, package lifecycle, hooks and capability seams expected
+of server/community packages. “Mod friendliness” is treated as evidence that the normal content-authoring model
+is compositional, not as a separate compatibility product.
 
 ---
 
