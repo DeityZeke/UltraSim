@@ -45,6 +45,21 @@ is the concrete place where authoritative game-owned domains meet.
 The repository verifier freezes the exact active project-reference graph. A new
 reference is an architecture decision, not a convenience edit.
 
+## Inbound HTTP Framework / Bridge seam
+
+`Framework/Http/Endpoint` owns instance-based inbound request/response contracts, fixed
+service-owned routing, per-service bounded admission and lifecycle. It is BCL-only Framework
+infrastructure, **not an HTTP Engine Core**, and does not own outbound HTTP. `Bridges/Http.Kestrel`
+realizes that contract through supported ASP.NET Core lifecycle APIs. `Server/Hosting` composes
+them; Static Content is the first production provider. The Framework/Bridge references no
+Game/Client/Server or content/discovery semantics. Shared binding does not imply shared service
+authorization, queue, concurrency or deadline budgets.
+
+This is the narrow F1.12-R3 correctness-driven extraction, not commencement of P1/P2/P3 or a
+generic module/package host. Future Discovery is an open transport-neutral application contract
+for client, website and third-party consumers; registry/status providers may share this endpoint.
+R3 implements neither Discovery, registry, outbound integrations nor federated Accounting.
+
 ## Authority
 
 One `ServerRuntime` owns one active `ServerGeneration`. A generation is the

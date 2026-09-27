@@ -2904,6 +2904,7 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
                 "UltraSim.Server.Runtime"],
             ["UltraSim.Client.Network", "UltraSim.Network", "UltraSim.Game.Protocol",
                 "UltraSim.Game.Replication.Remote", "UltraSim.Server.Hosting",
+                "UltraSim.Framework.Http.Endpoint", "UltraSim.Bridges.Http.Kestrel",
                 "UltraSim.Server.ConceptDemo", "UltraSim.Server.ConceptDemo.LocalHost"]),
         new(
             "Online",
@@ -2913,6 +2914,7 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
                 "UltraSim.Game.Composition", "UltraSim.Game.Inventory", "UltraSim.Game.Persistence",
                 "UltraSim.Game.Replication",
                 "UltraSim.Game.Replication.Remote", "UltraSim.Game.UI", "UltraSim.Server.Hosting",
+                "UltraSim.Framework.Http.Endpoint", "UltraSim.Bridges.Http.Kestrel",
                 "UltraSim.Server.Persistence", "UltraSim.Server.Runtime",
                 "UltraSim.Server.ConceptDemo", "UltraSim.Server.ConceptDemo.LocalHost"]),
         new(
@@ -2921,7 +2923,8 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
                 "UltraSim.Client.Local", "UltraSim.Client.StandardUi",
                 "UltraSim.Client.Network", "UltraSim.Game.Composition", "UltraSim.Game.Protocol",
                 "UltraSim.Game.Replication", "UltraSim.Network", "UltraSim.Server.Runtime",
-                "UltraSim.Server.ConceptDemo", "UltraSim.Server.ConceptDemo.LocalHost"],
+                "UltraSim.Server.ConceptDemo", "UltraSim.Server.ConceptDemo.LocalHost",
+                "UltraSim.Framework.Http.Endpoint", "UltraSim.Bridges.Http.Kestrel"],
             []),
     ];
 
@@ -2988,6 +2991,9 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
                 throw new InvalidOperationException(
                     $"{gate.Name} composition resolved or copied forbidden assembly '{forbidden}'.");
         }
+        bool hasKestrelPayload = Directory.EnumerateFiles(output, "Microsoft.AspNetCore*.dll").Any();
+        if (hasKestrelPayload != (gate.Name == "Complete"))
+            throw new InvalidOperationException($"{gate.Name} private HTTP runtime payload violates its edition boundary.");
         string networkAssembly = Path.Combine(output, "UltraSim.Network.dll");
         if (string.Equals(gate.Name, "Online", StringComparison.Ordinal))
         {
@@ -3265,6 +3271,7 @@ static FinalClientProductExports VerifyFinalClientProductExports(
     ExportClient(root, godot, "Complete", completeExecutable);
     string[] completeAssemblies =
     [
+        "UltraSim.Bridges.Http.Kestrel",
         "UltraSim.Client.Application.Godot",
         "UltraSim.Client.BuiltInTestWorlds",
         "UltraSim.Client.Content",
@@ -3273,6 +3280,7 @@ static FinalClientProductExports VerifyFinalClientProductExports(
         "UltraSim.Client.Network",
         "UltraSim.Client.StandardUi",
         "UltraSim.ECS",
+        "UltraSim.Framework.Http.Endpoint",
         "UltraSim.Game.Accounting",
         "UltraSim.Game.Admission",
         "UltraSim.Game.Chat",
@@ -3296,6 +3304,8 @@ static FinalClientProductExports VerifyFinalClientProductExports(
         "UltraSim.UI",
     ];
     RequireExactExportAssemblies(completeDirectory, completeAssemblies, "Complete");
+    if (!File.Exists(Path.Combine(ExportDataDirectory(completeDirectory), "Microsoft.AspNetCore.Server.Kestrel.Core.dll")))
+        throw new InvalidOperationException("Complete export omitted its supported private Kestrel runtime.");
     RequireExternalOfficialPresentation(completeDirectory, completeExecutable, "Complete");
     HashSet<string> completeNetworkTypes = ReadDefinedTypeNames(
         Path.Combine(ExportDataDirectory(completeDirectory), "UltraSim.Network.dll"));
@@ -5842,6 +5852,9 @@ static void VerifyArchitecture(string root)
 {
     var expected = new Dictionary<string, string[]>(StringComparer.Ordinal)
     {
+        ["Framework/Http/Endpoint/UltraSim.Framework.Http.Endpoint.csproj"] = [],
+        ["Bridges/Http.Kestrel/UltraSim.Bridges.Http.Kestrel.csproj"] =
+            ["Framework/Http/Endpoint/UltraSim.Framework.Http.Endpoint.csproj"],
         ["Kernels/ECS.Generators/UltraSim.ECS.Generators.csproj"] = [],
         ["Kernels/ECS/UltraSim.ECS.csproj"] =
             ["Kernels/ECS.Generators/UltraSim.ECS.Generators.csproj"],
@@ -5857,7 +5870,11 @@ static void VerifyArchitecture(string root)
         ["Server/Runtime/UltraSim.Server.Runtime.csproj"] =
             ["Kernels/ECS/UltraSim.ECS.csproj"],
         ["Server/Hosting/UltraSim.Server.Hosting.csproj"] =
-            ["Server/Runtime/UltraSim.Server.Runtime.csproj"],
+        [
+            "Server/Runtime/UltraSim.Server.Runtime.csproj",
+            "Framework/Http/Endpoint/UltraSim.Framework.Http.Endpoint.csproj",
+            "Bridges/Http.Kestrel/UltraSim.Bridges.Http.Kestrel.csproj",
+        ],
         ["Server/DirectConnect/UltraSim.Server.DirectConnect.csproj"] =
         [
             "Game/Protocol/UltraSim.Game.Protocol.csproj",
@@ -5868,6 +5885,8 @@ static void VerifyArchitecture(string root)
         ],
         ["Server/ConceptDemo/UltraSim.Server.ConceptDemo.csproj"] =
         [
+            "Framework/Http/Endpoint/UltraSim.Framework.Http.Endpoint.csproj",
+            "Bridges/Http.Kestrel/UltraSim.Bridges.Http.Kestrel.csproj",
             "Client/Content/UltraSim.Client.Content.csproj",
             "Game/Composition/UltraSim.Game.Composition.csproj",
             "Game/Contracts/UltraSim.Game.Contracts.csproj",
@@ -6042,7 +6061,7 @@ static void VerifyArchitecture(string root)
         ],
     };
 
-    string[] roots = ["Kernels", "Server", "Client", "Game", "Tools"];
+    string[] roots = ["Kernels", "Server", "Client", "Game", "Tools", "Framework", "Bridges"];
     string[] actualProjects = roots
         .SelectMany(folder => Directory.EnumerateFiles(Path.Combine(root, folder), "*.csproj", SearchOption.AllDirectories))
         .Select(path => Relative(root, path))
@@ -6075,7 +6094,17 @@ static void VerifyArchitecture(string root)
             throw new InvalidOperationException(
                 $"Project-reference boundary changed for '{project}'.\n" +
                 $"Expected: {string.Join(", ", orderedAllowed)}\nActual: {string.Join(", ", references)}");
+        if (project.StartsWith("Framework/Http/", StringComparison.Ordinal) &&
+            document.Descendants("FrameworkReference").Any())
+            throw new InvalidOperationException("Framework HTTP must remain backend-neutral/BCL-only.");
     }
+    string[] legacyHttpSources = new[] { "Server", "Framework", "Bridges", "Client", "Game", "Kernels" }
+        .SelectMany(folder => Directory.EnumerateFiles(Path.Combine(root, folder), "*.cs", SearchOption.AllDirectories))
+        .Where(path => !path.Contains("/obj/", StringComparison.Ordinal) && !path.Contains("/bin/", StringComparison.Ordinal))
+        .Where(path => Regex.IsMatch(File.ReadAllText(path), @"\bHttpListener(?:Context|Response)?\b"))
+        .Select(path => Relative(root, path)).ToArray();
+    if (legacyHttpSources.Length != 0)
+        throw new InvalidOperationException("Production managed listener remains: " + string.Join(", ", legacyHttpSources));
 }
 
 static void VerifyDocumentation(string root)
@@ -6197,7 +6226,7 @@ static void VerifyDocumentation(string root)
         }
     }
 
-    string[] productionRoots = ["Kernels", "Server", "Client", "Game"];
+    string[] productionRoots = ["Kernels", "Server", "Client", "Game", "Framework", "Bridges"];
     string[] documentationErrors =
     [
         "CS1570", "CS1572", "CS1573", "CS1574", "CS1580", "CS1581", "CS1584", "CS1587",

@@ -56,7 +56,11 @@ The canonical Network development default is Full. Dedicated product builds sele
 role; switching this product to Full later requires no consumer-code change.
 
 The default protocol bind is `127.0.0.1:7777` and the content host defaults to
-`127.0.0.1:7778`. `--bind=<IPv4>:<port>`, `--content-bind=<IPv4>:<port>`,
+`127.0.0.1:7778`. F1.12-R3 composes `StaticContentHttpService` with the shared inbound
+Framework HTTP Endpoint and Kestrel Bridge. Dedicated hosting requires the ASP.NET Core 8
+runtime (tested 8.0.31) in the selected dotnet installation; the SDK alone is not a runtime
+deployment. Complete's Godot export carries supported private Kestrel dependencies instead.
+`--bind=<IPv4>:<port>`, `--content-bind=<IPv4>:<port>`,
 `--identity-dir=<path>`, and the verifier-oriented `--ready-file=<path>` are supported. Automated
 acceptance may also request graceful retirement through `--stop-file=<path>` and capture the final
 generation/tick/join/leave/participant/session state through `--summary-file=<path>`. The

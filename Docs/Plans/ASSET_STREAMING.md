@@ -1810,16 +1810,19 @@ adapters. The package envelope carries the canonical manifest and its exact orde
 does not introduce another semantic package identity. All bytes still pass package/manifest/path,
 size, SHA-256, and passive-format validation before A0.2 installation and catalog publication.
 
-`Server.Hosting` now provides a small immutable-byte `StaticContentHttpHost` that is independent of
-Game ticks, Network lanes, realm authorization, and content meaning. Its admitted route/resource
-set and total retained bytes are fixed at construction, it accepts GET for exact lowercase routes
-only, and copies configured bytes before serving them. A fixed response-worker set, bounded pending
-queue, and per-response deadline prevent one stalled consumer from blocking every independent
-download; excess work is rejected rather than creating unbounded tasks. Deadline expiry
-actively aborts the response connection and awaits the blocked write's cleanup before
-the fixed worker is returned, because cancellation alone does not reliably interrupt an
-active `HttpListener` response write on every supported runtime. The same termination
-rule applies during host shutdown. The initial
+`Server.Hosting` provides immutable-byte `StaticContentHttpService` routes, composed by a
+backend-neutral `Framework.Http.Endpoint` and `Bridges.Http.Kestrel`. The old host name remains
+only as a delegation facade, not a listener/scheduler owner. Routes and copied bytes are fixed
+before startup; GET requires an exact lowercase canonical path without query. Content retains
+its own 4 active / 8 queued / 30 s deadline policy, 4,096-resource / 768 MiB defaults, exact Content-Type,
+Content-Length and immutable cache header. Each active slot covers the real response write and
+native completion. Overflow returns 503; other route/method/query rejection remains 404. Deadline
+and shutdown abort supported native exchanges, observe their real operations and join workers.
+A separate tiny status-like test service remains available on the same port during Content
+saturation. This proves per-service isolation, not implementation of Discovery/Registry.
+The affected managed listener backend is removed from production, not declared repaired; its
+historical R1/R2 finding remains valid. Cold `--content-bind` and content authorization are unchanged.
+The initial
 client source disables redirects and decompression, bounds response bytes and request time, and
 allows plaintext server-hosted HTTP or loopback/private targets only through explicit policy.
 External sources remain HTTPS-only. Literal private/loopback addresses are rejected by default;

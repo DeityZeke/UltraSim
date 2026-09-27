@@ -23,7 +23,26 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(UltraSimEdition)' == 'Complete'">
     <DefineConstants>$(DefineConstants);ULTRASIM_COMPLETE</DefineConstants>
+    <!-- Godot owns CoreCLR and cannot attach another shared framework to an already running
+         runtime. Ship the supported ASP.NET runtime assemblies as private Complete dependencies.
+         This does not add server hosting to SinglePlayer or Online. -->
+    <DisableTransitiveFrameworkReferences>true</DisableTransitiveFrameworkReferences>
+    <UltraSimAspNetRuntimeVersion>8.0.31</UltraSimAspNetRuntimeVersion>
   </PropertyGroup>
+
+  <ItemGroup Condition="'$(UltraSimEdition)' == 'Complete'">
+    <PackageDownload Include="Microsoft.AspNetCore.App.Runtime.linux-x64" Version="[$(UltraSimAspNetRuntimeVersion)]" />
+  </ItemGroup>
+  <Target Name="ResolveEmbeddedKestrelRuntime" BeforeTargets="ResolveAssemblyReferences"
+          Condition="'$(UltraSimEdition)' == 'Complete'">
+    <ItemGroup>
+      <Reference Include="$(NuGetPackageRoot)microsoft.aspnetcore.app.runtime.linux-x64/$(UltraSimAspNetRuntimeVersion)/runtimes/linux-x64/lib/net8.0/*.dll">
+        <Private>true</Private>
+      </Reference>
+    </ItemGroup>
+    <Error Condition="!Exists('$(NuGetPackageRoot)microsoft.aspnetcore.app.runtime.linux-x64/$(UltraSimAspNetRuntimeVersion)/runtimes/linux-x64/lib/net8.0/Microsoft.AspNetCore.Server.Kestrel.Core.dll')"
+           Text="Complete requires the restored supported Kestrel runtime package." />
+  </Target>
 
   <ItemGroup>
     <ProjectReference Include="../Core/UltraSim.Client.Core.csproj" />

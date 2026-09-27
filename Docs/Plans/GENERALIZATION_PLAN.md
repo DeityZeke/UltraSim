@@ -601,103 +601,47 @@ if no new Engine implementation is required.
 
 ---
 
-# 10. Phase 6 — Build Web.Core / WebEngine
+# 10. Inbound HTTP Framework Endpoint / Kestrel Bridge
 
-Create a reusable web/API capability as an optional Engine.
-
-The generic Web core should understand concepts such as:
-
-* routes;
-* requests;
-* responses;
-* authentication hooks;
-* authorization policy;
-* bounded request/response sizes;
-* rate/bounds policy;
-* semantic projections;
-* static-resource registration;
-* lifecycle.
-
-It must **not** inherently depend on:
-
-* ASP.NET Core;
-* Kestrel;
-* Apache;
-* nginx;
-* Godot;
-* UltraSim Game.
-
-Conceptually:
+The old proposal that WebEngine/Web.Core own generic listener/routing/lifecycle machinery is
+superseded by F1.12-R3's narrow correctness-driven extraction:
 
 ```text
-Web.Core
-    |
-    +-- ASP.NET/Kestrel adapter
-    |
-    +-- UltraSim EngineHost adapter
-    |
-    +-- future alternate host adapter
+Static Content / future Discovery / future richer Web capability
+                    ↓
+Framework.Http.Endpoint
+                    ↑
+Bridges.Http.Kestrel
 ```
 
-Apache/nginx would normally sit in front of a managed adapter through reverse proxying rather than embedding UltraSim code into the web server.
+Framework owns backend-neutral, instance-based inbound contracts, frozen service-owned route
+definitions, independent service budgets and lifecycle. Kestrel is an external technology Bridge,
+not the architectural contract. Server.Hosting explicitly composes both. A richer optional Web
+capability may consume this endpoint; it must not become listener owner simply because its API
+is sophisticated. Outbound HTTP, generic authorization, MVC, Runtime/Module Host and dynamic
+providers are not implemented by R3. This does not begin the general P1/P2/P3 campaign.
 
-Example deployment:
+# 11. Static Content as the first provider
 
-```text
-Internet
-    ↓
-nginx / Apache
-    ↓
-ASP.NET / Kestrel adapter
-    ↓
-Web.Core
-    ↓
-UltraSim projections/actions
-```
+Static Content owns copied immutable resource bytes and exact routes, not a listener or global
+web singleton. One endpoint can host multiple independently bounded services. The R3 test-only
+status-like service models the known registry poller's tiny status/proof workload and remains
+available while Content's active/queue budget is saturated. It does not implement a registry.
 
----
+Sharing listener machinery must not collapse semantic/security domains. Future public, registry,
+account and operator surfaces retain provider-owned authorization and limits. External content
+hosting (nginx/CDN/object store) remains possible without changing content identity.
 
-# 11. Phase 7 — Migrate Static Content Hosting Where Appropriate
+Discovery should remain an open transport-neutral application contract usable by native client,
+website and third-party consumers. Website/client are consumers; official registry is a provider;
+HTTP is a transport. Neither a website database schema nor client-private DTO defines Discovery.
+Future projections should be committed/bounded snapshots, not direct access to mutable authority.
 
-A0.4 introduced a deliberately dumb static content host.
-
-That behavior should be preserved.
-
-Eventually the implementation may migrate underneath Web.Core:
-
-```text
-WebEngine
-├─ Static Content Surface
-│  └─ immutable package bytes
-│
-├─ Public API
-├─ Account API
-└─ Operator / Authoring API
-```
-
-However:
-
-> **Sharing HTTP machinery must not collapse semantic/security domains.**
-
-Static package hosting must remain equivalent to:
-
-```text
-GET exact immutable approved bytes
-```
-
-and should not gain Game authority merely because it shares the WebEngine transport.
-
-The architecture must continue supporting external content hosting:
-
-```text
-game server
-    gameplay authority
-
-nginx / S3 / CDN / object storage
-    package bytes
-```
-
-without changing content identity.
+**Sequencing after successful R3 closure:** F1.12/Gate 0 closed; P1 Framework Control Plane next;
+P2–P11 and Gate 1 planned. PF6 remains planned/not ready/not started until the broader
+productization and identity/character-mode gate. Many-player live testing is not ready.
+No Control Plane, Discovery, Accounting federation, outbound integrations or W8/W9/W10 work is
+authorized by this early extraction.
 
 ---
 

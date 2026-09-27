@@ -12,5 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../Runtime/UltraSim.Server.Runtime.csproj" />
+    <ProjectReference Include="../../Framework/Http/Endpoint/UltraSim.Framework.Http.Endpoint.csproj" />
+    <ProjectReference Include="../../Bridges/Http.Kestrel/UltraSim.Bridges.Http.Kestrel.csproj" />
   </ItemGroup>
 </Project>

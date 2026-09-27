@@ -7,6 +7,8 @@ using UltraSim.Game.Replication;
 using UltraSim.Game.UI;
 using UltraSim.Game.World;
 using UltraSim.Server.Hosting;
+using UltraSim.Framework.Http.Endpoint;
+using UltraSim.Bridges.Http.Kestrel;
 using UltraSim.UI;
 
 namespace UltraSim.Server.ConceptDemo;
@@ -19,16 +21,19 @@ public sealed class ConceptDemoContentDeployment : IDisposable
     private const string ActorArchiveRoute = "/content/concept-demo-actors.uspkg";
     private const string ActorReplaceArchiveRoute = "/content/concept-demo-actor-replace.uspkg";
     private const string WorldPresentationArchiveRoute = "/content/concept-demo-world-presentation.uspkg";
-    private readonly StaticContentHttpHost _host;
+    private readonly HttpEndpointHost _host;
+    private readonly StaticContentHttpService _service;
 
     private ConceptDemoContentDeployment(
-        StaticContentHttpHost host,
+        HttpEndpointHost host,
+        StaticContentHttpService service,
         RemoteContentAuthorization authorization,
         RemoteContentAuthorization presentationAuthorization,
         ConceptDemoStructuralContent structural,
         ContentDeploymentSnapshot snapshot)
     {
         _host = host;
+        _service = service;
         Authorization = authorization;
         PresentationAuthorization = presentationAuthorization;
         Structural = structural;
@@ -46,7 +51,7 @@ public sealed class ConceptDemoContentDeployment : IDisposable
     /// Returns cold HTTP response-body accounting. These bytes exclude HTTP/TCP/IP
     /// framing and are deliberately separate from gameplay UDP accounting.
     /// </summary>
-    public StaticContentHttpHostSnapshot GetHttpSnapshot() => _host.GetSnapshot();
+    public StaticContentHttpHostSnapshot GetHttpSnapshot() => _service.GetSnapshot(_host);
 
     public static ConceptDemoContentDeployment Create(
         ApplicationRealmId realm,
@@ -190,8 +195,7 @@ public sealed class ConceptDemoContentDeployment : IDisposable
             resolvedCatalog, ConceptDemoActorPresentationProfile.HumanYDefinitionId,
             actors.Manifest.PackageId);
 
-        var host = new StaticContentHttpHost(
-            endpoint,
+        var service = new StaticContentHttpService(
             [
                 new StaticContentHttpResource(ArchiveRoute, archive),
                 new StaticContentHttpResource(WestPackArchiveRoute, westPackArchive),
@@ -200,14 +204,15 @@ public sealed class ConceptDemoContentDeployment : IDisposable
                 new StaticContentHttpResource(ActorReplaceArchiveRoute, actorReplaceArchive),
                 new StaticContentHttpResource(WorldPresentationArchiveRoute, worldPresentationArchive),
             ]);
+        var host = new HttpEndpointHost(endpoint, [service.Definition], new KestrelHttpEndpointBackend());
         try
         {
             ContentPackageAcquisition[] acquisitions =
             [
-                Acquisition(manifest!, host.GetUri(ArchiveRoute)),
-                Acquisition(actors.Manifest, host.GetUri(ActorArchiveRoute)),
-                Acquisition(actorReplacement.Manifest, host.GetUri(ActorReplaceArchiveRoute)),
-                Acquisition(worldPresentation.Manifest, host.GetUri(WorldPresentationArchiveRoute)),
+                Acquisition(manifest!, service.GetUri(host.BaseUri, ArchiveRoute)),
+                Acquisition(actors.Manifest, service.GetUri(host.BaseUri, ActorArchiveRoute)),
+                Acquisition(actorReplacement.Manifest, service.GetUri(host.BaseUri, ActorReplaceArchiveRoute)),
+                Acquisition(worldPresentation.Manifest, service.GetUri(host.BaseUri, WorldPresentationArchiveRoute)),
             ];
             RemoteContentAuthorization authorization = ProjectAuthorization(
                 plan!, catalog!.Fingerprint, [acquisitions[0]]);
@@ -216,15 +221,14 @@ public sealed class ConceptDemoContentDeployment : IDisposable
                 [acquisitions[1], acquisitions[2], acquisitions[3]]);
             var structural = new ConceptDemoStructuralContent(
                 structuralSource.Manifest,
-                Acquisition(westPack.Manifest, host.GetUri(WestPackArchiveRoute)),
-                Acquisition(eastPack.Manifest, host.GetUri(EastPackArchiveRoute)));
-            return new ConceptDemoContentDeployment(
-                host,
+                Acquisition(westPack.Manifest, service.GetUri(host.BaseUri, WestPackArchiveRoute)),
+                Acquisition(eastPack.Manifest, service.GetUri(host.BaseUri, EastPackArchiveRoute)));
+            return new ConceptDemoContentDeployment(host, service,
                 authorization,
                 presentationAuthorization,
                 structural,
                 new ContentDeploymentSnapshot(
-                    host.GetUri(ArchiveRoute),
+                    service.GetUri(host.BaseUri, ArchiveRoute),
                     checked(archive.Length + actorArchive.Length + actorReplaceArchive.Length + worldPresentationArchive.Length),
                     pack.Length,
                     checked(uiBytes.Length + monitorUiBytes.Length),
