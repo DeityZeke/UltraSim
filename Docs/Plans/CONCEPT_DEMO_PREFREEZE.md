@@ -1,18 +1,27 @@
 # UltraSim Concept Demo — Pre-Freeze Hardening, Load, and Deployment-Policy Plan
 
-**Current release disposition (2026-09-26): PF6 WAITING ON F1.12 / NOT READY FOR PF6.**
+**Current release disposition (2026-09-26): F1.12/Gate 0 CLOSED. P1 Framework Control Plane NEXT;
+P2–P11 and Gate 1 PLANNED. PF6 PLANNED / NOT READY / NOT STARTED; many-player live testing NOT READY.**
 The earlier PF5 readiness statements below remain historical subsystem conclusions. The active
 [Client Completion plan](CLIENT_COMPLETION_PLAN.md) now governs readiness. Its
 [partial F1.12 evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.md)
 records repaired product mechanics and historical canonical Release success. Its linked
 [R1 companion](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1.md)
 adds native Cabin/pointer/tier/nameplate assurance and repeated memory high-water reuse, but preserves
-a new unexpected HTTP shutdown failure from canonical Release as an unresolved release blocker.
+a new unexpected HTTP shutdown failure from canonical Release that R2 alone did not close.
 No passing retry is represented as a repair. The linked
 [R2 investigation](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r2.md)
 hardens application accept/response ownership but keeps the managed `HttpListener` teardown issue
-open: framework-owned unregistered responses can still race endpoint shutdown. No exception is
-suppressed and no replacement HTTP server is silently adopted. W8/W9/W10 and PF6 are unstarted.
+open: framework-owned unregistered responses can still race endpoint shutdown. The
+[R3 evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3.md)
+records the explicit supported HTTP-host decision: production `HttpListener` is retired in favor of
+the neutral Framework HTTP Endpoint/Kestrel Bridge. No NRE suppression is introduced. Uninterrupted
+canonical Release passes on integrated production candidate `cc937185ce630fdb707e51bdee6372f550ff77b0`;
+evidence commit `d9234948989ac9a272ab1905a388b58210cd6403` retains the failing, interrupted and passing
+runs. Focused multi-process lifecycle, independent-service saturation, exact-port retirement,
+real cold/warm content, Complete hosting and native Cabin regression pass. There is no remaining
+release-blocking finding within R3, but the subsequent productization/identity Gate 1 is not closed.
+W8/W9/W10 and PF6 remain unstarted.
 
 **Status:** active campaign. PF0 records the exact feature-complete candidate, PF1 closes the
 real headless ClientOnly Network bot plus mixed exported-client correctness gate, and PF2 closes
@@ -2369,10 +2378,12 @@ companion, and the human-readable report.
 
 ## PF6 — external human validation
 
-**Status: WAITING ON F1.12.** PF5-R8's earlier measurement closure was not the later client-dogfood
+**Status: PLANNED / NOT READY / NOT STARTED; waiting on P1–P11 and Gate 1.** F1.12/Gate 0 is closed
+after the supported R3 HTTP replacement. PF5-R8's earlier measurement closure was not the later client-dogfood
 readiness gate; see the current disposition above. PF5-R2-R2 repaired the HTTP-host
 shutdown race and retained complete unexpected-worker-failure reporting. That historical closure
-does not dismiss the later F1.12-R1 framework header-finalization shutdown failure recorded above.
+does not dismiss the later F1.12-R1 framework header-finalization shutdown failure recorded above;
+R3 explicitly retires that backend rather than relabeling a stress retry as its repair.
 PF5-R3 leaves Game,
 replication, proof, wire, cadence, AOI, compression, aggregation, and participant policy exact;
 its selected physical egress is covered by focused lifecycle, external Hosted, and full export

@@ -17,17 +17,25 @@ The [F1.10 actor-tier evidence](../../_Benchmarks/Baselines/client-f1.10-actor-r
 selects a conservative hybrid: Detailed near/feature-bearing actors, distant batched primitives.
 [F1.11](../../_Benchmarks/Baselines/client-f1.11-renderer-stress-vegetation-2026-09-25.md)
 closes common Local/Remote catalog-backed world resources and native renderer stress, with
-procedural vegetation opt-in/default Off. F1.12 is active with
+procedural vegetation opt-in/default Off. F1.12/Gate 0 is closed after R3, with
 [partial dogfood evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.md):
 four mechanical product repairs, exported lifecycle journeys and uninterrupted canonical Release on
 `ac6a81bf`. The linked [R1 evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1.md)
 adds actual native captures, pointer/tier/nameplate coverage and repeated radius-1 retired-memory
 high-water reuse. Settings v6 exposes device-owned/default-Off Experimental Vegetation (next entry).
-An unexpected HTTP shutdown error observed in canonical Release remains unresolved; PF6 is NOT READY.
+An unexpected HTTP shutdown error observed in canonical Release is preserved in the historical evidence.
 The [R2 investigation](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r2.md)
 adds explicit accept ownership and single response-closer hardening, but demonstrates a remaining
-managed-runtime teardown/header race outside application context ownership. This is not a closure
-claim. The grass preference is now directly beneath Show Advanced, still default Off/next-entry.
+managed-runtime teardown/header race outside application context ownership. R2 was not a closure
+claim. The [R3 evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3.md)
+records replacement of production `HttpListener` with the BCL-only Framework HTTP Endpoint and
+supported Kestrel Bridge. Uninterrupted canonical Release passes on integrated candidate
+`cc937185ce630fdb707e51bdee6372f550ff77b0`; immutable evidence is committed at
+`d9234948989ac9a272ab1905a388b58210cd6403`. Independent per-service bounds, actual write/completion
+ownership, complete unexpected-failure retention and real socket retirement are covered.
+P1 Framework Control Plane is next; P2–P11 and Gate 1 remain planned. PF6 is planned/not ready/not
+started; many-player live testing is not ready. The grass preference is directly beneath
+Show Advanced, still default Off/next-entry.
 The historical capture-stall trigger was not reproduced and is not claimed as an engine diagnosis.
 W8 remains unstarted. The initial F1.8A
 closure evidence remains historical, and the [R1 correction](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md)
@@ -2838,10 +2846,15 @@ F1.9A Simple/Advanced display composition and real Gameplay Frame output      CL
 F1.9B scalable Godot RID/MultiMesh backend                                    CLOSED (NodeMultiMesh/PerRow)
 F1.10 actor representation tiers/realization interpolation seam               CLOSED (conservative hybrid)
 F1.11 renderer stress consumers/vegetation prototype                          CLOSED (default Off)
-F1.12 product dogfooding/PF6 readiness                                        ACTIVE / HTTP RELEASE FAILURE OPEN
+F1.12 product dogfooding/PF6 readiness / Gate 0                               CLOSED after R3
         |
         v
-PF6 external human validation                                                WAITING ON F1.12
+P1 Framework Control Plane                                                  NEXT / NOT STARTED
+P2–P11 productization                                                       PLANNED
+Gate 1 productization and identity/character-mode readiness                   PLANNED
+        |
+        v
+PF6 external human validation                                                PLANNED / NOT READY / NOT STARTED
         |
         v
 repository generalization / extraction readiness
