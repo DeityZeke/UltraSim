@@ -11,6 +11,7 @@ internal static class R3HttpEndpointTests
         Check("FrameworkContractsAndDuplicateOwnership", Contracts);
         Check("TwoServicesIsolateSaturatedContent", Saturation);
         Check("GatedHandlerShutdownRetainsRealOwnership", GatedShutdown);
+        Check("ConcurrentCompletionConservesActiveOwnership", ConcurrentCompletion);
         Check("AllUnexpectedServiceFaultsSurviveConcurrentRetirement", Faults);
         Check("UnexpectedBackendFailureIsRetained", BackendFault);
         Check("StartupAndCleanupFailuresAreBothRetained", StartupFaults);
@@ -139,6 +140,24 @@ internal static class R3HttpEndpointTests
             Retired(host, ["fault"]);
             Observe(r1); Observe(r2);
         }
+    }
+    private static void ConcurrentCompletion()
+    {
+        var service = new HttpServiceDefinition("parallel", new(8, 128, 2000),
+            [new("GET", "/parallel", (_, _) => ValueTask.FromResult(new HttpEndpointResponse(200, "ok"u8.ToArray())))]);
+        using var host = Host([service]);
+        using var client = new HttpClient(new SocketsHttpHandler { MaxConnectionsPerServer = 64 });
+        for (int batch = 0; batch < 16; batch++)
+        {
+            Task<byte[]>[] requests = Enumerable.Range(0, 64).Select(_ =>
+                client.GetByteArrayAsync(new Uri(host.BaseUri, "parallel"))).ToArray();
+            Task.WhenAll(requests).WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+            Assert.True(requests.All(static request => request.Result.AsSpan().SequenceEqual("ok"u8)));
+        }
+        Until(() => host.GetServiceSnapshot("parallel") is { Active: 0, Queued: 0, Completed: 1024 });
+        host.Dispose();
+        Retired(host, ["parallel"]);
+        Assert.Equal(1024L, host.GetServiceSnapshot("parallel").Admitted);
     }
     private static void BackendFault()
     {

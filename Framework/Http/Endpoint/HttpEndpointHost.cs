@@ -220,7 +220,10 @@ public sealed class HttpEndpointHost : IDisposable
         {
             await foreach (Work work in _pending.Reader.ReadAllAsync().ConfigureAwait(false))
             {
-                lock (_gate) { _active++; _peak = Math.Max(_peak, _active); }
+                // Retirement can decrement on another worker outside the admission gate.
+                // Use the same atomic discipline for both sides of this live-owner count.
+                int active = Interlocked.Increment(ref _active);
+                lock (_gate) { _peak = Math.Max(_peak, active); }
                 try
                 {
                     if (_stopping.IsCancellationRequested || Volatile.Read(ref _faulted))
