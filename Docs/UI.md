@@ -38,6 +38,391 @@ exists in the current model. Display-only controls are noneditable. Definition
 limits, text limits, row/cell limits, and cache-family limits are protocol
 boundaries, not renderer suggestions.
 
+## UO-inspired authoring and visual vocabulary
+
+UltraSim's server-composed UI intentionally preserves the useful **authoring feel** of RunUO/UO
+gumps without copying the old client packet vocabulary or binding the neutral UI kernel to Godot.
+
+Historical UO/RunUO gumps exposed a small composable vocabulary including:
+
+```text
+background / resizepic
+image / gumppic
+tiled image / gumppictiled
+item art / tilepic
+button with normal + pressed art
+checkbox with off + on art
+radio groups
+text / cropped text
+text entry / limited text entry
+scrollable HTML/text regions
+page selection
+alpha/transparency regions
+tooltips
+```
+
+GumpStudio's classic `BackgroundElement` is effectively a nine-piece resizeable frame: nine
+images form four corners, four tiled edges and a tiled center. Its `TiledElement` repeats one
+image over a bounded rectangle. Buttons carry separate normal/pressed art; checkbox/radio controls
+carry separate inactive/active art.
+
+UltraSim should preserve the **semantic usefulness** of those primitives while allowing more
+capable modern presentation. Do not require Game/server authors to manually construct Godot
+`NinePatchRect`, `TextureButton`, theme overrides, atlas regions, or native nodes.
+
+The target authoring experience should remain compact and familiar:
+
+```csharp
+canvas.AddBackground("frame", "ui.paper.frame", placement);
+canvas.AddImage("portrait", "character.portrait", placement);
+canvas.AddTiledImage("fill", "ui.paper.tile", placement);
+canvas.AddButton("close", closeAction, closeLabel, visualRole: "ui.button.close");
+```
+
+Nested `Canvas`, `Vertical`, `Horizontal`, `Overlay`, and `Scroll` layout builders remain
+valid and are more expressive than the historical flat/page-only gump language. Do not replace
+them with a string-command scripting DSL merely to look like legacy UO.
+
+### Current UI-0 vocabulary
+
+The current neutral kernel already provides:
+
+```text
+layouts:
+    Canvas
+    Vertical
+    Horizontal
+    Overlay
+    Scroll
+
+elements:
+    Panel
+    Text
+    Image
+    Button
+    TextInput
+    Toggle
+    List
+```
+
+Current visual realization is deliberately minimal:
+
+- `Panel` exposes one `styleRole`;
+- `Image` exposes one fixed `assetRole`;
+- `Button` has semantic label/action state but no renderer-neutral image-state set;
+- `Toggle` has boolean semantics but no authored off/on image set;
+- Godot currently realizes Image as one `TextureRect`, Panel as one native `Panel`, and Button
+  as one native `Button`.
+
+Therefore UI-0 does **not** yet define nine-slice/nine-piece backgrounds, tiled images,
+multi-image button states, radio/exclusive image choices, dynamic semantic image values, or
+per-element image tint/source-region behavior.
+
+### Visual roles, not Godot types
+
+Prefer stable **visual roles** that resolve through presentation/content ownership.
+
+For example:
+
+```text
+ui.paper.frame
+ui.stats.background
+ui.button.close
+ui.button.tab
+ui.checkbox.classic
+ui.radio.classic
+```
+
+A visual role may resolve to one image, a nine-slice descriptor, a nine-piece frame, a tiled
+texture, or a stateful control image set. Game/server code should select the semantic role; the
+Godot adapter realizes it.
+
+The existing `styleRole`/`assetRole` vocabulary may evolve into this richer resolver rather than
+forcing every definition to repeat nine asset names or Godot theme details.
+
+### Image presentation modes
+
+The neutral image vocabulary should support at least:
+
+```text
+Natural
+    draw at authored/native size
+
+Fit
+    preserve aspect inside bounds
+
+Fill
+    preserve aspect and crop to fill bounds
+
+Stretch
+    scale to exact bounds
+
+Tile
+    repeat image inside clipped bounds
+
+NineSlice
+    split one source image by fixed margins;
+    corners remain fixed, edges/center use declared stretch/tile policy
+
+NinePiece
+    optional UO-style frame composed from nine semantic image roles;
+    fixed corners with tiled/stretched edges and center
+```
+
+NineSlice and NinePiece are presentation contracts, not separate gameplay element kinds.
+
+A frame descriptor should be bounded and deterministic, with explicit:
+
+```text
+left / top / right / bottom margins
+edge mode = Stretch | Tile
+center mode = Stretch | Tile
+minimum realizable size
+```
+
+For a NinePiece frame, the descriptor may instead carry:
+
+```text
+TopLeft
+Top
+TopRight
+Left
+Center
+Right
+BottomLeft
+Bottom
+BottomRight
+```
+
+as semantic asset roles.
+
+### Panels/backgrounds
+
+Support both common forms:
+
+```text
+single-image authored panel
+    e.g. one complete character/stat-sheet background
+
+resizeable frame/panel
+    e.g. parchment/stone/window frame using NineSlice or NinePiece
+```
+
+A panel/background is visual presentation. Text, controls and child layout remain independent
+siblings/children in the compiled UI topology.
+
+The authoring API should make common composition concise rather than requiring authors to hand-build
+an Overlay for every background. A convenience `AddBackground` / image-backed panel form is
+appropriate even if the compiled representation remains ordinary renderer-neutral elements.
+
+### Stateful button images
+
+Button interaction state is split between **model-owned semantic state** and **client-local
+presentation state**.
+
+Model/server-owned:
+
+```text
+Enabled / Disabled
+Active / Inactive          # optional selected/toggled/tab-like semantic state
+```
+
+Client-local ephemeral state:
+
+```text
+Normal
+Hover
+Pressed                    # includes held-down
+Released                   # optional short presentation transition
+Focused
+```
+
+Hover/press/release/focus must never require a server round trip.
+
+Prefer a reusable visual-role descriptor conceptually shaped as:
+
+```text
+UiButtonVisual
+    Inactive:
+        Normal      required
+        Hover       optional
+        Pressed     optional
+        Released    optional
+
+    Active:         optional complete/partial state set
+        Normal
+        Hover
+        Pressed
+        Released
+
+    Disabled        optional
+    FocusedOverlay  optional
+```
+
+Fallback is deterministic:
+
+```text
+missing Active state
+    -> corresponding Inactive state
+
+missing Hover
+    -> current Normal/base
+
+missing Pressed
+    -> Hover, then Normal/base
+
+missing Released
+    -> Hover or Normal/base
+
+missing Disabled
+    -> current base plus adapter-defined disabled treatment
+```
+
+The optional Released image is presentation-only and may use a bounded client-side transition
+duration owned by the visual descriptor/profile. Game authority never waits for it.
+
+### Toggle / checkbox and radio/exclusive-choice imagery
+
+The existing boolean `Toggle` semantics should gain image-backed visual roles so classic
+off/on checkbox presentation does not require a bespoke widget.
+
+A future exclusive-choice/radio semantic is also legitimate because it expresses a common
+authoring concept directly:
+
+```text
+checkbox/toggle
+    Off visual
+    On visual
+
+radio/exclusive option
+    Unselected visual
+    Selected visual
+    group/selection identity
+```
+
+Hover/pressed/focus overlays may reuse the same local interaction-state resolver as buttons.
+
+Do not treat a visual radio group as Game authority. The authoritative action still validates the
+requested semantic choice.
+
+### Dynamic semantic images and UO-style item art
+
+Historical `AddItem` / `tilepic` displays item/static art. UltraSim should not make the neutral
+UI kernel know what an Inventory Item, weapon, creature, or Godot texture is.
+
+Instead, add a neutral **semantic image/asset reference value** that can be bound dynamically:
+
+```text
+Ui image element
+    fixed asset role
+        OR
+    model slot containing an admitted semantic presentation asset reference
+```
+
+Game-level convenience authoring may then offer an `AddItemImage`-like helper which resolves an
+Item/Definition presentation facet into that neutral image reference.
+
+This is important for:
+
+```text
+Inventory item icons
+vendor/crafting rows
+character portraits
+skill/spell icons
+quest/reward art
+equipment paperdoll-like views
+```
+
+The server must not send arbitrary filesystem paths, Godot resources, or unvalidated URLs through
+this mechanism. The reference must resolve through the existing authorized content/catalog/
+presentation path.
+
+### Tint, clipping, atlas/source regions
+
+Useful image presentation metadata includes:
+
+```text
+optional tint/modulate
+optional opacity
+optional clip-to-bounds
+optional source/atlas region where the content pipeline exposes one safely
+```
+
+Prefer semantic asset/catalog resolution to hard-coded atlas coordinates. Atlas packing remains a
+presentation/content implementation strategy.
+
+### Text and input semantics
+
+Historical UO also had cropped text, limited text entries, scrollable HTML regions, and localization.
+
+UltraSim already has bounded text values, TextInput, Scroll containers, and ordinary nested layout.
+Future additions should be semantic rather than raw legacy HTML:
+
+```text
+Text overflow:
+    Wrap
+    Clip
+    Ellipsis
+
+TextInput:
+    optional per-control maximum length
+
+Rich/styled text:
+    only a bounded renderer-neutral vocabulary if a real consumer earns it
+
+Localization:
+    stable localization identity/arguments rather than renderer-owned raw HTML
+```
+
+Do not introduce arbitrary HTML/JavaScript as a generic server UI payload.
+
+### Tooltips
+
+UO attached tooltips to individual gump entries. UltraSim already owns a separate bounded
+Context/Tooltip presentation category.
+
+Add a renderer-neutral per-element tooltip/help binding when earned so an element can contribute
+authorized text/semantic help without owning a native tooltip implementation. The client remains
+the presentation owner.
+
+### Pages versus nested containers
+
+Historical `Page` is useful precedent for switching visible groups, but UltraSim already has real
+nested layout/container semantics.
+
+Do not regress server authoring into flat page command streams.
+
+If tabs/pages are needed, prefer a bounded semantic visibility/selection construct over the
+existing compiled tree, for example:
+
+```text
+Stack / PageSet
+    active page = bounded model value
+
+Tab buttons
+    ordinary semantic actions
+    optional Active visual state
+```
+
+That keeps nesting, layout validation, exact compiled identity, and Local/Remote equivalence.
+
+### Alpha/transparency regions
+
+Historical `CheckerTrans` / `AddAlphaRegion` is presentation precedent, not a required element
+kind. Normal panel/image opacity/tint should cover ordinary translucent backgrounds.
+
+Only add a dedicated mask/transparency primitive if a real UI cannot be expressed with the
+renderer-neutral image/panel vocabulary.
+
+### Permanent authoring rule
+
+> **The normal Game/server UI authoring path should be at least as convenient as the classic gump
+> model for ordinary windows, while retaining UltraSim's typed definitions, nested layout,
+> bounded models, semantic actions, exact content identity, and renderer neutrality.**
+
+A first-party stat sheet, inventory, vendor, crafting panel, package-provided gump, and future
+community-authored view should use substantially the same authoring contracts.
+
 ## Actions and authority
 
 Clients submit intent. Authoritative workflows re-resolve durable identity,
