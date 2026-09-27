@@ -786,6 +786,133 @@ Derived atlas pages themselves may be hash-addressed/reused when identical.
 
 ---
 
+# 14.1 Semantic presentation roles and derived UI portraits
+
+UI should consume **semantic presentation references**, not force every Game definition to own a
+separate hand-authored icon.
+
+Conceptually:
+
+```text
+SemanticPresentationReference
+    DefinitionDomainId
+    StableDefinitionId
+    PresentationRoleId
+```
+
+Representative roles:
+
+```text
+World
+Equipped
+InventoryPortrait
+VendorPortrait
+CraftingPortrait
+CharacterPortrait
+BestiaryPortrait
+TooltipPreview
+Inspection
+Paperdoll
+Thumbnail
+```
+
+A definition may explicitly override any role. When an explicit portrait is absent, presentation
+may derive a compatible role from the definition's normal World presentation.
+
+Example:
+
+```text
+Katana
+    World = katana.model
+
+InventoryPortrait
+    no explicit 2D icon
+        ↓
+    derive from World model
+        ↓
+    authored camera/orientation/autofit
+        ↓
+    render to derived texture
+```
+
+The same rule applies to creatures, props, furniture, crops, chests, statuettes and other
+semantically presentable definitions.
+
+The UI kernel remains domain-neutral. Game-level helpers may resolve Item/Creature/etc. definitions
+into the same generic reference, but Client presentation owns native realization.
+
+## 14.1.1 Portrait realization tiers
+
+Use bounded tiers rather than one live SubViewport/native scene per visible UI cell:
+
+```text
+Cached Portrait
+    render once / reuse derived texture
+    normal inventory/list/vendor/crafting use
+
+Live Portrait
+    bounded hover/selection realization
+    optional rotation or animation
+
+Inspection View
+    small bounded interactive realization
+    pointer/gesture rotation and zoom
+```
+
+A rigged creature portrait may evaluate one named pose or animation frame, render it, and retire the
+live skeleton. Only Live/Inspection modes retain animation machinery while active.
+
+Client-local visual behavior may include:
+
+```text
+HoverBehavior = None | Rotate | PlayAnimation | RotateAndAnimate
+InspectionAllowed
+Inspection camera/profile
+```
+
+Do not encode arbitrary per-definition mouse callback code as the normal presentation contract.
+
+## 14.1.2 Derived portrait lifetime and cache identity
+
+Generated portraits are disposable derived resources.
+
+A conceptual cache key is:
+
+```text
+resolved semantic presentation identity
++ PresentationRole
++ portrait profile/version
++ relevant selected immutable asset hashes
++ renderer/platform realization profile
+= DerivedPortraitKey
+```
+
+The cache can be deleted and regenerated without changing Game/content truth.
+
+After generation, compatible portraits may join the `UI/Icon` atlas family. Therefore hundreds of
+inventory items can still render as ordinary batched/atlased images even though their source
+presentation is 3D.
+
+## 14.1.3 Fallback
+
+Role resolution should degrade visibly and deterministically:
+
+```text
+explicit role-specific presentation
+    ↓
+compatible general presentation
+    ↓
+derive from World presentation
+    ↓
+primitive semantic representation
+    ↓
+missing-content checker/debug presentation
+```
+
+A missing portrait-specific asset must not make a semantically valid item disappear from UI.
+
+---
+
 # 15. Client startup/content-realization flow
 
 A mature renderer product should approximately do:
@@ -1718,6 +1845,10 @@ Recommended workstreams follow.
 - stable logical-ID-to-region mapping;
 - deterministic cache keys;
 - renderer/platform-specific derived realization;
+- semantic presentation references with role-specific fallback;
+- bounded 3D-derived UI portrait generation/cache;
+- optional bounded live portrait / inspection realization;
+- permit derived portraits to join compatible UI/Icon atlas output;
 - measure draw calls/material groups and startup/build cost.
 
 ## G. Client profile expansion
