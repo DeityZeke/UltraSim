@@ -85,9 +85,13 @@ object gains nothing from ECS representation.
 This is intentionally compatible with both RunUO-like conventional C# authoring and large
 Cities-Skylines-like data-oriented simulation.
 
-## Extensibility / modding seams
+## Authoring / extensibility seams
 
-The preferred modding model is several small typed seams rather than one universal Mod API:
+The preferred content-authoring/extensibility model is several small typed seams rather than one universal Mod API.
+
+UltraSim's own Game Implementation should use these same seams wherever practical. Third-party “mods” are not a separate runtime species; they are external packages/content using the same authoring contracts. If ordinary first-party content requires privileged bypasses into internals, treat that as evidence that the authoring seam is incomplete.
+
+Community/mod-layer ideas should be evaluated for the underlying semantic need they reveal, then folded into the appropriate Engine/Framework/Kernel contract only when that general seam is justified:
 
 ```text
 package lifecycle
@@ -106,7 +110,7 @@ Do not institutionalize access-transformer/private-member patching, a universal
 `Dictionary<string, object>`, or one global cancellable event bus as the normal extension model.
 
 The broader candidate catalog is maintained in
-[Future Engine & Modding Backlog](Plans/FUTURE_ENGINE_MODDING_BACKLOG.md). Water/Liquid Bodies,
+[Future Content & Engine Extensibility](Plans/FUTURE_CONTENT_AND_ENGINE_EXTENSIBILITY.md). Water/Liquid Bodies,
 Definition Tags/Sets, migration/remap semantics, and a deliberate typed hook/event registration
 seam are the currently promoted items from that catalog.
 
