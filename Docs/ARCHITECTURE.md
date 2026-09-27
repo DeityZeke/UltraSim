@@ -45,6 +45,71 @@ is the concrete place where authoritative game-owned domains meet.
 The repository verifier freezes the exact active project-reference graph. A new
 reference is an architecture decision, not a convenience edit.
 
+## Gameplay realization: OOP sidecars, ECS, or hybrid
+
+UltraSim does **not** require gameplay to be modeled as ECS.
+
+The ECS Kernel is the high-scale data-oriented storage/execution realization for state whose
+cardinality, homogeneity, or update density earns it. The Framework Runtime/Module Host may also
+host ordinary managed C# sidecars/runtime objects, or hybrids that bind one rich object to an ECS
+entity for selected high-volume state.
+
+Conceptually:
+
+```text
+OOP-first
+    BaseItem → BaseWeapon → BaseSword → Katana
+
+ECS-first
+    Entity + dense Components + Systems
+
+Hybrid
+    rich sidecar object
+        ↕ optional typed bridge
+    EntityId with movement/spatial/health/etc.
+```
+
+A sidecar/runtime-object identity should remain conceptually distinct from `EntityId`; an ECS
+entity is not required merely to make an ordinary object exist unless the selected realization
+earns that coupling.
+
+One authoritative owner exists for each piece of state. If Health is ECS-owned, a convenient
+sidecar `Health` property may route through the Health capability, but must not maintain a second
+unsynchronized authoritative copy.
+
+Engine Contracts preserve gameplay meaning across realization changes. A feature may begin as a
+small OOP implementation and later move hot/high-volume state into ECS without forcing every
+consumer definition/package to change. The reverse is also permitted when a rich low-cardinality
+object gains nothing from ECS representation.
+
+This is intentionally compatible with both RunUO-like conventional C# authoring and large
+Cities-Skylines-like data-oriented simulation.
+
+## Extensibility / modding seams
+
+The preferred modding model is several small typed seams rather than one universal Mod API:
+
+```text
+package lifecycle
+typed Engine/Framework Contracts
+typed definition facets
+Definition Tags/Sets
+definition aliases/migrations
+typed subsystem-owned hooks/events
+runtime capabilities/attachments
+Control Plane providers
+bounded package networking where earned
+presentation/audio contracts
+```
+
+Do not institutionalize access-transformer/private-member patching, a universal
+`Dictionary<string, object>`, or one global cancellable event bus as the normal extension model.
+
+The broader candidate catalog is maintained in
+[Future Engine & Modding Backlog](Plans/FUTURE_ENGINE_MODDING_BACKLOG.md). Water/Liquid Bodies,
+Definition Tags/Sets, migration/remap semantics, and a deliberate typed hook/event registration
+seam are the currently promoted items from that catalog.
+
 ## Inbound HTTP Framework / Bridge seam
 
 `Framework/Http/Endpoint` owns instance-based inbound request/response contracts, fixed
