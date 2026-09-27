@@ -151,6 +151,26 @@ generic module/package host. Future Discovery is an open transport-neutral appli
 for client, website and third-party consumers; registry/status providers may share this endpoint.
 R3 implements neither Discovery, registry, outbound integrations nor federated Accounting.
 
+## Framework Control Plane
+
+P1 introduces the BCL-only [Framework Control Plane](../Framework/ControlPlane/README.md), not an
+Engine Core. It publishes frozen Diagnostic/Control/Action/Collection descriptors separately
+from owner snapshots; typed scalar values, capabilities, exact provider-generation fences and
+provider-owned revisions route bounded cold operations. Requested/effective/pending values have
+independent provenance; unsaved viewer drafts are not pending state. Persistence and mutation
+remain with the owning subsystem, including coupled validation of provider-local batches.
+
+The ECS adapter sits in Bridges above Framework and ECS; the Kernel gains no upward dependency.
+The ServerRuntime adapter also sits above both sides, using a narrow immutable public policy/clock/
+idle observation. Client Settings uses an opt-in adapter above existing Client Core and its
+resolver/store. A generic viewer model contains no concrete subsystem types. These proof adapters
+are not default product dependencies or a completed F4/F10 UI.
+
+Registry operations are synchronous, owner-thread-bound and non-reentrant; cross-thread operator
+transport remains future product work. No registry lookup, descriptor allocation, capability
+check or polling is inserted into ECS, Network or rendering hot loops. P2 module hosting,
+package composition, Discovery and richer Web/Admin products remain unstarted.
+
 ## Authority
 
 One `ServerRuntime` owns one active `ServerGeneration`. A generation is the

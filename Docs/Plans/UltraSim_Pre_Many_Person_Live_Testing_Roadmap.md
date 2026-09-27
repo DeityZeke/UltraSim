@@ -2,7 +2,7 @@
 
 **Proposed status:** Candidate canonical roadmap / architecture checklist\
 **Current reference baseline:** F1.12-R3 / Gate 0 production closure — `e3a63ea21f8f5ea4fa69e3768a055c409edc8616`; documentation-only commits may advance `main` beyond that closure SHA.\
-**Immediate checkpoint:** P1 Framework Control Plane is **NEXT**. P2–P11 and Gate 1 remain **PLANNED**; PF6 remains **PLANNED / NOT READY / NOT STARTED**.\
+**Immediate checkpoint:** P1 Framework Control Plane is **IN PROGRESS** (implemented; final verification pending). P2–P11 and Gate 1 remain **PLANNED**; PF6 remains **PLANNED / NOT READY / NOT STARTED**.\
 **End state of this document:** UltraSim is ready to move from individual/trusted dogfooding and closed validation into a many-player live test where human feedback is primarily about the intended game rather than known development-harness limitations.
 
 ---
@@ -739,6 +739,13 @@ Formalize at least:
 
 ## 7.3 Descriptor vocabulary
 
+P1's implemented contracts are in [Framework/ControlPlane](../../Framework/ControlPlane/README.md).
+Mostly-static descriptors and dynamic snapshots are separate. The older combined census below
+is vocabulary, not one mutable object: bounds/options/defaults/audience/capabilities/apply/persistence
+belong to descriptors; requested/effective/pending values, independent provenance, writable/reason,
+provider generation and revision belong to owner snapshots. ControlValue is the closed
+Bool/Int64/UInt64/Float64/Text/Option machine; no arbitrary object/JSON or reflected CLR enum contract.
+
 A control descriptor should support:
 
 ```
@@ -871,6 +878,11 @@ ControlActionResult
 ```
 
 ## 7.9 Audit identity
+
+P1 uses the generic ControlPrincipal, not an Admin-only principal. Trusted composition grants
+bounded capabilities/context; categories are audience filters, not privilege. The optional bounded
+audit observation seam retains request identity, provider/operation/target, candidates, optional
+owner timestamp/tick and result. It is not a persistent audit database.
 
 Every authoritative admin mutation should be attributable.
 
@@ -1456,7 +1468,7 @@ The exact checkpoint numbering may evolve, but preserve the dependency order.
 
 ## Gate 0 — F1.12 product dogfood / architecture-readiness closure
 
-**Status:** CLOSED by F1.12-R3 / Gate 0 closure at production final `e3a63ea21f8f5ea4fa69e3768a055c409edc8616`. P1 is NEXT.
+**Status:** CLOSED by F1.12-R3 / Gate 0 closure at production final `e3a63ea21f8f5ea4fa69e3768a055c409edc8616`. P1 is now in progress below.
 
 ### Goal
 
@@ -1495,6 +1507,12 @@ It does not yet mean broad testing should begin.
 ---
 
 ## P1 — Framework Control Plane foundation
+
+**Status:** IN PROGRESS — implementation and focused owner/viewer proofs present; canonical closure pending.
+See the [implemented contract](../../Framework/ControlPlane/README.md). The registry is bounded,
+synchronous and owner-thread-bound; provider generations fence lifetimes while revisions describe
+owner state. Batch atomicity is provider-local, not global. ECS Kernel dependencies remain unchanged.
+The proof adapters are opt-in; P1 has not redesigned F4/F10 or begun P2.
 
 ### Goal
 

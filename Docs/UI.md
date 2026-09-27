@@ -26,6 +26,17 @@ Client/Godot
 `Game/UI` referencing Server Runtime is intentional: it implements server-side
 game workflows. It does not make the UI kernel or client authoritative.
 
+## P1 management viewer seam
+
+The [Framework Control Plane](../Framework/ControlPlane/README.md) is a separate, BCL-only cold
+management contract. Owning providers publish Diagnostic/Control/Action/Collection metadata and
+typed snapshots; a generic viewer organizes category paths without ECS-specific tabs or CLR
+property reflection. The utilitarian P1 viewer is a model proof, not a Godot gump or F4/F10 rewrite.
+Its local drafts are not owner Requested or Pending state. Apply submits one bounded provider-local
+batch under a trusted principal, generation and optional revision; authorization and owner
+validation precede mutation. Real Settings persistence still belongs to the existing client owner.
+Game UI protocols, view action authority, and semantic 3D presentation contracts are unchanged.
+
 ## Definitions and models
 
 Authoring compiles bounded immutable definitions. Typed references are resolved

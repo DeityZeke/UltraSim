@@ -2405,6 +2405,7 @@ bool pf1MixedSwarmVerified = false;
 bool pf2AccountingSwarmVerified = false;
 string[] testProjects =
 [
+    "_Tests/UltraSim.ControlPlane.Tests/UltraSim.ControlPlane.Tests.csproj",
     "_Tests/UltraSim.ECS.Tests/UltraSim.ECS.Tests.csproj",
     "_Tests/UltraSim.ECS.Generator.Tests/UltraSim.ECS.Generator.Tests.csproj",
     "_Tests/UltraSim.ECS.Comparison.Tests/UltraSim.ECS.Comparison.Tests.csproj",
@@ -2968,6 +2969,10 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
         var outputAssemblies = Directory.EnumerateFiles(output, "UltraSim*.dll", SearchOption.TopDirectoryOnly)
             .Select(static path => Path.GetFileNameWithoutExtension(path))
             .ToHashSet(StringComparer.Ordinal);
+        foreach (string managementProof in new[] { "UltraSim.Framework.ControlPlane", "UltraSim.Bridges.ControlPlane.ECS",
+            "UltraSim.Bridges.ControlPlane.ServerRuntime", "UltraSim.Client.ControlPlane" })
+            if (outputAssemblies.Contains(managementProof) || dependencies.Contains(managementProof))
+                throw new InvalidOperationException($"{gate.Name} acquired an opt-in P1 management proof assembly.");
 
         string[] scriptAssemblies = outputAssemblies
             .Where(static assembly => assembly.StartsWith("UltraSim.Client.", StringComparison.Ordinal) &&
@@ -5852,6 +5857,13 @@ static void VerifyArchitecture(string root)
 {
     var expected = new Dictionary<string, string[]>(StringComparer.Ordinal)
     {
+        ["Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj"] = [],
+        ["Bridges/ControlPlane.ECS/UltraSim.Bridges.ControlPlane.ECS.csproj"] =
+            ["Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj", "Kernels/ECS/UltraSim.ECS.csproj"],
+        ["Bridges/ControlPlane.ServerRuntime/UltraSim.Bridges.ControlPlane.ServerRuntime.csproj"] =
+            ["Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj", "Server/Runtime/UltraSim.Server.Runtime.csproj"],
+        ["Client/ControlPlane/UltraSim.Client.ControlPlane.csproj"] =
+            ["Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj", "Client/Core/UltraSim.Client.Core.csproj"],
         ["Framework/Http/Endpoint/UltraSim.Framework.Http.Endpoint.csproj"] = [],
         ["Bridges/Http.Kestrel/UltraSim.Bridges.Http.Kestrel.csproj"] =
             ["Framework/Http/Endpoint/UltraSim.Framework.Http.Endpoint.csproj"],
@@ -6094,9 +6106,9 @@ static void VerifyArchitecture(string root)
             throw new InvalidOperationException(
                 $"Project-reference boundary changed for '{project}'.\n" +
                 $"Expected: {string.Join(", ", orderedAllowed)}\nActual: {string.Join(", ", references)}");
-        if (project.StartsWith("Framework/Http/", StringComparison.Ordinal) &&
-            document.Descendants("FrameworkReference").Any())
-            throw new InvalidOperationException("Framework HTTP must remain backend-neutral/BCL-only.");
+        if (project.StartsWith("Framework/", StringComparison.Ordinal) &&
+            (document.Descendants("FrameworkReference").Any() || document.Descendants("PackageReference").Any()))
+            throw new InvalidOperationException("Framework HTTP and Control Plane must remain BCL-only.");
     }
     string[] legacyHttpSources = new[] { "Server", "Framework", "Bridges", "Client", "Game", "Kernels" }
         .SelectMany(folder => Directory.EnumerateFiles(Path.Combine(root, folder), "*.cs", SearchOption.AllDirectories))

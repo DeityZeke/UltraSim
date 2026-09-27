@@ -11,6 +11,9 @@ acceptance narratives remain available through git history.
 
 - [Architecture](ARCHITECTURE.md) — layers, dependency direction, authority,
   boundedness, and the source-of-truth hierarchy.
+- [Framework Control Plane](../Framework/ControlPlane/README.md) — P1's BCL-only cold provider,
+  descriptor/state, capability, generation, bounded batch/action/collection and generic viewer
+  contracts, with opt-in ECS, ServerRuntime and Client Settings proof adapters.
 - [Runtime](RUNTIME.md) — `ServerRuntime`, generations, hosts, lifecycle,
   publication, and authoritative cadence.
 - [Simulation time / resolution / control](../AIOS/canonical/simulation-time-resolution-and-control.md) —

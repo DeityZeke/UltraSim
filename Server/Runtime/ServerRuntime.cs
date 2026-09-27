@@ -41,6 +41,17 @@ public sealed class ServerRuntime : IDisposable
     /// </summary>
     public ServerGameFacet Game { get; }
 
+    /// <summary>Captures bounded management facts on the owner thread; never exposes a mutable generation.</summary>
+    public ServerRuntimeControlSnapshot CaptureControlSnapshot()
+    {
+        EnsureOwnerThread();
+        var clock = _currentGeneration?.Clock;
+        return new(_state, _currentGeneration?.GenerationId ?? 0, clock?.SimulationTick ?? 0,
+            clock?.WorldTimeMicroseconds ?? 0, clock?.SimulationFrequencyHz ?? _options.ClockOptions.SimulationFrequencyHz,
+            clock?.PlaybackRate ?? _options.ClockOptions.InitialPlaybackRate, _options.AllowVariablePlayback,
+            _options.AllowVariableSimulationFrequency, _operation == RuntimeOperation.None);
+    }
+
     public ServerRuntimeState State
     {
         get

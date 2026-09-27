@@ -990,6 +990,13 @@ This is reserved future work until a real package needs it.
 
 ## 6.5 Package-owned Control Plane publication
 
+The [P1 foundation](../../Framework/ControlPlane/README.md) now provides the BCL-only typed
+provider/descriptors/snapshots, bounded batches/actions/collections and generation-fenced
+registration seam. The ECS, ServerRuntime and Client Settings proof adapters are real owner
+consumers; the generic viewer contains no concrete owner branching. Dynamic package-owned
+registration, Runtime/Module Host and operator product UI remain P2/P5 work, not implemented P1
+features. There is no generic property bag or global settings store.
+
 Packages should be able to publish diagnostics, controls, actions and collections through the same generic Control Plane as built-in providers.
 
 Example:
