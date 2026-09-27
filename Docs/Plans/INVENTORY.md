@@ -484,6 +484,95 @@ Freeform UO bag
 
 Likewise a list/index UI may not be an inventory container at all. A global item index should often be a **projection/search view over real containers**, not a fake container duplicating item ownership.
 
+## 8.2 Inventory portrait is a presentation role, not an item-icon requirement
+
+An Inventory viewer should not require every Inventory-capable definition to ship a separately
+authored 2D icon.
+
+The normal path should be:
+
+```text
+Inventory item / definition identity
+    ↓
+semantic presentation reference
+    ↓
+PresentationRole = InventoryPortrait
+    ↓
+explicit portrait override if authored
+    otherwise derive from World presentation
+    ↓
+cached UI image realization
+```
+
+This preserves the UO-style convenience of “display this item definition” while avoiding an
+Inventory-owned art database or UI-kernel dependency on Item semantics.
+
+A Katana can therefore be authored with one normal 3D presentation and automatically acquire an
+Inventory portrait using an authored/default portrait profile:
+
+```text
+Katana
+    WorldPresentation = katana.model
+
+InventoryPortrait
+    Source = WorldPresentation
+    AutoFit
+    authored orientation/camera
+    static pose
+```
+
+A creature/statuette can use the same mechanism, including a frozen named pose or sampled animation
+frame. A dedicated 2D icon remains an optional role-specific override.
+
+The neutral UI consumes only an admitted semantic presentation reference such as:
+
+```text
+DefinitionDomainId
+StableDefinitionId
+PresentationRoleId
+```
+
+Game-level Inventory helpers may resolve an item definition into that reference, but
+`Kernels/UI` must not learn what an Inventory Item is.
+
+## 8.3 Optional live portrait and Examine presentation
+
+Normal D2/List Inventory should use cached portrait images, not one live 3D scene per visible item.
+
+Presentation may optionally promote only a bounded hovered/selected portrait:
+
+```text
+cached portrait
+    ↓ hover
+bounded Live Portrait
+    RotateSlowly / PlayAnimation / RotateAndAnimate
+    ↓ leave
+retire live realization
+return to cached image
+```
+
+A semantic Examine action/view may request the same definition's `Inspection` presentation role:
+
+```text
+right click -> Examine
+    ↓
+large bounded interactive 3D presentation
+    ↓
+pointer drag rotates
+wheel/gesture zooms where permitted
+```
+
+This supports Skyrim-like clue inspection and detailed item examination without duplicating the
+authoritative item or requiring separate inspection geometry.
+
+Hover rotation/animation and inspection camera manipulation are client presentation only.
+Actual Game actions exposed from the Examine surface still travel through normal validated semantic
+actions.
+
+Derived portrait textures are disposable renderer resources and may be cached/atlased after
+generation. Inventory authority remains item identity + quantity + placement/equipment/container
+state; portrait realization never becomes Inventory truth.
+
 ---
 
 # 9. Capacity is multidimensional
@@ -1488,6 +1577,7 @@ them.
 - transaction/trade/escrow;
 - lock/no-drop/no-trade/quest/reserved flags as gameplay earns them.
 - generalized/on-demand inspection acquisition beyond the currently disclosed bounded property set;
+- interactive 3D Inspection presentation profiles and optional hover-live portraits beyond the basic cached Inventory portrait requirement;
 - authored spawn-recipe/ObjectScript syntax beyond the first compiled Iron Sword recipe;
 
 ---
