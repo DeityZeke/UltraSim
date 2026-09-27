@@ -1738,6 +1738,31 @@ The Control Plane viewer must earn enough generic presentation vocabulary to ren
 
 Do **not** port every archived V2 UI widget merely because it existed. Add the generic vocabulary actually earned by current User/Admin/Developer consumers.
 
+### Server-composed UI visual vocabulary
+
+Before representative PF6 UI is treated as architecturally complete, extend the neutral UI
+definition/presentation contract with the UO-inspired visual primitives documented in
+[Docs/UI.md](../UI.md):
+
+- single-image backgrounds/panels;
+- tiled images;
+- resizeable NineSlice and/or NinePiece frame backgrounds with explicit tile/stretch policy;
+- stateful button visual roles with Normal/Hover/Pressed/optional Released/optional Active and
+  deterministic fallback;
+- image-backed Toggle/checkbox visuals;
+- exclusive/radio-choice semantics when a real first-party surface uses them;
+- dynamic admitted semantic image references so Game-level item/portrait/icon helpers do not leak
+  domain types into the UI kernel;
+- bounded image tint/opacity/clipping semantics;
+- per-control TextInput maximum length and text overflow policy where earned;
+- renderer-neutral per-element tooltip/help binding where earned.
+
+Keep server/Game authoring compact and gump-like. Do not expose Godot `TextureButton`,
+`NinePatchRect`, theme resources, filesystem paths, or raw HTML as the semantic contract.
+
+The existing Canvas/Vertical/Horizontal/Overlay/Scroll nesting model remains canonical; do not
+replace it with a flat legacy command stream.
+
 ### ECS Control Panel proof
 
 Use the P1 ECS provider as a concrete proof of the inverted V1.5/ACC model. The viewer should be able to show, without knowing concrete ECS system types:
@@ -1783,6 +1808,7 @@ Use the P1 ECS provider as a concrete proof of the inverted V1.5/ACC model. The 
 
 - ordinary intended features no longer require undocumented CLI flags.
 - generic viewers can render the minimum control vocabulary without subsystem-specific panel surgery.
+- representative server-composed UI can use authored image panels, tiled/nine-slice backgrounds and image-state buttons without Godot-specific Game/server code.
 - ECS Control Panel proof works through publication/discovery rather than concrete UI knowledge.
 - current Settings behavior regresses nowhere.
 - user/admin/developer/test boundaries are explicit.
