@@ -61,12 +61,22 @@ public sealed class KestrelHttpEndpointBackend : IHttpEndpointBackend
                 finally { Interlocked.Decrement(ref _active); }
             })).Build();
         try { _host.StartAsync().GetAwaiter().GetResult(); }
-        catch { _host.Dispose(); _host = null; throw; }
+        catch (Exception startupFailure)
+        {
+            try { _host.Dispose(); }
+            catch (Exception cleanupFailure)
+            {
+                throw new AggregateException("Kestrel startup and cleanup failures.", startupFailure, cleanupFailure);
+            }
+            finally { _host = null; }
+            throw;
+        }
     }
 
     public async Task StopAsync(CancellationToken cancellation)
     {
-        if (_host is null || _stopped) return;
+        if (_host is null) { _stopped = true; return; }
+        if (_stopped) return;
         await _host.StopAsync(cancellation).ConfigureAwait(false);
         if (Volatile.Read(ref _active) != 0)
             throw new InvalidOperationException("Kestrel returned with active endpoint requests.");
@@ -78,13 +88,13 @@ public sealed class KestrelHttpEndpointBackend : IHttpEndpointBackend
     {
         if (_host is not null && !_stopped)
             throw new InvalidOperationException("Stop and observe backend requests before disposal.");
-        _host?.Dispose();
-        Exception[] failures = _failures.Take(_failureCount).OfType<Exception>().ToArray();
+        var failures = _failures.Take(_failureCount).OfType<Exception>().ToList();
+        try { _host?.Dispose(); }
+        catch (Exception cleanupFailure) { failures.Add(cleanupFailure); }
         if (_failureOverflow != 0)
-            throw new AggregateException("HTTP failure storage bound exceeded.", failures.Append(
-                new InvalidOperationException($"Unretained backend failures: {_failureOverflow}.")));
-        if (failures.Length == 1) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failures[0]).Throw();
-        if (failures.Length > 1) throw new AggregateException("Unexpected HTTP dispatch failures.", failures);
+            failures.Add(new InvalidOperationException($"Unretained backend failures: {_failureOverflow}."));
+        if (failures.Count == 1) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        if (failures.Count > 1) throw new AggregateException("Unexpected HTTP dispatch/cleanup failures.", failures);
     }
 
     private sealed class Exchange(HttpContext context) : IHttpEndpointExchange

@@ -46,14 +46,27 @@ public sealed class HttpEndpointHost : IDisposable
             _routes.Add((route.Method, route.Path), (service, route));
         BaseUri = new Uri($"http://{endpoint.Address}:{endpoint.Port}/");
         try { backend.Start(new IPEndPoint(endpoint.Address, endpoint.Port), DispatchAsync); }
-        catch
+        catch (Exception startupFailure)
         {
-            _stopping.Cancel();
+            var failures = new List<Exception> { startupFailure };
+            Capture(_stopping.Cancel, failures);
             foreach (Service service in _services) service.CloseAdmission();
-            Task.WhenAll(_services.SelectMany(static s => s.Workers)).GetAwaiter().GetResult();
-            backend.Dispose();
-            _stopping.Dispose();
-            throw;
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            Capture(() => backend.StopAsync(deadline.Token).GetAwaiter().GetResult(), failures);
+            Task workers = Task.WhenAll(_services.SelectMany(static s => s.Workers));
+            Capture(() => workers.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult(), failures);
+            if (workers.Exception is { } workerFailures)
+                foreach (Exception exception in workerFailures.Flatten().InnerExceptions)
+                    if (!failures.Contains(exception)) failures.Add(exception);
+            if (workers.IsCompleted && backend.GetSnapshot() is { Stopped: true, ActiveRequests: 0 })
+            {
+                Capture(backend.Dispose, failures);
+                Capture(_stopping.Dispose, failures);
+            }
+            else failures.Add(new InvalidOperationException("Failed startup ownership did not retire."));
+            foreach (Service service in _services) failures.AddRange(service.Failures());
+            if (failures.Count == 1) ExceptionDispatchInfo.Capture(startupFailure).Throw();
+            throw new AggregateException("HTTP endpoint startup and cleanup failures.", failures);
         }
     }
 

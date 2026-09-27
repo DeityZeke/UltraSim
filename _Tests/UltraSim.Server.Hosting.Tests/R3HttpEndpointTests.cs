@@ -13,6 +13,7 @@ internal static class R3HttpEndpointTests
         Check("GatedHandlerShutdownRetainsRealOwnership", GatedShutdown);
         Check("AllUnexpectedServiceFaultsSurviveConcurrentRetirement", Faults);
         Check("UnexpectedBackendFailureIsRetained", BackendFault);
+        Check("StartupAndCleanupFailuresAreBothRetained", StartupFaults);
         Check("RealBridgeRetainsIndependentDispatchFaults", DispatchFaults);
         Check("KeepAliveDisconnectAndConnectionClose", Connections);
         Check("SamePortReuse16Cycles", Reuse);
@@ -148,6 +149,29 @@ internal static class R3HttpEndpointTests
         Assert.True(ReferenceEquals(failure, Failure(host.Dispose)));
         Assert.True(backend.Disposed);
         Retired(host, ["status"]);
+    }
+    private static void StartupFaults()
+    {
+        var startup = new InjectedFailure(1);
+        var cleanup = new InjectedFailure(2);
+        var backend = new ControlledBackend { StartFailure = startup, DisposeFailure = cleanup };
+        Exception? failure = Failure(() => new HttpEndpointHost(new(IPAddress.Loopback, Port()), [Tiny()], backend));
+        Assert.True(failure is AggregateException);
+        Assert.True(((AggregateException)failure!).Flatten().InnerExceptions.SequenceEqual([startup, cleanup]));
+        Assert.True(backend.Disposed && backend.GetSnapshot().Stopped);
+
+        // Native bind failure must release its partially built host without disturbing the owner.
+        int port = Port();
+        using (var owner = Host([Tiny()], port))
+        {
+            Assert.True(Failure(() => Host([Tiny()], port)) is IOException);
+            using var client = new HttpClient();
+            Assert.True(client.GetByteArrayAsync(new Uri(owner.BaseUri, "_test/status"))
+                .GetAwaiter().GetResult().AsSpan().SequenceEqual("status/proof projection"u8));
+        }
+        using var rebound = Host([Tiny()], port);
+        rebound.Dispose();
+        Retired(rebound, ["status"]);
     }
     private static void Connections()
     {
@@ -293,11 +317,13 @@ internal static class R3HttpEndpointTests
     {
         internal bool Started, Disposed;
         internal Exception? StopFailure;
+        internal Exception? StartFailure, DisposeFailure;
         private bool _stopped;
-        public void Start(IPEndPoint endpoint, Func<IHttpEndpointExchange, Task> dispatch) => Started = true;
+        public void Start(IPEndPoint endpoint, Func<IHttpEndpointExchange, Task> dispatch)
+        { Started = true; if (StartFailure is not null) throw StartFailure; }
         public Task StopAsync(CancellationToken cancellation)
         { _stopped = true; return StopFailure is null ? Task.CompletedTask : Task.FromException(StopFailure); }
         public HttpEndpointBackendSnapshot GetSnapshot() => new(Started, _stopped, 0);
-        public void Dispose() => Disposed = true;
+        public void Dispose() { Disposed = true; if (DisposeFailure is not null) throw DisposeFailure; }
     }
 }
