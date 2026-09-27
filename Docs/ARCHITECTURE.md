@@ -111,8 +111,30 @@ Do not institutionalize access-transformer/private-member patching, a universal
 
 The broader candidate catalog is maintained in
 [Future Content & Engine Extensibility](Plans/FUTURE_CONTENT_AND_ENGINE_EXTENSIBILITY.md). Water/Liquid Bodies,
-Definition Tags/Sets, migration/remap semantics, and a deliberate typed hook/event registration
-seam are the currently promoted items from that catalog.
+Definition Tags/Sets, migration/remap semantics, a deliberate typed hook/event registration
+seam, and semantic presentation references/3D-derived UI portraits are the currently promoted items from that catalog.
+
+## Semantic presentation identity
+
+Game/content definitions should be presentable through typed semantic roles rather than requiring
+every consumer to name a physical image/model resource directly.
+
+Conceptually:
+
+```text
+DefinitionDomainId + StableDefinitionId + PresentationRoleId
+```
+
+may resolve roles such as World, InventoryPortrait, VendorPortrait, CharacterPortrait, Inspection,
+or Thumbnail.
+
+A dedicated 2D icon is an optional override. When a compatible role-specific asset is absent, a
+client may derive a UI portrait from the already-authorized World/object presentation and cache it
+as disposable renderer output. A cached portrait may later be atlased; a small bounded live/
+inspection realization may rotate or animate locally.
+
+The UI Kernel remains unaware of Item/Creature/etc. semantics, and derived portrait/cache identity
+never becomes Game/content authority.
 
 ## Inbound HTTP Framework / Bridge seam
 
