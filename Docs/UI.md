@@ -305,37 +305,240 @@ Hover/pressed/focus overlays may reuse the same local interaction-state resolver
 Do not treat a visual radio group as Game authority. The authoritative action still validates the
 requested semantic choice.
 
-### Dynamic semantic images and UO-style item art
+### Dynamic semantic presentation references and UO-style item art
 
 Historical `AddItem` / `tilepic` displays item/static art. UltraSim should not make the neutral
 UI kernel know what an Inventory Item, weapon, creature, or Godot texture is.
 
-Instead, add a neutral **semantic image/asset reference value** that can be bound dynamically:
+Instead, add a neutral **semantic presentation reference value** that can be bound dynamically:
 
 ```text
-Ui image element
-    fixed asset role
-        OR
-    model slot containing an admitted semantic presentation asset reference
+SemanticPresentationReference
+    DefinitionDomainId
+    StableDefinitionId
+    PresentationRoleId
 ```
 
-Game-level convenience authoring may then offer an `AddItemImage`-like helper which resolves an
-Item/Definition presentation facet into that neutral image reference.
+Conceptually:
+
+```text
+Domain = UiArt
+Definition = 1838
+Role = NativeImage
+
+Domain = Items
+Definition = Katana
+Role = InventoryPortrait
+
+Domain = Creatures
+Definition = Goblin
+Role = BestiaryPortrait
+```
+
+The durable/public identity should not be a naked process-local integer. A content family may import
+legacy numeric IDs, but normal composition resolves stable semantic domain/definition/role
+identities into dense runtime IDs only after cold registration.
+
+A UI image element may therefore use:
+
+```text
+fixed visual/asset role
+    OR
+model slot containing an admitted SemanticPresentationReference
+```
+
+Game-level convenience authoring may offer helpers such as `AddItemPortrait`,
+`AddCreaturePortrait`, or `AddDefinitionPortrait`, but these compile/resolve to the same neutral
+presentation reference. They do not widen the UI kernel with Item/Creature-specific types.
 
 This is important for:
 
 ```text
-Inventory item icons
+Inventory portraits
 vendor/crafting rows
 character portraits
 skill/spell icons
 quest/reward art
-equipment paperdoll-like views
+equipment/paperdoll-like views
+bestiary/encyclopedia views
+inspection/examine views
 ```
 
 The server must not send arbitrary filesystem paths, Godot resources, or unvalidated URLs through
 this mechanism. The reference must resolve through the existing authorized content/catalog/
 presentation path.
+
+### Dedicated icons are optional, not mandatory
+
+A definition should not need a separately authored 2D icon merely to appear in UI.
+
+For semantically presentable definitions, presentation resolution should support role fallback:
+
+```text
+requested role-specific presentation
+    ↓
+explicit InventoryPortrait / VendorPortrait / etc. override
+    ↓
+compatible general presentation
+    ↓
+derive portrait from World presentation
+    ↓
+primitive semantic fallback
+    ↓
+missing-content checker/debug presentation
+```
+
+This allows a Katana, chair, potion, creature, statuette, crop, chest, or other world-presentable
+definition to acquire a useful UI portrait automatically.
+
+Permanent rule:
+
+> **Any semantically presentable definition should be capable of producing a renderer-neutral UI
+> presentation reference. A dedicated 2D icon is an optional override, not a prerequisite.**
+
+### 3D-derived portrait profiles
+
+A UI portrait may be realized from the same 3D presentation used in the World.
+
+Conceptually:
+
+```text
+InventoryPortraitProfile
+    Source = WorldPresentation
+    CameraProfile
+    LightingProfile
+    ScaleMode = AutoFit | Fixed
+    Orientation / framing
+    PoseMode
+    optional named pose / animation sample
+    BackgroundRole
+```
+
+Useful pose modes include:
+
+```text
+Static/BindPose
+NamedPose
+AnimationFrame(name, time)
+LiveAnimation(name)
+```
+
+For a frozen portrait of a rigged creature, the renderer may evaluate one authored animation frame
+and cache the rendered result; it does not need to retain a live skeleton/animation instance after
+the portrait is generated.
+
+Examples:
+
+```text
+Katana
+    WorldPresentation = katana.model
+    InventoryPortrait
+        Source = WorldPresentation
+        AutoFit
+        Orientation = authored item angle
+
+Goblin statuette
+    WorldPresentation = goblin.model
+    InventoryPortrait
+        Source = WorldPresentation
+        Scale = derived
+        Pose = Idle animation frame
+```
+
+### Cached, live, and inspection realization tiers
+
+Do not make every visible inventory row/grid cell a live 3D scene.
+
+Use bounded presentation tiers:
+
+```text
+Cached Portrait
+    offscreen-render once
+    retain/reuse derived image
+    normal inventory/vendor/crafting presentation
+
+Live Portrait
+    bounded small number
+    hovered/selected/focused only
+    may rotate or animate
+
+Inspection View
+    normally one or another very small bound
+    larger interactive 3D realization
+    user can rotate/zoom/examine
+```
+
+A typical interaction can be:
+
+```text
+inventory item
+    static cached portrait
+
+pointer hover
+    optionally promote one portrait to Live
+    RotateSlowly or PlayAnimation
+
+pointer leave
+    retire live realization
+    return to cached portrait
+
+right-click / Examine
+    open Inspection presentation
+    pointer-drag rotates
+    wheel/gesture zooms where allowed
+```
+
+This supports Skyrim-like physical clue inspection, animated creature/object portraits, and
+rotation-on-hover without making those behaviors Game authority.
+
+### Portrait interaction profiles, not arbitrary callbacks
+
+Prefer bounded declarative presentation behavior over arbitrary executable callbacks in every
+definition:
+
+```text
+HoverBehavior
+    None
+    Rotate
+    PlayAnimation
+    RotateAndAnimate
+
+HoverRotationRate
+HoverAnimation
+InspectionAllowed
+InspectionProfile
+```
+
+If a future first-party/community use case cannot fit that vocabulary, evaluate the underlying
+semantic need before adding a general presentation hook.
+
+Hover, rotation, live animation and inspection camera manipulation are client-local presentation.
+They must not mutate Game outcomes or require a server round trip unless the user invokes a real
+semantic Game action.
+
+### Derived portrait cache and UI atlas compatibility
+
+A cached 3D portrait is a **derived presentation resource**, not authoritative content.
+
+Its cache identity should include the selected semantic presentation/content generation plus the
+portrait/profile policy and renderer/backend information needed to make reuse exact.
+
+Conceptually:
+
+```text
+resolved definition presentation identity
++ PresentationRole
++ portrait profile/version
++ relevant selected asset hashes
++ renderer/backend profile
+= DerivedPortraitKey
+```
+
+Deleting the derived portrait cache loses no Game/content truth; the image can be regenerated.
+
+Derived portrait textures may later participate in the ordinary compatible UI/Icon atlas pipeline.
+This permits hundreds of visible inventory entries to remain conventional cheap image draws even
+when their source portraits were generated from 3D models.
 
 ### Tint, clipping, atlas/source regions
 
