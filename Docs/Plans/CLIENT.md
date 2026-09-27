@@ -1014,6 +1014,11 @@ Hot: exact definition already present, render model/delta.
 
 Disconnect/session replacement retires server-owned panels/actions but not local app UI.
 
+The visual authoring contract is specified in [Docs/UI.md](../UI.md). Preserve the useful
+RunUO/GumpStudio authoring vocabulary—image backgrounds, resizeable tiled frames, tiled images,
+state-image controls, item/icon-like semantic images, tooltips—without copying old flat packet
+commands or exposing Godot controls. Current nested layout builders remain canonical.
+
 ---
 
 # 14. Nameplates: cached presentation, never server polling
