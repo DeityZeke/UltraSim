@@ -446,6 +446,109 @@ Hooks must have explicit owner, bounds, ordering and failure semantics.
 
 ---
 
+## 2.5 Semantic presentation references / derived UI portraits — promote into P4/P5/P6
+
+Content authoring should not require a unique hand-authored 2D icon for every definition that can
+appear in UI.
+
+Use a generic presentation-reference vocabulary:
+
+~~~text
+SemanticPresentationReference
+    DefinitionDomainId
+    StableDefinitionId
+    PresentationRoleId
+~~~
+
+Representative roles may include:
+
+~~~text
+World
+Equipped
+InventoryPortrait
+VendorPortrait
+CraftingPortrait
+CharacterPortrait
+BestiaryPortrait
+TooltipPreview
+Inspection
+Paperdoll
+Thumbnail
+~~~
+
+Definition domains/registries may preserve imported numeric source IDs where useful, but durable
+identity should remain typed/stable. Cold composition may assign dense runtime IDs for lookup/wire
+efficiency.
+
+The resolver should prefer:
+
+~~~text
+explicit role-specific presentation
+    ↓
+compatible general presentation
+    ↓
+derive from World presentation
+    ↓
+primitive semantic fallback
+    ↓
+missing-content checker/debug presentation
+~~~
+
+This means a new Katana, chair, potion, crop, chest, creature or statuette can become UI-displayable
+from its existing 3D presentation with no extra icon authoring.
+
+A dedicated 2D icon remains a normal optional override.
+
+### Portrait profiles
+
+3D-derived portraits should use bounded declarative profiles:
+
+~~~text
+source presentation
+camera/framing
+lighting profile
+autofit/fixed scale
+orientation
+pose mode
+optional animation sample
+background role
+~~~
+
+Do not make arbitrary mouse callbacks part of every content definition.
+
+### Interaction tiers
+
+Presentation may provide:
+
+~~~text
+Cached Portrait
+    normal cheap UI image
+
+Live Portrait
+    small bounded hover/selection realization
+    rotate / animate
+
+Inspection View
+    small bounded interactive 3D view
+    rotate / zoom / examine
+~~~
+
+These are presentation tiers, not Game-state copies. Hover animation/rotation and inspection camera
+movement are client-local.
+
+This enables Skyrim-like object examination, animated creature/item previews, vendor/crafting/
+bestiary reuse, and automatic inventory portraits through one underlying presentation mechanism.
+
+### Derived resource rule
+
+A generated portrait is disposable derived output. Its cache identity must include the resolved
+presentation/content generation, role/profile version, relevant source asset hashes, and renderer
+profile. It may participate in the UI/Icon atlas after generation.
+
+Deleting the portrait cache never deletes Game/content truth.
+
+---
+
 # 3. Runtime capability / attachment model
 
 Capability/attachment patterns seen in Forge-like extension layers map well to UltraSim's hybrid OOP + ECS architecture, but should be adopted as normal strongly typed authoring/runtime seams rather than as a separate mod-only mechanism.
@@ -1068,6 +1171,7 @@ A UI, forum, web page or Godot scene must not become the authority merely becaus
 [ ] Definition Tags / Sets
 [ ] Definition aliases + migration/remap policy
 [ ] Typed subsystem hook/event registration seam
+[ ] Semantic presentation references + 3D-derived UI portraits
 ~~~
 
 ## Important after P2/P4 pressure exists
@@ -1161,6 +1265,7 @@ Exceptions already accepted:
 - **Definition Tags/Sets** belong in P4.
 - **Definition aliases/migrations** should influence P2/P4.
 - **Typed hook/event registration** should be accounted for in the P2 server-authoring seam.
+- **Semantic presentation references / derived UI portraits** participate in P4/P5/P6 because the representative Inventory/UI slice needs them; live hover/inspection elaboration remains bounded and may be staged.
 
 Everything else remains future until real pressure promotes it.
 
