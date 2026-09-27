@@ -6,6 +6,38 @@
 
 The Concept Demo remains the behavioral reference implementation throughout extraction.
 
+## Canonical terminology update
+
+This document predates the final Kernel / Contracts & Bridges / Framework / Engine Core / Game
+Implementation vocabulary and therefore still contains some older terms such as `EngineHost`
+and `Web.Core`.
+
+When wording conflicts, use the current canonical meaning from:
+
+- [UltraSim Pre–Many-Player Live Test Roadmap](UltraSim_Pre_Many_Person_Live_Testing_Roadmap.md)
+- [UltraSim Architecture](../ARCHITECTURE.md)
+- [Future Engine & Modding Backlog](FUTURE_ENGINE_MODDING_BACKLOG.md)
+
+In particular:
+
+```text
+old EngineHost
+    → Framework Runtime Host / Module Host
+
+generic inbound HTTP/Web ownership
+    → Framework.Http.Endpoint + external technology Bridge
+      (currently Bridges.Http.Kestrel)
+
+Engine
+    → Engine Core only when it means a reusable gameplay/interactive capability
+```
+
+The Framework may host conventional C# sidecar/runtime objects, ECS-backed state, or hybrids.
+ECS is a scalable realization, not the mandatory gameplay object model.
+
+The future/modding backlog is deliberately separate from the active P1–P11 campaign. Documenting
+a candidate Engine or hook does not automatically promote it into current implementation scope.
+
 ---
 
 # 1. Core Principle
