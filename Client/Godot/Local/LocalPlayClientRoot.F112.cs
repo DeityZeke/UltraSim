@@ -51,9 +51,9 @@ public abstract partial class LocalPlayClientRoot
                 Display = DisplayServer.GetName(), pointer, tiers, equipment, finalItem, FinalBoundary = CaptureSessionBoundary() },
                 new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter() } }));
             GD.Print("F1.12-R1 NATIVE PRODUCT PASS pointer=4 tiers=3 reveal=exact retirement=clean");
-            GetTree().Quit();
+            RequestApplicationExit();
         }
-        catch (Exception error) { GD.PushError(error.ToString()); RetireCurrentSession(); GetTree().Quit(1); }
+        catch (Exception error) { GD.PushError(error.ToString()); RetireCurrentSession(); RequestApplicationExit(1); }
     }
     // Cold, explicit native assurance. Uses the shipping GameplayOutput, never a screenshot viewport.
     private async void RunF112RenderProbe()
@@ -93,9 +93,9 @@ public abstract partial class LocalPlayClientRoot
             scene.Free();
             await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
             Stage("retired");
-            GetTree().Quit(0);
+            RequestApplicationExit(0);
         }
-        catch (Exception exception) { Stage(exception.ToString()); GetTree().Quit(1); }
+        catch (Exception exception) { Stage(exception.ToString()); RequestApplicationExit(1); }
         finally { RenderingServer.FramePreDraw -= Pre; RenderingServer.FramePostDraw -= Post; }
     }
 
@@ -176,7 +176,7 @@ public abstract partial class LocalPlayClientRoot
                     FinalBoundary = CaptureSessionBoundary(), HumanFeelRated = false },
                     new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter() } }));
             GD.Print($"F1.12 CABIN NATIVE PREVIEW PASS captures={captures.Count} retirement=clean");
-            GetTree().Quit(0);
+            RequestApplicationExit(0);
 
             async Task Capture(string view, GodotDiagnosticTimeOfDay time, GodotDiagnosticAtmosphere atmosphere)
             {
@@ -199,7 +199,7 @@ public abstract partial class LocalPlayClientRoot
             Stage(exception.ToString());
             GD.PushError($"F1.12 Cabin preview failed: {exception}");
             RetireCurrentSession();
-            GetTree().Quit(1);
+            RequestApplicationExit(1);
         }
     }
 
@@ -391,13 +391,13 @@ public abstract partial class LocalPlayClientRoot
                 Converters = { new JsonStringEnumConverter() } }));
             GD.Print("F1.12 PRODUCT DOGFOOD PASS lifetimes=3 settings=product " +
                 "saveLoad=central/far item=pickup/equip/drop/repickup retirement=clean");
-            GetTree().Quit(0);
+            RequestApplicationExit(0);
         }
         catch (Exception exception)
         {
             GD.PushError($"F1.12 product dogfood failed: {exception}");
             RetireCurrentSession();
-            GetTree().Quit(1);
+            RequestApplicationExit(1);
         }
         async Task Frames(int count)
         {

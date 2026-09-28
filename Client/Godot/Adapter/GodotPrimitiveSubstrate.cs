@@ -33,7 +33,7 @@ internal static class GodotPrimitiveSubstrate
         },
     };
 
-    internal static Node3D CreateActor(ClientActorVisualKind kind)
+    internal static Node3D CreateActor(ClientActorVisualKind kind, GodotOwnedResources resources)
     {
         ClientPrimitivePresentation descriptor = ClientPrimitivePresentationCatalog.ForActor(kind);
         Vector3 size = new(descriptor.WidthMillimeters * 0.001f,
@@ -45,19 +45,19 @@ internal static class GodotPrimitiveSubstrate
             ClientActorVisualKind.HumanY => new Color(0.86f, 0.52f, 0.24f),
             _ => new Color(0.48f, 0.35f, 0.23f),
         };
-        var material = new StandardMaterial3D { AlbedoColor = color, Roughness = 0.9f };
+        var material = resources.Own(new StandardMaterial3D { AlbedoColor = color, Roughness = 0.9f });
         if (descriptor.Shape == ClientPrimitiveShape.Capsule)
         {
             float radius = MathF.Min(size.X, size.Z) * 0.5f;
             return new MeshInstance3D
             {
-                Mesh = new CapsuleMesh { Radius = radius, Height = size.Y, Material = material },
+                Mesh = resources.Own(new CapsuleMesh { Radius = radius, Height = size.Y, Material = material }),
                 Position = new Vector3(0, size.Y * 0.5f, 0),
             };
         }
         return new MeshInstance3D
         {
-            Mesh = GodotMeshGeometry.CreateGroundedBox(size, material),
+            Mesh = resources.Own(GodotMeshGeometry.CreateGroundedBox(size, material)),
         };
     }
 
@@ -66,14 +66,13 @@ internal static class GodotPrimitiveSubstrate
 
     private static Texture2D BuildMissingIcon()
     {
-        Image image = Image.CreateEmpty(16, 16, false, Image.Format.Rgba8);
+        using Image image = Image.CreateEmpty(16, 16, false, Image.Format.Rgba8);
         for (int y = 0; y < 16; y++)
         for (int x = 0; x < 16; x++)
             image.SetPixel(x, y, (x / 4 + y / 4) % 2 == 0
                 ? new Color(0.82f, 0.04f, 0.62f)
                 : new Color(0.02f, 0.02f, 0.02f));
         Texture2D texture = ImageTexture.CreateFromImage(image);
-        image.Dispose();
         return texture;
     }
 }

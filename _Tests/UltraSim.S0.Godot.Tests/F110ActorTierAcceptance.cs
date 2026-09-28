@@ -17,6 +17,7 @@ public partial class F110ActorTierAcceptance : Node3D
     {
         try
         {
+            GodotLifetimeOwnershipTests.Run();
             await Assurance();
             foreach (int count in Native ? new[] { 16, 64, 128, 256 } : new[] { 16 })
                 for (int repetition = 0; repetition < (Native ? 3 : 1); repetition++)
@@ -57,11 +58,13 @@ public partial class F110ActorTierAcceptance : Node3D
             "Promotion failed.");
         Expect(root!.Position.IsEqualApprox(new(18, 0, 0)), "Promotion snapped to authoritative position.");
         await Boundary(); AssertBodies(presenter, records);
+        ArrayMesh[] retiredActorMeshes = GodotLifetimeOwnershipTests.CaptureActorTools(root!);
         ClientMotionPose far = near with { GlobalXMillimeters = 32_000 };
         presenter.SetPresentedPose(id, far); presenter.UpdateOriginAndLifetimes(Origin, 1200);
         await Boundary(); AssertBodies(presenter, records);
         Expect(!GodotObject.IsInstanceValid(root) && presenter.TryGetPresentedPose(id, out var pose) && pose == far,
             "Demotion kept a body or lost the presented pose.");
+        GodotLifetimeOwnershipTests.RequireRetired(retiredActorMeshes, "actor demotion");
         presenter.SetPresentedPose(id, far with { GlobalXMillimeters = 24_000 });
         presenter.UpdateOriginAndLifetimes(Origin, 1300);
         Expect(IsCheap(presenter, id), "Hysteresis oscillated in its dead band.");

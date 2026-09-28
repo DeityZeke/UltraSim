@@ -356,7 +356,9 @@ public partial class F111RendererStressAcceptance : Node3D
         long retiredStart = Stopwatch.GetTimestamp();
         actors.Apply(records.Select(r => new ClientActorPresentationChange(ClientActorPresentationChangeKind.Removed, r.Id, default)).ToArray(), player, 9000);
         Expect(actors.GetSnapshot().ActiveActors == 0, "Actor final drain did not retire exact lifetimes.");
+        ArrayMesh[] retiredTerrainMeshes = GodotLifetimeOwnershipTests.CaptureTerrain(renderer.Root);
         renderer.Dispose(); actors.Dispose();
+        GodotLifetimeOwnershipTests.RequireRetired(retiredTerrainMeshes, "renderer disposal");
         long retirement = Stopwatch.GetTimestamp() - retiredStart;
         Expect(renderer.GetSnapshot() is { ActiveNodes: 0, ActiveResources: 0 } && renderer.GetVegetationSnapshot().Patches == 0 &&
             host.GetChildCount() == 3, "Renderer/vegetation/actor retirement leaked.");

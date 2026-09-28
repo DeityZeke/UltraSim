@@ -1,0 +1,11 @@
+PASS box/success
+PASS box/Begin
+PASS box/SetMaterial
+PASS box/AddVertex
+PASS box/Commit
+PASS wedge/success
+PASS wedge/Begin
+PASS wedge/SetMaterial
+PASS wedge/AddVertex
+PASS wedge/Commit
+10/10 passed; 0/10 failed (test doubles; no native rendering)

@@ -1,0 +1,19 @@
+PASS startup-close: ordered retirement, two frame acknowledgements, one quit
+PASS normal close
+PASS cleanup failures: both retained, engine quit withheld
+PASS premature tree exit
+PASS resource transfer/retirement
+PASS resource cleanup failure aggregation
+PASS owner thread affinity
+PASS 7/7 lifetime/ownership controls; production lifetime code, deterministic engine doubles.
+UltraSim application retirement failed: System.AggregateException: Application owners did not all retire. (session failure) (services failure)
+ ---> System.Exception: session failure
+   at UltraSim.Client.Godot.ClientRoot.RetireCurrentSession()
+   at UltraSim.Client.Godot.ClientRoot.<>c__DisplayClass27_0.<RetireApplication>g__Run|1(Action retirement)
+   --- End of inner exception stack trace ---
+   at UltraSim.Client.Godot.ClientRoot.RetireApplication()
+   at UltraSim.Client.Godot.ClientRoot.ShutdownApplicationAsync()
+ ---> (Inner Exception #1) System.Exception: services failure
+   at UltraSim.Client.Godot.Host.RetireApplicationServices()
+   at UltraSim.Client.Godot.ClientRoot.<>c__DisplayClass27_0.<RetireApplication>g__Run|1(Action retirement)<---
+

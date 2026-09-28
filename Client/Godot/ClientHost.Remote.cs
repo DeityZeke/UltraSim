@@ -64,7 +64,7 @@ public partial class ClientHost
                     _remoteSession = null;
                     _remoteRetiring = false;
                     if (_remoteSmokeDisconnectStarted)
-                        GetTree().Quit(0);
+                        RequestApplicationExit(0);
                 }
                 return;
             }
@@ -91,7 +91,7 @@ public partial class ClientHost
                     string fault = playable.Fault ?? "Remote playable session failed.";
                     GD.PushError($"A0.8 remote playable fault: {fault}");
                     FailSession(BoundedShellMessage(fault));
-                    if (IsAutomatedRemoteSmoke()) GetTree().Quit(1);
+                    if (IsAutomatedRemoteSmoke()) RequestApplicationExit(1);
                     return;
                 }
                 if (playable.State == RemoteConceptDemoClientState.AwaitingGuest &&
@@ -210,7 +210,7 @@ public partial class ClientHost
                 {
                     FailSession(BoundedShellMessage(
                         profile.Detail ?? "The server client profile was rejected."));
-                    if (IsAutomatedRemoteSmoke()) GetTree().Quit(1);
+                    if (IsAutomatedRemoteSmoke()) RequestApplicationExit(1);
                     return;
                 }
                 if (profile.State == RemoteClientProfileState.AwaitingDecision)
@@ -303,7 +303,7 @@ public partial class ClientHost
                     {
                         GD.PushError(
                             $"A0.8 Direct Connect smoke failed: {snapshot.Failure}: {snapshot.Detail}");
-                        GetTree().Quit(1);
+                        RequestApplicationExit(1);
                     }
                     break;
                 }
@@ -315,7 +315,7 @@ public partial class ClientHost
                     {
                         GD.PushError(
                             $"A0.8 Direct Connect smoke closed: {snapshot.Failure}: {snapshot.Detail}");
-                        GetTree().Quit(1);
+                        RequestApplicationExit(1);
                     }
                     break;
                 }
@@ -328,7 +328,7 @@ public partial class ClientHost
                 $"Direct Connect failed safely: {exception.Message}"));
             if (IsAutomatedRemoteSmoke())
             {
-                GetTree().Quit(1);
+                RequestApplicationExit(1);
             }
         }
     }
@@ -1271,14 +1271,14 @@ public partial class ClientHost
                 $"remote_resources={remoteA.Snapshot.ActorResources.RealizedResources}/" +
                 $"{remoteA.Snapshot.ActorResources.RetainedArtifactBytes} " +
                 "retirement=clean");
-            GetTree().Quit(0);
+            RequestApplicationExit(0);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             GD.PushError($"F0.7 mixed-session lifecycle failed: {exception}");
             RetireCurrentSession();
             ReturnToMainMenu("F0.7 lifecycle failed safely.");
-            GetTree().Quit(1);
+            RequestApplicationExit(1);
         }
     }
 

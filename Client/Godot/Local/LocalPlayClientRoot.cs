@@ -35,6 +35,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
     public override void _Ready()
     {
         base._Ready();
+        if (!CanStartApplicationWork) return;
         string[] arguments = OS.GetCmdlineUserArgs();
         if (arguments.Contains("--f1-12-native-product", StringComparer.Ordinal))
         {
@@ -135,7 +136,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
                     $"diskHits={evidence.AfterRestore.DiskTextureHits}");
                 RetireCurrentSession();
                 ReturnToMainMenu("F1.6 derived Local smoke passed.");
-                GetTree().Quit(0);
+                RequestApplicationExit(0);
                 return;
             }
             if (f17UiSmoke)
@@ -183,7 +184,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
                 RetireCurrentSession();
                 ReturnToMainMenu("F1.7 Local UI smoke passed.");
                 RequireCleanSessionBoundary(in baseline, "F1.7 Local UI retirement");
-                GetTree().Quit(0);
+                RequestApplicationExit(0);
                 return;
             }
             if (f19DisplaySmoke)
@@ -237,7 +238,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
                     $"{evidence.PresentationCache.LiveCatalogPins}");
                 RetireCurrentSession();
                 ReturnToMainMenu($"F1.4 Official Local {f14Mode} smoke passed.");
-                GetTree().Quit(0);
+                RequestApplicationExit(0);
                 return;
             }
             if (conceptDemoSmoke || residencySmoke || farIslandSmoke)
@@ -272,7 +273,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
                     : residencySmoke
                         ? "Concept Demo D0.1 residency smoke passed."
                         : "Concept Demo D0.0 smoke passed.");
-                GetTree().Quit(0);
+                RequestApplicationExit(0);
                 return;
             }
 
@@ -307,14 +308,14 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
                 $"authorityTicks={first.AuthorityTicks}/{second.AuthorityTicks}");
             RetireCurrentSession();
             ReturnToMainMenu("F0.2 lifecycle smoke passed.");
-            GetTree().Quit(0);
+            RequestApplicationExit(0);
         }
         catch (Exception exception)
         {
             GD.PushError($"F0.2 local composition failed: {exception}");
             RetireCurrentSession();
             FailSession(exception.Message);
-            GetTree().Quit(1);
+            RequestApplicationExit(1);
         }
     }
 
@@ -384,13 +385,13 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
                 EffectiveDisplay != originalDisplay)
                 throw new InvalidOperationException("The F1.9A display smoke leaked native output ownership.");
             GD.Print("F1.9A LOCAL DISPLAY SMOKE PASS cases=3 session=retained retirement=clean");
-            GetTree().Quit(0);
+            RequestApplicationExit(0);
         }
         catch (Exception exception)
         {
             GD.PushError($"F1.9A native display smoke failed: {exception}");
             RetireCurrentSession();
-            GetTree().Quit(1);
+            RequestApplicationExit(1);
         }
     }
 
@@ -429,14 +430,14 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             ReturnToMainMenu(fallbackLab
                 ? "Concept Demo D0.4 Fallback Lab smoke passed."
                 : "Concept Demo D0.3 informational-sign smoke passed.");
-            GetTree().Quit(0);
+            RequestApplicationExit(0);
         }
         catch (Exception exception)
         {
             GD.PushError($"D0.{(fallbackLab ? 4 : 3)} native presentation failed: {exception}");
             RetireCurrentSession();
             FailSession(exception.Message);
-            GetTree().Quit(1);
+            RequestApplicationExit(1);
         }
     }
 
@@ -463,14 +464,14 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             RetireCurrentSession();
             ReturnToMainMenu("F1.3 primitive-only Concept Demo passed.");
             RequireCleanSessionBoundary(_f13PrimitiveBaseline, "F1.3 primitive-only retirement");
-            GetTree().Quit(0);
+            RequestApplicationExit(0);
         }
         catch (Exception exception)
         {
             GD.PushError($"F1.3 primitive-only presentation failed: {exception}");
             RetireCurrentSession();
             FailSession(exception.Message);
-            GetTree().Quit(1);
+            RequestApplicationExit(1);
         }
     }
 
@@ -557,7 +558,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
                     "remoteDetach=clean localWorldSurvived=true");
                 RetireCurrentSession();
                 ReturnToMainMenu("M0.0 embedded shared-authority smoke passed.");
-                GetTree().Quit(0);
+                RequestApplicationExit(0);
                 return;
             }
             throw new TimeoutException(
@@ -568,7 +569,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             GD.PushError($"M0.0 Complete hosted smoke failed: {exception}");
             RetireCurrentSession();
             FailSession(exception.Message);
-            GetTree().Quit(1);
+            RequestApplicationExit(1);
         }
     }
 
@@ -624,11 +625,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         _cabin.SetGameplayInputAllowed(shell.Focus.GameplayInputAllowed);
     }
 
-    public override void _ExitTree()
-    {
-        RetireCurrentSession();
-        base._ExitTree();
-    }
+    public override void _ExitTree() => base._ExitTree();
 
     protected override void BeginCapability(ClientCapability capability)
     {
@@ -770,7 +767,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         _catalogMarker = new Node { Name = $"CabinCatalog_{variant}_{resolved.Catalog.Fingerprint}" };
         ContentCatalogRoot.AddChild(_catalogMarker);
 
-        var cabin = new LocalCabinClient { Name = "LocalCabinSession" };
+        var cabin = new LocalCabinClient { Name = "LocalCabinSession", ExitRequested = RequestApplicationExit };
         GodotSessionUiLease sessionUi = BeginSessionUi("LocalCabinSession");
 #if ULTRASIM_COMPLETE
         ILocalPlayableServerExtensionFactory? extensionFactory = serverExtensionFactory ??
@@ -875,14 +872,14 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
                 "chatFocus=pass");
             RetireCurrentSession();
             ReturnToMainMenu("Concept Demo D0.5 guest admission smoke passed.");
-            GetTree().Quit(0);
+            RequestApplicationExit(0);
         }
         catch (Exception exception)
         {
             GD.PushError($"D0.5 guest admission failed: {exception}");
             RetireCurrentSession();
             FailSession(exception.Message);
-            GetTree().Quit(1);
+            RequestApplicationExit(1);
         }
     }
 

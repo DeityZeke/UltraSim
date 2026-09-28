@@ -114,37 +114,46 @@ internal sealed class GodotPrimitiveActorBatches : IDisposable
     private Group Create(ClientActorVisualKind kind)
     {
         // Same permanent primitive definition/color as Detailed fallback; no content resolver.
-        var template = (MeshInstance3D)GodotPrimitiveSubstrate.CreateActor(kind);
-        Mesh mesh = template.Mesh!; Transform3D offset = template.Transform;
-        template.Free();
+        var resources = new GodotOwnedResources();
+        MeshInstance3D? template = null;
         MultiMesh? multiMesh = null; MultiMeshInstance3D? node = null;
         try
         {
+            template = (MeshInstance3D)GodotPrimitiveSubstrate.CreateActor(kind, resources);
+            Mesh mesh = template.Mesh!; Transform3D offset = template.Transform;
+            template.Free();
+            template = null;
             multiMesh = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
                 Mesh = mesh, InstanceCount = _capacity, VisibleInstanceCount = 0 };
             node = new MultiMeshInstance3D { Name = $"CheapActors_{kind}", Multimesh = multiMesh };
             _host.AddChild(node);
-            var group = new Group(node, multiMesh, mesh, offset, _capacity);
+            var group = new Group(node, multiMesh, mesh, offset, _capacity, resources);
             GroupCount++; return group;
         }
-        catch { node?.Free(); multiMesh?.Dispose(); mesh.Dispose(); throw; }
+        catch
+        {
+            template?.Free();
+            node?.Free();
+            multiMesh?.Dispose();
+            resources.Dispose();
+            throw;
+        }
     }
 
     private sealed class Group(MultiMeshInstance3D node, MultiMesh multiMesh, Mesh mesh,
-        Transform3D meshOffset, int capacity) : IDisposable
+        Transform3D meshOffset, int capacity, GodotOwnedResources resources) : IDisposable
     {
         internal readonly MultiMeshInstance3D Node = node;
         internal readonly MultiMesh MultiMesh = multiMesh;
         internal readonly Mesh Mesh = mesh;
         internal readonly Transform3D MeshOffset = meshOffset;
         internal readonly Aabb MeshBounds = mesh.GetAabb();
-        internal readonly Material? Material = mesh is PrimitiveMesh primitive ? primitive.Material : mesh.SurfaceGetMaterial(0);
         internal readonly WorldPublicEntityId[] Ids = new WorldPublicEntityId[capacity];
         internal readonly int[] Owners = new int[capacity];
         internal readonly Transform3D[] Transforms = new Transform3D[capacity];
         internal int Count;
         public void Dispose()
-        { Node.Free(); MultiMesh.Dispose(); Mesh.Dispose(); Material?.Dispose(); }
+        { Node.Free(); MultiMesh.Dispose(); resources.Dispose(); }
     }
 }
 

@@ -133,6 +133,10 @@ public readonly record struct LocalF17UiAcceptanceSnapshot(
 /// </summary>
 public partial class LocalCabinClient : Node3D
 {
+    internal Action<int>? ExitRequested { get; set; }
+    private MeshInstance3D? _addedContentNode;
+    private ArrayMesh? _addedContentMesh;
+
     private enum ControlProfile : byte
     {
         OrbitCommand,
@@ -784,7 +788,7 @@ public partial class LocalCabinClient : Node3D
             if (OS.GetCmdlineUserArgs().Contains("--smoke", StringComparer.Ordinal))
             {
                 GD.Print("T0.10 PLAYABLE CLIENT SMOKE PASS");
-                GetTree().Quit(0);
+                (ExitRequested ?? throw new InvalidOperationException("Application exit owner is missing."))(0);
             }
         }
         catch (Exception exception)
@@ -1001,6 +1005,11 @@ public partial class LocalCabinClient : Node3D
         _publicPresentationMetadata = null;
         _renderer?.Dispose();
         _renderer = null;
+        if (_addedContentNode is not null && GodotObject.IsInstanceValid(_addedContentNode))
+            _addedContentNode.Free();
+        _addedContentNode = null;
+        _addedContentMesh?.Dispose();
+        _addedContentMesh = null;
         _assetResolver?.Dispose();
         _assetResolver = null;
         _diagnosticEnvironment?.Dispose();
@@ -1757,10 +1766,11 @@ public partial class LocalCabinClient : Node3D
         var badge = new MeshInstance3D
         {
             Name = "AddedCabinContent",
-            Mesh = GodotMeshGeometry.CreateGroundedBox(
+            Mesh = _addedContentMesh = GodotMeshGeometry.CreateGroundedBox(
                 new Vector3(0.8f, 0.12f, 0.8f), _assetResolver.AddedMaterial),
             Position = new Vector3(2.5f, 0.02f, -2.5f),
         };
+        _addedContentNode = badge;
         AddChild(badge);
         _addedPresentationRealized = true;
     }
