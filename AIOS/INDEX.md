@@ -51,6 +51,7 @@ Start here. This file is intentionally small.
 
 - [TOPICS.md](TOPICS.md) — nearly every project-relevant topic discussed or discovered.
 - [Materials and processing](topics/materials-and-processing.md)
+- [UI nine-slice art / frame families](topics/ui-nine-slice-art-and-frame-families.md)
 - [Body Mail / hybrid armor](topics/armor-body-mail.md)
 - [Campaign stakes / long simulation](topics/campaign-stakes.md)
 - [Actor motivations / aspirations / predispositions](topics/actor-motivation-and-traits.md)
