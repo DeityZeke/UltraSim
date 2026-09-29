@@ -62,6 +62,7 @@ public abstract partial class ClientRoot
         List<Exception>? failures = null;
         Run(RetireCurrentSession);
         Run(RetireApplicationServices);
+        Run(RetireAdapterControl);
         Run(() => { _uiComposition?.Dispose(); _uiComposition = null; });
         if (failures is not null)
             throw new AggregateException("Application owners did not all retire.", failures);

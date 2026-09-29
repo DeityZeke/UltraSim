@@ -1,6 +1,7 @@
 using Godot;
 using UltraSim.Client.Core;
 using UltraSim.Client.Godot;
+using UltraSim.Framework.ControlPlane;
 
 internal static class GodotLifetimeOwnershipTests
 {
@@ -28,6 +29,51 @@ internal static class GodotLifetimeOwnershipTests
         Expect(!lifetime.ShutdownCompletion.IsCompleted, "Shutdown completed before owner retirement.");
         lifetime.CompleteStop();
         Expect(lifetime.ShutdownCompletion.IsCompletedSuccessfully, "Shutdown completion was not published.");
+
+        AdapterControlPublication();
+    }
+
+    private static void AdapterControlPublication()
+    {
+        var current = new GodotAdapterStatus("Complete", GodotApplicationPhase.Starting, false, 4, 6);
+        var provider = new GodotAdapterControlProvider(() => current);
+        var registry = new ControlPlaneRegistry();
+        Expect(registry.TryRegister(provider, out ulong generation, out _), "Native adapter publication was rejected.");
+        var reader = new ControlPrincipal("native-reader", ControlPrincipalKind.TestAutomation,
+            [GodotAdapterControlProvider.Read, GodotAdapterControlProvider.Select]);
+        var denied = new ControlPrincipal("no-adapter-read", ControlPrincipalKind.TestAutomation, []);
+        Expect(registry.Discover(denied).Count == 0 &&
+            registry.Read(denied, GodotAdapterControlProvider.Id, generation,
+                new DiagnosticId("phase"), out _) == ControlResultCode.Unauthorized,
+            "Adapter state was visible without the read capability.");
+        Expect(registry.Read(reader, GodotAdapterControlProvider.Id, generation,
+                new ControlId("presentation-implementation"), out var presentation) == ControlResultCode.Accepted &&
+            presentation?.Effective.AsOption().Value == "godot" && !presentation.Writable,
+            "Physical presentation selection was not fixed/read-only.");
+        Expect(registry.Read(reader, GodotAdapterControlProvider.Id, generation,
+                new ControlId("audio-implementation"), out var audio) == ControlResultCode.Accepted &&
+            audio?.Effective.AsOption().Value == "none",
+            "The unimplemented Audio adapter was falsely published as active.");
+        var attempt = registry.Set(new SetControlRequest(
+            new(new("p3-adapter-selection"), reader), GodotAdapterControlProvider.Id,
+            new("presentation-implementation"), generation, ControlValue.Option(new("godot"))));
+        Expect(attempt.Outcome.Code == ControlResultCode.NotWritable,
+            "A physical adapter was accepted as a live runtime setting.");
+        ulong before = provider.Revision;
+        current = current with { Phase = GodotApplicationPhase.Running, SessionActive = true, WorldRootChildren = 5 };
+        Expect(registry.Read(reader, GodotAdapterControlProvider.Id, generation,
+                new DiagnosticId("session-active"), out var session) == ControlResultCode.Accepted &&
+            session?.Value.AsBool() == true && provider.Revision > before,
+            "Adapter diagnostic did not track the owner lifecycle/session change.");
+        Expect(registry.Retire(GodotAdapterControlProvider.Id, generation), "Adapter publication did not retire.");
+        Expect(registry.Read(reader, GodotAdapterControlProvider.Id, generation,
+                new DiagnosticId("phase"), out _) == ControlResultCode.UnknownProvider,
+            "Retired adapter diagnostics stayed reachable.");
+        Expect(registry.TryRegister(new GodotAdapterControlProvider(() => current),
+                out ulong replacement, out _) && replacement > generation &&
+            !registry.Retire(GodotAdapterControlProvider.Id, generation) &&
+            registry.Retire(GodotAdapterControlProvider.Id, replacement),
+            "A stale adapter generation retired its replacement.");
     }
 
     internal static ArrayMesh[] CaptureTerrain(Node root) => Capture(root,

@@ -90,14 +90,17 @@ their own bounded retention and safe-data policy.
   the ECS provider removes its content without changing the viewer. No concrete owner references,
   reflection tabs, polished F4/F10 UI or persisted drafts.
 
-P1 adapters are opt-in proof compositions, not new default product dependencies. Export gates
-reject their presence in SinglePlayer/Online/Complete. No ECS, packet or render hot path calls
-this registry; idle registration changes neither execution nor warmed allocation.
+The P1 ECS, ServerRuntime and Client Settings proof adapters remain opt-in, not
+default product dependencies; export gates still exclude those bridge/provider
+assemblies. P3 deliberately brings the BCL-only Framework Control Plane contract
+assembly into SinglePlayer/Online/Complete for one cold, read-only Godot adapter
+publication owned by the actual client root. No ECS, packet or render hot path calls
+this registry; adapter status is captured only on management requests.
 
 ## Verification
 
 Run dotnet run --project _Tests/UltraSim.ControlPlane.Tests -c Release, then
 bash ./verify.sh --architecture-only and bash ./verify.sh --configuration=Release.
 The canonical verifier includes this proof alongside existing ECS, Runtime, Settings and
-native/export/lifecycle gates. P2 module hosting, P5 product UI and remote operator routing
-are deliberately not implemented.
+native/export/lifecycle gates. P2 Runtime Host is separate and closed; P5 product UI
+and remote operator routing are deliberately not implemented here.

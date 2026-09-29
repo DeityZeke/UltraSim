@@ -2904,6 +2904,7 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
             ["UltraSim.Client.Application.Godot", "UltraSim.Client.BuiltInTestWorlds",
                 "UltraSim.Client.Content", "UltraSim.Client.Local",
                 "UltraSim.Client.StandardUi",
+                "UltraSim.Framework.ControlPlane",
                 "UltraSim.Framework.Persistence",
                 "UltraSim.Game.Composition", "UltraSim.Game.Replication",
                 "UltraSim.Server.Runtime"],
@@ -2914,7 +2915,8 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
         new(
             "Online",
             ["UltraSim.Client.Application.Godot", "UltraSim.Client.Content", "UltraSim.Client.Network",
-                "UltraSim.Client.StandardUi", "UltraSim.Game.Protocol", "UltraSim.Network"],
+                "UltraSim.Client.StandardUi", "UltraSim.Framework.ControlPlane",
+                "UltraSim.Game.Protocol", "UltraSim.Network"],
             ["UltraSim.Client.BuiltInTestWorlds", "UltraSim.Client.Local",
                 "UltraSim.Game.Composition", "UltraSim.Game.Inventory", "UltraSim.Game.Persistence",
                 "UltraSim.Game.Replication",
@@ -2928,6 +2930,7 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
             ["UltraSim.Client.Application.Godot", "UltraSim.Client.BuiltInTestWorlds",
                 "UltraSim.Client.Local", "UltraSim.Client.StandardUi",
                 "UltraSim.Client.Network", "UltraSim.Game.Composition", "UltraSim.Game.Protocol",
+                "UltraSim.Framework.ControlPlane",
                 "UltraSim.Framework.Persistence",
                 "UltraSim.Game.Replication", "UltraSim.Network", "UltraSim.Server.Runtime",
                 "UltraSim.Server.ConceptDemo", "UltraSim.Server.ConceptDemo.LocalHost",
@@ -2975,7 +2978,7 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
         var outputAssemblies = Directory.EnumerateFiles(output, "UltraSim*.dll", SearchOption.TopDirectoryOnly)
             .Select(static path => Path.GetFileNameWithoutExtension(path))
             .ToHashSet(StringComparer.Ordinal);
-        foreach (string managementProof in new[] { "UltraSim.Framework.ControlPlane", "UltraSim.Bridges.ControlPlane.ECS",
+        foreach (string managementProof in new[] { "UltraSim.Bridges.ControlPlane.ECS",
             "UltraSim.Bridges.ControlPlane.ServerRuntime", "UltraSim.Client.ControlPlane" })
             if (outputAssemblies.Contains(managementProof) || dependencies.Contains(managementProof))
                 throw new InvalidOperationException($"{gate.Name} acquired an opt-in P1 management proof assembly.");
@@ -3131,6 +3134,7 @@ static ContentlessOnlineExport VerifyContentlessOnlineExport(string root, string
         "UltraSim.Client.Network",
         "UltraSim.Client.StandardUi",
         "UltraSim.ECS",
+        "UltraSim.Framework.ControlPlane",
         "UltraSim.Game.Accounting",
         "UltraSim.Game.Contracts",
         "UltraSim.Game.Protocol",
@@ -3218,6 +3222,7 @@ static FinalClientProductExports VerifyFinalClientProductExports(
         "UltraSim.Client.Local",
         "UltraSim.Client.StandardUi",
         "UltraSim.ECS",
+        "UltraSim.Framework.ControlPlane",
         "UltraSim.Framework.Persistence",
         "UltraSim.Game.Accounting",
         "UltraSim.Game.Admission",
@@ -3293,6 +3298,7 @@ static FinalClientProductExports VerifyFinalClientProductExports(
         "UltraSim.Client.Network",
         "UltraSim.Client.StandardUi",
         "UltraSim.ECS",
+        "UltraSim.Framework.ControlPlane",
         "UltraSim.Framework.Http.Endpoint",
         "UltraSim.Framework.Persistence",
         "UltraSim.Game.Accounting",
@@ -5983,6 +5989,7 @@ static void VerifyArchitecture(string root)
             "Client/BuiltInTestWorlds/UltraSim.Client.BuiltInTestWorlds.csproj",
             "Client/Content/UltraSim.Client.Content.csproj",
             "Client/Core/UltraSim.Client.Core.csproj",
+            "Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj",
             "Client/Local/UltraSim.Client.Local.csproj",
             "Client/Network/UltraSim.Client.Network.csproj",
             "Client/StandardUi/UltraSim.Client.StandardUi.csproj",
@@ -6128,7 +6135,26 @@ static void VerifyArchitecture(string root)
         if (project.StartsWith("Framework/", StringComparison.Ordinal) &&
             (document.Descendants("FrameworkReference").Any() || document.Descendants("PackageReference").Any()))
             throw new InvalidOperationException("Framework foundation projects must remain BCL-only.");
+        if (!project.StartsWith("Client/Godot/", StringComparison.Ordinal) &&
+            (document.Root?.Attribute("Sdk")?.Value.Contains("Godot", StringComparison.OrdinalIgnoreCase) == true ||
+             document.Descendants("PackageReference").Any(e =>
+                 e.Attribute("Include")?.Value.Contains("Godot", StringComparison.OrdinalIgnoreCase) == true) ||
+             document.Descendants("Reference").Any(e =>
+                 e.Attribute("Include")?.Value.Contains("Godot", StringComparison.OrdinalIgnoreCase) == true)))
+            throw new InvalidOperationException($"Headless production project '{project}' directly depends on Godot.");
     }
+    string[] headlessGodotSources = new[] { "Game", "Framework", "Kernels", "Server", "Bridges",
+            "Client/Core", "Client/Local", "Client/Network" }
+        .SelectMany(folder => Directory.EnumerateFiles(Path.Combine(root, folder), "*.cs", SearchOption.AllDirectories))
+        .Where(path => !path.Contains("/obj/", StringComparison.Ordinal) &&
+                       !path.Contains("/bin/", StringComparison.Ordinal))
+        .Where(path => Regex.IsMatch(File.ReadAllText(path),
+            @"^\s*(?:global\s+)?using\s+(?:static\s+)?Godot(?:\.[A-Za-z_][A-Za-z0-9_]*)*\s*;|\bglobal::Godot\.",
+            RegexOptions.Multiline))
+        .Select(path => Relative(root, path)).ToArray();
+    if (headlessGodotSources.Length != 0)
+        throw new InvalidOperationException("Headless/Game source directly uses Godot: " +
+            string.Join(", ", headlessGodotSources));
     string[] legacyHttpSources = new[] { "Server", "Framework", "Bridges", "Client", "Game", "Kernels" }
         .SelectMany(folder => Directory.EnumerateFiles(Path.Combine(root, folder), "*.cs", SearchOption.AllDirectories))
         .Where(path => !path.Contains("/obj/", StringComparison.Ordinal) && !path.Contains("/bin/", StringComparison.Ordinal))

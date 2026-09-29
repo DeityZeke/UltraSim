@@ -2,7 +2,7 @@
 
 **Proposed status:** Candidate canonical roadmap / architecture checklist\
 **Current reference baseline:** F1.12-R3 / Gate 0 production closure — `e3a63ea21f8f5ea4fa69e3768a055c409edc8616`; documentation-only commits may advance `main` beyond that closure SHA.\
-**Immediate checkpoint:** P1 Framework Control Plane is **CLOSED** after the [native-lifetime repair acceptance](../../_Benchmarks/Baselines/framework-p1-native-lifetime-closure-2026-09-28.md). P2 Runtime Host and C# Server Authoring Environment is **CLOSED** after package-alias/remap, durable-schema admission and canonical Release closure evidence. P3 Framework adapter/runtime boundary migration is **NEXT / PLANNED**; P4–P11 and Gate 1 remain **PLANNED**; PF6 remains **PLANNED / NOT READY / NOT STARTED**.\
+**Immediate checkpoint:** P1 Framework Control Plane is **CLOSED** after the [native-lifetime repair acceptance](../../_Benchmarks/Baselines/framework-p1-native-lifetime-closure-2026-09-28.md). P2 Runtime Host and C# Server Authoring Environment is **CLOSED** after package-alias/remap, durable-schema admission and canonical Release closure evidence. P3 Framework adapter/runtime boundary migration is **ACTIVE**, pending final verification; P4–P11 and Gate 1 remain **PLANNED**; PF6 remains **PLANNED / NOT READY / NOT STARTED**.\
 **End state of this document:** UltraSim is ready to move from individual/trusted dogfooding and closed validation into a many-player live test where human feedback is primarily about the intended game rather than known development-harness limitations.
 
 ---
@@ -1639,6 +1639,16 @@ A consumer that truly **requires** the missing runtime capability must fail comp
 ---
 
 ## P3 — Framework adapter/runtime boundary migration
+
+**Implementation underway; canonical closure verification pending.** The source audit
+found no Godot type/project dependency in authoritative Game, Framework, Kernels or
+dedicated Server. Client Core/Local/Network also remain engine-neutral. The existing
+Godot input, world realization and native application-lifetime owners are already
+narrow and are retained. The selected physical client adapter is now a cold,
+read-only Control Plane publication with explicit shell registration/retirement;
+headless source/project guards and exact export assembly gates protect the boundary.
+There is no live adapter swap or Audio implementation. This is a selective migration,
+not a generic `IPlatformAdapter` framework.
 
 ### Goal
 

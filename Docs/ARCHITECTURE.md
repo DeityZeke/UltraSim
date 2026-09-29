@@ -45,6 +45,16 @@ is the concrete place where authoritative game-owned domains meet.
 The repository verifier freezes the exact active project-reference graph. A new
 reference is an architecture decision, not a convenience edit.
 
+The dedicated/headless authority composition has no Godot SDK, native scene, renderer,
+input, or Audio adapter requirement. Godot is a concrete client-side implementation:
+its world realization, physical input capture and application shutdown remain within
+`Client/Godot`. Engine-neutral Client Core owns semantic projection and input policy;
+Godot does not become a Game or Framework type. P3 publishes the selected physical
+client adapter and its lifecycle through an owner-thread, read-only Control Plane
+provider. Implementation selection is fixed by composition; settings such as
+vegetation remain distinct runtime/device configuration. The existing native
+application owner is retained rather than wrapped in a universal platform interface.
+
 ## Gameplay realization: OOP Extensions, ECS, or hybrid
 
 UltraSim does **not** require gameplay to be modeled as ECS.

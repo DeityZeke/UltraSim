@@ -283,6 +283,7 @@ public abstract partial class ClientRoot : Control
             Validate(_composition);
             LoadSettings();
             BuildPersistentRoots();
+            RegisterAdapterControl();
             RenderCurrentSurface();
             string capabilities = string.Join(',', _composition.Capabilities);
             GD.Print(
@@ -1001,6 +1002,7 @@ public abstract partial class ClientRoot : Control
             snapshot.Shell.Focus.GameplayInputAllowed ||
             snapshot.CapabilityCount != _composition.Capabilities.Count)
             throw new InvalidOperationException("The persistent client shell smoke contract failed.");
+        RequireAdapterControl();
     }
 
     private async void RunShellUiSmoke()

@@ -1,5 +1,28 @@
 # UltraSim client application project
 
+P3 keeps Godot as the concrete client presentation/input/runtime adapter, not a Game
+Engine or a dependency of authoritative Game/Framework/Server code. The existing
+`GodotApplicationLifetime` is the single native application owner: it starts on the
+engine thread, retires sessions and native resources, waits for the deletion-queue
+boundary, then quits. No second generic adapter lifecycle or one-size-fits-all
+`IPlatformAdapter` was added. The fixed physical selection is published through the
+owner-thread `client.godot.adapters` Control Plane provider at shell readiness and
+retired before the persistent UI owner. Its read-only selection controls identify
+Godot presentation/input/runtime and **no current Audio adapter**; cold diagnostics
+report edition, lifecycle phase, session activity and bounded root/layer counts.
+This provider has no per-frame polling and cannot select a different implementation
+live. Vegetation, camera and other client preferences remain settings/configuration,
+not adapter selection. The P1 opt-in Settings proof provider remains separate; P5
+owns any later polished management surface. Single Player, Online and Complete now
+carry only the small Framework Control Plane contract assembly for this publication,
+not the ECS/ServerRuntime proof bridges or a server operator UI.
+
+The architecture verifier rejects Godot SDK/package references in headless projects
+and direct Godot namespace imports in Game, Framework, Kernels, Server, Bridges and
+engine-neutral client projects. ServerOnly Direct Connect retains no Godot/client
+application/presentation dependency; the normal product export gates freeze the
+three exact client assembly closures. Audio implementation is still P8.
+
 F1.9A uses one display path for Local, Remote and Complete. The root owns a logical Application
 Resolution via Godot Window content scaling, while the persistent UI composition owns a real
 Gameplay Output `SubViewport`. The World root and camera live under that viewport. A `TextureRect`
