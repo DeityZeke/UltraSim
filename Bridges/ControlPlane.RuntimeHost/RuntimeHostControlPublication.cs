@@ -48,7 +48,9 @@ internal sealed class RuntimeHostControlProvider : IControlProvider
             new(new("runtime-fingerprint"), new("Framework/RuntimeHost"), "Runtime composition fingerprint", "Resolved compiled composition identity, not the process generation.", new(ControlValueKind.Text), Read)],
             collections: [new(new("packages"), new("Framework/RuntimeHost"), "Packages", "Selected package lifecycle states.",
                 RuntimeCompositionPlanner.MaximumPackages,
-                [new(new("state"), "State", new(ControlValueKind.Text)),
+                [new(new("version"), "Version", new(ControlValueKind.Text)),
+                 new(new("stage"), "Stage", new(ControlValueKind.Text)),
+                 new(new("state"), "State", new(ControlValueKind.Text)),
                  new(new("compile-key"), "Compile key", new(ControlValueKind.Text)),
                  new(new("cache"), "Cache", new(ControlValueKind.Text))], Read)]);
     }
@@ -71,7 +73,8 @@ internal sealed class RuntimeHostControlProvider : IControlProvider
     {
         if (id.Value != "packages") throw new ArgumentException("Unknown runtime host collection.");
         return _host.CaptureSnapshot().Packages.Select(p => new ControlCollectionRow(
-            new(p.Id.Value), [ControlValue.Text(p.State.ToString()),
+            new(p.Id.Value), [ControlValue.Text(p.Version.ToString()),
+                ControlValue.Text(p.Stage.ToString()), ControlValue.Text(p.State.ToString()),
                 ControlValue.Text(p.CompileKey ?? ""),
                 ControlValue.Text(p.CompileKey is null ? "built-in" : p.CacheHit ? "hit" : "miss")])).ToArray();
     }

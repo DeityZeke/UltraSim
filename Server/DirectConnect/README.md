@@ -57,7 +57,7 @@ role; switching this product to Full later requires no consumer-code change.
 
 P2 adds an opt-in trusted server-authoring startup seam. Point
 `--scripts-root=<server-owned Scripts directory>` at a tree of canonical
-`<package-id>/manifest.json` and top-level C# files; optionally set
+`<package-id>/manifest.json` and bounded canonical nested C# source files; optionally set
 `--scripts-cache=<writable cache directory>`. The repository's
 `Server/Scripts.Sample` is an executable example. The selected packages are
 discovered, compiled, admitted and started **before** Concept Demo authority or

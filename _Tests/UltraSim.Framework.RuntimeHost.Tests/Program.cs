@@ -13,6 +13,8 @@ var tests = new (string Name, Action Run)[]
     ("ContractsOnlyRuntimeNeedsNoEntrypointOrService", ContractsOnlyRuntimeNeedsNoEntrypointOrService),
     ("CapacityAndDuplicateSelectionFail", CapacityAndDuplicateSelectionFail),
     ("StrictFiniteManifestFormat", StrictFiniteManifestFormat),
+    ("PackageAliasesAndMigrationOrderFailClosed", PackageAliasesAndMigrationOrderFailClosed),
+    ("DurableSchemaDeclarationIsExact", DurableSchemaDeclarationIsExact),
     ("BuiltInLifecycleExtensionsAndRollback", RuntimeHostLifecycleTests.Run),
     ("ExplicitControlPlanePublicationAndRetirement", RuntimeHostLifecycleTests.ControlPlane)
 };
@@ -159,7 +161,7 @@ static void CapacityAndDuplicateSelectionFail()
 static void StrictFiniteManifestFormat()
 {
     const string valid = """
-        {"format":"UltraSim.RuntimePackage/v3","id":"sample.core","version":"1.0.0",
+        {"format":"UltraSim.RuntimePackage/v4","id":"sample.core","version":"1.0.0",
          "stage":"Core","class":"EngineCore","provides":["sample.runtime"],
          "services":["sample.service"],"entrypoint":"Sample.CoreEntrypoint",
          "dependencies":[{"package":"sample.contracts","minimumVersion":"1.0.0","maximumVersionExclusive":"2.0.0"}]}
@@ -171,19 +173,71 @@ static void StrictFiniteManifestFormat()
     Equal("Sample.CoreEntrypoint", parsed.Entrypoint);
     Equal(new RuntimePackageId("sample.contracts"), parsed.Dependencies[0].Package);
     Equal(new RuntimePackageVersion(2, 0, 0), parsed.Dependencies[0].MaximumVersionExclusive);
+    string aliased = valid.Replace("\"entrypoint\":\"Sample.CoreEntrypoint\"",
+        "\"aliases\":[\"old.core\"],\"durableSchema\":{\"participantService\":\"sample.service\",\"artifactKey\":\"sample-store\"},\"entrypoint\":\"Sample.CoreEntrypoint\"",
+        StringComparison.Ordinal);
+    RuntimePackageManifest extended = RuntimePackageManifestJson.Parse(System.Text.Encoding.UTF8.GetBytes(aliased));
+    Equal(new RuntimePackageId("old.core"), extended.Aliases.Single());
+    Equal("sample-store", extended.DurableSchema!.Value.ArtifactKey);
     foreach (string invalid in new[]
     {
         valid.Replace("\"id\":\"sample.core\"", "\"id\":\"sample.core\",\"id\":\"other.core\""),
         valid.Replace("\"stage\":\"Core\"", "\"stage\":\"UNKNOWN\""),
         valid.Replace("\"class\":\"EngineCore\"", "\"class\":\"EngineCore\",\"unknown\":1"),
         valid.Replace("\"package\":\"sample.contracts\"", "\"package\":\"sample.contracts\",\"package\":\"other.contracts\""),
-        valid.Replace("UltraSim.RuntimePackage/v3", "UltraSim.ServerModule/v2"),
+        valid.Replace("UltraSim.RuntimePackage/v4", "UltraSim.ServerModule/v2"),
+        valid.Replace("UltraSim.RuntimePackage/v4", "UltraSim.RuntimePackage/v3"),
         valid.Replace("Sample.CoreEntrypoint", "Sample.Core-Entrypoint"),
         valid.Replace("\"maximumVersionExclusive\":\"2.0.0\"", "\"maximumVersionExclusive\":\"1.0.0\""),
         valid.Replace("sample.core", "../sample.core"),
-        valid.Replace("\"provides\":[\"sample.runtime\"]", "\"provides\":\"sample.runtime\"")
+        valid.Replace("\"provides\":[\"sample.runtime\"]", "\"provides\":\"sample.runtime\""),
+        aliased.Replace("\"artifactKey\":\"sample-store\"", "\"artifactKey\":\"bad.name\"")
     }) Throws<FormatException>(() => RuntimePackageManifestJson.Parse(System.Text.Encoding.UTF8.GetBytes(invalid)));
     Throws<FormatException>(() => RuntimePackageManifestJson.Parse(new byte[RuntimePackageManifestJson.MaximumBytes + 1]));
+}
+
+static void PackageAliasesAndMigrationOrderFailClosed()
+{
+    var contracts = Package("new.contracts", RuntimePackageStage.Contracts,
+        aliases: [new("old.contracts")]);
+    var core = Package("new.core", RuntimePackageStage.Core,
+        dependencies: [new(new("old.contracts"), new(1, 0, 0))],
+        aliases: [new("old.core")]);
+    var scripts = Package("new.scripts", RuntimePackageStage.Scripts,
+        dependencies: [new(new("old.core"), new(1, 0, 0))]);
+    RuntimeCompositionPlan plan = Resolve([scripts, core, contracts]);
+    Equal(new RuntimePackageId("new.core"), plan.ResolveId(new("old.core")));
+    Check(plan.TryPlanSavedPackages([new(new("old.core"), new(1, 0, 0)),
+        new(new("old.contracts"), new(1, 0, 0))], out var steps, out _));
+    Equal("old.contracts>new.contracts,old.core>new.core",
+        string.Join(',', steps!.Select(x => x.SavedId + ">" + x.SelectedId)));
+    Check(!plan.TryPlanSavedPackages([new(new("old.core"), new(1, 0, 0)),
+        new(new("new.core"), new(1, 0, 0))], out _, out var ambiguity) &&
+        ambiguity!.Code == "saved-package-ambiguous");
+    Check(!plan.TryPlanSavedPackages([new(new("old.core"), new(2, 0, 0))], out _, out var version) &&
+        version!.Code == "saved-package-version");
+    Error("alias-selected-conflict", [contracts,
+        Package("old.contracts", RuntimePackageStage.Contracts)]);
+    Error("alias-ambiguous", [contracts,
+        Package("other.contracts", RuntimePackageStage.Contracts, aliases: [new("old.contracts")])]);
+    // Alias chains/cycles cannot be selected: an alias may only terminate at a selected ID.
+    Error("alias-selected-conflict", [Package("a.core", RuntimePackageStage.Core, aliases: [new("b.core")]),
+        Package("b.core", RuntimePackageStage.Core, aliases: [new("a.core")])]);
+    Check(plan.ManifestFingerprint != Resolve([Package("new.contracts", RuntimePackageStage.Contracts),
+        Package("new.core", RuntimePackageStage.Core), Package("new.scripts", RuntimePackageStage.Scripts)]).ManifestFingerprint);
+}
+
+static void DurableSchemaDeclarationIsExact()
+{
+    var schema = new RuntimePackageDurableSchema(new("sample.store"), "sample-store");
+    var package = Package("sample.core", RuntimePackageStage.Core,
+        services: [new("sample.store")], durableSchema: schema);
+    Check(package.DurableSchema == schema);
+    Throws<ArgumentException>(() => Package("sample.core", RuntimePackageStage.Core, durableSchema: schema));
+    Throws<ArgumentException>(() => Package("sample.core", RuntimePackageStage.Core,
+        services: [new("sample.store")], durableSchema: new(new("sample.store"), "bad.name")));
+    Check(Resolve([package]).ManifestFingerprint != Resolve([Package("sample.core", RuntimePackageStage.Core,
+        services: [new("sample.store")])]).ManifestFingerprint);
 }
 
 static RuntimePackageManifest Package(string id, RuntimePackageStage stage, string version = "1.0.0",
@@ -195,10 +249,12 @@ static RuntimePackageManifest Package(string id, RuntimePackageStage stage, stri
     IEnumerable<RuntimePackageId>? after = null,
     IEnumerable<RuntimePackageId>? conflicts = null,
     IEnumerable<RuntimeServiceId>? services = null,
-    IEnumerable<RuntimeServiceId>? requiresServices = null)
+    IEnumerable<RuntimeServiceId>? requiresServices = null,
+    IEnumerable<RuntimePackageId>? aliases = null,
+    RuntimePackageDurableSchema? durableSchema = null)
     => new(new(id), RuntimePackageVersion.Parse(version), stage, RuntimePackageClass.EngineCore,
         dependencies, provides, requires, optional, before, after, conflicts,
-        services, requiresServices);
+        services, requiresServices, aliases: aliases, durableSchema: durableSchema);
 
 static RuntimeCompositionPlan Resolve(IEnumerable<RuntimePackageManifest> manifests)
 {

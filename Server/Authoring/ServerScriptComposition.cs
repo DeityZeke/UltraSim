@@ -3,6 +3,7 @@ using System.Runtime.Loader;
 using System.Security.Cryptography;
 using System.Text;
 using UltraSim.Framework.RuntimeHost;
+using UltraSim.Framework.Persistence;
 
 namespace UltraSim.Server.Authoring;
 
@@ -15,11 +16,15 @@ public sealed class ServerScriptComposition : IDisposable
     private readonly ScriptAssemblyContext _loadContext;
     private bool _disposed;
     internal ServerScriptComposition(RuntimePackageHost host, ScriptAssemblyContext loadContext,
-        string runtimeFingerprint, IReadOnlyList<ScriptPackageSnapshot> packages)
-    { Host = host; _loadContext = loadContext; RuntimeCompositionFingerprint = runtimeFingerprint; Packages = packages; }
+        string runtimeFingerprint, IReadOnlyList<ScriptPackageSnapshot> packages,
+        IReadOnlyList<ISaveSetParticipant> saveParticipants)
+    { Host = host; _loadContext = loadContext; RuntimeCompositionFingerprint = runtimeFingerprint;
+        Packages = packages; SaveParticipants = saveParticipants; }
     public RuntimePackageHost Host { get; }
     public string RuntimeCompositionFingerprint { get; }
     public IReadOnlyList<ScriptPackageSnapshot> Packages { get; }
+    /// <summary>Complete save-set ownership: ledger plus all declared durable package participants.</summary>
+    public IReadOnlyList<ISaveSetParticipant> SaveParticipants { get; }
     public void Dispose()
     {
         if (_disposed) return;
@@ -33,13 +38,17 @@ public sealed class ServerScriptComposition : IDisposable
 /// <summary>Trusted server-author C# startup; no compiler or filesystem work occurs after Start.</summary>
 public static class ServerScriptAuthoring
 {
-    public static ServerScriptComposition Start(string scriptsRoot, string cacheRoot)
+    public static ServerScriptComposition Start(string scriptsRoot, string cacheRoot,
+        IEnumerable<RuntimeSavedPackage>? savedPackages = null)
     {
         IReadOnlyList<ServerScriptPackage> sources = ServerScriptSources.Discover(scriptsRoot);
         if (!RuntimeCompositionPlanner.TryResolve(sources.Select(p => p.Manifest), out var plan, out var error))
             throw new InvalidDataException($"Package composition {error?.Code}: {error?.Detail}");
+        if (savedPackages is not null && !plan!.TryPlanSavedPackages(savedPackages, out _, out var migrationError))
+            throw new InvalidDataException($"Saved package admission {migrationError?.Code}: {migrationError?.Detail}");
         IReadOnlyList<CompiledScriptPackage> compiled = ServerScriptCompiler.Compile(sources, plan!, cacheRoot);
         var loadContext = new ScriptAssemblyContext(compiled);
+        RuntimePackageHost? startedHost = null;
         try
         {
             var bindings = new List<RuntimePackageBinding>();
@@ -70,16 +79,37 @@ public static class ServerScriptAuthoring
                     .Append(package.AssemblyName).Append('|').Append(package.AssemblyHash).Append('\n');
             string fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString()))).ToLowerInvariant();
             var host = new RuntimePackageHost();
+            startedHost = host;
             host.Start(plan!.OrderedPackages, bindings,
                 new RuntimeCompositionBuildIdentity(fingerprint, compiled.Select(p =>
                     new RuntimePackageBuildIdentity(p.Manifest.Id, p.CompileKey, p.AssemblyHash, p.CacheHit)).ToArray()));
+            var saveParticipants = new List<ISaveSetParticipant> { new RuntimePackageSchemaLedger(plan!.OrderedPackages) };
+            var saveKeys = new HashSet<string>(StringComparer.Ordinal) { saveParticipants[0].Key };
+            foreach (RuntimePackageManifest package in plan.OrderedPackages)
+            {
+                if (package.DurableSchema is not { } schema) continue;
+                var handle = host.Handle<ISaveSetParticipant>(schema.ParticipantService);
+                if (!host.TryGet(handle, out ISaveSetParticipant? participant) || participant is null ||
+                    participant.Key != schema.ArtifactKey ||
+                    !saveKeys.Add(participant.Key))
+                    throw new InvalidDataException($"Durable participant admission failed for {package.Id}/{schema.ArtifactKey}.");
+                saveParticipants.Add(participant);
+            }
             var rows = compiled.Select(p => new ScriptPackageSnapshot(p.Manifest.Id, p.Manifest.Stage,
                 p.CompileKey, p.AssemblyHash, p.CacheHit, p.Manifest.Entrypoint is not null)).ToArray();
-            return new ServerScriptComposition(host, loadContext, fingerprint, rows);
+            return new ServerScriptComposition(host, loadContext, fingerprint, rows,
+                saveParticipants.AsReadOnly());
         }
-        catch
+        catch (Exception failure)
         {
+            Exception? retirementFailure = null;
+            if (startedHost?.State == RuntimeHostState.Running)
+            {
+                try { startedHost.Stop(); }
+                catch (Exception stopFailure) { retirementFailure = stopFailure; }
+            }
             loadContext.Unload();
+            if (retirementFailure is not null) throw new AggregateException(failure, retirementFailure);
             throw;
         }
     }

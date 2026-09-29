@@ -16,6 +16,27 @@ try
     Check(discovered.Count == 3 && discovered[0].Manifest.Id.Value == "sample.contracts");
     Console.WriteLine("PASS P2 deterministic bounded source discovery");
 
+    string nestedScripts = Path.Combine(root, "nested", "Scripts");
+    CopySample(Path.Combine(repository, "Server", "Scripts.Sample"), nestedScripts);
+    string nestedFolder = Path.Combine(nestedScripts, "sample.scripts", "Items");
+    Directory.CreateDirectory(nestedFolder);
+    File.Move(Path.Combine(nestedScripts, "sample.scripts", "Script.cs"),
+        Path.Combine(nestedFolder, "Weapons.cs"));
+    Check(ServerScriptSources.Discover(nestedScripts).Single(p => p.Manifest.Id.Value == "sample.scripts")
+        .Sources.Single().RelativePath == "Items/Weapons.cs");
+    string nestedScriptKey;
+    using (ServerScriptComposition nested = ServerScriptAuthoring.Start(nestedScripts, Path.Combine(root, "nested-cache")))
+    {
+        Check(nested.Host.State == RuntimeHostState.Running);
+        nestedScriptKey = nested.Packages.Single(p => p.Id.Value == "sample.scripts").CompileKey;
+    }
+    string deep = Path.Combine(nestedFolder, "a", "b", "c", "d");
+    Directory.CreateDirectory(deep);
+    Throws<InvalidDataException>(() => ServerScriptSources.Discover(nestedScripts), "depth exceeded");
+    Directory.Delete(Path.Combine(nestedFolder, "a"), recursive: true);
+    Console.WriteLine("PASS P2 bounded nested canonical C# source paths compile; excess depth rejects");
+
+    string saveRoot = Path.Combine(root, "save");
     string fingerprint;
     string contractsKey;
     string coreKey;
@@ -28,6 +49,7 @@ try
         fingerprint = first.RuntimeCompositionFingerprint;
         contractsKey = first.Packages.Single(p => p.Id.Value == "sample.contracts").CompileKey;
         coreKey = first.Packages.Single(p => p.Id.Value == "sample.core").CompileKey;
+        Check(nestedScriptKey != first.Packages.Single(p => p.Id.Value == "sample.scripts").CompileKey);
         object firstConsumer = Service<object>(first.Host, "sample.consumer");
         contractsAssemblyIdentity = (string)firstConsumer.GetType().GetProperty("ContractsAssembly")!.GetValue(firstConsumer)!;
         ISaveSetParticipant store = Service<ISaveSetParticipant>(first.Host, "sample.store");
@@ -41,26 +63,31 @@ try
         Check(registry.Read(principal, new("framework.runtimehost"), hostProvider.Generation,
             new DiagnosticId("runtime-fingerprint"), out ControlDiagnosticSnapshot? compositionDiagnostic) ==
             ControlResultCode.Accepted && compositionDiagnostic!.Value.AsText() == fingerprint);
+        Check(registry.Read(principal, new("framework.runtimehost"), hostProvider.Generation,
+            new ControlCollectionId("packages"), out ControlCollectionSnapshot? packageRows) ==
+            ControlResultCode.Accepted && packageRows!.Rows.Count == 3 &&
+            packageRows.Rows.Single(row => row.Id.Value == "sample.core").Values[0].AsText() == "1.0.0" &&
+            packageRows.Rows.Single(row => row.Id.Value == "sample.core").Values[1].AsText() == "Core");
         Check(first.Host.CaptureSnapshot().Packages.All(p => p.CompileKey is { Length: 64 }));
         var provider = registry.Discover(principal).Single(p => p.Definition.Id.Value == "sample.core");
         Check(registry.Read(principal, new("sample.core"), provider.Generation,
             new DiagnosticId("status"), out ControlDiagnosticSnapshot? status) == ControlResultCode.Accepted &&
             status!.Value.AsText() == "Running");
-        string saveRoot = Path.Combine(root, "save");
         var coordinator = new SaveSetCoordinator(saveRoot);
-        coordinator.Save([store], new(1, 100), action => action());
+        coordinator.Save(first.SaveParticipants, new(1, 100), action => action());
         SetValue(store, 99);
-        using (PreparedLoadGeneration prepared = coordinator.PrepareLoad([store], EmptyResolver.Instance))
-            prepared.Commit(parts => store.GetType().GetMethod("CommitPrepared")!.Invoke(null, [parts.Single()]));
+        using (PreparedLoadGeneration prepared = coordinator.PrepareLoad(first.SaveParticipants, EmptyResolver.Instance))
+            prepared.Commit(parts => store.GetType().GetMethod("CommitPrepared")!.Invoke(null,
+                [parts.Single(p => p.Key == store.Key)]));
         Check(GetValue(store) == 17);
         SetValue(store, -1);
-        coordinator.Save([store], new(2, 200), action => action());
+        coordinator.Save(first.SaveParticipants, new(2, 200), action => action());
         SetValue(store, 77);
-        try { using var rejected = coordinator.PrepareLoad([store], EmptyResolver.Instance); throw new Exception("Expected validation failure."); }
+        try { using var rejected = coordinator.PrepareLoad(first.SaveParticipants, EmptyResolver.Instance); throw new Exception("Expected validation failure."); }
         catch (InvalidDataException) { }
         Check(GetValue(store) == 77);
         using (PreparedLoadGeneration recovered = coordinator.PrepareLoad(
-            [store], EmptyResolver.Instance, SaveSetRecoveryMode.CurrentThenNewestComplete))
+            first.SaveParticipants, EmptyResolver.Instance, SaveSetRecoveryMode.CurrentThenNewestComplete))
             Check(recovered.Sequence == 1);
         long[] allocations = new long[3];
         int sum = 0;
@@ -86,6 +113,44 @@ try
         Check(Service<ControlPlaneRegistry>(warm.Host, "sample.registry").GetType().Assembly.FullName == registryIdentity);
     }
     Console.WriteLine("PASS P2 exact warm cache reuse and stable runtime fingerprint");
+    string relocatedScripts = Path.Combine(root, "relocated", "Scripts");
+    CopySample(Path.Combine(repository, "Server", "Scripts.Sample"), relocatedScripts);
+    using (ServerScriptComposition relocated = ServerScriptAuthoring.Start(relocatedScripts, cache))
+        Check(relocated.Packages.All(p => p.CacheHit) && relocated.RuntimeCompositionFingerprint == fingerprint);
+
+    string versionScripts = Path.Combine(root, "version", "Scripts");
+    CopySample(Path.Combine(repository, "Server", "Scripts.Sample"), versionScripts);
+    string versionManifest = Path.Combine(versionScripts, "sample.core", "manifest.json");
+    File.WriteAllText(versionManifest, File.ReadAllText(versionManifest).Replace(
+        "\"version\":\"1.0.0\"", "\"version\":\"1.0.1\"", StringComparison.Ordinal));
+    using (ServerScriptComposition versioned = ServerScriptAuthoring.Start(versionScripts, Path.Combine(root, "version-cache")))
+        Throws<IOException>(() => new SaveSetCoordinator(saveRoot).PrepareLoad(versioned.SaveParticipants,
+            EmptyResolver.Instance, SaveSetRecoveryMode.CurrentThenNewestComplete), "compatible save-set");
+    string aliasScripts = Path.Combine(root, "alias", "Scripts");
+    CopySample(Path.Combine(repository, "Server", "Scripts.Sample"), aliasScripts);
+    string oldDirectory = Path.Combine(aliasScripts, "sample.core");
+    string newDirectory = Path.Combine(aliasScripts, "renamed.core");
+    Directory.Move(oldDirectory, newDirectory);
+    string aliasManifest = Path.Combine(newDirectory, "manifest.json");
+    File.WriteAllText(aliasManifest, File.ReadAllText(aliasManifest).Replace(
+        "\"id\":\"sample.core\"", "\"id\":\"renamed.core\",\"aliases\":[\"sample.core\"]",
+        StringComparison.Ordinal));
+    string aliasConsumerManifest = Path.Combine(aliasScripts, "sample.scripts", "manifest.json");
+    File.WriteAllText(aliasConsumerManifest, File.ReadAllText(aliasConsumerManifest).Replace(
+        "\"maximumVersionExclusive\":\"2.0.0\"}],\"requires\"",
+        "\"maximumVersionExclusive\":\"2.0.0\"},{\"package\":\"sample.core\",\"minimumVersion\":\"1.0.0\"}],\"requires\"",
+        StringComparison.Ordinal));
+    Check(File.ReadAllText(aliasConsumerManifest).Contains("\"package\":\"sample.core\"", StringComparison.Ordinal));
+    using (ServerScriptComposition renamed = ServerScriptAuthoring.Start(aliasScripts, Path.Combine(root, "alias-cache"),
+        [new(new("sample.core"), new(1, 0, 0))]))
+        Throws<IOException>(() => new SaveSetCoordinator(saveRoot).PrepareLoad(renamed.SaveParticipants,
+            EmptyResolver.Instance, SaveSetRecoveryMode.CurrentThenNewestComplete), "compatible save-set");
+    string conflictCache = Path.Combine(root, "alias-conflict-cache");
+    Throws<InvalidDataException>(() => ServerScriptAuthoring.Start(aliasScripts, conflictCache,
+        [new(new("sample.core"), new(1, 0, 0)), new(new("renamed.core"), new(1, 0, 0))]),
+        "saved-package-ambiguous");
+    Check(!Directory.Exists(conflictCache));
+    Console.WriteLine("PASS P2 durable schema version/renamed-package removal cannot silently load prior save");
 
     string coreSource = Path.Combine(scripts, "sample.core", "Core.cs");
     File.AppendAllText(coreSource, "\n// source edit changes compiled identity\n");
@@ -113,6 +178,8 @@ try
         Check((bool)consumer.GetType().GetProperty("HasCore")!.GetValue(consumer)! == false);
         Check((string)consumer.GetType().GetProperty("ContractsType")!.GetValue(consumer)! == "Sample.Contracts.IGreeting");
         Check((string)consumer.GetType().GetProperty("ContractsAssembly")!.GetValue(consumer)! == contractsAssemblyIdentity);
+        Throws<IOException>(() => new SaveSetCoordinator(saveRoot).PrepareLoad(noCore.SaveParticipants,
+            EmptyResolver.Instance, SaveSetRecoveryMode.CurrentThenNewestComplete), "compatible save-set");
     }
     string requiredManifest = Path.Combine(scripts, "sample.scripts", "manifest.json");
     string optionalText = File.ReadAllText(requiredManifest);
@@ -199,6 +266,11 @@ try
         string originalManifest = File.ReadAllText(manifestPath);
         File.WriteAllText(manifestPath, originalManifest.Replace("Sample.CoreEntry", "Sample.Greeting", StringComparison.Ordinal));
         Throws<InvalidDataException>(() => ServerScriptAuthoring.Start(lifecycleScripts, lifecycleCache), "Entrypoint");
+        Check(active.Host.State == RuntimeHostState.Running);
+        File.WriteAllText(manifestPath, originalManifest.Replace("\"artifactKey\":\"sample-store\"",
+            "\"artifactKey\":\"wrong-store\"", StringComparison.Ordinal));
+        Throws<InvalidDataException>(() => ServerScriptAuthoring.Start(lifecycleScripts, lifecycleCache),
+            "Durable participant admission");
         Check(active.Host.State == RuntimeHostState.Running);
         File.WriteAllText(manifestPath, originalManifest);
     }

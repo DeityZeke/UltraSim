@@ -35,7 +35,7 @@ supported Kestrel Bridge. Uninterrupted canonical Release passes on integrated c
 ownership, complete unexpected-failure retention and real socket retirement are covered.
 P1 Framework Control Plane is closed after the [native-lifetime acceptance](../../_Benchmarks/Baselines/framework-p1-native-lifetime-closure-2026-09-28.md)
 and uninterrupted canonical Release on the merged repair tree. The original native failure remains
-preserved in its historical P1 evidence. P2 is active; P3–P11 and Gate 1 remain planned. PF6 is planned/not ready/not
+preserved in its historical P1 evidence. P2 is closed; P3 is next and P4–P11/Gate 1 remain planned. PF6 is planned/not ready/not
 started; many-player live testing is not ready. The grass preference is directly beneath
 Show Advanced, still default Off/next-entry.
 The historical capture-stall trigger was not reproduced and is not claimed as an engine diagnosis.
@@ -2863,7 +2863,7 @@ F1.12 product dogfooding/PF6 readiness / Gate 0                               CL
         |
         v
 P1 Framework Control Plane                                                  CLOSED
-P2 Runtime Host + C# Server Authoring Environment                   ACTIVE
+P2 Runtime Host + C# Server Authoring Environment                   CLOSED
 P3–P11 productization                                                       PLANNED
 Gate 1 productization and identity/character-mode readiness                   PLANNED
         |

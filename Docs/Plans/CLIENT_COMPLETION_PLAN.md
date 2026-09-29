@@ -1,8 +1,8 @@
 # UltraSim Client Completion Plan
 
-**Status:** **F1.0–F1.12 CLOSED / Gate 0 CLOSED. P1 Framework Control Plane CLOSED; P2 Runtime Host and C# Server Authoring Environment ACTIVE; P3–P11 and Gate 1 PLANNED. PF6 PLANNED / NOT READY / NOT STARTED; many-player live testing NOT READY.** The [P1 closure companion](../../_Benchmarks/Baselines/framework-p1-native-lifetime-closure-2026-09-28.md) records the merged native-lifetime repair, 50/50 warm Official-content exits, and uninterrupted canonical Release on `c106a7b6ec9d9b4b825c0a8b507147371f3d4488`. The [original P1 evidence](../../_Benchmarks/Baselines/framework-p1-control-plane-2026-09-27.md) preserves the earlier native failure. The [R3 closure evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3.md), committed at `d9234948989ac9a272ab1905a388b58210cd6403`, records the supported Framework HTTP Endpoint/Kestrel replacement and uninterrupted canonical Release on integrated production candidate `cc937185ce630fdb707e51bdee6372f550ff77b0`. No W8/W9/W10 or PF6 work has started.
+**Status:** **F1.0–F1.12 CLOSED / Gate 0 CLOSED. P1 Framework Control Plane CLOSED; P2 Runtime Host and C# Server Authoring Environment CLOSED; P3–P11 and Gate 1 PLANNED. PF6 PLANNED / NOT READY / NOT STARTED; many-player live testing NOT READY.** The [P1 closure companion](../../_Benchmarks/Baselines/framework-p1-native-lifetime-closure-2026-09-28.md) records the merged native-lifetime repair, 50/50 warm Official-content exits, and uninterrupted canonical Release on `c106a7b6ec9d9b4b825c0a8b507147371f3d4488`. The [original P1 evidence](../../_Benchmarks/Baselines/framework-p1-control-plane-2026-09-27.md) preserves the earlier native failure. The [R3 closure evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3.md), committed at `d9234948989ac9a272ab1905a388b58210cd6403`, records the supported Framework HTTP Endpoint/Kestrel replacement and uninterrupted canonical Release on integrated production candidate `cc937185ce630fdb707e51bdee6372f550ff77b0`. No W8/W9/W10 or PF6 work has started.
 
-P2 now has a server-owned, opt-in compiled `Scripts/` path, exact compile cache identity, a real Contracts-only/Core-optional proof, explicit RuntimeHost/Control Plane diagnostics, and Package/Runtime Service/Object Extension terminology. The [tested P2 authoring companion](../../_Benchmarks/Baselines/framework-p2-server-authoring-and-extension-terminology-2026-09-29.md) records the uninterrupted canonical Release pass on `98586fbe`. P2 remains **ACTIVE**: roadmap-level alias/remap, typed authoring registrations/facets/hooks, operator integration and first-party Game dogfooding remain. This foundation does not begin P3 or make PF6 ready.
+P2 has a server-owned, opt-in compiled `Scripts/` path, exact compile cache identity, a real Contracts-only/Core-optional proof, explicit RuntimeHost/Control Plane diagnostics, and Package/Runtime Service/Object Extension terminology. The [authoring foundation](../../_Benchmarks/Baselines/framework-p2-server-authoring-and-extension-terminology-2026-09-29.md) passed canonical Release on `98586fbe`; the P2 closure companion records package aliases, deterministic remap order, durable-schema load admission and final verification. P2 is **CLOSED**. DefinitionId/facet migration and first-party Game-definition dogfooding belong to P4, polished surfaces to P5, and the Server Operator Product to P7. P3 is next, not started; PF6 is not ready.
 
 The [partial F1.12 evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.md) and [R1 assurance evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1.md) remain immutable. Bounded native Cabin capture, pointer/tier/nameplate controls, retired-memory high-water reuse and the device-owned Advanced vegetation preference remain accepted. The historical obsolete capture-stall trigger remains unisolated, not a proven engine defect or a new blocker. The [F1.11 evidence](../../_Benchmarks/Baselines/client-f1.11-renderer-stress-vegetation-2026-09-25.md) closes shared Local/Remote world-resource consumption and bounded renderer stress; vegetation remains opt-in/default Off. F1.10 retains the conservative Detailed/BatchedPrimitive hybrid and F1.9B retains NodeMultiMesh/PerRow. The [F1.8A corrective evidence](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md) supersedes its initial closure claim without erasing the earlier failures.
 
@@ -100,7 +100,7 @@ F1.10 Actor representation tiers and GPU-friendly interpolation seam (CLOSED; co
 F1.11 Renderer stress consumers / vegetation prototype (CLOSED; prototype default Off)
 F1.12 Product dogfooding and PF6 readiness (CLOSED after R3; Gate 0 CLOSED)
 P1    Framework Control Plane (CLOSED after native-lifetime acceptance)
-P2    Runtime Host + C# Server Authoring Environment (ACTIVE)
+P2    Runtime Host + C# Server Authoring Environment (CLOSED)
 P3–P11 / Gate 1 (PLANNED; productization and identity/character-mode gate)
 PF6   External human validation (PLANNED / NOT READY / NOT STARTED)
 ~~~
@@ -1524,8 +1524,8 @@ PF6 begins only when:
 
 # 17. PF6 - External human validation
 
-F1.12/Gate 0 and P1 are closed; PF6 remains planned, not ready and not started. P2 is active,
-followed by the planned P3–P11 work and Gate 1. Only after that productization and
+F1.12/Gate 0, P1 and P2 are closed; PF6 remains planned, not ready and not started. P3 is next,
+followed by the planned P4–P11 work and Gate 1. Only after that productization and
 identity/character-mode gate closes may the existing PF6 campaign begin. R3 did not implement
 these future capabilities or begin human validation.
 

@@ -674,10 +674,11 @@ website and third-party consumers. Website/client are consumers; official regist
 HTTP is a transport. Neither a website database schema nor client-private DTO defines Discovery.
 Future projections should be committed/bounded snapshots, not direct access to mutable authority.
 
-**Current sequencing after [R3 closure](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3.md):**
-F1.12/Gate 0 closed; P1 Framework Control Plane active with its
-[canonical native export gate open](../../_Benchmarks/Baselines/framework-p1-control-plane-2026-09-27.md);
-P2–P11 and Gate 1 planned. PF6 remains planned/not ready/not started until the broader
+**Current sequencing after [R3 closure](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3.md) and later P1/P2 acceptance:**
+F1.12/Gate 0, P1 Framework Control Plane and P2 Runtime Host/C# Server Authoring are closed;
+P3 is next, while P4–P11 and Gate 1 remain planned. The earlier P1
+[open-gate record](../../_Benchmarks/Baselines/framework-p1-control-plane-2026-09-27.md) is historical.
+PF6 remains planned/not ready/not started until the broader
 productization and identity/character-mode gate. Many-player live testing is not ready.
 The integrated production candidate is `cc937185ce630fdb707e51bdee6372f550ff77b0` (uninterrupted
 canonical Release pass); immutable R3 evidence is committed at `d9234948989ac9a272ab1905a388b58210cd6403`.

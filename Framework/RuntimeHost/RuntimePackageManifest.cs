@@ -11,6 +11,13 @@ public enum RuntimePackageClass : byte
     Runtime, Definition, System, EngineCore, Kernel, Schema, Framework
 }
 
+/// <summary>Durable state is owned by one declared runtime service and exact save artifact.</summary>
+public readonly record struct RuntimePackageDurableSchema(RuntimeServiceId ParticipantService, string ArtifactKey)
+{
+    public bool IsValid => ParticipantService.IsValid && ArtifactKey is { Length: >= 1 and <= 64 } &&
+        ArtifactKey.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '-' or '_');
+}
+
 /// <summary>A required half-open version range. An absent maximum leaves the upper bound open.</summary>
 public readonly record struct RuntimePackageDependency
 {
@@ -50,6 +57,10 @@ public sealed class RuntimePackageManifest
     public ReadOnlyCollection<RuntimePackageId> Before { get; }
     public ReadOnlyCollection<RuntimePackageId> After { get; }
     public ReadOnlyCollection<RuntimePackageId> Conflicts { get; }
+    /// <summary>Retired stable IDs accepted as references to this selected package, never extra packages.</summary>
+    public ReadOnlyCollection<RuntimePackageId> Aliases { get; }
+    /// <summary>Exact save participant declaration; version/rename changes require explicit migration.</summary>
+    public RuntimePackageDurableSchema? DurableSchema { get; }
 
     public RuntimePackageManifest(
         RuntimePackageId id, RuntimePackageVersion version, RuntimePackageStage stage, RuntimePackageClass @class,
@@ -63,7 +74,9 @@ public sealed class RuntimePackageManifest
         IEnumerable<RuntimeServiceId>? services = null,
         IEnumerable<RuntimeServiceId>? requiresServices = null,
         IEnumerable<RuntimeServiceId>? optionalServices = null,
-        string? entrypoint = null)
+        string? entrypoint = null,
+        IEnumerable<RuntimePackageId>? aliases = null,
+        RuntimePackageDurableSchema? durableSchema = null)
     {
         if (!id.IsValid || !version.IsValid || !Enum.IsDefined(stage) || !Enum.IsDefined(@class))
             throw new ArgumentException("Package identity, version, stage and class must be valid.");
@@ -82,6 +95,10 @@ public sealed class RuntimePackageManifest
         Before = Copy(before, x => x.IsValid && x != id, x => x);
         After = Copy(after, x => x.IsValid && x != id, x => x);
         Conflicts = Copy(conflicts, x => x.IsValid && x != id, x => x);
+        Aliases = Copy(aliases, x => x.IsValid && x != id, x => x);
+        if (durableSchema is { } durable && (!durable.IsValid || !Services.Contains(durable.ParticipantService)))
+            throw new ArgumentException("Durable schema requires a declared participant runtime service and canonical artifact key.");
+        DurableSchema = durableSchema;
         if (Dependencies.Any(d => d.Package == id) ||
             Provides.Any(Requires.Contains) || Provides.Any(Optional.Contains) ||
             Requires.Any(Optional.Contains) || Services.Any(RequiresServices.Contains) ||
@@ -119,4 +136,18 @@ public sealed class RuntimePackageManifest
         }
         return values.AsReadOnly();
     }
+
+    /// <summary>Exact declaration equality, independent of a built-in getter's object lifetime.</summary>
+    public bool HasSameMeaning(RuntimePackageManifest other) => other is not null &&
+        Id == other.Id && Version == other.Version && Stage == other.Stage && Class == other.Class &&
+        Dependencies.OrderBy(d => d.Package).SequenceEqual(other.Dependencies.OrderBy(d => d.Package)) &&
+        Provides.Order().SequenceEqual(other.Provides.Order()) &&
+        Requires.Order().SequenceEqual(other.Requires.Order()) &&
+        Optional.Order().SequenceEqual(other.Optional.Order()) &&
+        Services.Order().SequenceEqual(other.Services.Order()) &&
+        RequiresServices.Order().SequenceEqual(other.RequiresServices.Order()) &&
+        OptionalServices.Order().SequenceEqual(other.OptionalServices.Order()) && Entrypoint == other.Entrypoint &&
+        Before.Order().SequenceEqual(other.Before.Order()) && After.Order().SequenceEqual(other.After.Order()) &&
+        Conflicts.Order().SequenceEqual(other.Conflicts.Order()) &&
+        Aliases.Order().SequenceEqual(other.Aliases.Order()) && DurableSchema == other.DurableSchema;
 }

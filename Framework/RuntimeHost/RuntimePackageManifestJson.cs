@@ -5,7 +5,7 @@ namespace UltraSim.Framework.RuntimeHost;
 /// <summary>Strict, finite on-disk package metadata; no source path is a package identity.</summary>
 public static class RuntimePackageManifestJson
 {
-    public const string Format = "UltraSim.RuntimePackage/v3";
+    public const string Format = "UltraSim.RuntimePackage/v4";
     public const int MaximumBytes = 32 * 1024;
 
     public static RuntimePackageManifest Parse(ReadOnlySpan<byte> utf8)
@@ -22,7 +22,8 @@ public static class RuntimePackageManifestJson
             List<RuntimePackageDependency>? dependencies = null;
             List<PackageCapabilityId>? provides = null, requires = null, optional = null;
             List<RuntimeServiceId>? services = null, requiresServices = null, optionalServices = null;
-            List<RuntimePackageId>? before = null, after = null, conflicts = null;
+            List<RuntimePackageId>? before = null, after = null, conflicts = null, aliases = null;
+            RuntimePackageDurableSchema? durableSchema = null;
             foreach (JsonProperty property in root.EnumerateObject())
             {
                 if (!seen.Add(property.Name)) throw Invalid($"Duplicate property {property.Name}.");
@@ -44,6 +45,8 @@ public static class RuntimePackageManifestJson
                     case "before": before = Packages(property.Value, "before"); break;
                     case "after": after = Packages(property.Value, "after"); break;
                     case "conflicts": conflicts = Packages(property.Value, "conflicts"); break;
+                    case "aliases": aliases = Packages(property.Value, "aliases"); break;
+                    case "durableSchema": durableSchema = DurableSchema(property.Value); break;
                     default: throw Invalid($"Unknown property {property.Name}.");
                 }
             }
@@ -52,7 +55,7 @@ public static class RuntimePackageManifestJson
                 throw Invalid("Missing required id, version, stage or class.");
             return new RuntimePackageManifest(new(id), RuntimePackageVersion.Parse(version), Stage(stage), Class(packageClass),
                 dependencies, provides, requires, optional, before, after, conflicts,
-                services, requiresServices, optionalServices, entrypoint);
+                services, requiresServices, optionalServices, entrypoint, aliases, durableSchema);
         }
         catch (JsonException exception) { throw new FormatException("Invalid runtime package manifest JSON.", exception); }
         catch (ArgumentException exception) { throw new FormatException("Invalid runtime package manifest field.", exception); }
@@ -105,6 +108,25 @@ public static class RuntimePackageManifestJson
             values.Add(new(new(package), RuntimePackageVersion.Parse(minimum), maximum is null ? null : RuntimePackageVersion.Parse(maximum)));
         }
         return values;
+    }
+
+    private static RuntimePackageDurableSchema DurableSchema(JsonElement value)
+    {
+        if (value.ValueKind != JsonValueKind.Object) throw Invalid("durableSchema must be an object.");
+        string? service = null, artifact = null;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (JsonProperty property in value.EnumerateObject())
+        {
+            if (!seen.Add(property.Name)) throw Invalid($"Duplicate durableSchema property {property.Name}.");
+            switch (property.Name)
+            {
+                case "participantService": service = Text(property.Value, property.Name); break;
+                case "artifactKey": artifact = Text(property.Value, property.Name); break;
+                default: throw Invalid($"Unknown durableSchema property {property.Name}.");
+            }
+        }
+        if (service is null || artifact is null) throw Invalid("durableSchema requires participantService and artifactKey.");
+        return new(new RuntimeServiceId(service), artifact);
     }
 
     private static IEnumerable<JsonElement> Items(JsonElement array, string property)

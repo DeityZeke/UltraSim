@@ -100,6 +100,35 @@ internal static class RuntimeHostLifecycleTests
             .Select(i => (IRuntimePackage)new SamplePackage("p" + i, [])));
             throw new Exception("Expected bounded host admission."); }
         catch (InvalidOperationException exception) when (exception.Message.Contains("capacity", StringComparison.Ordinal)) { }
+        int enumerated = 0;
+        IEnumerable<IRuntimePackage> BoundedInput()
+        {
+            for (int i = 0; i < RuntimeCompositionPlanner.MaximumPackages + 2; i++)
+            {
+                if (++enumerated > RuntimeCompositionPlanner.MaximumPackages + 1)
+                    throw new Exception("Unbounded enumerator advanced after rejection.");
+                yield return new SamplePackage("bounded" + i, []);
+            }
+        }
+        try { new RuntimePackageHost().Start(BoundedInput()); throw new Exception("Expected capacity rejection."); }
+        catch (InvalidOperationException exception) when (exception.Message.Contains("capacity", StringComparison.Ordinal)) { }
+        Require(enumerated == RuntimeCompositionPlanner.MaximumPackages + 1);
+
+        var exactPackage = new SamplePackage("exact.core", [], provides: "exact.service");
+        var equivalent = new RuntimePackageManifest(new("exact.core"), new(1, 0, 0),
+            RuntimePackageStage.Core, RuntimePackageClass.EngineCore,
+            provides: [new PackageCapabilityId("exact.service")],
+            services: [new RuntimeServiceId("exact.service")]);
+        var exactHost = new RuntimePackageHost();
+        exactHost.Start([exactPackage.Manifest], [new(equivalent, exactPackage)]);
+        exactHost.Stop();
+        var changed = new RuntimePackageManifest(new("exact.core"), new(2, 0, 0),
+            RuntimePackageStage.Core, RuntimePackageClass.EngineCore,
+            provides: [new PackageCapabilityId("exact.service")],
+            services: [new RuntimeServiceId("exact.service")]);
+        try { new RuntimePackageHost().Start([exactPackage.Manifest], [new(changed, exactPackage)]);
+            throw new Exception("Expected mismatched manifest rejection."); }
+        catch (InvalidOperationException exception) when (exception.Message.Contains("selected manifest", StringComparison.Ordinal)) { }
 
         // No host tick or polling API exists; direct service work above allocated zero while hosted.
     }

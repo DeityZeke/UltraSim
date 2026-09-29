@@ -2,7 +2,7 @@
 
 **Proposed status:** Candidate canonical roadmap / architecture checklist\
 **Current reference baseline:** F1.12-R3 / Gate 0 production closure — `e3a63ea21f8f5ea4fa69e3768a055c409edc8616`; documentation-only commits may advance `main` beyond that closure SHA.\
-**Immediate checkpoint:** P1 Framework Control Plane is **CLOSED** after the [native-lifetime repair acceptance](../../_Benchmarks/Baselines/framework-p1-native-lifetime-closure-2026-09-28.md) and uninterrupted canonical Release on merged `main`. P2 Runtime Host and C# Server Authoring Environment is **ACTIVE**. Typed Package/Runtime Service/Object Extension vocabulary, bounded dynamic C# authoring, compiled Contracts-only proof, Framework-only save sets and explicit Control Plane publication are implemented. Alias/remap, typed authoring registrations/facets/hooks, operator integration and first-party Game dogfooding remain; P2 closure is not implied by this foundation. P3–P11 and Gate 1 remain **PLANNED**; PF6 remains **PLANNED / NOT READY / NOT STARTED**.\
+**Immediate checkpoint:** P1 Framework Control Plane is **CLOSED** after the [native-lifetime repair acceptance](../../_Benchmarks/Baselines/framework-p1-native-lifetime-closure-2026-09-28.md). P2 Runtime Host and C# Server Authoring Environment is **CLOSED** after package-alias/remap, durable-schema admission and canonical Release closure evidence. P3 Framework adapter/runtime boundary migration is **NEXT / PLANNED**; P4–P11 and Gate 1 remain **PLANNED**; PF6 remains **PLANNED / NOT READY / NOT STARTED**.\
 **End state of this document:** UltraSim is ready to move from individual/trusted dogfooding and closed validation into a many-player live test where human feedback is primarily about the intended game rather than known development-harness limitations.
 
 ---
@@ -1567,8 +1567,7 @@ Create deterministic RunUO-like startup composition **and an actual C# server-au
 
 - Package manifest format.
 - Stable package IDs/versions.
-- Definition/package alias and migration/remap policy for renamed or removed persistent identities; runtime dense IDs are never the persistence compatibility contract.
-- Deterministic migration ordering/conflict detection so required remaps complete before World/server authority starts.
+- Package-ID aliases/remap and deterministic pre-authority ordering/conflict detection; runtime dense IDs are never persistence compatibility identity. DefinitionId/facet remaps belong to P4, after the typed Definition system exists.
 - required/optional/provided capability vocabulary.
 - dependency graph validation.
 - deterministic load/compile order.
@@ -1578,7 +1577,7 @@ Create deterministic RunUO-like startup composition **and an actual C# server-au
 - stable `RuntimeCompositionFingerprint`.
 - rollback/failure handling.
 - package diagnostics through Control Plane.
-- policy for schema-extending packages.
+- explicit schema-extending package participant/ledger policy; removal, rename and version change fail save admission until deliberate migration/drop, rather than silently losing durable state.
 - source compiler/load isolation appropriate to deployment.
 - compile cache that cannot make stale output authoritative.
 - built-in and dynamically compiled packages participate in the same capability/lifecycle vocabulary where practical.
@@ -1590,15 +1589,15 @@ Create deterministic RunUO-like startup composition **and an actual C# server-au
 - Preserve normal strongly typed C# authoring, generics/value types/source-generated IDs where useful.
 - Return compiler errors with package, source file, line/column, and dependency context.
 - Define explicit package lifecycle hooks such as Register/Configure/Initialize/Stop rather than relying on uncontrolled static initialization.
-- Define standard registration seams for:
+- Define standard registration seams as later consumers earn them; P2 supplies package services, explicit Control Plane publication and Framework Persistence participation, while P4/P5/P7 own their concrete products:
   - commands/actions;
   - Control Plane providers;
-  - definition facets and definition stores;
-  - definitions/content declarations;
+  - definition facets and definition stores (P4);
+  - definitions/content declarations (P4);
   - ECS systems;
   - Engine capabilities;
-  - typed subsystem-owned hook/event subscriptions and publications, with explicit observe/modify/cancel/order/failure semantics where earned;
-  - server-composed UI/control providers.
+  - typed subsystem-owned hook/event subscriptions and publications, with explicit observe/modify/cancel/order/failure semantics where earned by later consumers (P4+);
+  - server-composed UI/control providers (P5/P7).
 - Make compile/cache manifests diagnosable through the Control Plane/operator product.
 - Ensure failed compilation or registration leaves no partially authoritative composition.
 
@@ -3030,7 +3029,7 @@ This compact board is intended to sit near the top of active implementation note
 [x] Gate 0  F1.12 product dogfood/readiness
 
 [x] P1      Framework Control Plane — CLOSED
-[ ] P2      Runtime Host + C# Server Authoring Environment — ACTIVE
+[x] P2      Runtime Host + C# Server Authoring Environment — CLOSED
 [ ] P3      Framework adapter/runtime boundary migration
 [ ] P4      Engine Contracts + typed definition facets
 [ ] P5      User/Admin/Developer control surfaces

@@ -45,9 +45,16 @@ public static class ServerScriptCompiler
     {
         ArgumentNullException.ThrowIfNull(sources); ArgumentNullException.ThrowIfNull(plan);
         ArgumentException.ThrowIfNullOrWhiteSpace(cacheRoot);
-        var byId = sources.ToDictionary(p => p.Manifest.Id);
+        if (sources.Count > RuntimeCompositionPlanner.MaximumPackages)
+            throw new InvalidOperationException("Compiler package capacity exceeded.");
+        var byId = new Dictionary<RuntimePackageId, ServerScriptPackage>();
+        foreach (ServerScriptPackage? source in sources)
+        {
+            if (source?.Manifest is null || !byId.TryAdd(source.Manifest.Id, source))
+                throw new InvalidOperationException("Compiler package input is null or duplicated.");
+        }
         if (byId.Count != plan.OrderedPackages.Count ||
-            plan.OrderedPackages.Any(p => !byId.TryGetValue(p.Id, out var source) || !ReferenceEquals(p, source.Manifest)))
+            plan.OrderedPackages.Any(p => !byId.TryGetValue(p.Id, out var source) || !p.HasSameMeaning(source.Manifest)))
             throw new InvalidOperationException("Compiler inputs differ from the resolved package plan.");
         var references = ReferenceSet.Create();
         var compiled = new Dictionary<RuntimePackageId, CompiledScriptPackage>();
@@ -104,7 +111,7 @@ public static class ServerScriptCompiler
 
     private static RuntimePackageId[] CompileDependencies(RuntimePackageManifest manifest, RuntimeCompositionPlan plan)
     {
-        var ids = new HashSet<RuntimePackageId>(manifest.Dependencies.Select(d => d.Package));
+        var ids = new HashSet<RuntimePackageId>(manifest.Dependencies.Select(d => plan.ResolveId(d.Package)));
         foreach (RuntimePackageManifest provider in plan.OrderedPackages)
         {
             if (provider.Id == manifest.Id) continue;

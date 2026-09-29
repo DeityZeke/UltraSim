@@ -34,7 +34,8 @@ public interface IStagedRuntimePublication : IRuntimeHostPublication { void Publ
 
 public sealed record RuntimePackageBuildIdentity(RuntimePackageId Id, string CompileKey, string AssemblyHash, bool CacheHit);
 public sealed record RuntimeCompositionBuildIdentity(string Fingerprint, IReadOnlyList<RuntimePackageBuildIdentity> Packages);
-public sealed record RuntimePackageSnapshot(RuntimePackageId Id, RuntimePackageState State,
+public sealed record RuntimePackageSnapshot(RuntimePackageId Id, RuntimePackageVersion Version,
+    RuntimePackageStage Stage, RuntimePackageState State,
     string? CompileKey, bool CacheHit);
 public sealed record RuntimeHostSnapshot(RuntimeHostState State, ulong Generation, string? ManifestFingerprint,
     ReadOnlyCollection<RuntimePackageSnapshot> Packages, string? RuntimeCompositionFingerprint);
@@ -94,7 +95,8 @@ public sealed class RuntimePackageHost
             Array.AsReadOnly(_entries.Select(e =>
             {
                 RuntimePackageBuildIdentity? build = _buildIdentity?.Packages.FirstOrDefault(p => p.Id == e.Manifest.Id);
-                return new RuntimePackageSnapshot(e.Manifest.Id, e.State, build?.CompileKey, build?.CacheHit ?? false);
+                return new RuntimePackageSnapshot(e.Manifest.Id, e.Manifest.Version, e.Manifest.Stage,
+                    e.State, build?.CompileKey, build?.CacheHit ?? false);
             }).ToArray()), _buildIdentity?.Fingerprint);
     }
     public RuntimeServiceHandle<T> Handle<T>(RuntimeServiceId id) where T : class
@@ -157,10 +159,20 @@ public sealed class RuntimePackageHost
     }
     public void Start(IEnumerable<IRuntimePackage> selected)
     {
-        ArgumentNullException.ThrowIfNull(selected);
-        IRuntimePackage[] packages = selected.ToArray();
-        if (packages.Any(p => p is null)) throw new InvalidOperationException("Null package implementation.");
-        Start(packages.Select(p => p.Manifest), packages.Select(p => new RuntimePackageBinding(p.Manifest, p)));
+        EnsureOwner(); ArgumentNullException.ThrowIfNull(selected);
+        var manifests = new List<RuntimePackageManifest>();
+        var bindings = new List<RuntimePackageBinding>();
+        foreach (IRuntimePackage? package in selected)
+        {
+            if (package is null) throw new InvalidOperationException("Null package implementation.");
+            if (manifests.Count == RuntimeCompositionPlanner.MaximumPackages)
+                throw new InvalidOperationException("Runtime package capacity exhausted.");
+            RuntimePackageManifest manifest = package.Manifest ??
+                throw new InvalidOperationException("Null package manifest.");
+            manifests.Add(manifest);
+            bindings.Add(new RuntimePackageBinding(manifest, package));
+        }
+        Start(manifests, bindings);
     }
     /// <summary>Selected compiled vocabulary need not have a lifecycle entrypoint.</summary>
     public void Start(IEnumerable<RuntimePackageManifest> selected, IEnumerable<RuntimePackageBinding> implementations,
@@ -185,10 +197,13 @@ public sealed class RuntimePackageHost
              buildIdentity.Packages.Any(p => !bounded.Any(m => m.Id == p.Id) ||
                  !HexIdentity(p.CompileKey) || !HexIdentity(p.AssemblyHash))))
             throw new InvalidOperationException("Runtime composition build identity does not cover the selected packages.");
+        var selectedById = bounded.ToDictionary(m => m.Id);
         var byId = new Dictionary<RuntimePackageId, IRuntimePackageLifecycle>();
         foreach (RuntimePackageBinding implementation in implementations)
             if (implementation.Entrypoint is null ||
-                !bounded.Any(m => ReferenceEquals(m, implementation.Manifest)) ||
+                implementation.Manifest is null ||
+                !selectedById.TryGetValue(implementation.Manifest.Id, out RuntimePackageManifest? selectedManifest) ||
+                !selectedManifest.HasSameMeaning(implementation.Manifest) ||
                 !byId.TryAdd(implementation.Manifest.Id, implementation.Entrypoint))
                 throw new InvalidOperationException("Runtime entrypoint is null, duplicated or not bound to the selected manifest.");
         foreach (RuntimePackageManifest manifest in bounded)
