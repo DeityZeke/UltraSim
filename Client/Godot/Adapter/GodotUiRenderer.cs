@@ -591,7 +591,8 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
             StretchMode = ToStretch(visual?.Mode ?? UiImageMode.Fit),
             Modulate = new Color(1, 1, 1, visual?.Opacity ?? 1),
         };
-        if (_semanticImages?.TryGet(_definition, element.Id, out SemanticPresentationReference reference) == true)
+        if (_semanticImages?.TryGet(_instance, _definition, element.Id,
+                out SemanticPresentationReference reference) == true)
             image.Texture = (_assets as IGodotUiSemanticImageResolver)?.Resolve(reference) ?? _fallbackIcon();
         else if (!string.IsNullOrEmpty(element.AssetRole))
             image.Texture = _assets?.Resolve(visual?.Role ?? element.AssetRole) ?? _fallbackIcon();

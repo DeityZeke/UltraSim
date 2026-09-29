@@ -49,7 +49,7 @@ nine-piece frame with independent edge/center Stretch or Tile policy; Button and
 resolve local interaction states with deterministic fallback. Godot nodes own those controls;
 native textures returned by a resolver remain strongly owned and explicitly retired by that
 resolver after its views close. A typed `SemanticPresentationReference` may be attached to a
-compiled image element through a bounded, definition-fenced client binding. This is a
+compiled image element through a bounded, view-instance- and definition-fenced client binding. This is a
 presentation request after admission, not Game item authority or P6's dynamic portrait cache.
 
 ## Definitions and models

@@ -86,13 +86,17 @@ internal static class GodotLifetimeOwnershipTests
         UiElementId tileElement = definition.Elements.ToArray().Single(element => element.Key == "tile").Id;
         var semanticReference = new SemanticPresentationReference(new("world"), new("iron-sword"),
             PresentationRoleId.InventoryPortrait);
-        var semanticImages = new UiSemanticImageBindings(definition, [(tileElement, semanticReference)]);
-        Expect(semanticImages.TryGet(definition, tileElement, out var readReference) &&
-            readReference == semanticReference, "Typed semantic image binding was not preserved.");
+        var instance = new UiViewInstanceId(10_001);
+        var semanticImages = new UiSemanticImageBindings(instance, definition,
+            [(tileElement, semanticReference)]);
+        Expect(semanticImages.TryGet(instance, definition, tileElement, out var readReference) &&
+            readReference == semanticReference &&
+            !semanticImages.TryGet(new UiViewInstanceId(10_002), definition, tileElement, out _),
+            "Typed semantic image binding crossed a view-instance boundary.");
         bool rejectedNonImage = false;
         try
         {
-            _ = new UiSemanticImageBindings(definition,
+            _ = new UiSemanticImageBindings(instance, definition,
                 [(definition.Elements.ToArray().Single(element => element.Key == "button").Id, semanticReference)]);
         }
         catch (ArgumentException) { rejectedNonImage = true; }
@@ -101,7 +105,7 @@ internal static class GodotLifetimeOwnershipTests
         model.SetText(definition.Bindings.RequireSlot("label"), "Apply");
         model.SetBoolean(definition.Bindings.RequireSlot("selected"), true);
         using var renderer = new GodotUiRenderer(assets: assets, semanticImages: semanticImages);
-        var handle = (GodotUiRenderHandle)renderer.Create(new UiViewInstanceId(10_001), definition,
+        var handle = (GodotUiRenderHandle)renderer.Create(instance, definition,
             new UiModelView(model), _ => { });
         Control root = handle.Root;
         Control frame = root.FindChild("Element_frame", true, false) as Control ??

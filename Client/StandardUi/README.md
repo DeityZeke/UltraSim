@@ -14,7 +14,8 @@ typed item-inspection source used to populate the existing details model slot; i
 second Inventory definition or client-side Inventory authority.
 
 P5 adds a bounded, presentation-only `UiSemanticImageBindings` seam. It attaches an already
-admitted `SemanticPresentationReference` to an image element of one exact compiled definition;
+admitted `SemanticPresentationReference` to an image element of one exact view instance and
+compiled definition;
 the Godot adapter may resolve a borrowed texture or use its owned primitive icon fallback. This
 binding does not authorize content, change the Game UI wire format, create a second item identity,
 or implement P6's dynamic Inventory portraits and derived cache.
