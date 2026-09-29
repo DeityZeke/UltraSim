@@ -27,6 +27,20 @@ internal sealed class GodotOwnedResources : IDisposable
         return resource;
     }
 
+    /// <summary>Retire a replaced resource after its native consumers have switched away.</summary>
+    internal void Release(IDisposable resource)
+    {
+        EnsureOwner();
+        ArgumentNullException.ThrowIfNull(resource);
+        if (_stopping) throw new InvalidOperationException("Resource ownership is retiring.");
+        int index = _resources.FindIndex(item => ReferenceEquals(item, resource));
+        if (index < 0) throw new InvalidOperationException("Resource is not owned here.");
+        // Keep the strong reference if native disposal fails. A failed replacement must not
+        // silently hand the wrapper back to the CLR finalizer during Godot teardown.
+        resource.Dispose();
+        _resources.RemoveAt(index);
+    }
+
     public void Dispose()
     {
         EnsureOwner();

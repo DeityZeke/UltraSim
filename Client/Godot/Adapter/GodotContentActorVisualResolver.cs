@@ -308,9 +308,9 @@ public sealed class GodotContentActorVisualResolver : IGodotActorVisualResolver,
 
     private static bool HasAnimation(AnimationPlayer player, string requested)
     {
-        foreach (StringName candidate in player.GetAnimationList())
+        foreach (string candidate in player.GetAnimationList())
         {
-            string text = candidate.ToString();
+            string text = candidate;
             int separator = Math.Max(text.LastIndexOf('/'), text.LastIndexOf(':'));
             string leaf = separator >= 0 ? text[(separator + 1)..] : text;
             if (leaf.EndsWith("-loop", StringComparison.OrdinalIgnoreCase)) leaf = leaf[..^5];

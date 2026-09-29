@@ -9,17 +9,15 @@ namespace UltraSim.Client.Godot;
 /// </summary>
 internal static class GodotPrimitiveSubstrate
 {
-    private static Texture2D? _missingIcon;
-
     internal static StandardMaterial3D CreateNeutralMaterial() => new()
     {
         AlbedoColor = new Color(0.48f, 0.5f, 0.52f),
         Roughness = 0.95f,
     };
 
-    internal static ShaderMaterial CreateMissingTextureMaterial() => new()
+    internal static ShaderMaterial CreateMissingTextureMaterial(out Shader shader)
     {
-        Shader = new Shader
+        shader = new Shader
         {
             Code = "shader_type spatial;\n" +
                 "render_mode diffuse_lambert;\n" +
@@ -30,8 +28,9 @@ internal static class GodotPrimitiveSubstrate
                 "  ALBEDO = mix(vec3(1.0, 0.0, 0.85), vec3(1.0, 0.95, 0.0), c);\n" +
                 "  ROUGHNESS = 0.8;\n" +
                 "}\n",
-        },
-    };
+        };
+        return new ShaderMaterial { Shader = shader };
+    }
 
     internal static Node3D CreateActor(ClientActorVisualKind kind, GodotOwnedResources resources)
     {
@@ -62,9 +61,7 @@ internal static class GodotPrimitiveSubstrate
     }
 
     /// <summary>One finite icon for supported image-role UI when optional art is absent.</summary>
-    internal static Texture2D MissingIcon => _missingIcon ??= BuildMissingIcon();
-
-    private static Texture2D BuildMissingIcon()
+    internal static Texture2D CreateMissingIcon()
     {
         using Image image = Image.CreateEmpty(16, 16, false, Image.Format.Rgba8);
         for (int y = 0; y < 16; y++)

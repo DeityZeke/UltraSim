@@ -993,6 +993,8 @@ public partial class LocalCabinClient : Node3D
         _uiBridge = null;
         _uiClient?.Dispose();
         _uiClient = null;
+        _uiRenderer?.Dispose();
+        _uiRenderer = null;
         _actorPresenter?.Dispose();
         _actorPresenter = null;
         _actorVisuals?.Dispose();

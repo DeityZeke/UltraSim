@@ -51,7 +51,8 @@ public partial class S08HeadlessAcceptance
                 UltraSimGameProtocol.Manifest),
             "The remote Inventory protocol loopback could not be established.");
         using ProtocolLoopback loopback = created!;
-        var client = new UiClientRuntime(new GodotUiRenderer(this));
+        var renderer = new GodotUiRenderer(this);
+        var client = new UiClientRuntime(renderer);
         var bridge = new RemoteUiClientBridge(loopback.Client, client);
         var server = new RemoteGameApplicationSession(
             loopback.Server,
@@ -271,7 +272,8 @@ public partial class S08HeadlessAcceptance
             server.Dispose();
             bridge.Dispose();
 
-            var reconnectedClient = new UiClientRuntime(new GodotUiRenderer(this));
+            using var reconnectedRenderer = new GodotUiRenderer(this);
+            using var reconnectedClient = new UiClientRuntime(reconnectedRenderer);
             using var reconnectedBridge = new RemoteUiClientBridge(
                 loopback.Client, reconnectedClient);
             using var reconnectedServer = new RemoteGameApplicationSession(
@@ -353,6 +355,8 @@ public partial class S08HeadlessAcceptance
             catch (ObjectDisposedException) { }
             try { bridge.Dispose(); }
             catch (ObjectDisposedException) { }
+            client.Dispose();
+            renderer.Dispose();
             runtime.Stop();
             if (Directory.Exists(saveRoot)) Directory.Delete(saveRoot, recursive: true);
         }

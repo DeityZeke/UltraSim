@@ -273,6 +273,12 @@ public sealed class CabinContentOracle
             "user.cabin.wall-blue", "Cabin Blue Wall", CabinContentIds.WallTexture,
             "textures/user-wall.png", BlueGlowPng);
 
+    /// <summary>Deterministic native-lifetime control for a replaced Cabin roof/wood material.</summary>
+    public CabinLocalContentPackage CreateUserWoodTexturePack() =>
+        CreateUserTexturePack(
+            "user.cabin.wood-blue", "Cabin Blue Wood", CabinContentIds.WoodTexture,
+            "textures/user-wood.png", BlueGlowPng);
+
     /// <summary>Valid selected pack that intentionally targets no active Cabin logical leaf.</summary>
     public CabinLocalContentPackage CreateIneffectiveUserTexturePack()
     {

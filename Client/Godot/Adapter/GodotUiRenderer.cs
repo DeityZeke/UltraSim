@@ -14,12 +14,41 @@ public interface IGodotUiAssetResolver
 /// Minimal Godot UI adapter. Godot controls stay entirely in this project;
 /// Kernels/UI and Client/Core remain renderer-neutral.
 /// </summary>
-public sealed class GodotUiRenderer : IUiRenderer
+public sealed class GodotUiRenderer : IUiRenderer, IDisposable
 {
     private readonly IGodotUiAssetResolver? _assets;
     private readonly Control? _host;
     private readonly GodotGumpWindowManager? _windows;
     private readonly List<GodotUiRenderHandle> _openHandles = [];
+    private readonly int _ownerThread = System.Environment.CurrentManagedThreadId;
+    private Texture2D? _missingIcon;
+    private bool _disposed;
+
+    internal Texture2D DiagnosticMissingIcon
+    {
+        get
+        {
+            EnsureOwner();
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _missingIcon ??= GodotPrimitiveSubstrate.CreateMissingIcon();
+        }
+    }
+
+    public void Dispose()
+    {
+        EnsureOwner();
+        if (_disposed) return;
+        while (_openHandles.Count != 0) Close(_openHandles[^1]);
+        _missingIcon?.Dispose();
+        _missingIcon = null;
+        _disposed = true;
+    }
+
+    private void EnsureOwner()
+    {
+        if (_ownerThread != System.Environment.CurrentManagedThreadId)
+            throw new InvalidOperationException("Godot UI native resources are engine-thread-bound.");
+    }
 
     public GodotUiRenderer(Control? host = null, IGodotUiAssetResolver? assets = null)
     {
@@ -39,8 +68,11 @@ public sealed class GodotUiRenderer : IUiRenderer
         UiModelView model,
         Action<UiActionRequest> submitAction)
     {
+        EnsureOwner();
+        ObjectDisposedException.ThrowIf(_disposed, this);
         GodotUiDefinitionAdmission.Validate(definition);
-        var handle = new GodotUiRenderHandle(instance, definition, model, submitAction, _assets);
+        var handle = new GodotUiRenderHandle(instance, definition, model, submitAction,
+            _assets, () => DiagnosticMissingIcon);
         if (_windows is not null)
         {
             _windows.Attach(handle);
@@ -194,6 +226,7 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
     private readonly CompiledUiDefinition _definition;
     private readonly UiViewInstanceId _instance;
     private readonly IGodotUiAssetResolver? _assets;
+    private readonly Func<Texture2D> _fallbackIcon;
     private readonly Dictionary<UiLayoutNodeId, Control> _layouts = [];
     private readonly Dictionary<UiLayoutNodeId, Control> _layoutHosts = [];
     private readonly Dictionary<UiElementId, Control> _elements = [];
@@ -212,11 +245,13 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
         CompiledUiDefinition definition,
         UiModelView model,
         Action<UiActionRequest> submitAction,
-        IGodotUiAssetResolver? assets)
+        IGodotUiAssetResolver? assets,
+        Func<Texture2D> fallbackIcon)
     {
         _instance = instance;
         _definition = definition;
         _assets = assets;
+        _fallbackIcon = fallbackIcon;
         _submitAction = submitAction;
         Root = new Control
         {
@@ -525,7 +560,7 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
         };
         if (!string.IsNullOrEmpty(element.AssetRole))
             image.Texture = _assets?.Resolve(element.AssetRole) ??
-                GodotPrimitiveSubstrate.MissingIcon;
+                _fallbackIcon();
         return image;
     }
 

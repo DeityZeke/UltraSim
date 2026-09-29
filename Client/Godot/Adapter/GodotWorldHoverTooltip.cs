@@ -220,7 +220,9 @@ internal sealed class GodotWorldHoverTooltip : IDisposable
 
     private static float MeasureWidth(Label label, string text)
     {
-        Font font = label.GetThemeFont("font");
+        // The theme retains the native font, but GetThemeFont manufactures a managed
+        // RefCounted wrapper. Do not leave that temporary wrapper to finalization.
+        using Font font = label.GetThemeFont("font");
         int fontSize = label.GetThemeFontSize("font_size");
         return MathF.Ceiling(font.GetStringSize(
             text, HorizontalAlignment.Left, -1, fontSize).X);

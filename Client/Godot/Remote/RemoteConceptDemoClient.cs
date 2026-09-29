@@ -697,6 +697,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         _diagnosticEnvironment = null;
         _ = _session?.TryRequestDetach();
         _session?.Dispose();
+        _uiRenderer?.Dispose();
+        _uiRenderer = null;
         _source?.Dispose();
         _cache?.Dispose();
         _renderer = null;

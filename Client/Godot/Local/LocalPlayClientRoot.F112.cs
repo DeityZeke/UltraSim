@@ -67,18 +67,23 @@ public abstract partial class LocalPlayClientRoot
         void Post() => post++;
         RenderingServer.FramePreDraw += Pre;
         RenderingServer.FramePostDraw += Post;
+        Node3D? scene = null;
+        BoxMesh? probeMesh = null;
+        StandardMaterial3D? probeMaterial = null;
         try
         {
             Stage($"request display={DisplayServer.GetName()} loop={RenderingServer.IsRenderLoopEnabled()} visible={GetWindow().Visible}");
             if (DisplayServer.GetName() == "headless") throw new InvalidOperationException("Native display required.");
             await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
             Stage("process-frame");
-            var scene = new Node3D { Name = "F112KnownScene" };
+            scene = new Node3D { Name = "F112KnownScene" };
             WorldRoot.AddChild(scene);
             var camera = new Camera3D { Position = new Vector3(0, 0, 4), Current = true };
             scene.AddChild(camera);
-            var mesh = new MeshInstance3D { Mesh = new BoxMesh(), MaterialOverride = new StandardMaterial3D
-            { ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded, AlbedoColor = new Color(1, .2f, .05f) } };
+            probeMesh = new BoxMesh();
+            probeMaterial = new StandardMaterial3D
+            { ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded, AlbedoColor = new Color(1, .2f, .05f) };
+            var mesh = new MeshInstance3D { Mesh = probeMesh, MaterialOverride = probeMaterial };
             scene.AddChild(mesh);
             await AwaitF112Boundary(GetTree(), SceneTree.SignalName.PhysicsFrame);
             Stage($"physics-frame pre={pre} post={post} viewport={UiComposition.GameplayViewport.Size}");
@@ -91,12 +96,20 @@ public abstract partial class LocalPlayClientRoot
             if (image.IsEmpty() || image.SavePng(System.IO.Path.Combine(directory, "probe.png")) != Error.Ok)
                 throw new InvalidOperationException("Native readback failed.");
             scene.Free();
+            scene = null;
             await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
             Stage("retired");
             RequestApplicationExit(0);
         }
         catch (Exception exception) { Stage(exception.ToString()); RequestApplicationExit(1); }
-        finally { RenderingServer.FramePreDraw -= Pre; RenderingServer.FramePostDraw -= Post; }
+        finally
+        {
+            RenderingServer.FramePreDraw -= Pre;
+            RenderingServer.FramePostDraw -= Post;
+            if (scene is not null && GodotObject.IsInstanceValid(scene)) scene.Free();
+            probeMesh?.Dispose();
+            probeMaterial?.Dispose();
+        }
     }
 
     private async void RunF112CabinPreview()

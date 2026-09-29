@@ -1000,8 +1000,8 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             GodotActorMotionPhase.Rising or GodotActorMotionPhase.Falling => "Jump",
             _ => "Idle",
         };
-        if (!TryFindAnimation(slot.AnimationPlayer, requested, out StringName animation)) return;
-        slot.AnimationPlayer.Play(animation, 0.12);
+        if (!TryFindAnimation(slot.AnimationPlayer, requested, out string animation)) return;
+        using (var name = new StringName(animation)) slot.AnimationPlayer.Play(name, 0.12);
         slot.PlayedMotionPhase = phase;
     }
 
@@ -1038,12 +1038,15 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
     {
         foreach (string requested in new[] { "Idle", "Walk" })
         {
-            if (!TryFindAnimation(player, requested, out StringName name)) continue;
-            using Animation? animation = player.GetAnimation(name);
-            if (animation is not null)
+            if (!TryFindAnimation(player, requested, out string name)) continue;
+            using (var nativeName = new StringName(name))
             {
-                animation.LoopMode = Animation.LoopModeEnum.Linear;
-                diagnosticRetired?.Add(animation);
+                using Animation? animation = player.GetAnimation(nativeName);
+                if (animation is not null)
+                {
+                    animation.LoopMode = Animation.LoopModeEnum.Linear;
+                    diagnosticRetired?.Add(animation);
+                }
             }
         }
     }
@@ -1063,9 +1066,10 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         }
         if (rootBone < 0) return;
         string rootName = skeleton.GetBoneName(rootBone).ToString();
-        foreach (StringName animationName in player.GetAnimationList())
+        foreach (string animationName in player.GetAnimationList())
         {
-            using Animation? animation = player.GetAnimation(animationName);
+            using var nativeName = new StringName(animationName);
+            using Animation? animation = player.GetAnimation(nativeName);
             if (animation is null) continue;
             for (int track = 0; track < animation.GetTrackCount(); track++)
             {
@@ -1089,11 +1093,11 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
     private static bool TryFindAnimation(
         AnimationPlayer player,
         string requested,
-        out StringName result)
+        out string result)
     {
-        foreach (StringName candidate in player.GetAnimationList())
+        foreach (string candidate in player.GetAnimationList())
         {
-            string text = candidate.ToString();
+            string text = candidate;
             int separator = Math.Max(text.LastIndexOf('/'), text.LastIndexOf(':'));
             string leaf = separator >= 0 ? text[(separator + 1)..] : text;
             if (leaf.EndsWith("-loop", StringComparison.OrdinalIgnoreCase))
@@ -1102,7 +1106,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             result = candidate;
             return true;
         }
-        result = new StringName();
+        result = string.Empty;
         return false;
     }
 

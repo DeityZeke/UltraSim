@@ -18,6 +18,22 @@ internal static class GodotLifetimeOwnershipTests
         Expect(resources.IsRetired && resources.Count == 0 && retained.NativeInstance == IntPtr.Zero,
             "Owned primitive wrappers did not retire exactly once.");
 
+        var replaced = new GodotOwnedResources();
+        var replacedMaterial = replaced.Own(new StandardMaterial3D());
+        replaced.Release(replacedMaterial);
+        Expect(replacedMaterial.NativeInstance == IntPtr.Zero && replaced.Count == 0,
+            "Replaced native wrapper was not retired at its ownership transition.");
+        replaced.Dispose();
+
+        using (var ui = new GodotUiRenderer())
+        {
+            Texture2D icon = ui.DiagnosticMissingIcon;
+            Expect(icon.NativeInstance != IntPtr.Zero, "UI fallback icon was not realized.");
+            ui.Dispose();
+            Expect(icon.NativeInstance == IntPtr.Zero,
+                "Session-owned fallback icon survived UI renderer retirement.");
+        }
+
         var tooltipParent = new Control();
         var tooltip = new GodotWorldHoverTooltip(tooltipParent);
         StyleBoxFlat retainedTooltipStyle = tooltip.DiagnosticBackground;

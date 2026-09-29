@@ -93,6 +93,9 @@ public partial class F111RendererStressAcceptance : Node3D
         var key = new WorldStaticRenderKey(new(GameWorldStaticDefinitionIds.CabinWall), 0, WorldStaticFlags.Renderable);
         Mesh localMesh = localResolver.ResolveStaticMesh(key).Mesh!;
         Mesh remoteMesh = remoteResolver.ResolveStaticMesh(key).Mesh!;
+        Material localTerrain = localResolver.ResolveTerrainMaterial(GameTerrainMaterialIds.Grass)!;
+        Material remoteTerrain = remoteResolver.ResolveTerrainMaterial(GameTerrainMaterialIds.Grass)!;
+        StandardMaterial3D originalRoof = localAssets.DiagnosticRoofMaterial!;
         Expect(localMesh.GetAabb() == remoteMesh.GetAabb(), "Local/Realm mesh geometry differs.");
         foreach (ushort material in new ushort[] { 1, 2, 3, 4, 5 })
             Expect(((StandardMaterial3D)localResolver.ResolveTerrainMaterial(material)!).AlbedoColor ==
@@ -104,13 +107,34 @@ public partial class F111RendererStressAcceptance : Node3D
         {
             Rid meshRid = localMesh.GetRid(); var before = localAssets.WallTextureHash;
             localAssets.Refresh(overridden, store);
+            if (!ReferenceEquals(originalRoof, localAssets.DiagnosticRoofMaterial))
+                Expect(originalRoof.NativeInstance == IntPtr.Zero,
+                    "Replaced roof material wrapper was left to finalization.");
             Expect(localAssets.WallTextureSource == PresentationSourceKind.User && localAssets.WallTextureHash != before &&
                 localResolver.ResolveStaticMesh(key).Mesh!.GetRid() == meshRid,
                 "User refresh did not preserve unaffected native geometry.");
         }
         cache.TrySetEnabledUserResourcePacks([], out _);
+        var userWood = oracle.CreateUserWoodTexturePack();
+        Expect(cache.TryInstallUserResourcePack(userWood.Manifest, userWood.Payloads, out _, out _),
+            "User wood texture install failed.");
+        Expect(cache.TrySetEnabledUserResourcePacks([
+            new(userWood.Manifest.PackageId, userWood.Manifest.ManifestHash)], out _),
+            "User wood selection failed.");
+        using (var overriddenWood = OpenLocal(cache, local, true))
+        {
+            StandardMaterial3D previousRoof = localAssets.DiagnosticRoofMaterial!;
+            localAssets.Refresh(overriddenWood, store);
+            Expect(!ReferenceEquals(previousRoof, localAssets.DiagnosticRoofMaterial) &&
+                previousRoof.NativeInstance == IntPtr.Zero,
+                "Wood refresh did not retire the replaced roof material wrapper.");
+        }
+        cache.TrySetEnabledUserResourcePacks([], out _);
         using var restored = OpenLocal(cache, local);
+        StandardMaterial3D userRoof = localAssets.DiagnosticRoofMaterial!;
         localAssets.Refresh(restored, store);
+        Expect(userRoof.NativeInstance == IntPtr.Zero,
+            "User roof material wrapper survived restoration to world content.");
         Expect(localAssets.WallTextureHash == remoteAssets.WallTextureHash, "Exact disable restoration failed.");
         _rows.Add(new
         {
@@ -122,6 +146,13 @@ public partial class F111RendererStressAcceptance : Node3D
             nativeMeshRetained = true,
             semanticActivationChanged = false
         });
+        StandardMaterial3D currentRoof = localAssets.DiagnosticRoofMaterial!;
+        localAssets.Dispose();
+        remoteAssets.Dispose();
+        Expect(localMesh.NativeInstance == IntPtr.Zero && remoteMesh.NativeInstance == IntPtr.Zero &&
+            localTerrain.NativeInstance == IntPtr.Zero && remoteTerrain.NativeInstance == IntPtr.Zero &&
+            currentRoof.NativeInstance == IntPtr.Zero,
+            "Local/Realm world palette wrappers survived their explicit owner retirement.");
     }
 
     private async Task Measure(Fixture fixture, int actorCount, int radius, bool vegetation, bool primitive,

@@ -12,18 +12,10 @@ public readonly record struct GodotCatalogWorldAssetResolverSnapshot(int OwnedMe
 
 public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, IDisposable
 {
-    private readonly Dictionary<ushort, StandardMaterial3D> _terrain = new()
-    {
-        [GameTerrainMaterialIds.Water] = Material(new Color(0.08f, 0.28f, 0.5f)),
-        [GameTerrainMaterialIds.Sand] = Material(new Color(0.62f, 0.55f, 0.34f)),
-        [GameTerrainMaterialIds.Grass] = Material(new Color(0.16f, 0.38f, 0.14f)),
-        [GameTerrainMaterialIds.Rock] = Material(new Color(0.32f, 0.34f, 0.31f)),
-        [GameTerrainMaterialIds.Snow] = Material(new Color(0.78f, 0.84f, 0.82f)),
-    };
-    private readonly Mesh _wood = GroundedBox(
-        new Vector3(0.75f, 4.5f, 0.75f), new Color(0.24f, 0.14f, 0.07f));
-    private readonly Mesh _stone = GroundedBox(
-        Vector3.One, new Color(0.34f, 0.36f, 0.34f));
+    private readonly GodotOwnedResources _owned = new();
+    private readonly Dictionary<ushort, StandardMaterial3D> _terrain = new();
+    private readonly Mesh _wood = null!;
+    private readonly Mesh _stone = null!;
     private readonly Mesh _wallEight;
     private readonly Mesh _wallSix;
     private readonly Mesh _wallThree;
@@ -31,31 +23,19 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
     private readonly Mesh _shelf;
     private readonly Mesh _book;
     private readonly Mesh _fallbackStructure;
-    private readonly Mesh _character = CharacterMesh();
+    private readonly Mesh _character = null!;
     private readonly Mesh _door;
     private readonly Mesh _chest;
-    private readonly Mesh _animal = GroundedBox(
-        new Vector3(1.1f, 1.15f, 0.55f), new Color(0.48f, 0.35f, 0.23f));
-    private readonly Mesh _telepad = GroundedBox(
-        new Vector3(1.8f, 0.18f, 1.8f), new Color(0.12f, 0.72f, 0.9f));
-    private readonly Mesh _farGate = GroundedBox(
-        new Vector3(1.5f, 2.8f, 0.35f), new Color(0.68f, 0.22f, 0.86f));
-    private readonly Mesh _informationalSign = GroundedBox(
-        new Vector3(1.25f, 1.65f, 0.16f), new Color(0.52f, 0.31f, 0.12f));
-    private readonly Mesh _sword = GroundedBox(
-        new Vector3(0.12f, 1.15f, 0.20f), new Color(0.72f, 0.75f, 0.78f));
-    private readonly Mesh _mountainWallEight = GroundedBox(
-        new Vector3(8f, 7.2f, 0.4f), new Color(0.29f, 0.30f, 0.27f));
-    private readonly Mesh _mountainWallTen = GroundedBox(
-        new Vector3(10f, 7.2f, 0.4f), new Color(0.29f, 0.30f, 0.27f));
-    private readonly Mesh _fallbackLabPedestal = GroundedBox(
-        new Vector3(2f, 0.4f, 2f), new Color(0.23f, 0.24f, 0.26f));
-    private readonly Mesh _fallbackLabModel = GodotMeshGeometry.CreateGroundedPointerWedge(
-        0.5f,
-        0.42f,
-        0.72f,
-        1.6f,
-        Material(new Color(0.18f, 0.78f, 0.36f)));
+    private readonly Mesh _animal = null!;
+    private readonly Mesh _telepad = null!;
+    private readonly Mesh _farGate = null!;
+    private readonly Mesh _informationalSign = null!;
+    private readonly Mesh _sword = null!;
+    private readonly Mesh _mountainWallEight = null!;
+    private readonly Mesh _mountainWallTen = null!;
+    private readonly Mesh _fallbackLabPedestal = null!;
+    private readonly Mesh _fallbackLabModel = null!;
+    private StandardMaterial3D? _roofMaterial;
     private readonly List<GodotDerivedMaterialLease> _materialLeases = [];
     private GodotDerivedMaterialLease? _currentWall;
     private GodotDerivedMaterialLease? _currentWood;
@@ -67,6 +47,24 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
     {
         try
         {
+            _terrain[GameTerrainMaterialIds.Water] = Material(new Color(0.08f, 0.28f, 0.5f));
+            _terrain[GameTerrainMaterialIds.Sand] = Material(new Color(0.62f, 0.55f, 0.34f));
+            _terrain[GameTerrainMaterialIds.Grass] = Material(new Color(0.16f, 0.38f, 0.14f));
+            _terrain[GameTerrainMaterialIds.Rock] = Material(new Color(0.32f, 0.34f, 0.31f));
+            _terrain[GameTerrainMaterialIds.Snow] = Material(new Color(0.78f, 0.84f, 0.82f));
+            _wood = GroundedBox(new Vector3(0.75f, 4.5f, 0.75f), new Color(0.24f, 0.14f, 0.07f));
+            _stone = GroundedBox(Vector3.One, new Color(0.34f, 0.36f, 0.34f));
+            _character = CharacterMesh();
+            _animal = GroundedBox(new Vector3(1.1f, 1.15f, 0.55f), new Color(0.48f, 0.35f, 0.23f));
+            _telepad = GroundedBox(new Vector3(1.8f, 0.18f, 1.8f), new Color(0.12f, 0.72f, 0.9f));
+            _farGate = GroundedBox(new Vector3(1.5f, 2.8f, 0.35f), new Color(0.68f, 0.22f, 0.86f));
+            _informationalSign = GroundedBox(new Vector3(1.25f, 1.65f, 0.16f), new Color(0.52f, 0.31f, 0.12f));
+            _sword = GroundedBox(new Vector3(0.12f, 1.15f, 0.20f), new Color(0.72f, 0.75f, 0.78f));
+            _mountainWallEight = GroundedBox(new Vector3(8f, 7.2f, 0.4f), new Color(0.29f, 0.30f, 0.27f));
+            _mountainWallTen = GroundedBox(new Vector3(10f, 7.2f, 0.4f), new Color(0.29f, 0.30f, 0.27f));
+            _fallbackLabPedestal = GroundedBox(new Vector3(2f, 0.4f, 2f), new Color(0.23f, 0.24f, 0.26f));
+            _fallbackLabModel = _owned.Own(GodotMeshGeometry.CreateGroundedPointerWedge(
+                0.5f, 0.42f, 0.72f, 1.6f, Material(new Color(0.18f, 0.78f, 0.36f))));
             GodotDerivedMaterialLease wallLease = AcquireMaterial(
                 generation, derived, ClientWorldPresentationProfile.WallMaterial,
                 out ContentHash wallHash, out PresentationSourceKind wallSource);
@@ -82,7 +80,8 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
             _wallEight = GroundedBox(new Vector3(8f, 2.5f, 0.3f), wall);
             _wallSix = GroundedBox(new Vector3(6f, 2.5f, 0.3f), wall);
             _wallThree = GroundedBox(new Vector3(3f, 2.5f, 0.3f), wall);
-            _roof = GroundedBox(new Vector3(8.3f, 0.25f, 6.3f), wood, transparent: true);
+            _roofMaterial = RoofMaterial(wood);
+            _roof = GroundedBox(new Vector3(8.3f, 0.25f, 6.3f), _roofMaterial);
             _shelf = GroundedBox(new Vector3(0.9f, 1.8f, 0.35f), wood);
             _book = GroundedBox(new Vector3(0.24f, 0.18f, 0.18f), wood);
             _fallbackStructure = GroundedBox(new Vector3(1f, 2f, 0.35f), wall);
@@ -105,6 +104,7 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
     public PresentationSourceKind WallTextureSource { get; private set; }
     public GodotDerivedResourceKey WallDerivedKey { get; private set; }
     public StandardMaterial3D? AddedMaterial { get; }
+    internal StandardMaterial3D? DiagnosticRoofMaterial => _roofMaterial;
     public GodotCatalogWorldAssetResolverSnapshot GetSnapshot() => _disposed ? default :
         new(21, 18, _materialLeases.Count, WallTextureHash, WallTextureSource);
 
@@ -125,12 +125,11 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
             }
             if (wood.Key != _currentWood!.Key)
             {
-                var roof = (StandardMaterial3D)wood.Material.Duplicate();
-                roof.AlbedoColor = new Color(roof.AlbedoColor, .42f);
-                roof.Transparency = BaseMaterial3D.TransparencyEnum.Alpha;
-                Material previousRoof = ((ArrayMesh)_roof).SurfaceGetMaterial(0);
+                StandardMaterial3D roof = RoofMaterial(wood.Material);
                 ((ArrayMesh)_roof).SurfaceSetMaterial(0, roof);
-                previousRoof.Dispose();
+                StandardMaterial3D? previousRoof = _roofMaterial;
+                _roofMaterial = roof;
+                if (previousRoof is not null) _owned.Release(previousRoof);
                 foreach (Mesh mesh in new[] { _shelf, _book, _door, _chest })
                     ((ArrayMesh)mesh).SurfaceSetMaterial(0, wood.Material);
                 Release(_currentWood); _currentWood = wood; wood = null;
@@ -141,35 +140,27 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
     }
 
     private void Release(GodotDerivedMaterialLease lease)
-    { _materialLeases.Remove(lease); lease.Dispose(); }
+    { lease.Dispose(); _materialLeases.Remove(lease); }
 
     public void Dispose()
     {
         if (_disposed) return;
-        _disposed = true;
-        var retiredMaterials = new HashSet<Rid>();
-        foreach (Mesh? mesh in new Mesh?[]
-        {
-            _wood, _stone, _wallEight, _wallSix, _wallThree, _roof, _shelf, _book,
-            _fallbackStructure, _character, _door, _chest, _animal, _telepad, _farGate,
-            _informationalSign, _sword, _mountainWallEight, _mountainWallTen,
-            _fallbackLabPedestal, _fallbackLabModel,
-        })
-        {
-            if (mesh is null) continue;
-            for (int surface = 0; surface < mesh.GetSurfaceCount(); surface++)
-            {
-                Material? material = mesh.SurfaceGetMaterial(surface);
-                if (material is null || !retiredMaterials.Add(material.GetRid()) ||
-                    _materialLeases.Any(lease => lease.Material.GetRid() == material.GetRid())) continue;
-                material.Dispose();
-            }
-            mesh.Dispose();
-        }
-        foreach (StandardMaterial3D material in _terrain.Values) material.Dispose();
+        List<Exception>? failures = null;
+        try { _owned.Dispose(); }
+        catch (Exception error) { (failures ??= []).Add(error); }
         for (int index = _materialLeases.Count - 1; index >= 0; index--)
-            _materialLeases[index].Dispose();
-        _materialLeases.Clear();
+        {
+            try
+            {
+                _materialLeases[index].Dispose();
+                _materialLeases.RemoveAt(index);
+            }
+            catch (Exception error) { (failures ??= []).Add(error); }
+        }
+        if (failures is { Count: > 0 })
+            throw failures.Count == 1 ? failures[0] :
+                new AggregateException("World palette retirement failed.", failures);
+        _disposed = true;
     }
 
     private GodotDerivedMaterialLease AcquireMaterial(
@@ -269,40 +260,35 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
     public Material? ResolveTerrainMaterial(ushort materialId) =>
         _terrain.TryGetValue(materialId, out StandardMaterial3D? material) ? material : null;
 
-    private static StandardMaterial3D Material(Color color) => new()
+    private StandardMaterial3D Material(Color color) => _owned.Own(new StandardMaterial3D
     {
         AlbedoColor = color,
         Roughness = 0.95f,
-    };
+    });
 
-    private static ArrayMesh GroundedBox(Vector3 size, Color color, bool transparent = false)
+    private ArrayMesh GroundedBox(Vector3 size, Color color)
     {
         StandardMaterial3D material = Material(color);
-        if (transparent)
-            material.Transparency = BaseMaterial3D.TransparencyEnum.Alpha;
-        return GodotMeshGeometry.CreateGroundedBox(size, material);
+        return GroundedBox(size, material);
     }
 
-    private static ArrayMesh GroundedBox(
-        Vector3 size,
-        StandardMaterial3D material,
-        bool transparent = false)
+    private ArrayMesh GroundedBox(Vector3 size, StandardMaterial3D material) =>
+        _owned.Own(GodotMeshGeometry.CreateGroundedBox(size, material));
+
+    private StandardMaterial3D RoofMaterial(StandardMaterial3D wood)
     {
-        if (transparent)
-        {
-            material = (StandardMaterial3D)material.Duplicate();
-            material.AlbedoColor = new Color(material.AlbedoColor, 0.42f);
-            material.Transparency = BaseMaterial3D.TransparencyEnum.Alpha;
-        }
-        return GodotMeshGeometry.CreateGroundedBox(size, material);
+        var material = _owned.Own((StandardMaterial3D)wood.Duplicate());
+        material.AlbedoColor = new Color(material.AlbedoColor, 0.42f);
+        material.Transparency = BaseMaterial3D.TransparencyEnum.Alpha;
+        return material;
     }
 
-    private static ArrayMesh CharacterMesh()
+    private ArrayMesh CharacterMesh()
     {
         StandardMaterial3D material = Material(new Color(0, 0, 0, 0));
         material.Transparency = BaseMaterial3D.TransparencyEnum.Alpha;
-        return GodotMeshGeometry.CreateGroundedPointerWedge(
-            0.42f, 0.42f, 0.68f, 1.8f, material);
+        return _owned.Own(GodotMeshGeometry.CreateGroundedPointerWedge(
+            0.42f, 0.42f, 0.68f, 1.8f, material));
     }
 
 }

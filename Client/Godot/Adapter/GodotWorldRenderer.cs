@@ -254,6 +254,7 @@ public sealed class GodotWorldRenderer : IDisposable
     private readonly ArrayMesh _fallbackPublicMesh;
     private readonly StandardMaterial3D _neutralFallbackMaterial;
     private readonly ShaderMaterial _diagnosticFallbackMaterial;
+    private readonly Shader _diagnosticFallbackShader;
     private readonly GodotWorldFallbackMaterialMode _fallbackMaterialMode;
     private readonly GodotWorldInstanceBackend _instanceBackend;
     private readonly GodotWorldInstanceUpload _instanceUpload;
@@ -349,7 +350,8 @@ public sealed class GodotWorldRenderer : IDisposable
         _desiredResident = new bool[cache.Limits.MaximumResidentChunks];
         _desiredWindowOffsets = new ClientPresentationOffset[cache.Limits.MaximumResidentChunks];
         _neutralFallbackMaterial = GodotPrimitiveSubstrate.CreateNeutralMaterial();
-        _diagnosticFallbackMaterial = GodotPrimitiveSubstrate.CreateMissingTextureMaterial();
+        _diagnosticFallbackMaterial = GodotPrimitiveSubstrate.CreateMissingTextureMaterial(
+            out _diagnosticFallbackShader);
         _fallbackStaticMesh = GodotMeshGeometry.CreateGroundedBox(
             Vector3.One, _neutralFallbackMaterial);
         _fallbackPublicMesh = GodotMeshGeometry.CreateGroundedBox(
@@ -902,8 +904,8 @@ public sealed class GodotWorldRenderer : IDisposable
         if (GodotObject.IsInstanceValid(Root)) Root.Free();
         _fallbackStaticMesh.Dispose();
         _fallbackPublicMesh.Dispose();
-        _diagnosticFallbackMaterial.Shader?.Dispose();
         _diagnosticFallbackMaterial.Dispose();
+        _diagnosticFallbackShader.Dispose();
         _neutralFallbackMaterial.Dispose();
         _buildHead = 0;
         _buildCount = 0;
