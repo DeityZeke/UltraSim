@@ -2406,6 +2406,7 @@ bool pf2AccountingSwarmVerified = false;
 string[] testProjects =
 [
     "_Tests/UltraSim.ControlPlane.Tests/UltraSim.ControlPlane.Tests.csproj",
+    "_Tests/UltraSim.Framework.RuntimeHost.Tests/UltraSim.Framework.RuntimeHost.Tests.csproj",
     "_Tests/UltraSim.ECS.Tests/UltraSim.ECS.Tests.csproj",
     "_Tests/UltraSim.ECS.Generator.Tests/UltraSim.ECS.Generator.Tests.csproj",
     "_Tests/UltraSim.ECS.Comparison.Tests/UltraSim.ECS.Comparison.Tests.csproj",
@@ -5858,6 +5859,7 @@ static void VerifyArchitecture(string root)
     var expected = new Dictionary<string, string[]>(StringComparer.Ordinal)
     {
         ["Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj"] = [],
+        ["Framework/RuntimeHost/UltraSim.Framework.RuntimeHost.csproj"] = [],
         ["Bridges/ControlPlane.ECS/UltraSim.Bridges.ControlPlane.ECS.csproj"] =
             ["Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj", "Kernels/ECS/UltraSim.ECS.csproj"],
         ["Bridges/ControlPlane.ServerRuntime/UltraSim.Bridges.ControlPlane.ServerRuntime.csproj"] =
@@ -6108,7 +6110,7 @@ static void VerifyArchitecture(string root)
                 $"Expected: {string.Join(", ", orderedAllowed)}\nActual: {string.Join(", ", references)}");
         if (project.StartsWith("Framework/", StringComparison.Ordinal) &&
             (document.Descendants("FrameworkReference").Any() || document.Descendants("PackageReference").Any()))
-            throw new InvalidOperationException("Framework HTTP and Control Plane must remain BCL-only.");
+            throw new InvalidOperationException("Framework foundation projects must remain BCL-only.");
     }
     string[] legacyHttpSources = new[] { "Server", "Framework", "Bridges", "Client", "Game", "Kernels" }
         .SelectMany(folder => Directory.EnumerateFiles(Path.Combine(root, folder), "*.cs", SearchOption.AllDirectories))
