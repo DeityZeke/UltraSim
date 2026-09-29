@@ -671,6 +671,8 @@ public partial class T010PlayableWorldAcceptance : Node3D
                         upgradedRoot is not null && upgradedRoot.GetInstanceId() == rootLifetime,
                         "Native actor realization replaced the authoritative actor presentation lifetime.");
                     Node3D retainedRoot = upgradedRoot!;
+                    ArrayMesh retainedImportedMesh = FindContentMesh(retainedRoot) ??
+                        throw new InvalidOperationException("Imported actor mesh was not exposed by its content visual.");
                     Expect(presenter.GetSnapshot() is
                         { ActiveActors: 1, PrimitiveFallbackActors: 0, AnimatedActors: 1,
                           EquippedMainHands: 1, VisibleOverheadLabels: 1, VisualReplacements: 1 },
@@ -714,6 +716,12 @@ public partial class T010PlayableWorldAcceptance : Node3D
                         HasAnimation(yAnimations, "Idle") && HasAnimation(yAnimations, "Walk") &&
                         HasAnimation(yAnimations, "Jump"),
                         "The exact Y actor artifact did not realize through the same native cache.");
+                    var retiredAnimationLookups = new List<Animation>();
+                    GodotActorPresenter.ConfigureAnimationLoops(
+                        FindDescendant<AnimationPlayer>(yVisual!)!, retiredAnimationLookups);
+                    Expect(retiredAnimationLookups.Count == 2 &&
+                        retiredAnimationLookups.All(animation => animation.NativeInstance == IntPtr.Zero),
+                        "Imported animation lookup wrappers were left to finalization.");
                     yVisual!.Free();
                     GodotContentActorVisualResolverSnapshot completeResources = visuals.GetSnapshot();
                     Expect(completeResources is
@@ -754,6 +762,8 @@ public partial class T010PlayableWorldAcceptance : Node3D
                     source.Publish(PresentationGeneration.Create(userStack, userRealm, null));
                     int userReplacements = presenter.RefreshResolvedVisuals();
                     visuals.ReleaseRetiredResources();
+                    Expect(retainedImportedMesh.NativeInstance == IntPtr.Zero,
+                        "The retired imported actor mesh wrapper was left to finalization.");
                     Expect(userReplacements == 1 &&
                         presenter.TryGetActorRoot(actorId, out Node3D? userRoot) &&
                         userRoot is not null && userRoot.GetInstanceId() == rootLifetime,
@@ -994,6 +1004,18 @@ public partial class T010PlayableWorldAcceptance : Node3D
             T? found = FindDescendant<T>(child);
             if (found is not null) return found;
         }
+        return null;
+    }
+
+    private static ArrayMesh? FindContentMesh(Node root)
+    {
+        if (root is MeshInstance3D instance &&
+            root.Name.ToString() is not ("PrimitiveBlade" or "PrimitiveGuard" or
+                "PrimitiveGrip" or "AcceptedInteractCue") &&
+            instance.Mesh is ArrayMesh mesh)
+            return mesh;
+        foreach (Node child in root.GetChildren())
+            if (FindContentMesh(child) is { } childMesh) return childMesh;
         return null;
     }
 

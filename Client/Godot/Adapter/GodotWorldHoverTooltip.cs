@@ -13,6 +13,7 @@ internal sealed class GodotWorldHoverTooltip : IDisposable
     private const float ViewportMargin = 8f;
     private const float MaximumContentWidth = 480f;
     private readonly PanelContainer _panel;
+    private readonly StyleBoxFlat _background;
     private readonly VBoxContainer _stack;
     private readonly Label _title;
     private readonly Label[] _rows = new Label[InspectionPropertySet.MaximumProperties];
@@ -34,7 +35,7 @@ internal sealed class GodotWorldHoverTooltip : IDisposable
             MouseFilter = Control.MouseFilterEnum.Ignore,
             ZIndex = 100,
         };
-        var background = new StyleBoxFlat
+        _background = new StyleBoxFlat
         {
             BgColor = new Color(0.035f, 0.03f, 0.025f, 0.96f),
             BorderColor = new Color(0.72f, 0.55f, 0.2f, 1f),
@@ -47,7 +48,7 @@ internal sealed class GodotWorldHoverTooltip : IDisposable
             ContentMarginRight = 12,
             ContentMarginBottom = 9,
         };
-        _panel.AddThemeStyleboxOverride("panel", background);
+        _panel.AddThemeStyleboxOverride("panel", _background);
         _stack = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
         _panel.AddChild(_stack);
         _title = CreateLabel("Title");
@@ -72,6 +73,7 @@ internal sealed class GodotWorldHoverTooltip : IDisposable
     internal int VisibleRowCount => _visibleRows;
     internal ulong LayoutGeneration => _layoutGeneration;
     internal Node? NativeParent => _panel.GetParent();
+    internal StyleBoxFlat DiagnosticBackground => _background;
 
     internal void Hide()
     {
@@ -107,12 +109,13 @@ internal sealed class GodotWorldHoverTooltip : IDisposable
     public void Dispose()
     {
         if (_disposed) return;
-        _disposed = true;
         if (GodotObject.IsInstanceValid(_panel))
         {
             _panel.GetParent()?.RemoveChild(_panel);
             _panel.QueueFree();
         }
+        _background.Dispose();
+        _disposed = true;
     }
 
     private bool Rebuild(string title, InspectionPropertySet? properties, float viewportWidth)

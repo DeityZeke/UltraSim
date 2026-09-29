@@ -18,6 +18,16 @@ internal static class GodotLifetimeOwnershipTests
         Expect(resources.IsRetired && resources.Count == 0 && retained.NativeInstance == IntPtr.Zero,
             "Owned primitive wrappers did not retire exactly once.");
 
+        var tooltipParent = new Control();
+        var tooltip = new GodotWorldHoverTooltip(tooltipParent);
+        StyleBoxFlat retainedTooltipStyle = tooltip.DiagnosticBackground;
+        Expect(retainedTooltipStyle.NativeInstance != IntPtr.Zero,
+            "Tooltip style was not live before owner retirement.");
+        tooltip.Dispose();
+        tooltipParent.Free();
+        Expect(retainedTooltipStyle.NativeInstance == IntPtr.Zero,
+            "Owned tooltip StyleBoxFlat was left to finalization.");
+
         var lifetime = new GodotApplicationLifetime();
         lifetime.BeginStartup();
         Expect(lifetime.RequestStop(0), "Startup close was not accepted.");

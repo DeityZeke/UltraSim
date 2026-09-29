@@ -99,14 +99,14 @@ public sealed class GodotContentActorVisualResolver : IGodotActorVisualResolver,
             try
             {
                 if (!TryRealize(
-                        lease!, out Node3D? template,
+                        lease!, out Node3D? template, out GodotOwnedResources? nativeResources,
                         out GodotActorNativeRealizationError failure))
                 {
                     _lastFailure = failure;
                     SaturatingIncrement(ref _failures);
                     return null;
                 }
-                entry = new ResourceEntry(template!, lease!);
+                entry = new ResourceEntry(template!, lease!, nativeResources!);
                 _entries[slot] = entry;
                 lease = null;
             }
@@ -155,8 +155,11 @@ public sealed class GodotContentActorVisualResolver : IGodotActorVisualResolver,
     public void ReleaseRetiredResources()
     {
         EnsureOperational();
-        foreach (ResourceEntry entry in _retired) FreeEntry(entry);
-        _retired.Clear();
+        while (_retired.Count != 0)
+        {
+            FreeEntry(_retired[0]);
+            _retired.RemoveAt(0);
+        }
     }
 
     public GodotContentActorVisualResolverSnapshot GetSnapshot()
@@ -178,7 +181,6 @@ public sealed class GodotContentActorVisualResolver : IGodotActorVisualResolver,
     {
         EnsureOwner();
         if (_disposed) return;
-        _disposed = true;
         for (int index = 0; index < _entries.Length; index++)
         {
             ResourceEntry? entry = _entries[index];
@@ -186,22 +188,29 @@ public sealed class GodotContentActorVisualResolver : IGodotActorVisualResolver,
             FreeEntry(entry);
             _entries[index] = null;
         }
-        foreach (ResourceEntry entry in _retired) FreeEntry(entry);
-        _retired.Clear();
+        while (_retired.Count != 0)
+        {
+            FreeEntry(_retired[0]);
+            _retired.RemoveAt(0);
+        }
+        _disposed = true;
     }
 
     private static void FreeEntry(ResourceEntry entry)
     {
         if (GodotObject.IsInstanceValid(entry.Template)) entry.Template.Free();
+        entry.NativeResources.Dispose();
         entry.Lease.Dispose();
     }
 
     private static bool TryRealize(
         ActorPresentationContentLease lease,
         out Node3D? template,
+        out GodotOwnedResources? nativeResources,
         out GodotActorNativeRealizationError error)
     {
         template = null;
+        nativeResources = null;
         error = GodotActorNativeRealizationError.None;
         using var document = new GltfDocument();
         using var state = new GltfState();
@@ -211,21 +220,44 @@ public sealed class GodotContentActorVisualResolver : IGodotActorVisualResolver,
             error = GodotActorNativeRealizationError.ImportRejected;
             return false;
         }
-        Node scene = document.GenerateScene(state, 30f, false, false);
-        if (scene is not Node3D visual)
+        Node? scene = document.GenerateScene(state, 30f, false, false);
+        var resources = new GodotOwnedResources();
+        try
         {
-            scene.Free();
-            error = GodotActorNativeRealizationError.SceneTypeMismatch;
-            return false;
+            // GLTF scene nodes own native references, not the managed ArrayMesh wrappers
+            // returned by Mesh. Keep those wrappers alive through every duplicated visual,
+            // then retire them after all consumers and the template have been freed.
+            var captured = new HashSet<ulong>();
+            CaptureMeshes(scene, resources, captured);
+            if (scene is not Node3D visual)
+            {
+                error = GodotActorNativeRealizationError.SceneTypeMismatch;
+                return false;
+            }
+            if (!ValidateNativeScene(visual, lease.Info, out error)) return false;
+            visual.Name = $"ContentActor_{lease.DefinitionId.Value!.Replace('/', '_')}";
+            template = visual;
+            nativeResources = resources;
+            scene = null;
+            return true;
         }
-        if (!ValidateNativeScene(visual, lease.Info, out error))
+        finally
         {
-            visual.Free();
-            return false;
+            if (scene is not null)
+            {
+                try { scene.Free(); }
+                finally { resources.Dispose(); }
+            }
         }
-        visual.Name = $"ContentActor_{lease.DefinitionId.Value!.Replace('/', '_')}";
-        template = visual;
-        return true;
+    }
+
+    private static void CaptureMeshes(Node node, GodotOwnedResources resources, HashSet<ulong> captured)
+    {
+        if (node is MeshInstance3D instance && instance.Mesh is { } mesh &&
+            captured.Add(mesh.GetInstanceId()))
+            resources.Own(mesh);
+        for (int index = 0; index < node.GetChildCount(); index++)
+            CaptureMeshes(node.GetChild(index), resources, captured);
     }
 
     private static bool ValidateNativeScene(
@@ -330,5 +362,6 @@ public sealed class GodotContentActorVisualResolver : IGodotActorVisualResolver,
 
     private sealed record ResourceEntry(
         Node3D Template,
-        ActorPresentationContentLease Lease);
+        ActorPresentationContentLease Lease,
+        GodotOwnedResources NativeResources);
 }

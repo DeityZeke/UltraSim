@@ -166,7 +166,7 @@ public sealed class GodotDerivedResourceStore : IDisposable
         }
 
         long loadStarted = Stopwatch.GetTimestamp();
-        Image image = Image.CreateFromData(width, height, false, Image.Format.Rgba8, pixels);
+        using Image image = Image.CreateFromData(width, height, false, Image.Format.Rgba8, pixels);
         if (image.IsEmpty())
         {
             error = "Godot rejected the validated derived RGBA artifact.";
@@ -372,7 +372,7 @@ public sealed class GodotDerivedResourceStore : IDisposable
         height = 0;
         pixels = [];
         error = null;
-        var image = new Image();
+        using var image = new Image();
         Error status = source.File.Kind switch
         {
             ContentFileKind.PngTexture => image.LoadPngFromBuffer(source.Bytes.ToArray()),
@@ -702,7 +702,7 @@ public sealed class GodotWorldOpaqueAtlasCandidate : IDisposable
                 width = checked(width + source.Width);
                 height = Math.Max(height, source.Height);
                 sourceBytes = checked(sourceBytes + checked((long)source.Width * source.Height * 4));
-                Image image = source.Texture.GetImage();
+                using Image image = source.Texture.GetImage();
                 if (image.IsEmpty()) return Fail("An atlas source image was unavailable.", out error);
                 if (image.GetFormat() != Image.Format.Rgba8) image.Convert(Image.Format.Rgba8);
                 byte[] pixels = image.GetData();
@@ -736,7 +736,7 @@ public sealed class GodotWorldOpaqueAtlasCandidate : IDisposable
                     new Vector2((float)x / width, 0));
                 x += source.Width;
             }
-            Image atlasImage = Image.CreateFromData(width, height, false, Image.Format.Rgba8, pixelsOut);
+            using Image atlasImage = Image.CreateFromData(width, height, false, Image.Format.Rgba8, pixelsOut);
             if (atlasImage.IsEmpty()) return Fail("Godot rejected the WorldOpaque atlas page.", out error);
             page = ImageTexture.CreateFromImage(atlasImage);
             long buildTicks = Stopwatch.GetTimestamp() - started;

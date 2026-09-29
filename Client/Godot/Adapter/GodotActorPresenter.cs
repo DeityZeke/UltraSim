@@ -1032,13 +1032,19 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             slot.PrimaryCue.Visible = prefabId != 0 || slot.PrimaryCueStartedAtMilliseconds != 0;
     }
 
-    private static void ConfigureAnimationLoops(AnimationPlayer player)
+    internal static void ConfigureAnimationLoops(
+        AnimationPlayer player,
+        List<Animation>? diagnosticRetired = null)
     {
         foreach (string requested in new[] { "Idle", "Walk" })
         {
             if (!TryFindAnimation(player, requested, out StringName name)) continue;
-            Animation? animation = player.GetAnimation(name);
-            if (animation is not null) animation.LoopMode = Animation.LoopModeEnum.Linear;
+            using Animation? animation = player.GetAnimation(name);
+            if (animation is not null)
+            {
+                animation.LoopMode = Animation.LoopModeEnum.Linear;
+                diagnosticRetired?.Add(animation);
+            }
         }
     }
 
@@ -1059,13 +1065,13 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         string rootName = skeleton.GetBoneName(rootBone).ToString();
         foreach (StringName animationName in player.GetAnimationList())
         {
-            Animation? animation = player.GetAnimation(animationName);
+            using Animation? animation = player.GetAnimation(animationName);
             if (animation is null) continue;
             for (int track = 0; track < animation.GetTrackCount(); track++)
             {
                 if (animation.TrackGetType(track) != Animation.TrackType.Position3D)
                     continue;
-                NodePath path = animation.TrackGetPath(track);
+                using NodePath path = animation.TrackGetPath(track);
                 if (!string.Equals(
                         path.GetConcatenatedSubNames(), rootName,
                         StringComparison.Ordinal))

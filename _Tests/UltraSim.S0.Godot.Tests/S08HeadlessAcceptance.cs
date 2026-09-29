@@ -89,6 +89,7 @@ public partial class S08HeadlessAcceptance : Control
         Node3D? worldCanary = null;
         Camera3D? camera = null;
         GodotGameplayCameraRig? cameraRig = null;
+        ViewportTexture? retainedOutputTexture = null;
         try
         {
             for (int index = 0; index < cases.Length; index++)
@@ -98,6 +99,7 @@ public partial class S08HeadlessAcceptance : Control
                 if (composition is null)
                 {
                     composition = new GodotClientUiComposition(owner, display);
+                    retainedOutputTexture = composition.GameplayTexture;
                     worldCanary = new Node3D { Name = "DisplayOwnedWorldCanary" };
                     composition.GameplayViewport.AddChild(worldCanary);
                     camera = new Camera3D
@@ -144,6 +146,8 @@ public partial class S08HeadlessAcceptance : Control
         finally
         {
             composition?.Dispose();
+            Expect(retainedOutputTexture is null || retainedOutputTexture.NativeInstance == IntPtr.Zero,
+                "The Gameplay Output texture wrapper was left to finalize after native teardown.");
             RemoveChild(owner);
             owner.Free();
         }

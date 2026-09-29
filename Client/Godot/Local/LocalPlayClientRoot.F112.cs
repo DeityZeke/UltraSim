@@ -86,7 +86,7 @@ public abstract partial class LocalPlayClientRoot
             Stage("force-draw-start");
             RenderingServer.ForceDraw();
             Stage($"force-draw-end pre={pre} post={post}");
-            using Image image = UiComposition.GameplayViewport.GetTexture().GetImage();
+            using Image image = UiComposition.GameplayTexture.GetImage();
             Stage($"readback empty={image.IsEmpty()} size={image.GetSize()}");
             if (image.IsEmpty() || image.SavePng(System.IO.Path.Combine(directory, "probe.png")) != Error.Ok)
                 throw new InvalidOperationException("Native readback failed.");
@@ -229,7 +229,7 @@ public abstract partial class LocalPlayClientRoot
             stage("render-request");
             RenderingServer.ForceDraw(); // synchronous native boundary, includes the real GameplayOutput
             if (pre == 0 || post == 0) throw new InvalidOperationException("Native draw boundary was not observed.");
-            ViewportTexture texture = UiComposition.GameplayViewport.GetTexture();
+            ViewportTexture texture = UiComposition.GameplayTexture;
             stage($"texture-valid={texture.GetRid().IsValid}");
             using Image image = texture.GetImage();
             stage("readback-complete");

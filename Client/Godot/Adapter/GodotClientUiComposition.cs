@@ -65,6 +65,7 @@ public sealed class GodotClientUiComposition : IDisposable
     private readonly Control _workspaceRoot;
     private readonly ColorRect[] _masks = new ColorRect[4];
     private readonly SubViewport _gameplayViewport;
+    private readonly ViewportTexture _gameplayTexture;
     private readonly TextureRect _gameplayImage;
     private readonly CanvasLayer _worldLayer;
     private readonly CanvasLayer _hudLayer;
@@ -113,10 +114,13 @@ public sealed class GodotClientUiComposition : IDisposable
             HandleInputLocally = false,
         };
         layers.AddChild(_gameplayViewport);
+        // GetTexture returns a managed RefCounted wrapper. The native TextureRect reference
+        // does not keep that wrapper alive for .NET; retire it before the viewport/language.
+        _gameplayTexture = _gameplayViewport.GetTexture();
         _gameplayImage = new TextureRect
         {
             Name = "GameplayFrameImage",
-            Texture = _gameplayViewport.GetTexture(),
+            Texture = _gameplayTexture,
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
             StretchMode = TextureRect.StretchModeEnum.Scale,
             MouseFilter = Control.MouseFilterEnum.Ignore,
@@ -170,6 +174,7 @@ public sealed class GodotClientUiComposition : IDisposable
     public GodotGumpWindowManager Gumps { get; }
     public GameplayFrameLayout Layout => _layout;
     public SubViewport GameplayViewport => _gameplayViewport;
+    public ViewportTexture GameplayTexture => _gameplayTexture;
     public GodotClientDebugPage DebugPage => _debug.Page;
 
     public GodotSessionUiLease BeginSession(string name)
@@ -308,6 +313,8 @@ public sealed class GodotClientUiComposition : IDisposable
         _session = null;
         Gumps.Dispose();
         _debug.Dispose();
+        _gameplayImage.Texture = null;
+        _gameplayTexture.Dispose();
         _gameplayViewport.QueueFree();
     }
 
