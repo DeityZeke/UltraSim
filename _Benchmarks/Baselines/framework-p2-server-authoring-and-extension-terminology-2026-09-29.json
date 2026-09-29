@@ -1,0 +1,50 @@
+{
+  "checkpoint": "P2 server C# authoring and Extension terminology foundation",
+  "date": "2026-09-29",
+  "status": "foundation_verified_p2_active",
+  "startingHead": "5e381ed278431cf6c48be4a0a617888c50bcf70f",
+  "implementationCommits": ["bda7a773", "98586fbe6f50c86f5fb8a2f849973ba18bae64f0"],
+  "testedImplementationHead": "98586fbe6f50c86f5fb8a2f849973ba18bae64f0",
+  "environment": {
+    "os": "Linux 7.2.6-1-cachyos x86-64",
+    "cpu": "AMD Ryzen 7 7800X3D",
+    "visibleLogicalProcessors": 16,
+    "dotnetSdk": "8.0.125",
+    "dotnetRuntime": "8.0.25",
+    "godot": "4.7.1 Mono",
+    "configuration": "Release"
+  },
+  "manifestFormat": "UltraSim.RuntimePackage/v3",
+  "vocabulary": {
+    "declarativeUnit": "Runtime Package",
+    "declarativeRelation": "Package capability",
+    "liveExclusiveObject": "Runtime Service",
+    "sparseOwnerAttachedObject": "Object Extension",
+    "historicalAccModuleMapsTo": "Object Extension"
+  },
+  "authoring": {
+    "sourceRootShape": "Scripts/<package-id>/manifest.json + top-level *.cs",
+    "maximumPackages": 128,
+    "maximumSourceFilesPerPackage": 64,
+    "maximumSourceBytesPerPackage": 262144,
+    "maximumSourceBytesPerComposition": 2097152,
+    "optInDirectConnect": true,
+    "trustedCodeOnly": true,
+    "sandboxClaimed": false,
+    "samplePackages": ["sample.contracts", "sample.core", "sample.scripts"],
+    "warmCacheHits": 3
+  },
+  "verification": {
+    "runtimeHostTests": {"passed": 13, "failed": 0},
+    "authoringControls": "pass",
+    "gamePersistenceTests": {"passed": 13, "failed": 0},
+    "architectureOnly": "pass",
+    "canonicalRelease": {"command": "env PATH=\"/home/nathan/.dotnet:$PATH\" bash ./verify.sh --configuration=Release", "exitCode": 0, "uninterrupted": true},
+    "physicalClientExports": ["SinglePlayer", "Online", "Complete"],
+    "directConnectSample": "cold_and_warm_pass",
+    "warmedCompiledServiceAllocatedBytesPer10000Calls": [0, 0, 0]
+  },
+  "remainingP2": ["alias/remap", "typed registrations/facets/hooks", "operator diagnostics integration", "first-party Game dogfooding"],
+  "p3Started": false,
+  "pf6Ready": false
+}
