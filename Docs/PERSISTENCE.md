@@ -133,7 +133,7 @@ sequence.
 The generic coordinator and contracts are now BCL-only in
 [`../Framework/Persistence/`](../Framework/Persistence/README.md). Its neutral
 durable reference key records a canonical domain plus stable scope/local IDs.
-The Server ECS bridge adapts `PersistentEntityKey`; an Engine/sidecar participant
+The Server ECS bridge adapts `PersistentEntityKey`; an Engine/Extension participant
 can use the same transaction without importing ECS. Staged namespace owners
 are resolved before other providers and cannot fall through to old active
 authority. Domain-specific compatibility exceptions are classified explicitly

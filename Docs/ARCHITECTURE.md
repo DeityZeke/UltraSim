@@ -45,13 +45,18 @@ is the concrete place where authoritative game-owned domains meet.
 The repository verifier freezes the exact active project-reference graph. A new
 reference is an architecture decision, not a convenience edit.
 
-## Gameplay realization: OOP sidecars, ECS, or hybrid
+## Gameplay realization: OOP Extensions, ECS, or hybrid
 
 UltraSim does **not** require gameplay to be modeled as ECS.
 
+An **Object Extension** (“Extension”) is sparse managed state/behavior attached to an owner
+identity, or to a global owner, outside the ECS component model. Multiple named instances of
+one Extension family may attach to the same owner. A Runtime Package may define an Extension
+type; a live Runtime Service or Engine Core may manage instances. These are distinct concepts.
+
 The ECS Kernel is the high-scale data-oriented storage/execution realization for state whose
-cardinality, homogeneity, or update density earns it. The Framework Runtime/Module Host may also
-host ordinary managed C# sidecars/runtime objects, or hybrids that bind one rich object to an ECS
+cardinality, homogeneity, or update density earns it. The Framework Runtime Host may also
+host ordinary managed C# Extensions/runtime objects, or hybrids that bind one rich object to an ECS
 entity for selected high-volume state.
 
 Conceptually:
@@ -64,17 +69,17 @@ ECS-first
     Entity + dense Components + Systems
 
 Hybrid
-    rich sidecar object
+    rich Extension object
         ↕ optional typed bridge
     EntityId with movement/spatial/health/etc.
 ```
 
-A sidecar/runtime-object identity should remain conceptually distinct from `EntityId`; an ECS
+An Extension/runtime-object identity should remain conceptually distinct from `EntityId`; an ECS
 entity is not required merely to make an ordinary object exist unless the selected realization
 earns that coupling.
 
 One authoritative owner exists for each piece of state. If Health is ECS-owned, a convenient
-sidecar `Health` property may route through the Health capability, but must not maintain a second
+Extension `Health` property may route through the Health capability, but must not maintain a second
 unsynchronized authoritative copy.
 
 Engine Contracts preserve gameplay meaning across realization changes. A feature may begin as a
@@ -146,8 +151,7 @@ them; Static Content is the first production provider. The Framework/Bridge refe
 Game/Client/Server or content/discovery semantics. Shared binding does not imply shared service
 authorization, queue, concurrency or deadline budgets.
 
-This is the narrow F1.12-R3 correctness-driven extraction, not commencement of P1/P2/P3 or a
-generic module/package host. Future Discovery is an open transport-neutral application contract
+This was the narrow F1.12-R3 correctness-driven extraction, not a generic package host. Future Discovery is an open transport-neutral application contract
 for client, website and third-party consumers; registry/status providers may share this endpoint.
 R3 implements neither Discovery, registry, outbound integrations nor federated Accounting.
 
@@ -168,8 +172,8 @@ are not default product dependencies or a completed F4/F10 UI.
 
 Registry operations are synchronous, owner-thread-bound and non-reentrant; cross-thread operator
 transport remains future product work. No registry lookup, descriptor allocation, capability
-check or polling is inserted into ECS, Network or rendering hot loops. P2 module hosting,
-package composition, Discovery and richer Web/Admin products remain unstarted.
+check or polling is inserted into ECS, Network or rendering hot loops. P2 package composition
+and server-owned authoring are now opt-in; Discovery and richer Web/Admin products remain future.
 
 ## Authority
 

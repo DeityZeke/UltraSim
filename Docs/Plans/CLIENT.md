@@ -2863,7 +2863,7 @@ F1.12 product dogfooding/PF6 readiness / Gate 0                               CL
         |
         v
 P1 Framework Control Plane                                                  CLOSED
-P2 Runtime/Module Host + C# Server Authoring Environment                   ACTIVE
+P2 Runtime Host + C# Server Authoring Environment                   ACTIVE
 P3–P11 productization                                                       PLANNED
 Gate 1 productization and identity/character-mode readiness                   PLANNED
         |

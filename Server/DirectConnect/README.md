@@ -55,6 +55,18 @@ The canonical Network development default is Full. Dedicated product builds sele
 `ServerOnly` explicitly so their physical output omits the unused Hosted client
 role; switching this product to Full later requires no consumer-code change.
 
+P2 adds an opt-in trusted server-authoring startup seam. Point
+`--scripts-root=<server-owned Scripts directory>` at a tree of canonical
+`<package-id>/manifest.json` and top-level C# files; optionally set
+`--scripts-cache=<writable cache directory>`. The repository's
+`Server/Scripts.Sample` is an executable example. The selected packages are
+discovered, compiled, admitted and started **before** Concept Demo authority or
+Network is constructed; a failure exits nonzero without starting either. The
+startup summary prints the resolved runtime composition fingerprint and cache-hit
+count. No Scripts polling occurs in the authority loop. This development/sample
+composition does not yet alter the fixed Concept Demo Game rules or create a
+privileged path for downloaded client code. See [Server Authoring](../Authoring/README.md).
+
 The default protocol bind is `127.0.0.1:7777` and the content host defaults to
 `127.0.0.1:7778`. F1.12-R3 composes `StaticContentHttpService` with the shared inbound
 Framework HTTP Endpoint and Kestrel Bridge. Dedicated hosting requires the ASP.NET Core 8

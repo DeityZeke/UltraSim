@@ -2,7 +2,7 @@
 
 **Proposed status:** Candidate canonical roadmap / architecture checklist\
 **Current reference baseline:** F1.12-R3 / Gate 0 production closure — `e3a63ea21f8f5ea4fa69e3768a055c409edc8616`; documentation-only commits may advance `main` beyond that closure SHA.\
-**Immediate checkpoint:** P1 Framework Control Plane is **CLOSED** after the [native-lifetime repair acceptance](../../_Benchmarks/Baselines/framework-p1-native-lifetime-closure-2026-09-28.md) and uninterrupted canonical Release on merged `main`. P2 Runtime/Module Host and C# Server Authoring Environment is **ACTIVE**: the manifest planner, built-in lifecycle, sparse sidecars, Framework-only save-set seam and explicit Control Plane bridge are implemented; dynamic C# authoring/compilation and compiled Contracts-only proof are not. P3–P11 and Gate 1 remain **PLANNED**; PF6 remains **PLANNED / NOT READY / NOT STARTED**.\
+**Immediate checkpoint:** P1 Framework Control Plane is **CLOSED** after the [native-lifetime repair acceptance](../../_Benchmarks/Baselines/framework-p1-native-lifetime-closure-2026-09-28.md) and uninterrupted canonical Release on merged `main`. P2 Runtime Host and C# Server Authoring Environment is **ACTIVE**. Typed Package/Runtime Service/Object Extension vocabulary, bounded dynamic C# authoring, compiled Contracts-only proof, Framework-only save sets and explicit Control Plane publication are implemented. Alias/remap, typed authoring registrations/facets/hooks, operator integration and first-party Game dogfooding remain; P2 closure is not implied by this foundation. P3–P11 and Gate 1 remain **PLANNED**; PF6 remains **PLANNED / NOT READY / NOT STARTED**.\
 **End state of this document:** UltraSim is ready to move from individual/trusted dogfooding and closed validation into a many-player live test where human feedback is primarily about the intended game rather than known development-harness limitations.
 
 ---
@@ -517,11 +517,13 @@ The Engine defines reusable capability/default possibilities. The Game layer sel
 
 ---
 
-# 5. Package/module runtime model
+# 5. Package runtime model
 
 The previous “Engine Host” wording is retired because `Engine` now means gameplay/interactive Engine Core.
 
-Use **Runtime Host**, **Module Host**, or **Framework Runtime Host** for the infrastructure that discovers, validates, loads and composes packages.
+Use **Framework Runtime Host** for BCL-only composition/lifecycle; `Server/Authoring` discovers and compiles source before handing selected packages to it. Retire “Module Host” as a current UltraSim term. An ACC “Module” is historical vocabulary for what UltraSim calls an **Object Extension**: sparse managed state/behavior attached to an owner or global identity outside ECS.
+
+Canonical distinctions: **Package** is deployment/composition, **Engine Core** is a domain capability, **Runtime Service** is a live exclusive object, **Extension** is sparse owner-attached OOP state, and **Contribution** is a participant in a bounded multi-contributor seam. Package `Provides` is declarative vocabulary, not a demand to construct a runtime object. A Contracts-only package may have no lifecycle entrypoint. `RuntimePackageClass.Kernel`/`Framework`/`Schema` classify packages; they are not Object Extensions.
 
 ## 5.1 Initial composition rule
 
@@ -567,14 +569,15 @@ A package manifest should describe at least:
 - entry assembly/source roots;
 - lifecycle category if special restrictions apply.
 
-Candidate package classes:
+Current unshipped package classes:
 
-- Runtime Extension;
+- Runtime;
 - Definition Package;
 - System Package;
-- Engine Package;
-- Kernel Extension;
-- Schema Extension.
+- Engine Core Package;
+- Kernel;
+- Schema;
+- Framework.
 
 ## 5.3 Runtime composition fingerprint
 
@@ -611,7 +614,7 @@ and diagnostics must identify the failing package/capability relationship.
 
 ## 5.5 Server authoring environment
 
-The Runtime/Module Host is not only a loader. Before many-player testing it should establish the beginning of the intended RunUO-style **server authoring experience** for normal C# source packages.
+The Runtime Host plus server-owned authoring adapter are not only a loader. Before many-player testing they should establish the beginning of the intended RunUO-style **server authoring experience** for normal C# source packages.
 
 A server deployment should be able to own a source tree such as:
 
@@ -640,17 +643,17 @@ Required first-stage capabilities:
 
 - deterministic discovery of the selected source/package tree;
 - staged compilation in dependency order;
-- Contracts before dependents, then Core/runtime modules, then Scripts/Profiles/Definitions where applicable;
+- Contracts before dependents, then Core/runtime packages, then Scripts/Profiles/Definitions where applicable;
 - a compile cache keyed by source/dependency/runtime-composition identity so stale output cannot silently become authoritative;
 - source file/line compiler diagnostics usable by a server operator/author;
-- explicit package/module lifecycle hooks such as registration/configuration/initialization rather than arbitrary static side effects;
+- explicit package lifecycle hooks such as registration/configuration/initialization rather than arbitrary static side effects;
 - standard registration seams for commands/actions, Control Plane providers, definition facets, definitions, ECS systems, Engine capabilities, and UI/control providers;
 - one sample server/shard package that demonstrates the complete author workflow.
 - use first-party/reference content/packages to dogfood the same public authoring seams expected of external server authors; do not maintain a privileged hidden authoring path for stock Game content without an explicit architectural reason.
 
 This is normal C# authoring. Do not replace it with a limited pseudo-language merely to make dynamic loading easier.
 
-Hot source/module reload is not required for the initial campaign. Startup-time compilation/composition with deterministic restart is sufficient.
+Hot source/package reload is not required for the initial campaign. Startup-time compilation/composition with deterministic restart is sufficient.
 
 ---
 
@@ -1554,7 +1557,7 @@ Build the stable provider/control/action/collection substrate before wiring larg
 
 ---
 
-## P2 — Framework Runtime/Module Host + Server Authoring Environment
+## P2 — Framework Runtime Host + Server Authoring Environment
 
 ### Goal
 
@@ -1630,7 +1633,7 @@ A consumer that truly **requires** the missing runtime capability must fail comp
 
 - A server owner can add/edit an ordinary C# package without rebuilding `UltraSim.Server` itself.
 - Compile/load diagnostics identify the actual failing package/source/dependency.
-- module lifecycle is deterministic and bounded.
+- package lifecycle is deterministic and bounded.
 - Contracts-only survivability proof passes.
 - built-in versus dynamic deployment does not require unrelated public contracts.
 
@@ -1640,7 +1643,7 @@ A consumer that truly **requires** the missing runtime capability must fail comp
 
 ### Goal
 
-Replace the older ambiguous “Engine Host/engine handler” concept with a clean Framework Runtime/Module Host plus platform adapter seams.
+Replace the older ambiguous “Engine Host/engine handler” concept with a clean Framework Runtime Host plus platform adapter seams.
 
 ### Tasks
 
@@ -2194,7 +2197,7 @@ UltraSim is ready for a many-player live/dogfood test only when all relevant ite
 
 - F1.12 closed.
 - Control Plane stable enough that new controls do not require hard-coded panel surgery.
-- Runtime/Module Host package lifecycle proven end-to-end.
+- Runtime Host package lifecycle proven end-to-end.
 - C# server-authoring flow (Scripts tree → compile/cache → register/init) proven end-to-end.
 - Contracts-only survivability acceptance proven.
 - stable composition fingerprint exists.
@@ -2378,7 +2381,7 @@ F1.12 green
     ↓
 P1   Framework Control Plane
     ↓
-P2   Framework Runtime/Module Host + C# Server Authoring Environment
+P2   Framework Runtime Host + C# Server Authoring Environment
     ↓
 P3   Framework adapter/runtime boundary migration
     ↓
@@ -2407,7 +2410,7 @@ Many-player live/dogfood test
 
 Art/audio work may overlap with engineering where it does not create architectural rework.
 
-Control ownership / module / adapter boundaries should be stabilized before large amounts of UI are hard-wired around temporary seams.
+Control ownership / package / adapter boundaries should be stabilized before large amounts of UI are hard-wired around temporary seams.
 
 ---
 
@@ -2984,14 +2987,14 @@ Use this table when updating older plans/docs/code comments so terminology conve
 
 | Older / ambiguous wording                | Canonical wording                                                                     | Notes                                                                               |
 | ---------------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Engine Host                              | **Framework Runtime Host / Module Host**                                              | Infrastructure that composes/hosts packages and capabilities; not a gameplay Engine |
+| Engine Host                              | **Framework Runtime Host**                                              | Infrastructure that composes/hosts packages and capabilities; not a gameplay Engine |
 | Engine handler                           | **Framework adapter/runtime boundary** or **Runtime Host** depending responsibility   | Avoid implying Godot/render/audio service is a gameplay Engine                      |
 | Rendering Engine (UltraSim architecture) | **Presentation/Rendering Adapter** over relevant contracts/Kernels                    | Godot may call itself an engine externally; UltraSim terminology stays distinct     |
 | Audio Engine meaning device/mixer        | **Audio Kernel**                                                                      | Generic device/mix/spatial machinery                                                |
 | Sound/game audio behavior                | **Sound Engine**                                                                      | Footsteps, ambience semantics, cue mapping, game-facing behavior                    |
 | Core (ambiguous)                         | **Kernel** when foundational, **Engine Core** when gameplay capability implementation | Do not use importance/prestige as classifier                                        |
 | Scripts (as if small callbacks)          | **Game Implementation** umbrella containing Scripts/Profiles/Definitions/Rules        | This layer decides what game is actually being made                                 |
-| Plugin                                   | **Package / Runtime Extension / Engine Package / Kernel Extension**                   | Classify by architectural role; plugin may remain colloquial UX term later          |
+| Plugin                                   | **Runtime Package**                                                                   | Classify by package class; “Extension” means sparse owner-attached OOP state        |
 | Godot Engine integration                 | **Godot Adapter / Bridge**                                                            | External technology realization                                                     |
 | Server/client glue                       | **Framework / Bridge** depending ownership                                            | Framework composes; Bridges translate contracts/boundaries                          |
 
@@ -3027,7 +3030,7 @@ This compact board is intended to sit near the top of active implementation note
 [x] Gate 0  F1.12 product dogfood/readiness
 
 [x] P1      Framework Control Plane — CLOSED
-[ ] P2      Runtime/Module Host + C# Server Authoring Environment — ACTIVE
+[ ] P2      Runtime Host + C# Server Authoring Environment — ACTIVE
 [ ] P3      Framework adapter/runtime boundary migration
 [ ] P4      Engine Contracts + typed definition facets
 [ ] P5      User/Admin/Developer control surfaces

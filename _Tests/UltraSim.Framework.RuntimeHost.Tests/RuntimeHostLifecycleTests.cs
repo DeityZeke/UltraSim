@@ -51,6 +51,9 @@ internal static class RuntimeHostLifecycleTests
         Require(notes.TryGet(singleton, out retained) && retained!.Value == 30);
         try { extensions.RegisterFamily<SamplePackage>(family); throw new Exception("Expected family type collision."); }
         catch (InvalidOperationException) { }
+        try { notes.Add(new ExtensionKey(owner, new("sample.vendor")), new Note(40));
+            throw new Exception("Expected wrong family rejection."); }
+        catch (ArgumentException) { }
 
         host.Stop(); host.Stop();
         Require(host.State == RuntimeHostState.Stopped && !host.TryGet(handle, out _));

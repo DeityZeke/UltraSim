@@ -2408,6 +2408,7 @@ string[] testProjects =
     "_Tests/UltraSim.ControlPlane.Tests/UltraSim.ControlPlane.Tests.csproj",
     "_Tests/UltraSim.Framework.RuntimeHost.Tests/UltraSim.Framework.RuntimeHost.Tests.csproj",
     "_Tests/UltraSim.Framework.Persistence.Tests/UltraSim.Framework.Persistence.Tests.csproj",
+    "_Tests/UltraSim.Server.Authoring.Tests/UltraSim.Server.Authoring.Tests.csproj",
     "_Tests/UltraSim.ECS.Tests/UltraSim.ECS.Tests.csproj",
     "_Tests/UltraSim.ECS.Generator.Tests/UltraSim.ECS.Generator.Tests.csproj",
     "_Tests/UltraSim.ECS.Comparison.Tests/UltraSim.ECS.Comparison.Tests.csproj",
@@ -5892,6 +5893,10 @@ static void VerifyArchitecture(string root)
         ["Kernels/UI/UltraSim.UI.csproj"] = [],
         ["Server/Persistence/UltraSim.Server.Persistence.csproj"] =
             ["Framework/Persistence/UltraSim.Framework.Persistence.csproj", "Kernels/ECS/UltraSim.ECS.csproj"],
+        ["Server/Authoring/UltraSim.Server.Authoring.csproj"] =
+            ["Framework/RuntimeHost/UltraSim.Framework.RuntimeHost.csproj",
+             "Framework/Persistence/UltraSim.Framework.Persistence.csproj",
+             "Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj"],
         ["Server/Runtime/UltraSim.Server.Runtime.csproj"] =
             ["Kernels/ECS/UltraSim.ECS.csproj"],
         ["Server/Hosting/UltraSim.Server.Hosting.csproj"] =
@@ -5907,6 +5912,7 @@ static void VerifyArchitecture(string root)
             "Game/UI/UltraSim.Game.UI.csproj",
             "Kernels/Network/UltraSim.Network.csproj",
             "Server/ConceptDemo/UltraSim.Server.ConceptDemo.csproj",
+            "Server/Authoring/UltraSim.Server.Authoring.csproj",
         ],
         ["Server/ConceptDemo/UltraSim.Server.ConceptDemo.csproj"] =
         [

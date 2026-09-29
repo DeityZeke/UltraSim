@@ -11,6 +11,7 @@ using UltraSim.UI;
 using UltraSim.Server.ConceptDemo;
 using UltraSim.Game.Composition;
 using UltraSim.Game.World;
+using UltraSim.Server.Authoring;
 
 DirectConnectOptions options;
 try
@@ -22,6 +23,23 @@ catch (Exception exception) when (exception is ArgumentException or FormatExcept
     Console.Error.WriteLine($"UltraSim Direct Connect configuration error: {exception.Message}");
     return 2;
 }
+
+ServerScriptComposition? scriptComposition = null;
+try
+{
+    if (options.ScriptsRoot is not null)
+        scriptComposition = ServerScriptAuthoring.Start(options.ScriptsRoot,
+            options.ScriptsCache ?? Path.Combine(options.IdentityDirectory, "script-cache"));
+}
+catch (Exception failure)
+{
+    Console.Error.WriteLine($"UltraSim server Scripts startup failed: {failure}");
+    return 2; // No Concept Demo authority or Network host has been constructed.
+}
+using var scriptLifetime = scriptComposition;
+if (scriptComposition is not null)
+    Console.WriteLine($"P2 Scripts Running fingerprint={scriptComposition.RuntimeCompositionFingerprint} " +
+        $"packages={scriptComposition.Packages.Count} cache-hits={scriptComposition.Packages.Count(p => p.CacheHit)}");
 
 if (options.EphemeralSmoke)
 {
@@ -444,6 +462,8 @@ internal readonly record struct DirectConnectOptions(
     IPEndPoint ContentEndPoint,
     string IdentityDirectory,
     string? OfficialContentRoot,
+    string? ScriptsRoot,
+    string? ScriptsCache,
     string? ReadyFile,
     string? StopFile,
     string? SummaryFile,
@@ -476,6 +496,8 @@ internal readonly record struct DirectConnectOptions(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "UltraSim", "Server", "DirectConnect");
         string? officialContentRoot = null;
+        string? scriptsRoot = null;
+        string? scriptsCache = null;
         bool smoke = false;
         string? readyFile = null;
         string? stopFile = null;
@@ -539,6 +561,16 @@ internal readonly record struct DirectConnectOptions(
                 if (string.IsNullOrWhiteSpace(value))
                     throw new ArgumentException("--official-content-root cannot be empty.");
                 officialContentRoot = Path.GetFullPath(value);
+                continue;
+            }
+            if (argument.StartsWith("--scripts-root=", StringComparison.Ordinal))
+            {
+                scriptsRoot = RequiredPath(argument, "--scripts-root=");
+                continue;
+            }
+            if (argument.StartsWith("--scripts-cache=", StringComparison.Ordinal))
+            {
+                scriptsCache = RequiredPath(argument, "--scripts-cache=");
                 continue;
             }
             if (argument.StartsWith("--content-bind=", StringComparison.Ordinal))
@@ -764,6 +796,8 @@ internal readonly record struct DirectConnectOptions(
         if (accountingTestMarker is not null && !anyAccounting)
             throw new ArgumentException(
                 "--accounting-test-marker requires the accounting window options.");
+        if (scriptsCache is not null && scriptsRoot is null)
+            throw new ArgumentException("--scripts-cache requires --scripts-root.");
         if (recommendedInputHz > maximumInputHz)
             throw new ArgumentException(
                 "--recommended-input-hz cannot exceed --maximum-input-hz.");
@@ -776,7 +810,7 @@ internal readonly record struct DirectConnectOptions(
             publicationCadence, publicationRepresentation, compressionPolicy);
         publicationPolicy.Validate();
         return new DirectConnectOptions(
-            endpoint, contentEndpoint, identity, officialContentRoot,
+            endpoint, contentEndpoint, identity, officialContentRoot, scriptsRoot, scriptsCache,
             readyFile, stopFile, summaryFile,
             accountingStartFile, accountingReadyFile, accountingStopFile,
             accountingSummaryFile, accountingTestMarker, nativeGateTriggerFile, clientProfile,

@@ -22,7 +22,7 @@ In particular:
 
 ```text
 old EngineHost
-    → Framework Runtime Host / Module Host
+    → Framework Runtime Host
 
 generic inbound HTTP/Web ownership
     → Framework.Http.Endpoint + external technology Bridge
@@ -32,7 +32,7 @@ Engine
     → Engine Core only when it means a reusable gameplay/interactive capability
 ```
 
-The Framework may host conventional C# sidecar/runtime objects, ECS-backed state, or hybrids.
+The Framework may host conventional C# Extension/runtime objects, ECS-backed state, or hybrids.
 ECS is a scalable realization, not the mandatory gameplay object model.
 
 The future authoring/extensibility backlog is deliberately separate from the active P1–P11 campaign. Documenting
@@ -149,11 +149,11 @@ If yes, it is probably a System.
 
 ---
 
-## 2.5 Module
+## 2.5 Object Extension
 
-A sparse managed sidecar attached to an Entity outside archetype storage.
+A sparse managed Extension attached to an owner identity outside archetype storage.
 
-A Module is useful when an Entity needs richer or unusual state without changing its ECS archetype merely to support one sparse behavior.
+An Extension is useful when an Entity needs richer or unusual state without changing its ECS archetype merely to support one sparse behavior. It may also use a non-Entity or global owner identity.
 
 Conceptually:
 
@@ -163,21 +163,21 @@ Entity
 │  ├─ Position
 │  └─ Velocity
 │
-└─ optional Modules
-   ├─ VendorModule
-   └─ SpecialBehaviorModule
+└─ optional Extensions
+   ├─ VendorExtension
+   └─ SpecialBehaviorExtension
 ```
 
 Hard rules:
 
-* Modules are managed objects and therefore create GC pressure.
+* Extensions are managed objects and therefore create GC pressure.
 * They are intended to remain sparse.
 * Large homogeneous populations should use Components instead.
-* Module association must use complete Entity identity, including generation.
-* Destroying an Entity must not leave a Module attached to a future reused slot.
-* Do not store managed Module references inside dense Components merely to bridge the two models.
+* Extension association with an Entity must use complete identity, including generation.
+* Destroying an Entity must not leave an Extension attached to a future reused slot.
+* Do not store managed Extension references inside dense Components merely to bridge the two models.
 
-A universal Module registry/API should not be invented until real consumers establish the required contract.
+A universal Extension hook/property framework should not be invented until real consumers establish the required contract. The current bounded typed `ExtensionFamily<T>` is only sparse owner storage.
 
 ---
 
@@ -386,9 +386,9 @@ Document:
 * Entity;
 * Component;
 * System;
-* Module;
+* Object Extension;
 * Engine;
-* EngineHost;
+* Framework Runtime Host;
 * Package;
 * Profile;
 * Script;
@@ -655,7 +655,7 @@ Framework owns backend-neutral, instance-based inbound contracts, frozen service
 definitions, independent service budgets and lifecycle. Kestrel is an external technology Bridge,
 not the architectural contract. Server.Hosting explicitly composes both. A richer optional Web
 capability may consume this endpoint; it must not become listener owner simply because its API
-is sophisticated. Outbound HTTP, generic authorization, MVC, Runtime/Module Host and dynamic
+is sophisticated. Outbound HTTP, generic authorization, MVC, Runtime Host and dynamic
 providers are not implemented by R3. This does not begin the general P1/P2/P3 campaign.
 
 # 11. Static Content as the first provider
@@ -1194,9 +1194,9 @@ The currently preferred order is:
 1. Freeze accepted playable Concept Demo baseline.
 
 2. Formalize Kernel / System / Component /
-   Module / Engine / EngineHost terminology.
+   Object Extension / Engine Core / Framework Runtime Host terminology.
 
-3. Implement EngineHost.
+3. Implement the Framework Runtime Host and server authoring adapter.
 
 4. Begin monorepo extraction one proven seam at a time.
 

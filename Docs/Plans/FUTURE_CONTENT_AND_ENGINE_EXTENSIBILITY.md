@@ -36,7 +36,7 @@ Authoring/extensibility design should also preserve:
 
 > **Do not create one giant Mod API.**
 
-UltraSim's first-party Game Implementation should dogfood the same author-facing contracts used by server packages. A community “mod” should ideally be architecturally ordinary: another package, profile, definition set, script/rule set, sidecar type, Engine capability or content bundle composed through the same mechanisms.
+UltraSim's first-party Game Implementation should dogfood the same author-facing contracts used by server packages. A community “mod” should ideally be architecturally ordinary: another package, profile, definition set, script/rule set, Extension type, Engine capability or content bundle composed through the same mechanisms.
 
 A useful test is:
 
@@ -556,7 +556,7 @@ Capability/attachment patterns seen in Forge-like extension layers map well to U
 Potential attachment owners:
 
 ~~~text
-runtime sidecar object
+runtime Extension object
 ECS EntityId
 item instance
 container
@@ -581,7 +581,7 @@ Interactable capability
 The capability interface/contract should preserve meaning while the backing realization may be:
 
 ~~~text
-normal C# sidecar/OOP state
+normal C# Extension/OOP state
 ECS component-backed state
 hybrid object ↔ entity bridge
 derived read model
@@ -593,7 +593,7 @@ Permanent rule:
 
 Avoid duplicate authoritative state.
 
-If Health is ECS-owned, a rich sidecar's Health property should route through the owning capability rather than maintaining a second unsynchronized health field.
+If Health is ECS-owned, a rich Extension's Health property should route through the owning capability rather than maintaining a second unsynchronized health field.
 
 ---
 
@@ -650,7 +650,7 @@ Mobile
         health
         high-volume state
 
-    sidecar:
+    Extension:
         dialogue
         bespoke behavior
         inventory relationships
@@ -660,7 +660,7 @@ Mobile
 
 Promotion into ECS should be evidence-driven.
 
-If 20 rich quest objects are awkward in ECS, use sidecars.
+If 20 rich quest objects are awkward in ECS, use Extensions.
 
 If 3,000,000 crops require dense updates, move the hot crop state into ECS.
 
@@ -994,7 +994,7 @@ The [P1 foundation](../../Framework/ControlPlane/README.md) now provides the BCL
 provider/descriptors/snapshots, bounded batches/actions/collections and generation-fenced
 registration seam. The ECS, ServerRuntime and Client Settings proof adapters are real owner
 consumers; the generic viewer contains no concrete owner branching. Dynamic package-owned
-registration, Runtime/Module Host and operator product UI remain P2/P5 work, not implemented P1
+registration, Runtime Host and operator product UI remain P2/P5 work, not implemented P1
 features. There is no generic property bag or global settings store.
 
 Packages should be able to publish diagnostics, controls, actions and collections through the same generic Control Plane as built-in providers.
@@ -1153,7 +1153,7 @@ Use typed capabilities/contracts and stable IDs.
 
 ## No mandatory inheritance hierarchy
 
-OOP sidecars are supported, but Engine capabilities must not require every package to derive from one universal GameObject.
+OOP Extensions are supported, but Engine capabilities must not require every package to derive from one universal GameObject.
 
 ## No mandatory ECS representation
 
@@ -1256,7 +1256,7 @@ The active sequence remains:
 
 ~~~text
 P1 Control Plane
-P2 Runtime/Module Host
+P2 Runtime Host
 P3 adapter/runtime boundary
 P4 Engine Contracts/facets
 P5–P11 productization

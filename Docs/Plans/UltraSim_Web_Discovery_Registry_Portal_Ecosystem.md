@@ -1557,7 +1557,7 @@ Provided capabilities
 content/runtime identity
 ```
 
-The Runtime/Module Host should accept a valid package regardless of whether it came from:
+The Runtime Host should accept a valid package regardless of whether it came from:
 
 ```text
 forums
@@ -2302,14 +2302,14 @@ public Discovery summary/detail
 future richer Web capability
 separate service authorization policies
 multiple endpoint instances
-Runtime/Module Host-provided route services
+Runtime Host-provided route services
 ```
 
 It should **not** prematurely implement those systems.
 
 ---
 
-# 53. Future Runtime/Module Host relationship
+# 53. Future Runtime Host relationship
 
 Later:
 
@@ -2318,7 +2318,7 @@ server package
     ↓
 registers HttpServiceDefinition / capability
     ↓
-Framework Runtime/Module Host
+Framework Runtime Host
     ↓
 validates whole composition
     ↓
@@ -2346,7 +2346,7 @@ publishes package + forum thread
         ↓
 other owner downloads/install
         ↓
-Runtime/Module Host validates package manifest
+Runtime Host validates package manifest
         ↓
 server starts with capability
 ```

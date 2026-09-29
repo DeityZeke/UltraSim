@@ -24,7 +24,7 @@ The finite failure deadline is **not** a license to abandon ownership: an unreti
 makes Dispose fail with Faulted state and keeps resources owned rather than publishing success.
 Do not dispose an endpoint from its own handler (self-join).
 
-One owner exists per bound endpoint, not per feature or process. A future Runtime/Module Host may
+One owner exists per bound endpoint, not per feature or process. A future Runtime Host may
 supply providers, but there is no dynamic registration/generation/package framework here. Listener
 sharing does not share authorization or backpressure domains. Discovery must remain an open,
 transport-neutral application contract consumable by clients, websites and third parties; registry,

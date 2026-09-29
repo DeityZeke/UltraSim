@@ -15,8 +15,9 @@ acceptance narratives remain available through git history.
   descriptor/state, capability, generation, bounded batch/action/collection and generic viewer
   contracts, with opt-in ECS, ServerRuntime and Client Settings proof adapters.
 - [Framework Runtime Host](../Framework/RuntimeHost/README.md) — P2's bounded canonical package
-  manifest and deterministic pre-authority composition-planning foundation; dynamic compilation,
-  module lifecycle and the server authoring environment remain active P2 work.
+  composition, optional lifecycle, service and sparse Object Extension contracts.
+- [Server C# Authoring](../Server/Authoring/README.md) — P2's server-owned trusted `Scripts/`
+  discovery, staged Roslyn compilation, exact cache identity and admitted composition load path.
 - [Runtime](RUNTIME.md) — `ServerRuntime`, generations, hosts, lifecycle,
   publication, and authoritative cadence.
 - [Simulation time / resolution / control](../AIOS/canonical/simulation-time-resolution-and-control.md) —
