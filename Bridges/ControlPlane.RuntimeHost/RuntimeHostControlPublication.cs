@@ -44,10 +44,13 @@ internal sealed class RuntimeHostControlProvider : IControlProvider
         Definition = new(Id, diagnostics: [
             new(new("state"), new("Framework/RuntimeHost"), "State", "Runtime composition lifecycle state.", new(ControlValueKind.Text), Read),
             new(new("generation"), new("Framework/RuntimeHost"), "Generation", "Process-local runtime generation fence.", new(ControlValueKind.UInt64), Read),
-            new(new("manifest-fingerprint"), new("Framework/RuntimeHost"), "Manifest fingerprint", "Manifest-only plan identity, not a source/compile fingerprint.", new(ControlValueKind.Text), Read)],
+            new(new("manifest-fingerprint"), new("Framework/RuntimeHost"), "Manifest fingerprint", "Manifest-only plan identity, not a source/compile fingerprint.", new(ControlValueKind.Text), Read),
+            new(new("runtime-fingerprint"), new("Framework/RuntimeHost"), "Runtime composition fingerprint", "Resolved compiled composition identity, not the process generation.", new(ControlValueKind.Text), Read)],
             collections: [new(new("packages"), new("Framework/RuntimeHost"), "Packages", "Selected package lifecycle states.",
-                ModuleCompositionPlanner.MaximumPackages,
-                [new(new("state"), "State", new(ControlValueKind.Text))], Read)]);
+                RuntimeCompositionPlanner.MaximumPackages,
+                [new(new("state"), "State", new(ControlValueKind.Text)),
+                 new(new("compile-key"), "Compile key", new(ControlValueKind.Text)),
+                 new(new("cache"), "Cache", new(ControlValueKind.Text))], Read)]);
     }
     public ControlProviderDefinition Definition { get; }
     public ulong Revision => _host.Generation;
@@ -60,6 +63,7 @@ internal sealed class RuntimeHostControlProvider : IControlProvider
             "state" => ControlValue.Text(snapshot.State.ToString()),
             "generation" => ControlValue.UInt64(snapshot.Generation),
             "manifest-fingerprint" => ControlValue.Text(snapshot.ManifestFingerprint ?? ""),
+            "runtime-fingerprint" => ControlValue.Text(snapshot.RuntimeCompositionFingerprint ?? ""),
             _ => throw new ArgumentException("Unknown runtime host diagnostic.")
         };
     }
@@ -67,7 +71,9 @@ internal sealed class RuntimeHostControlProvider : IControlProvider
     {
         if (id.Value != "packages") throw new ArgumentException("Unknown runtime host collection.");
         return _host.CaptureSnapshot().Packages.Select(p => new ControlCollectionRow(
-            new(p.Id.Value), [ControlValue.Text(p.State.ToString())])).ToArray();
+            new(p.Id.Value), [ControlValue.Text(p.State.ToString()),
+                ControlValue.Text(p.CompileKey ?? ""),
+                ControlValue.Text(p.CompileKey is null ? "built-in" : p.CacheHit ? "hit" : "miss")])).ToArray();
     }
     public ControlOwnerResult Set(ControlRequestContext context, IReadOnlyList<ControlMutation> mutations) =>
         ControlOwnerResult.Reject(ControlResultCode.UnknownPublication);

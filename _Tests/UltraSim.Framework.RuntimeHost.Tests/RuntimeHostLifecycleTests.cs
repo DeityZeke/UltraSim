@@ -37,17 +37,20 @@ internal static class RuntimeHostLifecycleTests
         Console.WriteLine($"P2_HOSTED_DIRECT_SERVICE allocations_10k=[{string.Join(',', sampleBytes)}] management_calls=0");
 
         // A Framework-only OOP owner can attach multiple instances of one family without an Entity.
-        var sidecars = new RuntimeSidecars();
-        var owner = new SidecarOwnerId("sample.owner");
-        var family = new SidecarTypeId("sample.notes");
-        var one = new SidecarKey(owner, family, "one");
-        var two = new SidecarKey(owner, family, "two");
-        var singleton = new SidecarKey(SidecarOwnerId.Global, family);
-        sidecars.Add(one, new Note(10)); sidecars.Add(two, new Note(20)); sidecars.Add(singleton, new Note(30));
-        Require(sidecars.Remove(one));
-        Require(!sidecars.TryGet<Note>(one, out _));
-        Require(sidecars.TryGet<Note>(two, out Note? retained) && retained!.Value == 20);
-        Require(sidecars.TryGet<Note>(singleton, out retained) && retained!.Value == 30);
+        var extensions = new ExtensionRegistry();
+        var owner = new ExtensionOwnerId("sample.owner");
+        var family = new ExtensionTypeId("sample.notes");
+        ExtensionFamily<Note> notes = extensions.RegisterFamily<Note>(family);
+        var one = new ExtensionKey(owner, family, "one");
+        var two = new ExtensionKey(owner, family, "two");
+        var singleton = new ExtensionKey(ExtensionOwnerId.Global, family);
+        notes.Add(one, new Note(10)); notes.Add(two, new Note(20)); notes.Add(singleton, new Note(30));
+        Require(notes.Remove(one));
+        Require(!notes.TryGet(one, out _));
+        Require(notes.TryGet(two, out Note? retained) && retained!.Value == 20);
+        Require(notes.TryGet(singleton, out retained) && retained!.Value == 30);
+        try { extensions.RegisterFamily<SamplePackage>(family); throw new Exception("Expected family type collision."); }
+        catch (InvalidOperationException) { }
 
         host.Stop(); host.Stop();
         Require(host.State == RuntimeHostState.Stopped && !host.TryGet(handle, out _));
@@ -90,7 +93,7 @@ internal static class RuntimeHostLifecycleTests
         try { duplicate.Start([new SamplePackage("a.core", [], provides: "same.service"),
             new SamplePackage("b.core", [], provides: "same.service")]); throw new Exception("Expected duplicate capability."); }
         catch (InvalidOperationException exception) when (exception.Message.Contains("also provided", StringComparison.Ordinal)) { }
-        try { new RuntimePackageHost().Start(Enumerable.Range(0, ModuleCompositionPlanner.MaximumPackages + 1)
+        try { new RuntimePackageHost().Start(Enumerable.Range(0, RuntimeCompositionPlanner.MaximumPackages + 1)
             .Select(i => (IRuntimePackage)new SamplePackage("p" + i, [])));
             throw new Exception("Expected bounded host admission."); }
         catch (InvalidOperationException exception) when (exception.Message.Contains("capacity", StringComparison.Ordinal)) { }
@@ -114,7 +117,7 @@ internal static class RuntimeHostLifecycleTests
         firstGeneration = first.ProviderGeneration;
         var viewer = new ControlPlaneViewer(registry, principal);
         var categories = viewer.Capture();
-        Require(categories.Count == 1 && categories[0].Items.Count == 4);
+        Require(categories.Count == 1 && categories[0].Items.Count == 5);
         Require(categories[0].Items.Any(i => i.Diagnostic?.Value.AsText() == "Running"));
         host.Stop(); // Retires provider before invoking the package's Stop.
         host.Start([package]);
@@ -143,10 +146,11 @@ internal static class RuntimeHostLifecycleTests
         {
             _trace = trace; _provides = provides; _contributes = contributes;
             _failInitialize = failInitialize; _failStop = failStop; _onStop = onStop; _failStage = failStage;
-            Manifest = new(new(id), new(1, 0, 0), ModulePackageStage.Core, ModulePackageClass.EngineCore,
-                provides: provides is null ? [] : [new ModuleCapabilityId(provides)]);
+            Manifest = new(new(id), new(1, 0, 0), RuntimePackageStage.Core, RuntimePackageClass.EngineCore,
+                provides: provides is null ? [] : [new PackageCapabilityId(provides)],
+                services: provides is null ? [] : [new RuntimeServiceId(provides)]);
         }
-        public ModulePackageManifest Manifest { get; }
+        public RuntimePackageManifest Manifest { get; }
         internal RuntimePackageContext? LastContext { get; private set; }
         internal int TickCount { get; private set; }
         internal void Tick() => TickCount++;

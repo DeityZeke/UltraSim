@@ -3,41 +3,51 @@ using System.Globalization;
 namespace UltraSim.Framework.RuntimeHost;
 
 /// <summary>A stable package identity. It is never a path or a process-local runtime index.</summary>
-public readonly record struct ModulePackageId : IComparable<ModulePackageId>
+public readonly record struct RuntimePackageId : IComparable<RuntimePackageId>
 {
     public string Value { get; }
 
-    public ModulePackageId(string value)
+    public RuntimePackageId(string value)
     {
-        ModuleIdentity.Validate(value, nameof(value));
+        RuntimeIdentity.Validate(value, nameof(value));
         Value = value;
     }
 
     public bool IsValid => Value is not null;
-    public int CompareTo(ModulePackageId other) => StringComparer.Ordinal.Compare(Value, other.Value);
+    public int CompareTo(RuntimePackageId other) => StringComparer.Ordinal.Compare(Value, other.Value);
     public override string ToString() => Value ?? "<invalid>";
 }
 
-/// <summary>A stable capability identity published by exactly one selected package.</summary>
-public readonly record struct ModuleCapabilityId : IComparable<ModuleCapabilityId>
+/// <summary>A declarative package-composition capability, not a live object.</summary>
+public readonly record struct PackageCapabilityId : IComparable<PackageCapabilityId>
 {
     public string Value { get; }
 
-    public ModuleCapabilityId(string value)
+    public PackageCapabilityId(string value)
     {
-        ModuleIdentity.Validate(value, nameof(value));
+        RuntimeIdentity.Validate(value, nameof(value));
         Value = value;
     }
 
     public bool IsValid => Value is not null;
-    public int CompareTo(ModuleCapabilityId other) => StringComparer.Ordinal.Compare(Value, other.Value);
+    public int CompareTo(PackageCapabilityId other) => StringComparer.Ordinal.Compare(Value, other.Value);
+    public override string ToString() => Value ?? "<invalid>";
+}
+
+/// <summary>Identity of one exclusive live runtime service object.</summary>
+public readonly record struct RuntimeServiceId : IComparable<RuntimeServiceId>
+{
+    public string Value { get; }
+    public RuntimeServiceId(string value) { RuntimeIdentity.Validate(value, nameof(value)); Value = value; }
+    public bool IsValid => Value is not null;
+    public int CompareTo(RuntimeServiceId other) => StringComparer.Ordinal.Compare(Value, other.Value);
     public override string ToString() => Value ?? "<invalid>";
 }
 
 /// <summary>Canonical three-component package version; not an assembly or runtime generation.</summary>
-public readonly record struct ModuleVersion(int Major, int Minor, int Patch) : IComparable<ModuleVersion>
+public readonly record struct RuntimePackageVersion(int Major, int Minor, int Patch) : IComparable<RuntimePackageVersion>
 {
-    public static ModuleVersion Parse(string text)
+    public static RuntimePackageVersion Parse(string text)
     {
         ArgumentNullException.ThrowIfNull(text);
         string[] parts = text.Split('.');
@@ -50,11 +60,11 @@ public readonly record struct ModuleVersion(int Major, int Minor, int Patch) : I
                 !int.TryParse(part, NumberStyles.None, CultureInfo.InvariantCulture, out values[i]))
                 throw new FormatException("Package versions require canonical nonnegative integers.");
         }
-        return new ModuleVersion(values[0], values[1], values[2]);
+        return new RuntimePackageVersion(values[0], values[1], values[2]);
     }
 
     public bool IsValid => Major >= 0 && Minor >= 0 && Patch >= 0;
-    public int CompareTo(ModuleVersion other)
+    public int CompareTo(RuntimePackageVersion other)
     {
         int major = Major.CompareTo(other.Major);
         if (major != 0) return major;
@@ -64,7 +74,7 @@ public readonly record struct ModuleVersion(int Major, int Minor, int Patch) : I
     public override string ToString() => FormattableString.Invariant($"{Major}.{Minor}.{Patch}");
 }
 
-internal static class ModuleIdentity
+internal static class RuntimeIdentity
 {
     internal static void Validate(string value, string parameter)
     {
