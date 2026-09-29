@@ -97,6 +97,12 @@ small OOP implementation and later move hot/high-volume state into ECS without f
 consumer definition/package to change. The reverse is also permitted when a rich low-cardinality
 object gains nothing from ECS representation.
 
+P4's [typed Definition composition](../Framework/Definitions/README.md) is the cold meeting point
+for independent Engine Contracts. Stable authored Definition IDs are distinct from ECS prefab
+identity; dense Definition handles are local to one composition. An optional Core can disappear
+without erasing its Contracts-owned facet meaning. Runtime Services, Object Extensions, ECS
+components, and immutable Definition facets remain separate kinds of state.
+
 This is intentionally compatible with both RunUO-like conventional C# authoring and large
 Cities-Skylines-like data-oriented simulation.
 

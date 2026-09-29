@@ -9,6 +9,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Text;
 using UltraSim.Framework.ControlPlane;
+using UltraSim.Framework.Definitions;
 using UltraSim.Framework.Persistence;
 using UltraSim.Framework.RuntimeHost;
 
@@ -222,6 +223,7 @@ public static class ServerScriptCompiler
             paths.Add(typeof(RuntimePackageHost).Assembly.Location);
             paths.Add(typeof(SaveSetCoordinator).Assembly.Location);
             paths.Add(typeof(ControlPlaneRegistry).Assembly.Location);
+            paths.Add(typeof(DefinitionComposer).Assembly.Location);
             var ordered = paths.Distinct(StringComparer.Ordinal).OrderBy(p => Path.GetFileName(p), StringComparer.Ordinal).ToArray();
             var metadata = new List<MetadataReference>(ordered.Length);
             var identities = new List<string>(ordered.Length);

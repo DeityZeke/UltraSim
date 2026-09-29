@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using UltraSim.Client.Core;
 using UltraSim.ECS;
 using UltraSim.Game.Accounting;
@@ -10,6 +11,11 @@ using UltraSim.Game.UI;
 using UltraSim.Game.World;
 using UltraSim.Server.Persistence;
 using UltraSim.Framework.Persistence;
+using UltraSim.Framework.Definitions;
+using UltraSim.Game.Items.Contracts;
+using UltraSim.Game.Combat.Contracts;
+using UltraSim.Game.Presentation.Contracts;
+using UltraSim.Game.Skills.Contracts;
 using UltraSim.Server.Runtime;
 using UltraSim.UI;
 
@@ -25,6 +31,8 @@ var tests = new (string Name, Action Body)[]
     ("GameAggregateRejectsCrossWorldFeatureState", GameAggregateRejectsCrossWorldFeatureState),
     ("FixtureRebuildsDerivedIndexFromEcsTruth", FixtureRebuildsDerivedIndexFromEcsTruth),
     ("ContentAddsThirdItemWithoutInventoryRuleChange", ContentAddsThirdItemWithoutInventoryRuleChange),
+    ("IronSwordUsesTypedDefinitionWithoutOwningArt", IronSwordUsesTypedDefinitionWithoutOwningArt),
+    ("IronSwordStableDefinitionIdentitySurvivesSaveSetAndRecomposition", IronSwordStableDefinitionIdentitySurvivesSaveSetAndRecomposition),
     ("OwnerlessWorldContainerIsFirstClass", OwnerlessWorldContainerIsFirstClass),
     ("MoveSplitEquipAreAtomicAndPolicyDriven", MoveSplitEquipAreAtomicAndPolicyDriven),
     ("PackedChildPoolRepairsDonorLinks", PackedChildPoolRepairsDonorLinks),
@@ -74,6 +82,78 @@ static void ClosedGameSchemaOwnsFinalInventoryIds()
     PersistenceCatalog catalog = GameSchema.CreatePersistenceCatalog();
     Assert.Equal(schema.Id, catalog.Schema.Id);
     Assert.Equal(schema.ComponentCount, catalog.Schema.ComponentCount);
+}
+
+static void IronSwordUsesTypedDefinitionWithoutOwningArt()
+{
+    using Fixture fixture = CreateFixture();
+    Assert.True(fixture.Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+        (world, _, game) =>
+        {
+            DefinitionCatalog definitions = game.Content.Definitions;
+            Assert.True(definitions.TryResolve(GameDefinitionIds.IronSword, out DefinitionHandle sword));
+            Assert.True(definitions.Bind(ItemDefinitionFacets.Item).TryGet(sword, out ItemFacet item));
+            Assert.Equal("Iron Sword", item.DisplayName);
+            Assert.True(definitions.Bind(ItemDefinitionFacets.Inventory).TryGet(sword, out InventoryFacet inventory));
+            Assert.Equal((ushort)3, inventory.GridHeight);
+            Assert.True(definitions.Bind(ItemDefinitionFacets.Equipment).TryGet(sword, out EquipmentFacet equipment) &&
+                equipment.MainHand);
+            Assert.True(definitions.Bind(CombatDefinitionFacets.Combat).TryGet(sword, out CombatFacet combat));
+            Assert.Equal(6, combat.MaximumDamage);
+            Assert.True(definitions.Bind(ItemDefinitionFacets.Durability).TryGet(sword, out DurabilityFacet durability));
+            Assert.Equal(35, durability.Maximum);
+            Assert.True(definitions.Bind(SkillsDefinitionFacets.Skills).TryGet(sword, out SkillsFacet skill));
+            Assert.Equal("weapons.swords", skill.SkillFamily);
+            Assert.True(definitions.Bind(PresentationDefinitionFacets.Presentation).TryGet(sword,
+                out PresentationFacet presentation) && presentation.IsValid);
+            Assert.Equal(GameDefinitionIds.IronSword, presentation.World.Definition);
+            Assert.True(definitions.Bind(GameDefinitionIds.Swords).Contains(sword));
+            Assert.True(definitions.Bind(GameDefinitionIds.Metals).Contains(sword));
+            Assert.Equal(7, definitions.Contributions.Count);
+            // The Definition carries public fallback bounds but no GLB/asset requirement.
+            Assert.True(presentation.FallbackBounds.IsValid);
+            Assert.Equal(GamePrefabKeys.IronSword, game.Content.IronSword.Key);
+            return true;
+        }, out bool matched) && matched);
+}
+
+static void IronSwordStableDefinitionIdentitySurvivesSaveSetAndRecomposition()
+{
+    var badPresentation = new DefinitionComposer();
+    PresentationDefinitionFacets.Register(badPresentation);
+    var owner = new DefinitionPackageId("game.content");
+    badPresentation.Define(owner, GameDefinitionIds.IronSword);
+    Assert.Throws<InvalidOperationException>(() => badPresentation.Extend(GameDefinitionIds.IronSword).With(
+        owner, PresentationDefinitionFacets.Presentation,
+        new(new(new("game"), new StableDefinitionId("game.item.other"), PresentationRoleId.World),
+            new(500, 1200, 500))));
+
+    string saveRoot = Path.Combine(Path.GetTempPath(), "ultrasim-p4-iron-sword-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        using Fixture before = CreateFixture();
+        DefinitionCatalog original = before.Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, DefinitionCatalog>(
+            (world, _, game) => game.Content.Definitions, out DefinitionCatalog catalog) ? catalog :
+            throw new InvalidOperationException("Original Game Definition catalog was unavailable.");
+        var writer = new FirstPartyDefinitionReference(original, GameDefinitionIds.IronSword);
+        var coordinator = new SaveSetCoordinator(saveRoot);
+        coordinator.Save([writer], new SaveSetContext(1, 100), action => action());
+        Assert.True(original.TryResolve(GameDefinitionIds.IronSword, out DefinitionHandle originalHandle));
+
+        using Fixture after = CreateFixture();
+        DefinitionCatalog rebuilt = after.Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, DefinitionCatalog>(
+            (world, _, game) => game.Content.Definitions, out DefinitionCatalog newCatalog) ? newCatalog :
+            throw new InvalidOperationException("Rebuilt Game Definition catalog was unavailable.");
+        var reader = new FirstPartyDefinitionReference(rebuilt, default);
+        using (PreparedLoadGeneration prepared = coordinator.PrepareLoad([reader], new EmptyDefinitionResolver()))
+            prepared.Commit(parts => reader.Published = ((PreparedFirstPartyDefinitionReference)parts.Single()).Handle);
+        Assert.True(reader.Published.IsValid && reader.Published != originalHandle);
+        Assert.True(rebuilt.TryGetStableId(reader.Published, out StableDefinitionId restored) &&
+            restored == GameDefinitionIds.IronSword);
+        Assert.True(rebuilt.Bind(ItemDefinitionFacets.Inventory).TryGet(reader.Published, out InventoryFacet item) &&
+            item.GridHeight == 3);
+    }
+    finally { if (Directory.Exists(saveRoot)) Directory.Delete(saveRoot, recursive: true); }
 }
 
 static void RuleCatalogSeparatesScopeCapacityAndPlacement()
@@ -2049,6 +2129,43 @@ sealed class MemoryRenderer : IUiRenderer
 
     public void Close(IUiRenderHandle handle) { }
     private sealed class Handle : IUiRenderHandle;
+}
+
+sealed class FirstPartyDefinitionReference(DefinitionCatalog catalog, StableDefinitionId stable) : ISaveSetParticipant
+{
+    public string Key => "first-party-definition";
+    public long MaximumArtifactBytes => 128;
+    public DefinitionHandle Published;
+    public ICapturedSaveSetParticipant Capture(in SaveSetContext context) => new CapturedFirstPartyDefinitionReference(stable);
+    public IPreparedLoadParticipant Prepare(ReadOnlyMemory<byte> artifact, in SaveSetContext context)
+    {
+        StableDefinitionId id = new(new UTF8Encoding(false, true).GetString(artifact.Span));
+        if (!catalog.TryResolvePersistedDistinct([id], out DefinitionHandle[] handles))
+            throw new InvalidDataException($"Persisted Definition {id} is missing or ambiguous.");
+        return new PreparedFirstPartyDefinitionReference(handles[0]);
+    }
+}
+
+sealed class CapturedFirstPartyDefinitionReference(StableDefinitionId stable) : ICapturedSaveSetParticipant
+{
+    public string Key => "first-party-definition";
+    public void WriteArtifact(Stream destination) => destination.Write(Encoding.UTF8.GetBytes(stable.Value));
+    public void Dispose() { }
+}
+
+sealed class PreparedFirstPartyDefinitionReference(DefinitionHandle handle) : IPreparedLoadParticipant
+{
+    public string Key => "first-party-definition";
+    public DefinitionHandle Handle => handle;
+    public void Resolve(IPersistentReferenceResolver resolver) { }
+    public void Validate() { if (!handle.IsValid) throw new InvalidDataException("Unresolved Definition handle."); }
+    public void Dispose() { }
+}
+
+sealed class EmptyDefinitionResolver : IExternalPersistentReferenceResolver
+{
+    public bool TryResolve(PersistentReferenceKey key, out object? value)
+    { value = null; return false; }
 }
 
 static class Assert

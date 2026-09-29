@@ -27,6 +27,7 @@ acceptance narratives remain available through git history.
   claim that all high-speed mechanisms are implemented.
 - [Persistence](PERSISTENCE.md) — ECS snapshots, save-set transactions, game
   participant composition, recovery, and generation publication.
+- [Typed Definitions](../Framework/Definitions/README.md) — P4 stable authored identity, bounded typed facets/tags, aliases, dormant optional capabilities, and public presentation identity.
 - [UI](UI.md) — neutral UI protocol, authoritative workflows, client state, and
   Godot presentation.
 - [Game](GAME.md) — concrete game composition, schema/content ownership,

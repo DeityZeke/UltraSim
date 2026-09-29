@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../Game/Contracts/UltraSim.Game.Contracts.csproj" />
+    <ProjectReference Include="../../Game/Presentation.Contracts/UltraSim.Game.Presentation.Contracts.csproj" />
     <ProjectReference Include="../../Game/World/UltraSim.Game.World.csproj" />
     <ProjectReference Include="../../Kernels/Spatial/UltraSim.Spatial.csproj" />
     <ProjectReference Include="../../Kernels/UI/UltraSim.UI.csproj" />

@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using UltraSim.Framework.RuntimeHost;
 using UltraSim.Framework.Persistence;
+using UltraSim.Framework.Definitions;
 
 namespace UltraSim.Server.Authoring;
 
@@ -132,6 +133,7 @@ internal sealed class ScriptAssemblyContext : AssemblyLoadContext
             typeof(RuntimePackageHost).Assembly,
             typeof(UltraSim.Framework.Persistence.SaveSetCoordinator).Assembly,
             typeof(UltraSim.Framework.ControlPlane.ControlPlaneRegistry).Assembly,
+            typeof(DefinitionComposer).Assembly,
         }.ToDictionary(assembly => assembly.GetName().Name!, StringComparer.Ordinal);
     }
 

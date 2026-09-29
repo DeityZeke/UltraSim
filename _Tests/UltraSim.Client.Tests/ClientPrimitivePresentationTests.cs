@@ -1,6 +1,8 @@
 using UltraSim.Client.Core;
 using UltraSim.Game.Composition;
 using UltraSim.Game.World;
+using UltraSim.Framework.Definitions;
+using UltraSim.Game.Presentation.Contracts;
 
 internal static class ClientPrimitivePresentationTests
 {
@@ -33,6 +35,17 @@ internal static class ClientPrimitivePresentationTests
         Check(sword.Kind == ClientPrimitiveKind.GroundItem &&
             sword.HeightMillimeters == 1_200,
             "The sword needs an asset-independent ground-item pick/presentation volume.");
+        var descriptor = new PublicDefinitionPresentationDescriptor(
+            new(new("game"), new("game.item.iron-sword"), PresentationRoleId.World),
+            new(500, 1_200, 500), true);
+        Check(ClientPrimitivePresentation.TryFromDefinitionDescriptor(descriptor,
+                ClientPrimitiveKind.GroundItem, out ClientPrimitivePresentation byDefinition) &&
+            byDefinition == sword,
+            "A public semantic Definition descriptor must reproduce the sword's asset-free fallback.");
+        Check(!ClientPrimitivePresentation.TryFromDefinitionDescriptor(
+                descriptor with { FallbackBounds = new(100_000, 1, 1) },
+                ClientPrimitiveKind.GroundItem, out _),
+            "Unbounded public fallback must reject before renderer realization.");
         Check(ClientPrimitivePresentationCatalog.ForPublic(uint.MaxValue).Kind ==
             ClientPrimitiveKind.InteractiveMarker,
             "An unfamiliar disclosed public prefab should have a bounded marker.");

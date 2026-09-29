@@ -13,6 +13,7 @@
     <ProjectReference Include="../../Framework/RuntimeHost/UltraSim.Framework.RuntimeHost.csproj" />
     <ProjectReference Include="../../Framework/Persistence/UltraSim.Framework.Persistence.csproj" />
     <ProjectReference Include="../../Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj" />
+    <ProjectReference Include="../../Framework/Definitions/UltraSim.Framework.Definitions.csproj" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.5.0" />
   </ItemGroup>
 </Project>

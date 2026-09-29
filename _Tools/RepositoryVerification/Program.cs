@@ -2407,6 +2407,7 @@ string[] testProjects =
 [
     "_Tests/UltraSim.ControlPlane.Tests/UltraSim.ControlPlane.Tests.csproj",
     "_Tests/UltraSim.Framework.RuntimeHost.Tests/UltraSim.Framework.RuntimeHost.Tests.csproj",
+    "_Tests/UltraSim.Framework.Definitions.Tests/UltraSim.Framework.Definitions.Tests.csproj",
     "_Tests/UltraSim.Framework.Persistence.Tests/UltraSim.Framework.Persistence.Tests.csproj",
     "_Tests/UltraSim.Server.Authoring.Tests/UltraSim.Server.Authoring.Tests.csproj",
     "_Tests/UltraSim.ECS.Tests/UltraSim.ECS.Tests.csproj",
@@ -2906,6 +2907,7 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
                 "UltraSim.Client.StandardUi",
                 "UltraSim.Framework.ControlPlane",
                 "UltraSim.Framework.Persistence",
+                "UltraSim.Framework.Definitions",
                 "UltraSim.Game.Composition", "UltraSim.Game.Replication",
                 "UltraSim.Server.Runtime"],
             ["UltraSim.Client.Network", "UltraSim.Network", "UltraSim.Game.Protocol",
@@ -2916,11 +2918,14 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
             "Online",
             ["UltraSim.Client.Application.Godot", "UltraSim.Client.Content", "UltraSim.Client.Network",
                 "UltraSim.Client.StandardUi", "UltraSim.Framework.ControlPlane",
+                "UltraSim.Framework.Definitions", "UltraSim.Game.Presentation.Contracts",
                 "UltraSim.Game.Protocol", "UltraSim.Network"],
             ["UltraSim.Client.BuiltInTestWorlds", "UltraSim.Client.Local",
                 "UltraSim.Game.Composition", "UltraSim.Game.Inventory", "UltraSim.Game.Persistence",
                 "UltraSim.Game.Replication",
                 "UltraSim.Game.Replication.Remote", "UltraSim.Game.UI", "UltraSim.Server.Hosting",
+                "UltraSim.Game.Items.Contracts", "UltraSim.Game.Combat.Contracts",
+                "UltraSim.Game.Skills.Contracts",
                 "UltraSim.Framework.Http.Endpoint", "UltraSim.Bridges.Http.Kestrel",
                 "UltraSim.Framework.Persistence",
                 "UltraSim.Server.Persistence", "UltraSim.Server.Runtime",
@@ -3135,8 +3140,10 @@ static ContentlessOnlineExport VerifyContentlessOnlineExport(string root, string
         "UltraSim.Client.StandardUi",
         "UltraSim.ECS",
         "UltraSim.Framework.ControlPlane",
+        "UltraSim.Framework.Definitions",
         "UltraSim.Game.Accounting",
         "UltraSim.Game.Contracts",
+        "UltraSim.Game.Presentation.Contracts",
         "UltraSim.Game.Protocol",
         "UltraSim.Game.World",
         "UltraSim.Network",
@@ -3167,6 +3174,9 @@ static ContentlessOnlineExport VerifyContentlessOnlineExport(string root, string
         "UltraSim.Game.Replication",
         "UltraSim.Game.Replication.Remote",
         "UltraSim.Framework.Persistence",
+        "UltraSim.Game.Items.Contracts",
+        "UltraSim.Game.Combat.Contracts",
+        "UltraSim.Game.Skills.Contracts",
         "UltraSim.Server.Hosting",
         "UltraSim.Server.Persistence",
         "UltraSim.Server.Runtime",
@@ -3223,12 +3233,17 @@ static FinalClientProductExports VerifyFinalClientProductExports(
         "UltraSim.Client.StandardUi",
         "UltraSim.ECS",
         "UltraSim.Framework.ControlPlane",
+        "UltraSim.Framework.Definitions",
         "UltraSim.Framework.Persistence",
         "UltraSim.Game.Accounting",
         "UltraSim.Game.Admission",
         "UltraSim.Game.Chat",
         "UltraSim.Game.Composition",
         "UltraSim.Game.Contracts",
+        "UltraSim.Game.Items.Contracts",
+        "UltraSim.Game.Combat.Contracts",
+        "UltraSim.Game.Skills.Contracts",
+        "UltraSim.Game.Presentation.Contracts",
         "UltraSim.Game.Inventory",
         "UltraSim.Game.Persistence",
         "UltraSim.Game.Physics",
@@ -3301,11 +3316,16 @@ static FinalClientProductExports VerifyFinalClientProductExports(
         "UltraSim.Framework.ControlPlane",
         "UltraSim.Framework.Http.Endpoint",
         "UltraSim.Framework.Persistence",
+        "UltraSim.Framework.Definitions",
         "UltraSim.Game.Accounting",
         "UltraSim.Game.Admission",
         "UltraSim.Game.Chat",
         "UltraSim.Game.Composition",
         "UltraSim.Game.Contracts",
+        "UltraSim.Game.Items.Contracts",
+        "UltraSim.Game.Combat.Contracts",
+        "UltraSim.Game.Skills.Contracts",
+        "UltraSim.Game.Presentation.Contracts",
         "UltraSim.Game.Inventory",
         "UltraSim.Game.Persistence",
         "UltraSim.Game.Physics",
@@ -5875,6 +5895,7 @@ static void VerifyArchitecture(string root)
     {
         ["Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj"] = [],
         ["Framework/RuntimeHost/UltraSim.Framework.RuntimeHost.csproj"] = [],
+        ["Framework/Definitions/UltraSim.Framework.Definitions.csproj"] = [],
         ["Framework/Persistence/UltraSim.Framework.Persistence.csproj"] = [],
         ["Bridges/ControlPlane.ECS/UltraSim.Bridges.ControlPlane.ECS.csproj"] =
             ["Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj", "Kernels/ECS/UltraSim.ECS.csproj"],
@@ -5901,6 +5922,7 @@ static void VerifyArchitecture(string root)
             ["Framework/Persistence/UltraSim.Framework.Persistence.csproj", "Kernels/ECS/UltraSim.ECS.csproj"],
         ["Server/Authoring/UltraSim.Server.Authoring.csproj"] =
             ["Framework/RuntimeHost/UltraSim.Framework.RuntimeHost.csproj",
+             "Framework/Definitions/UltraSim.Framework.Definitions.csproj",
              "Framework/Persistence/UltraSim.Framework.Persistence.csproj",
              "Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj"],
         ["Server/Runtime/UltraSim.Server.Runtime.csproj"] =
@@ -5943,6 +5965,7 @@ static void VerifyArchitecture(string root)
         ["Client/Core/UltraSim.Client.Core.csproj"] =
         [
             "Game/Contracts/UltraSim.Game.Contracts.csproj",
+            "Game/Presentation.Contracts/UltraSim.Game.Presentation.Contracts.csproj",
             "Game/World/UltraSim.Game.World.csproj",
             "Kernels/Spatial/UltraSim.Spatial.csproj",
             "Kernels/UI/UltraSim.UI.csproj",
@@ -6009,6 +6032,14 @@ static void VerifyArchitecture(string root)
             "Game/Contracts/UltraSim.Game.Contracts.csproj",
             "Kernels/ECS/UltraSim.ECS.csproj",
         ],
+        ["Game/Items.Contracts/UltraSim.Game.Items.Contracts.csproj"] =
+            ["Framework/Definitions/UltraSim.Framework.Definitions.csproj"],
+        ["Game/Combat.Contracts/UltraSim.Game.Combat.Contracts.csproj"] =
+            ["Framework/Definitions/UltraSim.Framework.Definitions.csproj"],
+        ["Game/Skills.Contracts/UltraSim.Game.Skills.Contracts.csproj"] =
+            ["Framework/Definitions/UltraSim.Framework.Definitions.csproj"],
+        ["Game/Presentation.Contracts/UltraSim.Game.Presentation.Contracts.csproj"] =
+            ["Framework/Definitions/UltraSim.Framework.Definitions.csproj"],
         ["Game/Admission/UltraSim.Game.Admission.csproj"] =
         [
             "Game/Accounting/UltraSim.Game.Accounting.csproj",
@@ -6038,7 +6069,12 @@ static void VerifyArchitecture(string root)
             ["Game/World/UltraSim.Game.World.csproj"],
         ["Game/Composition/UltraSim.Game.Composition.csproj"] =
         [
+            "Framework/Definitions/UltraSim.Framework.Definitions.csproj",
             "Game/Accounting/UltraSim.Game.Accounting.csproj",
+            "Game/Items.Contracts/UltraSim.Game.Items.Contracts.csproj",
+            "Game/Combat.Contracts/UltraSim.Game.Combat.Contracts.csproj",
+            "Game/Skills.Contracts/UltraSim.Game.Skills.Contracts.csproj",
+            "Game/Presentation.Contracts/UltraSim.Game.Presentation.Contracts.csproj",
             "Game/Contracts/UltraSim.Game.Contracts.csproj",
             "Game/Inventory/UltraSim.Game.Inventory.csproj",
             "Game/Physics/UltraSim.Game.Physics.csproj",

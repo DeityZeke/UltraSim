@@ -1,0 +1,1 @@
+{"format":"UltraSim.RuntimePackage/v4","id":"p4.definitions","version":"1.0.0","stage":"Scripts","class":"Definition","dependencies":[{"package":"p4.items.contracts","minimumVersion":"1.0.0"},{"package":"p4.combat.contracts","minimumVersion":"1.0.0"}],"optionalServices":["p4.combat.service"],"services":["p4.catalog"],"entrypoint":"P4.Definitions.DefinitionEntry"}

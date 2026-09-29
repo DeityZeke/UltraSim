@@ -1,6 +1,7 @@
 using System.Reflection;
 using UltraSim.Bridges.ControlPlane.RuntimeHost;
 using UltraSim.Framework.ControlPlane;
+using UltraSim.Framework.Definitions;
 using UltraSim.Framework.Persistence;
 using UltraSim.Framework.RuntimeHost;
 using UltraSim.Server.Authoring;
@@ -51,6 +52,11 @@ try
         coreKey = first.Packages.Single(p => p.Id.Value == "sample.core").CompileKey;
         Check(nestedScriptKey != first.Packages.Single(p => p.Id.Value == "sample.scripts").CompileKey);
         object firstConsumer = Service<object>(first.Host, "sample.consumer");
+        DefinitionCatalog authored = (DefinitionCatalog)firstConsumer.GetType().GetProperty("Definitions")!.GetValue(firstConsumer)!;
+        Check(authored.TryResolve(new StableDefinitionId("sample.item.iron-sword"), out var authoredSword) &&
+            authoredSword.IsValid && authored.Contributions.Count == 1 &&
+            (int)firstConsumer.GetType().GetProperty("CombatMinimum")!.GetValue(firstConsumer)! == 2 &&
+            (bool)firstConsumer.GetType().GetProperty("CombatRuntimeActive")!.GetValue(firstConsumer)!);
         contractsAssemblyIdentity = (string)firstConsumer.GetType().GetProperty("ContractsAssembly")!.GetValue(firstConsumer)!;
         ISaveSetParticipant store = Service<ISaveSetParticipant>(first.Host, "sample.store");
         ControlPlaneRegistry registry = Service<ControlPlaneRegistry>(first.Host, "sample.registry");
@@ -175,6 +181,11 @@ try
         Check(noCore.Host.State == RuntimeHostState.Running);
         Check(!noCore.Host.TryGet(new RuntimeServiceHandle<object>(new("sample.greeting"), noCore.Host.Generation), out _));
         object consumer = Service<object>(noCore.Host, "sample.consumer");
+        DefinitionCatalog dormant = (DefinitionCatalog)consumer.GetType().GetProperty("Definitions")!.GetValue(consumer)!;
+        Check(dormant.TryResolve(new StableDefinitionId("sample.item.iron-sword"), out var dormantSword) &&
+            dormantSword.IsValid && dormant.Contributions.Count == 1 &&
+            (int)consumer.GetType().GetProperty("CombatMinimum")!.GetValue(consumer)! == 2 &&
+            !(bool)consumer.GetType().GetProperty("CombatRuntimeActive")!.GetValue(consumer)!);
         Check((bool)consumer.GetType().GetProperty("HasCore")!.GetValue(consumer)! == false);
         Check((string)consumer.GetType().GetProperty("ContractsType")!.GetValue(consumer)! == "Sample.Contracts.IGreeting");
         Check((string)consumer.GetType().GetProperty("ContractsAssembly")!.GetValue(consumer)! == contractsAssemblyIdentity);
@@ -188,6 +199,42 @@ try
     Throws<InvalidDataException>(() => ServerScriptAuthoring.Start(scripts, cache), "missing-service");
     File.WriteAllText(requiredManifest, optionalText);
     Console.WriteLine("PASS P2 real compiled Contracts-only survivability and required-Core rejection");
+
+    string p4Scripts = Path.Combine(root, "p4", "Scripts");
+    string p4Cache = Path.Combine(root, "p4", "cache");
+    CopySample(Path.Combine(repository, "Server", "Scripts.P4"), p4Scripts);
+    using (ServerScriptComposition p4 = ServerScriptAuthoring.Start(p4Scripts, p4Cache))
+    {
+        Check(p4.Packages.Count == 4 && p4.Packages.Count(p => p.Stage == RuntimePackageStage.Contracts) == 2);
+        object holder = Service<object>(p4.Host, "p4.catalog");
+        DefinitionCatalog catalog = (DefinitionCatalog)holder.GetType().GetProperty("Catalog")!.GetValue(holder)!;
+        Check(catalog.TryResolve(new StableDefinitionId("p4.items.old-sword"), out DefinitionHandle sword) &&
+            catalog.TryGetStableId(sword, out StableDefinitionId canonical) &&
+            canonical == new StableDefinitionId("p4.items.iron-sword") &&
+            catalog.Contributions.Count == 2 &&
+            catalog.Contributions.Any(c => c.Facet.Value == "p4.item") &&
+            catalog.Contributions.Any(c => c.Facet.Value == "p4.combat") &&
+            catalog.Bind(new DefinitionTagId("weapons.swords")).Contains(sword) &&
+            (int)holder.GetType().GetProperty("CombatMaximum")!.GetValue(holder)! == 6 &&
+            (bool)holder.GetType().GetProperty("CombatRuntimeActive")!.GetValue(holder)!);
+    }
+    Directory.Delete(Path.Combine(p4Scripts, "p4.combat.core"), recursive: true);
+    using (ServerScriptComposition p4NoCore = ServerScriptAuthoring.Start(p4Scripts, p4Cache))
+    {
+        Check(p4NoCore.Packages.Count == 3 && p4NoCore.Packages.Count(p => p.Stage == RuntimePackageStage.Contracts) == 2);
+        object holder = Service<object>(p4NoCore.Host, "p4.catalog");
+        DefinitionCatalog catalog = (DefinitionCatalog)holder.GetType().GetProperty("Catalog")!.GetValue(holder)!;
+        Check(catalog.Contributions.Count == 2 &&
+            catalog.Contributions.Any(c => c.Facet.Value == "p4.combat") &&
+            (int)holder.GetType().GetProperty("CombatMaximum")!.GetValue(holder)! == 6 &&
+            !(bool)holder.GetType().GetProperty("CombatRuntimeActive")!.GetValue(holder)!);
+    }
+    string p4Manifest = Path.Combine(p4Scripts, "p4.definitions", "manifest.json");
+    File.WriteAllText(p4Manifest, File.ReadAllText(p4Manifest).Replace(
+        "\"optionalServices\":[\"p4.combat.service\"]",
+        "\"requiresServices\":[\"p4.combat.service\"]", StringComparison.Ordinal));
+    Throws<InvalidDataException>(() => ServerScriptAuthoring.Start(p4Scripts, p4Cache), "missing-service");
+    Console.WriteLine("PASS P4 compiled two-Contracts Definition, optional Core removal and required-Core pre-authority rejection");
 
     File.AppendAllText(Path.Combine(scripts, "sample.scripts", "Script.cs"), "\n#error TEST_COMPILER_FAILURE\n");
     try { ServerScriptAuthoring.Start(scripts, cache); throw new Exception("Expected compiler failure."); }

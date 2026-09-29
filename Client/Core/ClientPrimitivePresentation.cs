@@ -1,5 +1,6 @@
 using UltraSim.Game.Composition;
 using UltraSim.Game.World;
+using UltraSim.Game.Presentation.Contracts;
 
 namespace UltraSim.Client.Core;
 
@@ -103,6 +104,21 @@ public readonly record struct ClientPrimitivePresentation(
             false);
         if (!candidate.IsValid) return false;
         presentation = candidate;
+        return true;
+    }
+
+    /// <summary>Uses only admitted public Definition presentation facts, never optional art or private facets.</summary>
+    public static bool TryFromDefinitionDescriptor(
+        in PublicDefinitionPresentationDescriptor descriptor, ClientPrimitiveKind kind,
+        out ClientPrimitivePresentation presentation)
+    {
+        presentation = default;
+        if (!descriptor.IsValid || kind is not (ClientPrimitiveKind.GroundItem or ClientPrimitiveKind.PublicObject))
+            return false;
+        PublicFallbackBounds bounds = descriptor.FallbackBounds;
+        presentation = Grounded(kind, ClientPrimitiveShape.Box,
+            bounds.WidthMillimeters, bounds.HeightMillimeters, bounds.DepthMillimeters,
+            descriptor.InteractionVisible);
         return true;
     }
 }

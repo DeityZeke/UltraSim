@@ -1,5 +1,10 @@
 using UltraSim.ECS;
+using UltraSim.Framework.Definitions;
+using UltraSim.Game.Combat.Contracts;
 using UltraSim.Game.Inventory;
+using UltraSim.Game.Items.Contracts;
+using UltraSim.Game.Presentation.Contracts;
+using UltraSim.Game.Skills.Contracts;
 using UltraSim.Game.World;
 
 namespace UltraSim.Game.Composition;
@@ -22,6 +27,14 @@ public static class GamePrefabKeys
     public static readonly PrefabKey FarGate = new("game.world.far-gate");
     public static readonly PrefabKey InformationalSign = new("game.world.informational-sign");
     public static readonly PrefabKey WoodlandAnimal = new("game.world.woodland-animal");
+}
+
+/// <summary>Authored semantic identity; the matching prefab is one optional ECS realization.</summary>
+public static class GameDefinitionIds
+{
+    public static readonly StableDefinitionId IronSword = new("game.item.iron-sword");
+    public static readonly DefinitionTagId Swords = new("weapons.swords");
+    public static readonly DefinitionTagId Metals = new("materials.metals");
 }
 
 /// <summary>Stable compiled inventory policy identities owned by this game content set.</summary>
@@ -59,7 +72,8 @@ public sealed class GameContent : IInventoryContentCatalog
         PrefabHandle informationalSign,
         PrefabHandle woodlandAnimal,
         WorldContentBinding world,
-        Dictionary<ArchetypeHandle, GridPlacementTransitions> gridPlacementTransitions)
+        Dictionary<ArchetypeHandle, GridPlacementTransitions> gridPlacementTransitions,
+        DefinitionCatalog definitions)
     {
         ValidateContainerRules(inventoryRules, backpack);
         ValidateContainerRules(inventoryRules, gridBackpack);
@@ -81,6 +95,7 @@ public sealed class GameContent : IInventoryContentCatalog
         InformationalSign = informationalSign;
         WoodlandAnimal = woodlandAnimal;
         World = world;
+        Definitions = definitions;
         _gridPlacementTransitions = gridPlacementTransitions;
         _itemsByHandle = new Dictionary<PrefabHandle, InventoryItemDefinition>(3)
         {
@@ -125,6 +140,7 @@ public sealed class GameContent : IInventoryContentCatalog
     public PrefabHandle InformationalSign { get; }
     public PrefabHandle WoodlandAnimal { get; }
     public WorldContentBinding World { get; }
+    public DefinitionCatalog Definitions { get; }
 
     // Governance: bump this identity whenever the semantic meaning of any packed numeric world-content
     // ID changes incompatibly, even when the numeric value itself remains admitted and unchanged.
@@ -203,6 +219,21 @@ public sealed class GameContent : IInventoryContentCatalog
                     InitialGridHeight: 5),
             ]);
         var content = new ContentCatalogBuilder(world.Schema);
+        DefinitionCatalog definitions = CompileDefinitions();
+        if (!definitions.TryResolve(GameDefinitionIds.IronSword, out DefinitionHandle swordDefinition))
+            throw new InvalidOperationException("Iron Sword Definition did not resolve.");
+        var itemTable = definitions.Bind(ItemDefinitionFacets.Item);
+        var inventoryTable = definitions.Bind(ItemDefinitionFacets.Inventory);
+        var equipmentTable = definitions.Bind(ItemDefinitionFacets.Equipment);
+        var combatTable = definitions.Bind(CombatDefinitionFacets.Combat);
+        var durabilityTable = definitions.Bind(ItemDefinitionFacets.Durability);
+        if (!itemTable.TryGet(swordDefinition, out ItemFacet swordItem) ||
+            !inventoryTable.TryGet(swordDefinition, out InventoryFacet swordInventory) ||
+            !equipmentTable.TryGet(swordDefinition, out EquipmentFacet swordEquipment) ||
+            !combatTable.TryGet(swordDefinition, out CombatFacet swordCombat) ||
+            !durabilityTable.TryGet(swordDefinition, out DurabilityFacet swordDurability) ||
+            !combatTable.RuntimeActive)
+            throw new InvalidOperationException("Iron Sword typed Definition is incomplete for the selected Game composition.");
         PrefabBuilder character = content.Define(GamePrefabKeys.Character);
         character.With(new GameCharacter { Marker = 1 });
         character.With(new GameSimulationState { TickMarker = 0 });
@@ -262,8 +293,8 @@ public sealed class GameContent : IInventoryContentCatalog
             EquipSlot = InventoryEquipSlot.None,
             Quantity = 1,
         });
-        swordPrefab.With(new InventoryEquipCapability { AllowedSlots = InventoryEquipSlots.MainHand });
-        swordPrefab.With(new InventoryGridFootprint { Width = 1, Height = 3 });
+        swordPrefab.With(new InventoryEquipCapability { AllowedSlots = swordEquipment.MainHand ? InventoryEquipSlots.MainHand : InventoryEquipSlots.None });
+        swordPrefab.With(new InventoryGridFootprint { Width = swordInventory.GridWidth, Height = swordInventory.GridHeight });
         swordPrefab.With(new WorldPositionComponent(new WorldPosition(0, 0, 0, 0, 0)));
         swordPrefab.With(new WorldPublicComponent(new WorldPublicDescriptor(
             GameWorldPublicPrefabIds.IronSword,
@@ -273,22 +304,22 @@ public sealed class GameContent : IInventoryContentCatalog
         // Demo spawning overwrites it once with the deterministic rolled instance result.
         swordPrefab.With(new GameWeaponInstance
         {
-            DamageMinimum = 2,
-            DamageMaximum = 6,
-            MaximumDurability = 35,
-            CurrentDurability = 35,
+            DamageMinimum = checked((ushort)swordCombat.MinimumDamage),
+            DamageMaximum = checked((ushort)swordCombat.MaximumDamage),
+            MaximumDurability = checked((ushort)swordDurability.Maximum),
+            CurrentDurability = checked((ushort)swordDurability.Maximum),
             Quality = 1,
             Element = GameWeaponElement.None,
             SpawnOrdinal = 0,
         });
         swordPrefab.With(new GameSpawnedItem { Spawner = Entity.Null });
-        swordPrefab.DisplayName("Iron Sword");
+        swordPrefab.DisplayName(swordItem.DisplayName);
         var swordSource = new InventoryItemAuthoring(
             GamePrefabKeys.IronSword,
-            "Iron Sword",
-            1,
-            InventoryEquipSlots.MainHand,
-            new InventoryItemFootprint(1, 3));
+            swordItem.DisplayName,
+            swordItem.MaximumQuantity,
+            swordEquipment.MainHand ? InventoryEquipSlots.MainHand : InventoryEquipSlots.None,
+            new InventoryItemFootprint(swordInventory.GridWidth, swordInventory.GridHeight));
 
         PrefabBuilder swordSpawner = content.Define(GamePrefabKeys.IronSwordSpawner);
         swordSpawner.With(new WorldPositionComponent(new WorldPosition(0, 0, 0, 0, 0)));
@@ -385,7 +416,32 @@ public sealed class GameContent : IInventoryContentCatalog
                 GameWorldStaticDefinitionIds.Shelf,
                 GameWorldStaticDefinitionIds.Book,
             ]),
-            gridPlacementTransitions);
+            gridPlacementTransitions,
+            definitions);
+    }
+
+    private static DefinitionCatalog CompileDefinitions()
+    {
+        var composer = new DefinitionComposer();
+        ItemDefinitionFacets.Register(composer);
+        CombatDefinitionFacets.Register(composer);
+        SkillsDefinitionFacets.Register(composer);
+        PresentationDefinitionFacets.Register(composer);
+        var game = new DefinitionPackageId("game.content");
+        composer.Define(game, GameDefinitionIds.IronSword)
+            .ItemMeaning(game, new("Iron Sword", 1))
+            .InventoryMeaning(game, new(1, 3))
+            .EquipmentMeaning(game, new(true))
+            .CombatMeaning(game, new(2, 6))
+            .DurabilityMeaning(game, new(35))
+            .SkillsMeaning(game, new("weapons.swords"))
+            .WorldPresentation(game, new(
+                new(new("game"), GameDefinitionIds.IronSword, PresentationRoleId.World),
+                new(500, 1200, 500)));
+        composer.ContributeTag(game, GameDefinitionIds.Swords, GameDefinitionIds.IronSword);
+        composer.ContributeTag(game, GameDefinitionIds.Metals, GameDefinitionIds.IronSword);
+        // Game currently owns the sword action; Skills remains authored meaning without a selected Core.
+        return composer.Freeze([CombatDefinitionFacets.Runtime]);
     }
 
     private static InventoryContainerDefinition BindContainer(
