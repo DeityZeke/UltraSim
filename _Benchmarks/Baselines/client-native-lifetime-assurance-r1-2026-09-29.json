@@ -1,0 +1,81 @@
+{
+  "checkpoint": "Godot/.NET native shutdown-lifetime assurance R1",
+  "date": "2026-09-29",
+  "disposition": "known_reproduced_product_blocker_closed",
+  "startingHead": "ac4e61938e994eddb63ee1bb17ee004e3215d117",
+  "repairCommitTested": "f46ee3bd8aff14a9516781d49d147a261dcacbb2",
+  "environment": {
+    "os": "Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D",
+    "dotnetSdk": "8.0.131",
+    "dotnetRuntime": "8.0.31",
+    "godotRevision": "4.7.1 mono a13da4feb",
+    "nativeExecutableSha256": "9d2552734fbd46677f76187537bd0a3833ceaf451812a9938d549cd2be453478",
+    "officialPackageSha256": "03f77dd361bdf7c9edf564fc92c95ced31aa71378a5d14555cc670b1cda6c554",
+    "processArrangement": "independent exported Single Player processes; no affinity",
+    "warmCache": "same current warm Official-content cache for all checkpoint controls",
+    "timeoutSecondsPerProcess": 80
+  },
+  "historicalExactSourceControls": [
+    { "checkpoint": "P1 accepted", "source": "c106a7b6ec9d9b4b825c0a8b507147371f3d4488", "passesBeforeFailure": 7, "attempts": 8, "exit": 139, "pid": 698107, "finalizerType": "Godot.Image" },
+    { "checkpoint": "P2 closure", "source": "4bbd26a24bc3b9c55c3a0d0e90a3f848eb9d83d4", "passes": 10, "attempts": 10, "exit": 0, "interpretation": "bounded negative sample, not a fix" },
+    { "checkpoint": "P3 tested", "source": "9134f6d9bafd5708e7ceeaa70005e7bf60f9d95d", "passesBeforeFailure": 4, "attempts": 5, "exit": 139, "pid": 702420, "finalizerType": "Godot.Animation" },
+    { "checkpoint": "pre-P4", "source": "46dfbf1648eb8e01f574a7dde1f40c7d108bd93e", "passesBeforeFailure": 3, "attempts": 4, "exit": 139, "pid": 704178, "finalizerType": "Godot.ViewportTexture" },
+    { "checkpoint": "P4 tested", "source": "137289c9c195a42f78555b72d5c61d1515b1c6b9", "passesBeforeFailure": 2, "attempts": 3, "exit": 139, "pid": 706077, "finalizerType": "Godot.ViewportTexture" }
+  ],
+  "candidateSequence": [
+    { "candidate": "first uncommitted repair", "passesBeforeFailure": 4, "attempts": 5, "exit": 139, "pid": 672540, "finalizerType": "Godot.StyleBoxFlat" },
+    { "candidate": "second uncommitted repair", "passesBeforeFailure": 11, "attempts": 12, "exit": 139, "pid": 677032, "finalizerType": "Godot.Animation" },
+    { "candidate": "final f46ee3bd repair", "passes": 200, "attempts": 200, "exit": 0, "crashes": 0 }
+  ],
+  "supplementaryRetainedExports": [
+    { "sourceClass": "P1-era", "pid": 664066, "finalizerType": "Godot.ArrayMesh" },
+    { "sourceClass": "P4-era", "pid": 663342, "finalizerType": "Godot.ViewportTexture" }
+  ],
+  "nativePath": {
+    "managed": "GodotObject.Finalize -> Dispose(false)",
+    "native": "Godot executable +0xb55d75 -> pthread_mutex_lock",
+    "p4ExactCrashRegisters": { "rdi": "0x170", "r15": "0x0", "singletonPointerAt0x4a76a38": "0x0" },
+    "attributionStrength": "source-correlated via call path, disassembly, registers; binary has no DWARF symbol for offset"
+  },
+  "finalizerQueueReadyCounts": {
+    "p1Retained": 7409,
+    "p4Retained": 45681,
+    "firstRepair": 45652,
+    "secondRepair": 1997,
+    "p1Exact": 70,
+    "p3Exact": 1977,
+    "preP4Exact": 45500,
+    "p4Exact": 45536,
+    "meaning": "all finalizable objects including Godot collection/string wrappers; not a count of unsafe application owners"
+  },
+  "repair": [
+    "owned UI ViewportTexture",
+    "owned GLTF imported ArrayMesh wrappers through visual retirement",
+    "owned tooltip StyleBoxFlat",
+    "scoped Image, Animation and NodePath wrappers",
+    "capture reuses owned gameplay texture"
+  ],
+  "verification": {
+    "nativeS08": "pass",
+    "nativeT010": "pass",
+    "nativeF110": "pass",
+    "nativeF111": "pass",
+    "mutationControls": "mesh, viewport texture, tooltip style, animation lookup assertions fail when retirement removed",
+    "physicalExports": ["SinglePlayer", "Online", "Complete"],
+    "startupClose": { "passes": 30, "attempts": 30, "perEdition": 10 },
+    "expectedStartupFailure": "edition mismatch exits 1 without native crash",
+    "realWindowClose": { "passes": 3, "attempts": 3 },
+    "warmOfficial": { "passes": 200, "attempts": 200 },
+    "architectureOnly": "pass",
+    "canonicalRelease": "pass_uninterrupted_on_repair_commit",
+    "canonicalLogSha256": "1b40e4430aad64c16253184fac3e61c9aaa311bedcbadf750eea58bef4a3a212",
+    "warmLedgerSha256": "fb667236543669ec849c0c6fed531e5d742d45146210bf0bef544e7038c35d87"
+  },
+  "rawArchive": {
+    "path": "client-native-lifetime-assurance-r1-2026-09-29.raw.tar.gz",
+    "sha256": "df58bb16caced3908fb06efb9547780e2fc8277e3dc0055d068894a4d5f5312d",
+    "fullDumpsAndExports": ".output/native-lifetime-assurance-2026-09-29 (ignored; process-memory dumps must not be published)"
+  },
+  "roadmap": { "P1": "closed", "P4": "closed", "P5": "safe_to_begin_not_started", "PF6": "not_started" }
+}

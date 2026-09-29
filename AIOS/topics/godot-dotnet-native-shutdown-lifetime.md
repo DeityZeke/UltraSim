@@ -1,11 +1,12 @@
 # Godot / .NET Native Shutdown Lifetime Assurance
 
-Status: CANONICAL evidence history; ACTIVE product blocker / assurance reopened
+Status: CANONICAL evidence history; R1 product blocker CLOSED for reproduced paths
 
 Primary references:
 - [P1 native-lifetime closure evidence](../../_Benchmarks/Baselines/framework-p1-native-lifetime-closure-2026-09-28.md)
 - [Original native-lifetime repair candidate](../../_Benchmarks/Baselines/client-native-lifetime-repair-2026-09-28.md)
 - [P4 evidence / reproduced warm-exit finding](../../_Benchmarks/Baselines/framework-p4-typed-definitions-2026-09-29.md)
+- [R1 causal repair and acceptance](../../_Benchmarks/Baselines/client-native-lifetime-assurance-r1-2026-09-29.md)
 
 Related:
 - [Godot adapter / headless boundary](../TOPICS.md)
@@ -64,3 +65,11 @@ Closure should require causal evidence, not only a lucky stress batch:
 - finish with one uninterrupted canonical Release verifier on the exact fixed tree.
 
 Keep the historical failed and successful campaigns intact.
+
+## R1 closure, 2026-09-29
+
+Fresh exact-source exported controls reproduced the same Finalizer/native path on the accepted P1 tree (run 8/10), P3 (5/10), pre-P4 (4/10), and P4 (3/10). P2 passed only 10/10, an insufficient negative sample. Full dumps identified `Image`, `Animation`, and `ViewportTexture` on those controls; intermediate repair candidates exposed `StyleBoxFlat` and another `Animation`, while retained earlier dumps also identified `ArrayMesh`. This establishes a residual multi-wrapper ownership gap already present at P1 closure, not a P4-introduced crash.
+
+Production repair `f46ee3bd8aff14a9516781d49d147a261dcacbb2` gives these application-reachable wrappers explicit Godot-thread owners or scoped disposal before language teardown. Native strong-reference assertions and removal mutations prove the major retirement boundaries; the same warm Official-content path passed 200/200, startup-close 30/30, window close 3/3, all three physical exports, architecture verification, and one uninterrupted canonical Release verifier on the repair commit. No engine patch, sleep, forced GC, finalizer drain, or exception suppression was used.
+
+The native `+0xb55d75` call path is source-correlated with the Godot 4.7.1 C# instance-binding lookup while its language singleton is null; the stripped binary does not provide direct source-line symbols. Full SOS/GDB evidence is linked in the R1 companion. The current known product blocker is **CLOSED**. P1/P4 historical records remain accurate as originally written; P5 is safe to begin but has not begun, and PF6 has not started. A newly reproduced wrapper failure would require fresh type/owner attribution.
