@@ -82,6 +82,12 @@ static void VersionRangeFailsBeforeStart()
         Package("consumer.scripts", ModulePackageStage.Scripts,
             dependencies: [new(new("provider.contracts"), new(1, 0, 0), new(2, 0, 0))])]);
     Throws<ArgumentException>(() => new ModuleDependency(new("provider.contracts"), new(2, 0, 0), new(2, 0, 0)));
+    var provider = Package("provider.contracts", ModulePackageStage.Contracts);
+    string bounded = Resolve([provider, Package("consumer.scripts", ModulePackageStage.Scripts,
+        dependencies: [new(new("provider.contracts"), new(1, 0, 0), new(2, 0, 0))])]).ManifestFingerprint;
+    string wider = Resolve([provider, Package("consumer.scripts", ModulePackageStage.Scripts,
+        dependencies: [new(new("provider.contracts"), new(1, 0, 0), new(3, 0, 0))])]).ManifestFingerprint;
+    Check(bounded != wider);
 }
 
 static void CapabilityAdmissionAndConflict()

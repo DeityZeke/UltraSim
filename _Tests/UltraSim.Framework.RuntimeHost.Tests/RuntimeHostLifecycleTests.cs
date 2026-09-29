@@ -38,7 +38,7 @@ internal static class RuntimeHostLifecycleTests
         // A Framework-only OOP owner can attach multiple instances of one family without an Entity.
         var sidecars = new RuntimeSidecars();
         var owner = new SidecarOwnerId("sample.owner");
-        var family = new ModulePackageId("sample.notes");
+        var family = new SidecarTypeId("sample.notes");
         var one = new SidecarKey(owner, family, "one");
         var two = new SidecarKey(owner, family, "two");
         var singleton = new SidecarKey(SidecarOwnerId.Global, family);

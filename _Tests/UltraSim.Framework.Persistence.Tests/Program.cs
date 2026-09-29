@@ -6,8 +6,8 @@ string root = Path.Combine(Path.GetTempPath(), "ultrasim-framework-save-" + Guid
 try
 {
     var live = new RuntimeSidecars();
-    var first = new SidecarKey(new("owner.one"), new("notes.core"), "left");
-    var second = new SidecarKey(new("owner.one"), new("notes.core"), "right");
+    var first = new SidecarKey(new("owner.one"), new("notes.quest"), "left");
+    var second = new SidecarKey(new("owner.one"), new("notes.quest"), "right");
     live.Add(first, new Note(17)); live.Add(second, new Note(29));
     var participant = new NoteParticipant(live, first, second);
     var coordinator = new SaveSetCoordinator(root);
@@ -39,7 +39,7 @@ try
     using (PreparedLoadGeneration recovered = coordinator.PrepareLoad(
         [participant], EmptyResolver.Instance, SaveSetRecoveryMode.CurrentThenNewestComplete))
         Check(recovered.Sequence == 1);
-    Console.WriteLine("PASS P2 Framework-only multiple same-family sidecars, durable roundtrip, staging rejection and recovery");
+    Console.WriteLine("PASS P2 Framework-only multiple same-type sidecars, durable roundtrip, staging rejection and recovery");
 }
 finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
 
@@ -83,7 +83,7 @@ sealed class NoteParticipant : ISaveSetParticipant
     }
     private static int Read(BinaryReader reader, SidecarKey expected)
     {
-        if (reader.ReadString() != expected.Owner.Value || reader.ReadString() != expected.Family.Value ||
+        if (reader.ReadString() != expected.Owner.Value || reader.ReadString() != expected.Type.Value ||
             reader.ReadString() != expected.Instance)
             throw new InvalidDataException("Wrong sidecar owner/family/instance identity.");
         return reader.ReadInt32();
@@ -103,7 +103,7 @@ sealed class CapturedNotes(string key, byte version, SidecarKey firstKey, int fi
     private static void Write(BinaryWriter writer, SidecarKey identity, int value)
     {
         writer.Write(identity.Owner.Value);
-        writer.Write(identity.Family.Value);
+        writer.Write(identity.Type.Value);
         writer.Write(identity.Instance);
         writer.Write(value);
     }

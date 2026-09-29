@@ -9,20 +9,28 @@ public readonly record struct SidecarOwnerId
     public bool IsValid => Value is not null;
 }
 
+/// <summary>Stable sidecar contract identity, independent of the package that implements it.</summary>
+public readonly record struct SidecarTypeId
+{
+    public SidecarTypeId(string value) { ModuleIdentity.Validate(value, nameof(value)); Value = value; }
+    public string Value { get; }
+    public bool IsValid => Value is not null;
+}
+
 /// <summary>A family can have multiple named instances on one owner. "default" is the singleton convenience key.</summary>
 public readonly record struct SidecarKey
 {
     public const string DefaultInstance = "default";
-    public SidecarKey(SidecarOwnerId owner, ModulePackageId family, string instance = DefaultInstance)
+    public SidecarKey(SidecarOwnerId owner, SidecarTypeId type, string instance = DefaultInstance)
     {
-        if (!owner.IsValid || !family.IsValid) throw new ArgumentException("Invalid sidecar owner or family.");
+        if (!owner.IsValid || !type.IsValid) throw new ArgumentException("Invalid sidecar owner or type.");
         ModuleIdentity.Validate(instance, nameof(instance));
-        Owner = owner; Family = family; Instance = instance;
+        Owner = owner; Type = type; Instance = instance;
     }
     public SidecarOwnerId Owner { get; }
-    public ModulePackageId Family { get; }
+    public SidecarTypeId Type { get; }
     public string Instance { get; }
-    public bool IsValid => Owner.IsValid && Family.IsValid && Instance is not null;
+    public bool IsValid => Owner.IsValid && Type.IsValid && Instance is not null;
 }
 
 /// <summary>Cold, bounded sparse OOP storage. Bulk high-cardinality simulation remains an ECS concern.</summary>

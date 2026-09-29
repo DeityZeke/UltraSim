@@ -6,4 +6,4 @@ This BCL-only assembly owns the existing bounded crash-durable SaveSet transacti
 
 Recoverable participant-specific format/schema failures are supplied explicitly by the composition caller; the generic coordinator only classifies its own structural/IO failures. Unexpected implementation faults do not turn into compatible-recovery candidates. Save-set artifact format and on-disk layout are unchanged by this extraction.
 
-The framework proof project references only Framework.Persistence and Framework.RuntimeHost. Its sample participant serializes owner, family and instance identities for two same-family sidecars, stages them, rejects unsupported format without replacing live state, and recovers the previous complete generation.
+The framework proof project references only Framework.Persistence and Framework.RuntimeHost. Its sample participant serializes owner, sidecar type and instance identities for two same-type sidecars, stages them, rejects unsupported format without replacing live state, and recovers the previous complete generation.
