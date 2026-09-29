@@ -5073,8 +5073,9 @@ static void VerifyPf1BotArtifact(string root, string configuration)
     string[] expected =
     [
         "UltraSim.Client.Content", "UltraSim.Client.Core", "UltraSim.Client.Network",
-        "UltraSim.Client.StandardUi", "UltraSim.ECS", "UltraSim.Game.Accounting",
-        "UltraSim.Game.Contracts", "UltraSim.Game.Protocol", "UltraSim.Game.World",
+        "UltraSim.Client.StandardUi", "UltraSim.ECS", "UltraSim.Framework.Definitions",
+        "UltraSim.Game.Accounting", "UltraSim.Game.Contracts",
+        "UltraSim.Game.Presentation.Contracts", "UltraSim.Game.Protocol", "UltraSim.Game.World",
         "UltraSim.Network", "UltraSim.NetworkBots", "UltraSim.Spatial", "UltraSim.UI",
     ];
     string[] actual = Directory.EnumerateFiles(output, "UltraSim*.dll", SearchOption.TopDirectoryOnly)
@@ -5096,6 +5097,7 @@ static void VerifyPf1BotArtifact(string root, string configuration)
     [
         "GodotSharp", "UltraSim.Client.Local", "UltraSim.Client.BuiltInTestWorlds",
         "UltraSim.Game.Composition", "UltraSim.Game.Persistence", "UltraSim.Game.Physics",
+        "UltraSim.Game.Items.Contracts", "UltraSim.Game.Combat.Contracts", "UltraSim.Game.Skills.Contracts",
         "UltraSim.Game.Replication", "UltraSim.Game.Replication.Remote", "UltraSim.Game.UI",
         "UltraSim.Network.Testing", "UltraSim.Server.Hosting", "UltraSim.Server.Persistence",
         "UltraSim.Framework.Persistence",
