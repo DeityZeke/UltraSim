@@ -1,0 +1,49 @@
+{
+  "checkpoint": "P1 Framework Control Plane native-lifetime closure",
+  "date": "2026-09-28",
+  "status": "closed",
+  "testedHead": "c106a7b6ec9d9b4b825c0a8b507147371f3d4488",
+  "nativeRepairCommit": "0cd15e6b71a5c90a4c4363d6239fe02110a68ee9",
+  "sourceChangedDuringAcceptance": false,
+  "environment": {
+    "os": "Linux x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D",
+    "configuration": "Release",
+    "dotnetSdk": "8.0.131",
+    "dotnetRuntime": "8.0.31",
+    "aspnetCoreRuntime": "8.0.31 task-local",
+    "godot": "4.7.1 Mono"
+  },
+  "verification": {
+    "nativeActorTier": "passed",
+    "nativeRendererStress": "passed",
+    "physicalExports": ["SinglePlayer", "Online", "Complete"],
+    "startupClose": { "passes": 30, "attempts": 30, "perEdition": 10 },
+    "officialContentColdFill": { "passes": 1, "attempts": 1 },
+    "officialContentWarm": { "passes": 50, "attempts": 50 },
+    "windowClose": { "passes": 3, "attempts": 3 },
+    "architectureOnly": "passed",
+    "firstCanonicalRelease": "environment_failed_missing_Microsoft.AspNetCore.App",
+    "focusedServerHostingAfterRuntimeInstall": { "passed": 18, "total": 18, "shutdownStressCycles": 1024 },
+    "canonicalReleaseWithTaskLocalRuntime": "passed_uninterrupted",
+    "worktree": "clean"
+  },
+  "rawArchive": {
+    "path": "framework-p1-native-lifetime-closure-2026-09-28.raw.tar.gz",
+    "sha256": "764d97f7234db3c0611d637b5b004174f9c255047252badf455273f12c43f4f0"
+  },
+  "rawLogSha256": {
+    "firstCanonicalEnvironmentFailure": "6754e488abbb6b14e0bc406e08a0f33407be3cbae60db36255482d4338f4397f",
+    "passingCanonicalRelease": "e03f08dfd7bd82b6960835b20279b44fb15d7cae2ac51c4b726e0efb9e601f25",
+    "startupLedger": "553dfd6c1a9efb635895ea4f110b5bc9ba439393025ab0cb11222579f99dc467",
+    "warmLedger": "a3855ba8e4e20a64e81b66356f8a546af0f12f13f949a242f5d16ca890767868",
+    "windowLedger": "0ff798496e574991a4d6243b3529f9d2c6307c9586db0d16dcfa661a302c9cfa"
+  },
+  "roadmap": {
+    "P1": "closed",
+    "P2": "active_next",
+    "Gate1": "planned",
+    "PF6": "planned_not_ready_not_started",
+    "W8W9W10": "not_started"
+  }
+}

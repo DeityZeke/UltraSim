@@ -1,6 +1,6 @@
 # UltraSim Client Completion Plan
 
-**Status:** **F1.0–F1.12 CLOSED / Gate 0 CLOSED. P1 Framework Control Plane ACTIVE (implementation present; canonical Release gate open); P2–P11 and Gate 1 PLANNED. PF6 PLANNED / NOT READY / NOT STARTED; many-player live testing NOT READY.** The [P1 evidence](../../_Benchmarks/Baselines/framework-p1-control-plane-2026-09-27.md) records its focused/architecture passes and the reproduced pre-P1 native Single Player crash that prevents P1 closure. The [R3 closure evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3.md), committed at `d9234948989ac9a272ab1905a388b58210cd6403`, records the supported Framework HTTP Endpoint/Kestrel replacement and uninterrupted canonical Release on integrated production candidate `cc937185ce630fdb707e51bdee6372f550ff77b0`. No W8/W9/W10 or PF6 work has started.
+**Status:** **F1.0–F1.12 CLOSED / Gate 0 CLOSED. P1 Framework Control Plane CLOSED; P2 Runtime/Module Host and C# Server Authoring Environment ACTIVE; P3–P11 and Gate 1 PLANNED. PF6 PLANNED / NOT READY / NOT STARTED; many-player live testing NOT READY.** The [P1 closure companion](../../_Benchmarks/Baselines/framework-p1-native-lifetime-closure-2026-09-28.md) records the merged native-lifetime repair, 50/50 warm Official-content exits, and uninterrupted canonical Release on `c106a7b6ec9d9b4b825c0a8b507147371f3d4488`. The [original P1 evidence](../../_Benchmarks/Baselines/framework-p1-control-plane-2026-09-27.md) preserves the earlier native failure. The [R3 closure evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3.md), committed at `d9234948989ac9a272ab1905a388b58210cd6403`, records the supported Framework HTTP Endpoint/Kestrel replacement and uninterrupted canonical Release on integrated production candidate `cc937185ce630fdb707e51bdee6372f550ff77b0`. No W8/W9/W10 or PF6 work has started.
 
 The [partial F1.12 evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.md) and [R1 assurance evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1.md) remain immutable. Bounded native Cabin capture, pointer/tier/nameplate controls, retired-memory high-water reuse and the device-owned Advanced vegetation preference remain accepted. The historical obsolete capture-stall trigger remains unisolated, not a proven engine defect or a new blocker. The [F1.11 evidence](../../_Benchmarks/Baselines/client-f1.11-renderer-stress-vegetation-2026-09-25.md) closes shared Local/Remote world-resource consumption and bounded renderer stress; vegetation remains opt-in/default Off. F1.10 retains the conservative Detailed/BatchedPrimitive hybrid and F1.9B retains NodeMultiMesh/PerRow. The [F1.8A corrective evidence](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md) supersedes its initial closure claim without erasing the earlier failures.
 
@@ -97,8 +97,9 @@ F1.9B scalable Godot realization / RID / MultiMesh (CLOSED; NodeMultiMesh/PerRow
 F1.10 Actor representation tiers and GPU-friendly interpolation seam (CLOSED; conservative hybrid)
 F1.11 Renderer stress consumers / vegetation prototype (CLOSED; prototype default Off)
 F1.12 Product dogfooding and PF6 readiness (CLOSED after R3; Gate 0 CLOSED)
-P1    Framework Control Plane (ACTIVE; implemented; canonical Release gate open)
-P2–P11 / Gate 1 (PLANNED; productization and identity/character-mode gate)
+P1    Framework Control Plane (CLOSED after native-lifetime acceptance)
+P2    Runtime/Module Host + C# Server Authoring Environment (ACTIVE)
+P3–P11 / Gate 1 (PLANNED; productization and identity/character-mode gate)
 PF6   External human validation (PLANNED / NOT READY / NOT STARTED)
 ~~~
 
@@ -1425,9 +1426,11 @@ test repair, the intentionally interrupted accounting-repair run, and the succes
 The native short regression adds 12 Gameplay Output captures and exact clean retirement.
 The obsolete unbounded Cabin harness's unknown historical trigger is not an additional PF6 blocker;
 R1's current bounded native capture assurance remains the control.
-No current release-blocking finding remains within F1.12 itself. P1 is now active, with a separate
-pre-existing native export failure keeping its canonical gate open; P2–P11 and Gate 1
-remain planned. This is not immediate PF6 readiness: the broader productization and
+No current release-blocking finding remains within F1.12 itself. The separately reproduced
+pre-P1 native export failure was repaired and P1's canonical Release gate passed on the merged
+tree; [P1 closure evidence](../../_Benchmarks/Baselines/framework-p1-native-lifetime-closure-2026-09-28.md)
+preserves both the failed environmental attempt and successful rerun. P2 is now active; P3–P11
+and Gate 1 remain planned. This is not immediate PF6 readiness: the broader productization and
 identity/character-mode gate remains ahead. PF6/W8/W9/W10 remain unstarted. Human motion feel and the historical approximately 1.4–1.67 m
 correction range remain ungraded, nonblocking polish questions.
 
@@ -1519,8 +1522,8 @@ PF6 begins only when:
 
 # 17. PF6 - External human validation
 
-F1.12/Gate 0 is closed; PF6 remains planned, not ready and not started. P1 Framework Control Plane
-is active but not closed, followed by the planned P2–P11 work and Gate 1. Only after that productization and
+F1.12/Gate 0 and P1 are closed; PF6 remains planned, not ready and not started. P2 is active,
+followed by the planned P3–P11 work and Gate 1. Only after that productization and
 identity/character-mode gate closes may the existing PF6 campaign begin. R3 did not implement
 these future capabilities or begin human validation.
 

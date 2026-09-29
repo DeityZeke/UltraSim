@@ -2,7 +2,7 @@
 
 **Proposed status:** Candidate canonical roadmap / architecture checklist\
 **Current reference baseline:** F1.12-R3 / Gate 0 production closure — `e3a63ea21f8f5ea4fa69e3768a055c409edc8616`; documentation-only commits may advance `main` beyond that closure SHA.\
-**Immediate checkpoint:** P1 Framework Control Plane is **ACTIVE** (implemented, but canonical Release blocked by a reproduced pre-P1 native export crash; [P1 evidence](../../_Benchmarks/Baselines/framework-p1-control-plane-2026-09-27.md)). P2–P11 and Gate 1 remain **PLANNED**; PF6 remains **PLANNED / NOT READY / NOT STARTED**.\
+**Immediate checkpoint:** P1 Framework Control Plane is **CLOSED** after the [native-lifetime repair acceptance](../../_Benchmarks/Baselines/framework-p1-native-lifetime-closure-2026-09-28.md) and uninterrupted canonical Release on merged `main`. P2 Runtime/Module Host and C# Server Authoring Environment is **ACTIVE**; P3–P11 and Gate 1 remain **PLANNED**; PF6 remains **PLANNED / NOT READY / NOT STARTED**.\
 **End state of this document:** UltraSim is ready to move from individual/trusted dogfooding and closed validation into a many-player live test where human feedback is primarily about the intended game rather than known development-harness limitations.
 
 ---
@@ -3026,8 +3026,8 @@ This compact board is intended to sit near the top of active implementation note
 ```
 [x] Gate 0  F1.12 product dogfood/readiness
 
-[ ] P1      Framework Control Plane — ACTIVE; canonical Release gate open
-[ ] P2      Runtime/Module Host + C# Server Authoring Environment — HELD
+[x] P1      Framework Control Plane — CLOSED
+[ ] P2      Runtime/Module Host + C# Server Authoring Environment — ACTIVE
 [ ] P3      Framework adapter/runtime boundary migration
 [ ] P4      Engine Contracts + typed definition facets
 [ ] P5      User/Admin/Developer control surfaces

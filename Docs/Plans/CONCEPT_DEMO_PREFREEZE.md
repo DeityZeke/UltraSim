@@ -1,7 +1,6 @@
 # UltraSim Concept Demo — Pre-Freeze Hardening, Load, and Deployment-Policy Plan
 
-**Current release disposition (2026-09-27): F1.12/Gate 0 CLOSED. P1 Framework Control Plane ACTIVE (implementation present; [canonical native export gate open](../../_Benchmarks/Baselines/framework-p1-control-plane-2026-09-27.md));
-P2–P11 and Gate 1 PLANNED. PF6 PLANNED / NOT READY / NOT STARTED; many-player live testing NOT READY.**
+**Current release disposition (2026-09-28): F1.12/Gate 0 and P1 Framework Control Plane CLOSED after [native-lifetime acceptance](../../_Benchmarks/Baselines/framework-p1-native-lifetime-closure-2026-09-28.md). P2 ACTIVE; P3–P11 and Gate 1 PLANNED. PF6 PLANNED / NOT READY / NOT STARTED; many-player live testing NOT READY.**
 The earlier PF5 readiness statements below remain historical subsystem conclusions. The active
 [Client Completion plan](CLIENT_COMPLETION_PLAN.md) now governs readiness. Its
 [partial F1.12 evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.md)
