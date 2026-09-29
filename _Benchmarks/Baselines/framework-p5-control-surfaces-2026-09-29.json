@@ -5,7 +5,9 @@
   "startingCommit": "15e185c5f46965d869628c06818659e91963d945",
   "implementationCommit": "c5ab587d",
   "gateCommits": ["6b9264aa", "bc0f9131b4ba512ad6b67693ed4d0d94ec645249"],
-  "canonicallyTestedCommit": "bc0f9131b4ba512ad6b67693ed4d0d94ec645249",
+  "viewInstanceFenceCommit": "016f32a7e1b614e8f01c9acccfcc45b4e54cb24e",
+  "canonicallyTestedCommit": "016f32a7e1b614e8f01c9acccfcc45b4e54cb24e",
+  "additionalCanonicalPassCommit": "bc0f9131b4ba512ad6b67693ed4d0d94ec645249",
   "platform": {
     "os": "CachyOS Linux 7.2.6-1-cachyos x86_64",
     "cpu": "AMD Ryzen 7 7800X3D; 8 cores, 16 threads",
