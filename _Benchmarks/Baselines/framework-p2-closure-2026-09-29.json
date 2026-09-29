@@ -1,0 +1,57 @@
+{
+  "checkpoint": "P2 Runtime Host and C# Server Authoring closure",
+  "date": "2026-09-29",
+  "status": "CLOSED",
+  "startingHead": "7f6f753d0d8c6d9758ae41c8a9c6509663a2f378",
+  "testedImplementationHead": "e6b6f7cdaf952204f09972d4000f82aedf7e8d32",
+  "evidenceCommit": "self-referential; resolve with git log for this file",
+  "environment": {
+    "os": "Linux 7.2.6-1-cachyos x86-64",
+    "cpu": "AMD Ryzen 7 7800X3D",
+    "visibleLogicalProcessors": 16,
+    "dotnetSdk": "8.0.125",
+    "dotnetRuntime": "8.0.25",
+    "godot": "4.7.1 Mono",
+    "configuration": "Release"
+  },
+  "policy": {
+    "manifestFormat": "UltraSim.RuntimePackage/v4",
+    "previousUnshippedV3": "rejected, not silently reinterpreted",
+    "packageAlias": "terminal selected-identity remap; ambiguous, chained and selected-ID conflicts rejected",
+    "savedPackageOrder": "selected composition plan order",
+    "durableSchema": "exact ledger and participant admission; no automatic stored-byte migration",
+    "nestedSourceMaximumDepth": 4,
+    "sourceFileMaximumPerPackage": 64,
+    "sourceDirectoryMaximumPerPackage": 64
+  },
+  "verification": {
+    "runtimeHostFocused": { "result": "pass", "passed": 15, "failed": 0 },
+    "serverAuthoringFocused": { "result": "pass" },
+    "frameworkPersistence": "pass",
+    "serverPersistence": "pass",
+    "gamePersistence": { "result": "pass", "passed": 13, "failed": 0 },
+    "directConnectColdWarm": {
+      "result": "both ready",
+      "coldCacheHits": 0,
+      "warmCacheHits": 3,
+      "resolvedFingerprint": "2c0fd5baf2803b2d3d8984398b2c6b7300b04f8ecafdb933aee656803e2b372a"
+    },
+    "architectureOnly": "pass",
+    "canonicalReleaseAttempts": [
+      {
+        "result": "fail",
+        "exitCode": 134,
+        "stage": "Release Godot-test build; Network GenerateDepsFile/File.Create",
+        "cause": "unproven; immediate standalone retry had transient DLL-in-use MSB3026 warning"
+      },
+      {
+        "result": "pass",
+        "exitCode": 0,
+        "uninterrupted": true,
+        "scratch": "/tmp/ultrasim-repository-verification/394886"
+      }
+    ]
+  },
+  "next": "P3 planned, not started",
+  "pf6": "not ready"
+}
