@@ -1018,6 +1018,7 @@ public sealed class GodotWorldRenderer : IDisposable
         var root = new Node3D { Name = $"Chunk_{semantic.Info.Key.Coord.X}_{semantic.Info.Key.Coord.Z}" };
         var structural = new Node3D { Name = "Structural" };
         var nativeGroups = new List<GodotWorldInstanceGroup>();
+        var terrainResources = new GodotOwnedResources();
         RenderLayer? publicLayer = null;
         GodotVegetationChunk? vegetation = null;
         root.AddChild(structural);
@@ -1026,6 +1027,7 @@ public sealed class GodotWorldRenderer : IDisposable
             ArrayMesh terrainMesh = CreateTerrainMesh(
                 handle, semantic.Info.Key, out int yAnchor, out float firstTerrainY,
                 out int terrainTriangleCount);
+            terrainResources.Own(terrainMesh);
             structural.AddChild(new MeshInstance3D { Name = "BaseTerrain", Mesh = terrainMesh });
             if (_vegetation is not null)
             {
@@ -1045,6 +1047,7 @@ public sealed class GodotWorldRenderer : IDisposable
                 ArrayMesh additionalMesh = CreateAdditionalTerrainMesh(
                     handle, fragment, yAnchor, out int fragmentTriangles, out float fragmentFirstY,
                     out WorldSurfaceId surfaceId);
+                terrainResources.Own(additionalMesh);
                 structural.AddChild(new MeshInstance3D
                 {
                     Name = $"AdditionalTerrain_{surfaceId.Value}_{fragment}",
@@ -1100,7 +1103,7 @@ public sealed class GodotWorldRenderer : IDisposable
                 firstAdditionalTerrainY,
                 structuralFallbacks,
                 preparedPublic.NodeCount, preparedPublic.ResourceCount, preparedPublic.Fallbacks,
-                nativeGroups.ToArray(), preparedPublic.Groups, vegetation);
+                nativeGroups.ToArray(), preparedPublic.Groups, vegetation, terrainResources);
         }
         catch
         {
@@ -1108,7 +1111,8 @@ public sealed class GodotWorldRenderer : IDisposable
             foreach (GodotWorldInstanceGroup group in nativeGroups) group.Dispose();
             if (publicLayer is { } preparedPublic)
                 foreach (GodotWorldInstanceGroup group in preparedPublic.Groups) group.Dispose();
-            root.Free();
+            try { root.Free(); }
+            finally { terrainResources.Dispose(); }
             throw;
         }
     }
@@ -1248,18 +1252,26 @@ public sealed class GodotWorldRenderer : IDisposable
         }
 
         var mesh = new ArrayMesh();
-        foreach ((ushort material, List<int> indices) in trianglesByMaterial)
+        try
         {
-            var arrays = new global::Godot.Collections.Array();
-            arrays.Resize((int)Mesh.ArrayType.Max);
-            arrays[(int)Mesh.ArrayType.Vertex] = vertices;
-            arrays[(int)Mesh.ArrayType.Normal] = normals;
-            arrays[(int)Mesh.ArrayType.Index] = indices.ToArray();
-            mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
-            Material? resolved = _assets?.ResolveTerrainMaterial(material);
-            if (resolved is not null) mesh.SurfaceSetMaterial(mesh.GetSurfaceCount() - 1, resolved);
+            foreach ((ushort material, List<int> indices) in trianglesByMaterial)
+            {
+                using var arrays = new global::Godot.Collections.Array();
+                arrays.Resize((int)Mesh.ArrayType.Max);
+                arrays[(int)Mesh.ArrayType.Vertex] = vertices;
+                arrays[(int)Mesh.ArrayType.Normal] = normals;
+                arrays[(int)Mesh.ArrayType.Index] = indices.ToArray();
+                mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+                Material? resolved = _assets?.ResolveTerrainMaterial(material);
+                if (resolved is not null) mesh.SurfaceSetMaterial(mesh.GetSurfaceCount() - 1, resolved);
+            }
+            return mesh;
         }
-        return mesh;
+        catch
+        {
+            mesh.Dispose();
+            throw;
+        }
     }
 
     private ArrayMesh CreateAdditionalTerrainMesh(
@@ -1303,18 +1315,26 @@ public sealed class GodotWorldRenderer : IDisposable
             indices.Add(first); indices.Add(second); indices.Add(third);
         }
         var mesh = new ArrayMesh();
-        foreach ((ushort material, List<int> indices) in trianglesByMaterial)
+        try
         {
-            var arrays = new global::Godot.Collections.Array();
-            arrays.Resize((int)Mesh.ArrayType.Max);
-            arrays[(int)Mesh.ArrayType.Vertex] = vertices;
-            arrays[(int)Mesh.ArrayType.Normal] = normals;
-            arrays[(int)Mesh.ArrayType.Index] = indices.ToArray();
-            mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
-            Material? resolved = _assets?.ResolveTerrainMaterial(material);
-            if (resolved is not null) mesh.SurfaceSetMaterial(mesh.GetSurfaceCount() - 1, resolved);
+            foreach ((ushort material, List<int> indices) in trianglesByMaterial)
+            {
+                using var arrays = new global::Godot.Collections.Array();
+                arrays.Resize((int)Mesh.ArrayType.Max);
+                arrays[(int)Mesh.ArrayType.Vertex] = vertices;
+                arrays[(int)Mesh.ArrayType.Normal] = normals;
+                arrays[(int)Mesh.ArrayType.Index] = indices.ToArray();
+                mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+                Material? resolved = _assets?.ResolveTerrainMaterial(material);
+                if (resolved is not null) mesh.SurfaceSetMaterial(mesh.GetSurfaceCount() - 1, resolved);
+            }
+            return mesh;
         }
-        return mesh;
+        catch
+        {
+            mesh.Dispose();
+            throw;
+        }
     }
 
     private GodotWorldInstanceGroup CreateInstanceGroup(Node3D parent,
@@ -1611,6 +1631,7 @@ public sealed class GodotWorldRenderer : IDisposable
         foreach (GodotWorldInstanceGroup group in chunk.PublicGroups) group.Dispose();
         chunk.Vegetation?.Dispose();
         if (GodotObject.IsInstanceValid(chunk.Root)) chunk.Root.Free();
+        chunk.TerrainResources.Dispose();
         _renderChunks[renderSlot] = null;
         int semanticIndex = checked((int)chunk.Handle.Index);
         if (_associations[semanticIndex].Generation == chunk.Handle.Generation &&
@@ -1828,7 +1849,8 @@ public sealed class GodotWorldRenderer : IDisposable
             int publicNodeCount, int publicResourceCount,
             FallbackCounts publicFallbacks,
             GodotWorldInstanceGroup[] structuralGroups,
-            GodotWorldInstanceGroup[] publicGroups, GodotVegetationChunk? vegetation)
+            GodotWorldInstanceGroup[] publicGroups, GodotVegetationChunk? vegetation,
+            GodotOwnedResources terrainResources)
         {
             Handle = handle;
             Key = key;
@@ -1838,6 +1860,7 @@ public sealed class GodotWorldRenderer : IDisposable
             StructuralRoot = structuralRoot;
             PublicRoot = publicRoot;
             TerrainMesh = terrainMesh;
+            TerrainResources = terrainResources;
             YAnchorMillimeters = yAnchorMillimeters;
             FirstTerrainLocalY = firstTerrainLocalY;
             TerrainTriangleCount = terrainTriangleCount;
@@ -1865,6 +1888,7 @@ public sealed class GodotWorldRenderer : IDisposable
         internal Node3D StructuralRoot { get; }
         internal Node3D PublicRoot { get; set; }
         internal ArrayMesh TerrainMesh { get; }
+        internal GodotOwnedResources TerrainResources { get; }
         internal int YAnchorMillimeters { get; }
         internal float FirstTerrainLocalY { get; }
         internal int TerrainTriangleCount { get; }

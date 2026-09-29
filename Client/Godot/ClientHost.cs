@@ -54,23 +54,37 @@ public partial class ClientHost :
         return base.SessionPresentationDiagnostics();
     }
 
+    public override void _EnterTree()
+    {
+        base._EnterTree();
+        BeginApplicationStartup();
+    }
+
+    public override void _Notification(int what)
+    {
+        if (what == NotificationWMCloseRequest) RequestApplicationExit();
+        base._Notification(what);
+    }
+
     public override void _Ready()
     {
+        if (!CanStartApplicationWork) return;
         try
         {
             ValidateProductIdentity();
+            base._Ready();
+            CompleteApplicationStartup();
+            if (!CanStartApplicationWork) return;
+#if ULTRASIM_COMPLETE
+            if (OS.GetCmdlineUserArgs().Contains("--f0-7-smoke", StringComparer.Ordinal))
+                Callable.From(RunF07MixedSessionLifecycleSmoke).CallDeferred();
+#endif
         }
         catch (Exception exception)
         {
-            GD.PushError($"Client product composition mismatch: {exception.Message}");
-            GetTree().Quit(1);
-            return;
+            GD.PushError($"Client startup failed: {exception}");
+            RequestApplicationExit(1);
         }
-        base._Ready();
-#if ULTRASIM_COMPLETE
-        if (OS.GetCmdlineUserArgs().Contains("--f0-7-smoke", StringComparer.Ordinal))
-            Callable.From(RunF07MixedSessionLifecycleSmoke).CallDeferred();
-#endif
     }
 
     // Godot's native script dispatch generator binds lifecycle overrides from the canonical
@@ -79,18 +93,21 @@ public partial class ClientHost :
     // compile normally yet remain invisible to native dispatch.
     public override void _Process(double delta)
     {
+        if (!CanStartApplicationWork) return;
         base._Process(delta);
 #if ULTRASIM_ONLINE || ULTRASIM_COMPLETE
         ProcessRemote(delta);
 #endif
     }
 
-    public override void _ExitTree()
+    public override void _ExitTree() => base._ExitTree();
+
+    protected override void RetireApplicationServices()
     {
 #if ULTRASIM_ONLINE || ULTRASIM_COMPLETE
         ExitRemote();
 #endif
-        base._ExitTree();
+        base.RetireApplicationServices();
     }
 
     private static void ValidateProductIdentity()

@@ -49,7 +49,7 @@ public sealed class GodotVegetation : IDisposable
         var vertices = new Vector3[BladesPerPatch * VerticesPerBlade];
         // A finite non-degenerate source keeps native bounds valid; the shader derives final blades.
         for (int i = 0; i < vertices.Length; i++) vertices[i] = new((i % 3) * .01f, (i % 2) * .1f, 0);
-        var arrays = new global::Godot.Collections.Array(); arrays.Resize((int)Mesh.ArrayType.Max);
+        using var arrays = new global::Godot.Collections.Array(); arrays.Resize((int)Mesh.ArrayType.Max);
         arrays[(int)Mesh.ArrayType.Vertex] = vertices;
         _mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
         _mesh.SurfaceSetMaterial(0, _material);

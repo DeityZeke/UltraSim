@@ -47,11 +47,11 @@ public abstract partial class LocalPlayClientRoot
             Sample(lifetimes, "retired-forced-gc-diagnostic", null);
             Flush();
             GD.Print($"F1.12-R1 MEMORY PASS lifetimes={lifetimes} radius=1 retirement=clean");
-            GetTree().Quit(0);
+            RequestApplicationExit(0);
         }
         catch (Exception error)
         {
-            GD.PushError(error.ToString()); RetireCurrentSession(); Flush(); GetTree().Quit(1);
+            GD.PushError(error.ToString()); RetireCurrentSession(); Flush(); RequestApplicationExit(1);
         }
         void Sample(int lifetime, string phase, LocalCabinPresentationSnapshot? presentation) =>
             samples.Add(new { lifetime, phase, Memory = GodotDiagnosticProcessMemory.Capture(), presentation,

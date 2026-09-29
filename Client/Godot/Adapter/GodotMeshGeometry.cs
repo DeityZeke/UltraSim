@@ -32,7 +32,7 @@ public static class GodotMeshGeometry
         if (!size.IsFinite() || size.X <= 0f || size.Y <= 0f || size.Z <= 0f)
             throw new ArgumentOutOfRangeException(nameof(size), "A finite positive box size is required.");
 
-        var surface = new SurfaceTool();
+        using var surface = new SurfaceTool();
         surface.Begin(Mesh.PrimitiveType.Triangles);
         surface.SetMaterial(material);
         float x = size.X * 0.5f;
@@ -77,7 +77,7 @@ public static class GodotMeshGeometry
                 nameof(halfWidth), "Finite positive wedge dimensions are required.");
         }
 
-        var surface = new SurfaceTool();
+        using var surface = new SurfaceTool();
         surface.Begin(Mesh.PrimitiveType.Triangles);
         surface.SetMaterial(material);
         Vector3 backLeftBottom = new(-halfWidth, 0f, -backExtent);

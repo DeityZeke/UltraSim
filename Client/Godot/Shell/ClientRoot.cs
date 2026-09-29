@@ -112,6 +112,7 @@ public abstract partial class ClientRoot : Control
 
     public override void _Input(InputEvent inputEvent)
     {
+        if (!CanStartApplicationWork) return;
         // World lives in an independent SubViewport. Its gameplay input still originates in
         // application coordinates, so session UI policy sees the same events as before.
         if (_uiComposition is not null && _shell.Snapshot().SessionActive)
@@ -239,36 +240,43 @@ public abstract partial class ClientRoot : Control
 
     protected void BeginSessionLoading(string status)
     {
+        if (!CanStartApplicationWork) throw new InvalidOperationException("Application is stopping.");
         _shell.BeginLoading(status);
         RenderCurrentSurface();
     }
 
     protected void BeginAdmission(string status)
     {
+        if (!CanStartApplicationWork) return;
         _shell.BeginAdmission(status);
         RenderCurrentSurface();
     }
 
     protected void CommitSession(string status)
     {
+        if (!CanStartApplicationWork) throw new InvalidOperationException("Application is stopping.");
         _shell.EnterSession(status);
         RenderCurrentSurface();
     }
 
     protected void FailSession(string message)
     {
+        if (!CanStartApplicationWork) return;
         _shell.Fail(message);
         RenderCurrentSurface();
     }
 
     protected void ReturnToMainMenu(string? status = null)
     {
+        if (!CanStartApplicationWork) return;
         _shell.ReturnToMainMenu(status);
         RenderCurrentSurface();
     }
 
     public override void _Ready()
     {
+        if (ApplicationPhase == GodotApplicationPhase.Created) BeginApplicationStartup();
+        if (!CanStartApplicationWork) return;
         try
         {
             _composition = Composition;
@@ -292,22 +300,23 @@ public abstract partial class ClientRoot : Control
                     $"F0.1 CLIENT SHELL SMOKE PASS edition={_composition.Edition} " +
                     $"capabilities={capabilities} " +
                     "layers=Workspace,World,HUD,Menus,Debug,ContextTooltip");
-                GetTree().Quit(0);
+                RequestApplicationExit(0);
             }
         }
         catch (Exception exception)
         {
             GD.PushError($"Client shell initialization failed: {exception}");
-            GetTree().Quit(1);
+            RequestApplicationExit(1);
         }
     }
 
     public override void _UnhandledInput(InputEvent inputEvent)
     {
+        if (!CanStartApplicationWork) return;
         if (inputEvent is not InputEventKey key || !key.Pressed || key.Echo) return;
         if (Matches(key, ClientSemanticAction.ExitApplication))
         {
-            GetTree().Quit(0);
+            RequestApplicationExit(0);
             GetViewport().SetInputAsHandled();
             return;
         }
@@ -561,11 +570,7 @@ public abstract partial class ClientRoot : Control
         }
     }
 
-    public override void _ExitTree()
-    {
-        _uiComposition?.Dispose();
-        _uiComposition = null;
-    }
+    public override void _ExitTree() => RetireOnTreeExit();
 
     private void BuildMainMenu(in ClientShellSnapshot snapshot)
     {
@@ -589,7 +594,7 @@ public abstract partial class ClientRoot : Control
                     });
                     break;
                 case ClientCapability.Exit:
-                    ConnectDeferred(button, () => GetTree().Quit(0));
+                    ConnectDeferred(button, () => RequestApplicationExit(0));
                     break;
                 default:
                     ClientCapability captured = capability;
@@ -1056,13 +1061,13 @@ public abstract partial class ClientRoot : Control
             GD.Print(
                 $"F0.1 CLIENT SHELL UI PASS edition={_composition.Edition} " +
                 "settings=scrollable transitions=deferred capabilities=admission");
-            GetTree().Quit(0);
+            RequestApplicationExit(0);
         }
         catch (Exception exception)
         {
             GD.PushError($"Client shell UI smoke failed: {exception}");
             RetireCurrentSession();
-            GetTree().Quit(1);
+            RequestApplicationExit(1);
         }
     }
 
@@ -1244,11 +1249,11 @@ public abstract partial class ClientRoot : Control
         }
     }
 
-    protected static void ConnectDeferred(Button button, Action pressed)
+    protected void ConnectDeferred(Button button, Action pressed)
     {
         Error result = button.Connect(
             BaseButton.SignalName.Pressed,
-            Callable.From(pressed),
+            Callable.From(() => { if (CanStartApplicationWork) pressed(); }),
             (uint)GodotObject.ConnectFlags.Deferred);
         if (result != Error.Ok)
             throw new InvalidOperationException(

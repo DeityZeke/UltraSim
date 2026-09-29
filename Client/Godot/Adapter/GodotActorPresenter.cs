@@ -74,6 +74,9 @@ public readonly record struct GodotActorPresentationDiagnostics(
 /// </summary>
 public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposable
 {
+    private readonly Dictionary<Node3D, GodotOwnedResources> _presentationResources =
+        new(ReferenceEqualityComparer.Instance);
+
     public const ulong ControlledNameplateGraceMilliseconds = 2_500;
     public const ulong PrimaryCueDurationMilliseconds = 240;
     public const ulong InteractCueDurationMilliseconds = 220;
@@ -432,10 +435,11 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         for (int index = 0; index < _slots.Length; index++)
             if (_slots[index].Used) Release(index);
         _batches.Dispose();
+        foreach (Node3D pending in _presentationResources.Keys.ToArray()) FreePresentation(pending);
         if (GodotObject.IsInstanceValid(Root))
         {
             Root.GetParent()?.RemoveChild(Root);
-            Root.QueueFree();
+            FreePresentation(Root);
         }
     }
 
@@ -549,7 +553,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             slot.NativeBodyNodes = CountNative(root, includeLabels: false);
             return slot;
         }
-        catch { if (GodotObject.IsInstanceValid(root)) root.Free(); throw; }
+        catch { FreePresentation(root); throw; }
     }
 
     private void ReplaceVisual(int index, ref ActorSlot slot, Node3D visual, bool primitive)
@@ -563,12 +567,12 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         if (oldSocket is not null && oldSocket.GetParent() == root)
         {
             root.RemoveChild(oldSocket);
-            oldSocket.Free();
+            FreePresentation(oldSocket);
         }
         if (oldVisual is not null && GodotObject.IsInstanceValid(oldVisual))
         {
             oldVisual.GetParent()?.RemoveChild(oldVisual);
-            oldVisual.Free();
+            FreePresentation(oldVisual);
         }
 
         visual.Name = "Visual";
@@ -730,7 +734,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
     private void RetireDetailed(ref ActorSlot slot)
     {
         CountDetailed(in slot, -1);
-        slot.Root?.Free();
+        FreePresentation(slot.Root);
         slot.Root = slot.Visual = slot.PrimaryCue = slot.PrimaryActionPivot = slot.MainHandSocket =
             slot.InteractCue = null;
         slot.Nameplate = slot.Overhead = null; slot.AnimationPlayer = null; slot.MainHandSkeleton = null;
@@ -1116,8 +1120,54 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         return -1;
     }
 
-    private static Node3D CreatePrimitive(ClientActorVisualKind kind) =>
-        GodotPrimitiveSubstrate.CreateActor(kind);
+    private Node3D CreatePrimitive(ClientActorVisualKind kind)
+    {
+        var resources = new GodotOwnedResources();
+        Node3D? visual = null;
+        try
+        {
+            visual = GodotPrimitiveSubstrate.CreateActor(kind, resources);
+            _presentationResources.Add(visual, resources);
+            return visual;
+        }
+        catch
+        {
+            visual?.Free();
+            resources.Dispose();
+            throw;
+        }
+    }
+
+    // Resource scopes follow their presentation subtree across reparenting. Capture them before
+    // Free destroys the tree, retain them strongly while native consumers retire, then dispose.
+    private void FreePresentation(Node3D? root)
+    {
+        if (root is null) return;
+        var owned = new List<KeyValuePair<Node3D, GodotOwnedResources>>();
+        List<Exception>? failures = null;
+        if (GodotObject.IsInstanceValid(root))
+        {
+            Collect(root);
+            try { root.Free(); }
+            catch (Exception error) { (failures ??= []).Add(error); }
+        }
+        else if (_presentationResources.TryGetValue(root, out var retained))
+            owned.Add(new(root, retained));
+        foreach (var pair in owned)
+        {
+            try { pair.Value.Dispose(); _presentationResources.Remove(pair.Key); }
+            catch (Exception error) { (failures ??= []).Add(error); }
+        }
+        if (failures is not null)
+            throw new AggregateException("Actor presentation did not retire.", failures);
+
+        void Collect(Node node)
+        {
+            for (int index = 0; index < node.GetChildCount(); index++) Collect(node.GetChild(index));
+            if (node is Node3D spatial && _presentationResources.TryGetValue(spatial, out var resources))
+                owned.Add(new(spatial, resources));
+        }
+    }
 
     private static Node3D CreateMainHandSocket(
         Node3D root,
@@ -1180,73 +1230,85 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             handInRoot.Origin);
     }
 
-    private static Node3D CreateMainHandPresentation(out Node3D actionPivot)
+    private Node3D CreateMainHandPresentation(out Node3D actionPivot)
     {
-        var bladeMaterial = new StandardMaterial3D
+        var resources = new GodotOwnedResources();
+        Node3D? pivot = null;
+        try
         {
-            AlbedoColor = new Color(0.83f, 0.90f, 1.0f),
-            Metallic = 0.75f,
-            Roughness = 0.18f,
-            EmissionEnabled = true,
-            Emission = new Color(0.14f, 0.19f, 0.30f),
-            EmissionEnergyMultiplier = 0.65f,
-            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-        };
-        var guardMaterial = new StandardMaterial3D
+            var bladeMaterial = resources.Own(new StandardMaterial3D
+            {
+                AlbedoColor = new Color(0.83f, 0.90f, 1.0f),
+                Metallic = 0.75f,
+                Roughness = 0.18f,
+                EmissionEnabled = true,
+                Emission = new Color(0.14f, 0.19f, 0.30f),
+                EmissionEnergyMultiplier = 0.65f,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            });
+            var guardMaterial = resources.Own(new StandardMaterial3D
+            {
+                AlbedoColor = new Color(0.72f, 0.48f, 0.12f),
+                Metallic = 0.65f,
+                Roughness = 0.28f,
+            });
+            var gripMaterial = resources.Own(new StandardMaterial3D
+            {
+                AlbedoColor = new Color(0.16f, 0.07f, 0.035f),
+                Roughness = 0.82f,
+            });
+            pivot = new Node3D
+            {
+                Name = "MainHandPresentation",
+                Visible = false,
+                // Local +Y is the weapon's hilt-to-tip axis. This grip correction places the blade
+                // diagonally down/back from the Mixamo RightHand frame; locomotion then carries the
+                // whole correction with the animated hand instead of leaving a vertical pendulum.
+                Basis = CreateMainHandGripBasis(),
+            };
+            actionPivot = new Node3D { Name = "MainHandActionPivot" };
+            pivot.AddChild(actionPivot);
+            actionPivot.AddChild(new MeshInstance3D
+            {
+                Name = "PrimitiveBlade",
+                Mesh = resources.Own(GodotMeshGeometry.CreateGroundedBox(
+                    new Vector3(
+                        MainHandBladeWidthMeters,
+                        MainHandBladeLengthMeters,
+                        MainHandBladeThicknessMeters), bladeMaterial)),
+                Position = new Vector3(0, MainHandBladeBaseMeters, 0),
+            });
+            actionPivot.AddChild(new MeshInstance3D
+            {
+                Name = "PrimitiveGuard",
+                Mesh = resources.Own(GodotMeshGeometry.CreateGroundedBox(
+                    new Vector3(
+                        MainHandGuardWidthMeters,
+                        MainHandGuardLengthMeters,
+                        MainHandGuardThicknessMeters), guardMaterial)),
+                Position = new Vector3(
+                    0, MainHandGuardCenterMeters - MainHandGuardLengthMeters * 0.5f, 0),
+            });
+            actionPivot.AddChild(new MeshInstance3D
+            {
+                Name = "PrimitiveGrip",
+                Mesh = resources.Own(GodotMeshGeometry.CreateGroundedBox(
+                    new Vector3(
+                        MainHandGripWidthMeters,
+                        MainHandGripLengthMeters,
+                        MainHandGripThicknessMeters), gripMaterial)),
+                // The bone socket now lands at the middle of the grip, not on the guard.
+                Position = new Vector3(0, -MainHandGripLengthMeters * 0.5f, 0),
+            });
+            _presentationResources.Add(pivot, resources);
+            return pivot;
+        }
+        catch
         {
-            AlbedoColor = new Color(0.72f, 0.48f, 0.12f),
-            Metallic = 0.65f,
-            Roughness = 0.28f,
-        };
-        var gripMaterial = new StandardMaterial3D
-        {
-            AlbedoColor = new Color(0.16f, 0.07f, 0.035f),
-            Roughness = 0.82f,
-        };
-        var pivot = new Node3D
-        {
-            Name = "MainHandPresentation",
-            Visible = false,
-            // Local +Y is the weapon's hilt-to-tip axis. This grip correction places the blade
-            // diagonally down/back from the Mixamo RightHand frame; locomotion then carries the
-            // whole correction with the animated hand instead of leaving a vertical pendulum.
-            Basis = CreateMainHandGripBasis(),
-        };
-        actionPivot = new Node3D { Name = "MainHandActionPivot" };
-        pivot.AddChild(actionPivot);
-        actionPivot.AddChild(new MeshInstance3D
-        {
-            Name = "PrimitiveBlade",
-            Mesh = GodotMeshGeometry.CreateGroundedBox(
-                new Vector3(
-                    MainHandBladeWidthMeters,
-                    MainHandBladeLengthMeters,
-                    MainHandBladeThicknessMeters), bladeMaterial),
-            Position = new Vector3(0, MainHandBladeBaseMeters, 0),
-        });
-        actionPivot.AddChild(new MeshInstance3D
-        {
-            Name = "PrimitiveGuard",
-            Mesh = GodotMeshGeometry.CreateGroundedBox(
-                new Vector3(
-                    MainHandGuardWidthMeters,
-                    MainHandGuardLengthMeters,
-                    MainHandGuardThicknessMeters), guardMaterial),
-            Position = new Vector3(
-                0, MainHandGuardCenterMeters - MainHandGuardLengthMeters * 0.5f, 0),
-        });
-        actionPivot.AddChild(new MeshInstance3D
-        {
-            Name = "PrimitiveGrip",
-            Mesh = GodotMeshGeometry.CreateGroundedBox(
-                new Vector3(
-                    MainHandGripWidthMeters,
-                    MainHandGripLengthMeters,
-                    MainHandGripThicknessMeters), gripMaterial),
-            // The bone socket now lands at the middle of the grip, not on the guard.
-            Position = new Vector3(0, -MainHandGripLengthMeters * 0.5f, 0),
-        });
-        return pivot;
+            pivot?.Free();
+            resources.Dispose();
+            throw;
+        }
     }
 
     private static Basis CreateMainHandGripBasis()
@@ -1268,22 +1330,35 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             1f / inherited.Z);
     }
 
-    private static Node3D CreateInteractCue()
+    private Node3D CreateInteractCue()
     {
-        var material = new StandardMaterial3D
+        var resources = new GodotOwnedResources();
+        MeshInstance3D? cue = null;
+        try
         {
-            AlbedoColor = new Color(1f, 0.82f, 0.2f),
-            EmissionEnabled = true,
-            Emission = new Color(0.8f, 0.45f, 0.05f),
-            EmissionEnergyMultiplier = 1.8f,
-        };
-        return new MeshInstance3D
+            var material = resources.Own(new StandardMaterial3D
+            {
+                AlbedoColor = new Color(1f, 0.82f, 0.2f),
+                EmissionEnabled = true,
+                Emission = new Color(0.8f, 0.45f, 0.05f),
+                EmissionEnergyMultiplier = 1.8f,
+            });
+            cue = new MeshInstance3D
+            {
+                Name = "AcceptedInteractCue",
+                Mesh = resources.Own(GodotMeshGeometry.CreateGroundedBox(new Vector3(0.18f, 0.18f, 0.18f), material)),
+                Position = new Vector3(0, 0.12f, 0),
+                Visible = false,
+            };
+            _presentationResources.Add(cue, resources);
+            return cue;
+        }
+        catch
         {
-            Name = "AcceptedInteractCue",
-            Mesh = GodotMeshGeometry.CreateGroundedBox(new Vector3(0.18f, 0.18f, 0.18f), material),
-            Position = new Vector3(0, 0.12f, 0),
-            Visible = false,
-        };
+            cue?.Free();
+            resources.Dispose();
+            throw;
+        }
     }
 
     private static T? FindFirst<T>(Node root) where T : Node
