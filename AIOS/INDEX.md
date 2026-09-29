@@ -53,6 +53,7 @@ Start here. This file is intentionally small.
 - [TOPICS.md](TOPICS.md) — nearly every project-relevant topic discussed or discovered.
 - [Framework Runtime Packages / Services / Object Extensions / ECS boundary](topics/framework-runtime-packages-services-extensions.md)
 - [Framework Persistence / Control Plane publication](topics/framework-persistence-and-control-plane.md)
+- [Godot / .NET native shutdown lifetime assurance](topics/godot-dotnet-native-shutdown-lifetime.md)
 - [Definition / presentation / asset independence](topics/definition-presentation-asset-independence.md)
 - [Renderer impostor LOD / far-field cards](topics/renderer-impostor-lod.md)
 - [Materials and processing](topics/materials-and-processing.md)

@@ -38,7 +38,7 @@ Presentation/resource-pack replacement must not silently change collision, walka
 
 ## Physical semantics should not be inferred from art at runtime
 
-The general P4 target is for authoritative/public physical meaning to live with semantic definition/contracts, not to be inferred from current GLB/mesh bounds.
+P4 now establishes stable typed Definitions and a representative public fallback descriptor. The broader direction remains that authoritative/public physical meaning lives with semantic definition/contracts, not inferred from current GLB/mesh bounds.
 
 Conceptually:
 
@@ -178,19 +178,18 @@ rather than arbitrary executable callbacks on every definition. A real semantic 
 
 The client should not need every private server definition field merely to render a valid object.
 
-P4 may compile a bounded client-visible semantic/presentation descriptor containing the public pieces required for presentation/fallback, such as stable definition identity, presentation roles, disclosed physical/fallback shape, and public interaction/picking metadata. Private loot/stats/AI/crafting truth remains server-side unless independently disclosed.
+P4 implements a representative bounded public descriptor carrying semantic presentation identity plus public fallback dimensions/visibility while excluding private Combat, Durability, and Skills facts. This is a foothold, not yet a general Definition wire protocol. Private loot/stats/AI/crafting truth remains server-side unless independently disclosed.
 
-The exact descriptor/facet layout is still open P4 design.
+## Post-P4 remaining presentation work
 
-## P4 questions still open
+P4 now proves the typed Definition/facet/store API, stable/dense identity split, Definition aliases/remaps, dormant optional facets, tags/sets, first-party Iron Sword dogfooding, semantic presentation references, and representative primitive public fallback.
 
-P4 still needs to settle/prove:
+Still open for later checkpoints:
 
-- the exact typed Definition/facet/store authoring API;
-- DefinitionId alias/remap integration;
-- generalized public physical/fallback shape contracts beyond current frozen-static proofs;
-- the generic non-actor 3D presentation/content path;
+- generalized physical/fallback shape contracts beyond the representative descriptor and current frozen-static proof;
+- generic non-actor 3D presentation/content realization;
 - authoring validation/warnings between physical semantics and visual mesh;
-- how first-party item/object definitions dogfood these seams without privileged bypasses.
+- P6 derived/cached Inventory portraits and bounded Live/Inspection realization;
+- any general Definition wire disclosure beyond explicitly earned public descriptors.
 
-Do not treat those open implementation details as already complete simply because the higher-level separation is accepted.
+Do not infer that P4 implemented those later rendering/content consumers.
