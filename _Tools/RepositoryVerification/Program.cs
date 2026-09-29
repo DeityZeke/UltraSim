@@ -2910,7 +2910,7 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
             "SinglePlayer",
             ["UltraSim.Client.Application.Godot", "UltraSim.Client.BuiltInTestWorlds",
                 "UltraSim.Client.Content", "UltraSim.Client.Local",
-                "UltraSim.Client.StandardUi",
+                "UltraSim.Client.StandardUi", "UltraSim.Client.ControlPlane",
                 "UltraSim.Framework.ControlPlane",
                 "UltraSim.Framework.Persistence",
                 "UltraSim.Framework.Definitions",
@@ -2923,7 +2923,7 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
         new(
             "Online",
             ["UltraSim.Client.Application.Godot", "UltraSim.Client.Content", "UltraSim.Client.Network",
-                "UltraSim.Client.StandardUi", "UltraSim.Framework.ControlPlane",
+                "UltraSim.Client.StandardUi", "UltraSim.Client.ControlPlane", "UltraSim.Framework.ControlPlane",
                 "UltraSim.Framework.Definitions", "UltraSim.Game.Presentation.Contracts",
                 "UltraSim.Game.Protocol", "UltraSim.Network"],
             ["UltraSim.Client.BuiltInTestWorlds", "UltraSim.Client.Local",
@@ -2939,7 +2939,7 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
         new(
             "Complete",
             ["UltraSim.Client.Application.Godot", "UltraSim.Client.BuiltInTestWorlds",
-                "UltraSim.Client.Local", "UltraSim.Client.StandardUi",
+                "UltraSim.Client.Local", "UltraSim.Client.StandardUi", "UltraSim.Client.ControlPlane",
                 "UltraSim.Client.Network", "UltraSim.Game.Composition", "UltraSim.Game.Protocol",
                 "UltraSim.Framework.ControlPlane",
                 "UltraSim.Framework.Persistence",
@@ -2990,7 +2990,7 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
             .Select(static path => Path.GetFileNameWithoutExtension(path))
             .ToHashSet(StringComparer.Ordinal);
         foreach (string managementProof in new[] { "UltraSim.Bridges.ControlPlane.ECS",
-            "UltraSim.Bridges.ControlPlane.ServerRuntime", "UltraSim.Client.ControlPlane" })
+            "UltraSim.Bridges.ControlPlane.ServerRuntime" })
             if (outputAssemblies.Contains(managementProof) || dependencies.Contains(managementProof))
                 throw new InvalidOperationException($"{gate.Name} acquired an opt-in P1 management proof assembly.");
 
@@ -3144,6 +3144,7 @@ static ContentlessOnlineExport VerifyContentlessOnlineExport(string root, string
         "UltraSim.Client.Core",
         "UltraSim.Client.Network",
         "UltraSim.Client.StandardUi",
+        "UltraSim.Client.ControlPlane",
         "UltraSim.ECS",
         "UltraSim.Framework.ControlPlane",
         "UltraSim.Framework.Definitions",
@@ -3237,6 +3238,7 @@ static FinalClientProductExports VerifyFinalClientProductExports(
         "UltraSim.Client.Core",
         "UltraSim.Client.Local",
         "UltraSim.Client.StandardUi",
+        "UltraSim.Client.ControlPlane",
         "UltraSim.ECS",
         "UltraSim.Framework.ControlPlane",
         "UltraSim.Framework.Definitions",
@@ -3318,6 +3320,7 @@ static FinalClientProductExports VerifyFinalClientProductExports(
         "UltraSim.Client.Local",
         "UltraSim.Client.Network",
         "UltraSim.Client.StandardUi",
+        "UltraSim.Client.ControlPlane",
         "UltraSim.ECS",
         "UltraSim.Framework.ControlPlane",
         "UltraSim.Framework.Definitions",
