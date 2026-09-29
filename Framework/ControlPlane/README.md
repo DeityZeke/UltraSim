@@ -82,25 +82,30 @@ their own bounded retention and safe-data policy.
 - Client/ControlPlane depends on Framework and existing Client Core. Trusted composition supplies
   the existing immutable document getter, actual effective consumer settings and transactional
   owner commit. The existing resolver/FileStore retain validation/persistence/Realm/consent
-  ownership. Seven representative fields prove Bool/Float/Int/Option and device-owned next-entry
-  vegetation Pending. Master Volume is explicitly a persisted preference without an Audio consumer.
-  The adapter is scoped to one current context; named-profile/editor integration remains P5.
+  ownership. P5 promotes the provider into all physical client editions with eleven representative
+  existing fields, a bounded input-binding collection/rebind action, and device-owned next-entry
+  vegetation Pending. Master Volume remains a persisted preference without an Audio consumer.
+  The adapter is scoped to one current context; its F10 generic viewer coexists with the detailed
+  Advanced display form rather than introducing a second settings store.
 - ControlPlaneViewer is a generic cold model of category paths, descriptors and typed snapshots.
-  It invokes actions, holds at most 32 local drafts and submits provider-local batches. Removing
-  the ECS provider removes its content without changing the viewer. No concrete owner references,
-  reflection tabs, polished F4/F10 UI or persisted drafts.
+  It invokes actions, holds at most 32 local drafts and submits provider-local batches. P5 adds
+  read-only-principal presentation, schema-checked drafts and confirmation pinned to the published
+  provider generation/revision. Removing the ECS provider removes its content without changing the
+  viewer. Godot's cold generic surface pages collections at 32 rendered rows; no concrete owner
+  references, reflection tabs or persisted drafts are added.
 
-The P1 ECS, ServerRuntime and Client Settings proof adapters remain opt-in, not
-default product dependencies; export gates still exclude those bridge/provider
-assemblies. P3 deliberately brings the BCL-only Framework Control Plane contract
-assembly into SinglePlayer/Online/Complete for one cold, read-only Godot adapter
-publication owned by the actual client root. No ECS, packet or render hot path calls
-this registry; adapter status is captured only on management requests.
+The P1 ECS and ServerRuntime proof bridges remain opt-in and excluded from client exports. P5
+promotes Client Settings into SinglePlayer/Online/Complete while P3's BCL-only Framework contract
+and cold Godot adapter publication remain. User and Developer views are explicitly classified;
+the Operator proof is read-only and no remote Control Plane route or server-admin command is
+implied. No ECS, packet or render hot path calls this registry; adapter status is captured only on
+management requests. The existing Game-authored F4 Server Monitor remains separate from the
+future P7 operator product.
 
 ## Verification
 
 Run dotnet run --project _Tests/UltraSim.ControlPlane.Tests -c Release, then
 bash ./verify.sh --architecture-only and bash ./verify.sh --configuration=Release.
 The canonical verifier includes this proof alongside existing ECS, Runtime, Settings and
-native/export/lifecycle gates. P2 Runtime Host is separate and closed; P5 product UI
-and remote operator routing are deliberately not implemented here.
+native/export/lifecycle gates. P5's tested product surface and limits are recorded in
+[_Benchmarks/Baselines/framework-p5-control-surfaces-2026-09-29.md](../../_Benchmarks/Baselines/framework-p5-control-surfaces-2026-09-29.md).

@@ -1,0 +1,43 @@
+{
+  "checkpoint": "P5",
+  "status": "closed-representative-contract",
+  "date": "2026-09-29",
+  "startingCommit": "15e185c5f46965d869628c06818659e91963d945",
+  "implementationCommit": "c5ab587d",
+  "gateCommits": ["6b9264aa", "bc0f9131b4ba512ad6b67693ed4d0d94ec645249"],
+  "canonicallyTestedCommit": "bc0f9131b4ba512ad6b67693ed4d0d94ec645249",
+  "platform": {
+    "os": "CachyOS Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D; 8 cores, 16 threads",
+    "godot": "4.7.1 stable Mono",
+    "dotnetSdk": "8.0.131",
+    "dotnetRuntimes": ["Microsoft.NETCore.App 8.0.31", "Microsoft.AspNetCore.App 8.0.31"],
+    "dotnetRoot": "/tmp/ultrasim-p5-dotnet-8.0.131"
+  },
+  "results": {
+    "controlPlane": "21/21 pass",
+    "uiKernel": "29/29 pass",
+    "clientCore": "36/36 pass",
+    "localClient": "24/24 pass",
+    "nativeManagementSmoke": "pass",
+    "nativeOwnershipFixture": "pass",
+    "architectureOnly": "pass",
+    "canonicalRelease": "pass uninterrupted",
+    "physicalExports": ["SinglePlayer", "Online", "Complete"],
+    "warmOfficialContentExits": { "passed": 5, "attempted": 5 }
+  },
+  "precedingStops": [
+    "system dotnet installation lacked Microsoft.AspNetCore.App",
+    "old composition gate rejected promoted Client.ControlPlane assembly",
+    "first exact export list placed promoted assembly out of ordinal order"
+  ],
+  "remainingOwners": {
+    "advancedF10Display": "existing validated form retained",
+    "f4ServerMonitor": "Game-authored read-only view; P7 owns future operator transport",
+    "inventoryD2ListAndPortraits": "P6",
+    "audioConsumer": "P8",
+    "productionVisualArt": "P9/P10"
+  },
+  "next": "P6",
+  "pf6Started": false
+}

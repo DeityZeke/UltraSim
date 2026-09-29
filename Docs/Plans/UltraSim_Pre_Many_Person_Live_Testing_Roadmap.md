@@ -2,7 +2,7 @@
 
 **Proposed status:** Candidate canonical roadmap / architecture checklist\
 **Current reference baseline:** F1.12-R3 / Gate 0 production closure — `e3a63ea21f8f5ea4fa69e3768a055c409edc8616`; documentation-only commits may advance `main` beyond that closure SHA.\
-**Immediate checkpoint:** P1 Framework Control Plane, P2 Runtime Host/C# Server Authoring, P3 adapter boundaries, and P4 Engine Contracts + typed definition facets are **CLOSED**. The previously reproduced warm Official-content Finalizer failure was repaired and accepted in [native-lifetime R1 evidence](../../_Benchmarks/Baselines/client-native-lifetime-assurance-r1-2026-09-29.md), with [pre-P5 wrapper hardening](../../_Benchmarks/Baselines/client-native-lifetime-pre-p5-hardening-2026-09-29.md) verified on the integrated tree. P5 is **NEXT / NOT STARTED**, P6–P11 and Gate 1 remain **PLANNED**, and PF6 remains **PLANNED / NOT READY / NOT STARTED**.\
+**Immediate checkpoint:** P1–P5 are **CLOSED**; [P5's representative control-surface evidence](../../_Benchmarks/Baselines/framework-p5-control-surfaces-2026-09-29.md) records the generic F10 viewer, neutral UI roles, typed image seam and canonical Release/export acceptance. P6 is **NEXT**; P7–P11 and Gate 1 remain **PLANNED**, and PF6 remains **PLANNED / NOT READY / NOT STARTED**. The previously reproduced warm Official-content Finalizer failure remains closed by [native-lifetime R1 evidence](../../_Benchmarks/Baselines/client-native-lifetime-assurance-r1-2026-09-29.md) and [pre-P5 wrapper hardening](../../_Benchmarks/Baselines/client-native-lifetime-pre-p5-hardening-2026-09-29.md).\
 **End state of this document:** UltraSim is ready to move from individual/trusted dogfooding and closed validation into a many-player live test where human feedback is primarily about the intended game rather than known development-harness limitations.
 
 ---
@@ -1739,6 +1739,8 @@ Skills
 
 ## P5 — User/Admin/Developer control surfaces
 
+**Status: CLOSED (representative P5 contract).** The [P5 evidence](../../_Benchmarks/Baselines/framework-p5-control-surfaces-2026-09-29.md) pins the canonical Release/export pass and exact scope. F10 now contains an owner-backed generic User viewer while its detailed Advanced display form remains for parity. A discoverable local Developer viewer and a generic authorized Operator read-only proof exist; P7 still owns an actual remote Server Operator product. F4 remains a sanitized Game-authored read-only monitor until a real authenticated management projection is warranted. The P4 typed-reference image seam is proven without implementing P6 dynamic portraits or P9 art.
+
 Native-resource review requirement: every new Godot-backed wrapper produced or retrieved by a
 P5 surface must be classified as owner-lived (strongly retained and explicitly retired),
 temporary (scoped disposal on the Godot thread), or proven borrowed/engine-owned. Add a
@@ -3053,8 +3055,8 @@ This compact board is intended to sit near the top of active implementation note
 [x] P2      Runtime Host + C# Server Authoring Environment — CLOSED
 [x] P3      Framework adapter/runtime boundary migration — CLOSED
 [x] P4      Engine Contracts + typed definition facets — CLOSED
-[ ] P5      User/Admin/Developer control surfaces
-[ ] P6      Inventory D2/List viewer profiles
+[x] P5      User/Admin/Developer control surfaces — representative contract CLOSED
+[ ] P6      Inventory D2/List viewer profiles — NEXT
 [ ] P7      Server Operator Product + console + Godot GUI + save/backup/recovery
 [ ] P8      Audio Kernel + Sound Engine
 [ ] P9      Representative Cabin visual/content pass

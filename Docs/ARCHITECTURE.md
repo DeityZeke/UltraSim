@@ -182,9 +182,12 @@ remain with the owning subsystem, including coupled validation of provider-local
 
 The ECS adapter sits in Bridges above Framework and ECS; the Kernel gains no upward dependency.
 The ServerRuntime adapter also sits above both sides, using a narrow immutable public policy/clock/
-idle observation. Client Settings uses an opt-in adapter above existing Client Core and its
-resolver/store. A generic viewer model contains no concrete subsystem types. These proof adapters
-are not default product dependencies or a completed F4/F10 UI.
+idle observation. P5 promotes the Client Settings adapter above existing Client Core and its
+resolver/store into all three physical client editions. A generic viewer model contains no
+concrete subsystem types. F10 now contains that owner-published User surface and a discoverable
+read-only Developer view, while retaining its detailed Advanced display form for parity. The
+ECS/ServerRuntime bridges remain opt-in and F4's sanitized authority-authored Server Monitor
+remains Game UI; no remote operator command route is implied.
 
 Registry operations are synchronous, owner-thread-bound and non-reentrant; cross-thread operator
 transport remains future product work. No registry lookup, descriptor allocation, capability

@@ -31,11 +31,26 @@ game workflows. It does not make the UI kernel or client authoritative.
 The [Framework Control Plane](../Framework/ControlPlane/README.md) is a separate, BCL-only cold
 management contract. Owning providers publish Diagnostic/Control/Action/Collection metadata and
 typed snapshots; a generic viewer organizes category paths without ECS-specific tabs or CLR
-property reflection. The utilitarian P1 viewer is a model proof, not a Godot gump or F4/F10 rewrite.
-Its local drafts are not owner Requested or Pending state. Apply submits one bounded provider-local
+property reflection. P1's utilitarian viewer established the model; P5 now renders it as a cold
+Godot management surface in F10, with typed fields, actions, read-only reasons, owner state and
+bounded collection pages. The detailed Advanced display form remains for parity. Local drafts
+are not owner Requested or Pending state. Apply submits one bounded provider-local
 batch under a trusted principal, generation and optional revision; authorization and owner
 validation precede mutation. Real Settings persistence still belongs to the existing client owner.
 Game UI protocols, view action authority, and semantic 3D presentation contracts are unchanged.
+
+P5 classifies F10 preferences as User-owned, client adapter diagnostics as Developer/Operator
+read-only, test hooks as Test, and implementation selection as Cold Configuration. Local Developer
+diagnostics are discoverable without a CLI switch. The sanitized F4 Server Monitor remains an
+authority-authored Game UI, not a silently created server Admin command.
+
+Authored `Image` can realize tiled/opacity-aware visual roles. A Panel role can resolve a bounded
+nine-piece frame with independent edge/center Stretch or Tile policy; Button and Toggle roles
+resolve local interaction states with deterministic fallback. Godot nodes own those controls;
+native textures returned by a resolver remain strongly owned and explicitly retired by that
+resolver after its views close. A typed `SemanticPresentationReference` may be attached to a
+compiled image element through a bounded, definition-fenced client binding. This is a
+presentation request after admission, not Game item authority or P6's dynamic portrait cache.
 
 ## Definitions and models
 
