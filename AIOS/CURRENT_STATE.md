@@ -26,10 +26,13 @@ This is a compact design-memory snapshot, not a replacement for implementation p
 | Framework Runtime Host + C# server authoring | CANONICAL implementation / P2 CLOSED | [Runtime Host README](../Framework/RuntimeHost/README.md), [Server Authoring README](../Server/Authoring/README.md), [AIOS synthesis](topics/framework-runtime-packages-services-extensions.md) |
 | Framework save-set persistence | CANONICAL implementation | [Framework Persistence README](../Framework/Persistence/README.md), [AIOS synthesis](topics/framework-persistence-and-control-plane.md) |
 | Runtime Package / Runtime Service / Object Extension terminology | CANONICAL | [Architecture](../Docs/ARCHITECTURE.md), [AIOS synthesis](topics/framework-runtime-packages-services-extensions.md) |
-| Framework adapter/runtime boundary migration | NEXT / P3 unstarted | [Pre-many-player roadmap](../Docs/Plans/UltraSim_Pre_Many_Person_Live_Testing_Roadmap.md) |
+| Framework adapter/runtime boundary migration | CANONICAL implementation / P3 CLOSED | [Pre-many-player roadmap](../Docs/Plans/UltraSim_Pre_Many_Person_Live_Testing_Roadmap.md), [P3 evidence](../_Benchmarks/Baselines/framework-p3-adapter-boundary-2026-09-29.md) |
 | Definition ↔ presentation ↔ asset independence | CANONICAL presentation rules + P4-pending generalization | [UI](../Docs/UI.md), [Architecture](../Docs/ARCHITECTURE.md), [AIOS synthesis](topics/definition-presentation-asset-independence.md) |
+| Engine Contracts + typed definition facets | NEXT / P4 unstarted | [Pre-many-player roadmap](../Docs/Plans/UltraSim_Pre_Many_Person_Live_Testing_Roadmap.md) |
 
 P2's closed vocabulary is precise: a **Runtime Package** is the authored/deployed composition unit; an **Engine Core** is a reusable domain capability; a **Runtime Service** is a live generation-fenced service object; an **Object Extension** (“Extension”) is sparse managed owner/global state or behavior outside ECS; and ECS remains the high-scale data-oriented substrate. Historical ACC “Module” maps to an UltraSim Object Extension, not to a Runtime Package.
+
+P3 closed by proving the existing platform boundary was already narrow: authoritative Game/Framework/Server and engine-neutral Client code have no direct Godot dependency. Godot remains an explicit client adapter with read-only Control Plane diagnostics; dedicated ServerOnly composition remains headless. No generic `IPlatformAdapter` framework was added. P4 is next.
 
 ## Recently explored but not yet promoted into a large canonical plan
 
