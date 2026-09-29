@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
-namespace UltraSim.Server.Persistence;
+namespace UltraSim.Framework.Persistence;
 
 /// <summary>Injectable filesystem operations required by crash-durable save-set publication.</summary>
 /// <remarks>Implementations must preserve the flush/rename semantics implied by each operation.</remarks>

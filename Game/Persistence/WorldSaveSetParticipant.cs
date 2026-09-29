@@ -3,6 +3,7 @@ using System.Text;
 using UltraSim.ECS;
 using UltraSim.Game.World;
 using UltraSim.Server.Persistence;
+using UltraSim.Framework.Persistence;
 using UltraSim.Spatial;
 
 namespace UltraSim.Game.Persistence;
@@ -584,7 +585,7 @@ public sealed class PreparedWorldParticipant : IPreparedLoadParticipant
     public WorldMutableOverlay? Overlay { get; private set; }
     public PreparedWorldComposition? PreparedComposition { get; private set; }
 
-    public void Resolve(IPersistentEntityResolver resolver)
+    public void Resolve(IPersistentReferenceResolver resolver)
     {
         ArgumentNullException.ThrowIfNull(resolver);
         if (_resolved)

@@ -11,6 +11,7 @@ using UltraSim.Game.Replication;
 using UltraSim.Game.World;
 using UltraSim.Network;
 using UltraSim.Server.Persistence;
+using UltraSim.Framework.Persistence;
 using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
 

@@ -4,7 +4,8 @@ UltraSim persistence is four cooperating layers, not one serializer:
 
 ```text
 ECS persistence            world identity, shape, columns, references, system state
-Server save-set            participant transaction and crash-durable publication
+Framework save-set         participant transaction and crash-durable publication
+Server ECS bridge          durable entity-key adaptation and ECS participant
 Game persistence           participant composition and derived-state rebuild
 Runtime publication        one coherent restored ServerGeneration
 ```
@@ -27,7 +28,7 @@ container and component contract.
 
 ## Save-set transaction
 
-The server coordinator gives all participants one sequence/epoch. Capture is a
+The Framework coordinator gives all participants one sequence/epoch. Capture is a
 brief owner-thread authority operation that returns immutable owned artifacts.
 Encoding, hashing, file I/O, flush, rename, manifest, and `CURRENT` publication
 occur after the authority lease is released and may run on a persistence worker.
@@ -128,6 +129,15 @@ classified corruption/not-found failures, never arbitrary implementation,
 out-of-memory, or transient I/O exceptions. Paths are contained below the save
 root. Manifests and artifacts cross-check participant keys, lengths, hashes, and
 sequence.
+
+The generic coordinator and contracts are now BCL-only in
+[`../Framework/Persistence/`](../Framework/Persistence/README.md). Its neutral
+durable reference key records a canonical domain plus stable scope/local IDs.
+The Server ECS bridge adapts `PersistentEntityKey`; an Engine/sidecar participant
+can use the same transaction without importing ECS. Staged namespace owners
+are resolved before other providers and cannot fall through to old active
+authority. Domain-specific compatibility exceptions are classified explicitly
+by the Game composition caller; unknown faults still surface.
 
 Immutable prepared surfaces do not expose mutable backing arrays/dictionaries.
 Prepared ownership is single-use: publication attempts cannot be retried after a

@@ -6,6 +6,7 @@ using UltraSim.Game.Accounting;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Persistence;
 using UltraSim.Server.Persistence;
+using UltraSim.Framework.Persistence;
 using UltraSim.Server.Runtime;
 
 var tests = new (string Name, Action Body)[]
@@ -783,7 +784,7 @@ sealed class PersistenceComposition : IServerComposition
     }
 }
 
-sealed class StaticResolver : IPersistentEntityResolver
+sealed class StaticResolver : IPersistentReferenceResolver
 {
     private readonly PersistentEntityKey _key;
     private readonly Entity _entity;
@@ -794,9 +795,9 @@ sealed class StaticResolver : IPersistentEntityResolver
         _entity = entity;
     }
 
-    public bool TryResolve(PersistentEntityKey key, out object? value)
+    public bool TryResolve(PersistentReferenceKey key, out object? value)
     {
-        if (key.Equals(_key))
+        if (key.Equals(EcsPersistentReference.From(_key)))
         {
             value = _entity;
             return true;

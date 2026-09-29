@@ -6,5 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../Framework/RuntimeHost/UltraSim.Framework.RuntimeHost.csproj" />
+    <ProjectReference Include="../../Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj" />
+    <ProjectReference Include="../../Bridges/ControlPlane.RuntimeHost/UltraSim.Bridges.ControlPlane.RuntimeHost.csproj" />
   </ItemGroup>
 </Project>

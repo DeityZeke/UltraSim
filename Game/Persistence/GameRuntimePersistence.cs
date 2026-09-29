@@ -3,6 +3,7 @@ using UltraSim.Game.Accounting;
 using UltraSim.Game.Composition;
 using UltraSim.Game.World;
 using UltraSim.Server.Persistence;
+using UltraSim.Framework.Persistence;
 using UltraSim.Server.Runtime;
 
 namespace UltraSim.Game.Persistence;
@@ -163,7 +164,8 @@ public sealed class GameRuntimePersistence
             using PreparedLoadGeneration prepared = _coordinator.PrepareLoad(
                 [ecsParticipant, worldParticipant, accountingParticipant, clockParticipant],
                 EmptyResolver.Instance,
-                recoveryMode);
+                recoveryMode,
+                static failure => failure is PersistenceValidationException or PersistenceCompatibilityException);
             PreparedEcsWorldParticipant ecs = prepared.Participants.OfType<PreparedEcsWorldParticipant>().Single();
             PreparedWorldParticipant preparedWorld = prepared.Participants.OfType<PreparedWorldParticipant>().Single();
             PreparedAccountingParticipant accounting = prepared.Participants.OfType<PreparedAccountingParticipant>().Single();
@@ -289,11 +291,11 @@ public sealed class GameRuntimePersistence
             throw new InvalidOperationException("Game persistence is bound to its creating owner thread.");
     }
 
-    private sealed class EmptyResolver : IExternalPersistentEntityResolver
+    private sealed class EmptyResolver : IExternalPersistentReferenceResolver
     {
         internal static readonly EmptyResolver Instance = new();
 
-        public bool TryResolve(PersistentEntityKey key, out object? value)
+        public bool TryResolve(PersistentReferenceKey key, out object? value)
         {
             value = null;
             return false;

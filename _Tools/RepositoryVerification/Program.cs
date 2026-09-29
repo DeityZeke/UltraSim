@@ -2407,6 +2407,7 @@ string[] testProjects =
 [
     "_Tests/UltraSim.ControlPlane.Tests/UltraSim.ControlPlane.Tests.csproj",
     "_Tests/UltraSim.Framework.RuntimeHost.Tests/UltraSim.Framework.RuntimeHost.Tests.csproj",
+    "_Tests/UltraSim.Framework.Persistence.Tests/UltraSim.Framework.Persistence.Tests.csproj",
     "_Tests/UltraSim.ECS.Tests/UltraSim.ECS.Tests.csproj",
     "_Tests/UltraSim.ECS.Generator.Tests/UltraSim.ECS.Generator.Tests.csproj",
     "_Tests/UltraSim.ECS.Comparison.Tests/UltraSim.ECS.Comparison.Tests.csproj",
@@ -5860,10 +5861,13 @@ static void VerifyArchitecture(string root)
     {
         ["Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj"] = [],
         ["Framework/RuntimeHost/UltraSim.Framework.RuntimeHost.csproj"] = [],
+        ["Framework/Persistence/UltraSim.Framework.Persistence.csproj"] = [],
         ["Bridges/ControlPlane.ECS/UltraSim.Bridges.ControlPlane.ECS.csproj"] =
             ["Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj", "Kernels/ECS/UltraSim.ECS.csproj"],
         ["Bridges/ControlPlane.ServerRuntime/UltraSim.Bridges.ControlPlane.ServerRuntime.csproj"] =
             ["Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj", "Server/Runtime/UltraSim.Server.Runtime.csproj"],
+        ["Bridges/ControlPlane.RuntimeHost/UltraSim.Bridges.ControlPlane.RuntimeHost.csproj"] =
+            ["Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj", "Framework/RuntimeHost/UltraSim.Framework.RuntimeHost.csproj"],
         ["Client/ControlPlane/UltraSim.Client.ControlPlane.csproj"] =
             ["Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj", "Client/Core/UltraSim.Client.Core.csproj"],
         ["Framework/Http/Endpoint/UltraSim.Framework.Http.Endpoint.csproj"] = [],
@@ -5880,7 +5884,7 @@ static void VerifyArchitecture(string root)
         ["Kernels/Spatial/UltraSim.Spatial.csproj"] = [],
         ["Kernels/UI/UltraSim.UI.csproj"] = [],
         ["Server/Persistence/UltraSim.Server.Persistence.csproj"] =
-            ["Kernels/ECS/UltraSim.ECS.csproj"],
+            ["Framework/Persistence/UltraSim.Framework.Persistence.csproj", "Kernels/ECS/UltraSim.ECS.csproj"],
         ["Server/Runtime/UltraSim.Server.Runtime.csproj"] =
             ["Kernels/ECS/UltraSim.ECS.csproj"],
         ["Server/Hosting/UltraSim.Server.Hosting.csproj"] =

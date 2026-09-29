@@ -1,4 +1,5 @@
 using UltraSim.ECS;
+using UltraSim.Framework.Persistence;
 
 namespace UltraSim.Server.Persistence;
 
@@ -89,7 +90,7 @@ internal sealed class CapturedEcsWorldParticipant : ICapturedSaveSetParticipant
 
 /// <summary>Prepared ECS staging generation. The publishing host takes ownership exactly once.</summary>
 public sealed class PreparedEcsWorldParticipant : IPreparedLoadParticipant,
-    IPreparedPersistentEntityResolver, IPreparedPersistentEntityNamespace
+    IPreparedPersistentReferenceResolver, IPreparedPersistentReferenceNamespace
 {
     private PersistenceRestorePlan? _plan;
     private readonly Func<PersistenceRestoreRequirements, EcsWorld> _stagingWorldFactory;
@@ -108,8 +109,10 @@ public sealed class PreparedEcsWorldParticipant : IPreparedLoadParticipant,
     public PersistenceRestoreReport RestoreReport { get; private set; }
     public EcsWorld World => _world ?? throw new InvalidOperationException("The ECS participant has not completed Resolve.");
 
-    public bool TryResolve(PersistentEntityKey key, out object? value)
+    public bool TryResolve(PersistentReferenceKey reference, out object? value)
     {
+        if (!EcsPersistentReference.TryToEcs(reference, out PersistentEntityKey key))
+        { value = null; return false; }
         if (_world is not null &&
             key.IsValid &&
             key.World == _world.PersistentWorldId &&
@@ -125,10 +128,11 @@ public sealed class PreparedEcsWorldParticipant : IPreparedLoadParticipant,
         return false;
     }
 
-    public bool Owns(PersistentEntityKey key) =>
-        _world is not null && key.IsValid && key.World == _world.PersistentWorldId;
+    public bool Owns(PersistentReferenceKey key) =>
+        _world is not null && key.IsValid && key.Domain == EcsPersistentReference.Domain &&
+        key.Scope == _world.PersistentWorldId.Value;
 
-    public void Resolve(IPersistentEntityResolver resolver)
+    public void Resolve(IPersistentReferenceResolver resolver)
     {
         ArgumentNullException.ThrowIfNull(resolver);
         if (_world is not null || _plan is null) throw new InvalidOperationException("The ECS participant was already resolved.");

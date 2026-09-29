@@ -3,9 +3,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using UltraSim.ECS;
-
-namespace UltraSim.Server.Persistence;
+namespace UltraSim.Framework.Persistence;
 
 /// <summary>Coordinates bounded participant capture, staged restore, and crash-durable save-set publication.</summary>
 /// <remarks>
@@ -190,7 +188,8 @@ public sealed class SaveSetCoordinator
     }
 
     public PreparedLoadGeneration PrepareLoad(IReadOnlyList<ISaveSetParticipant> participants,
-        IExternalPersistentEntityResolver resolver, SaveSetRecoveryMode recoveryMode = SaveSetRecoveryMode.StrictCurrent)
+        IExternalPersistentReferenceResolver resolver, SaveSetRecoveryMode recoveryMode = SaveSetRecoveryMode.StrictCurrent,
+        Func<Exception, bool>? additionalRecoverableFailure = null)
     {
         ArgumentNullException.ThrowIfNull(participants); ArgumentNullException.ThrowIfNull(resolver);
         ValidateParticipants(participants);
@@ -199,14 +198,14 @@ public sealed class SaveSetCoordinator
         {
             try { return PrepareGeneration(generation, participants, resolver); }
             catch (Exception exception) when (recoveryMode == SaveSetRecoveryMode.CurrentThenNewestComplete &&
-                IsRecoverableCandidateFailure(exception))
+                (IsRecoverableCandidateFailure(exception) || additionalRecoverableFailure?.Invoke(exception) == true))
             { currentFailure ??= exception; }
         }
         throw new IOException("No complete compatible save-set generation could be prepared.", currentFailure);
     }
 
     private PreparedLoadGeneration PrepareGeneration(string directory, IReadOnlyList<ISaveSetParticipant> participants,
-        IExternalPersistentEntityResolver resolver)
+        IExternalPersistentReferenceResolver resolver)
     {
         string manifestPath = Path.Combine(directory, ManifestName);
         long manifestLength = _files.GetFileLength(manifestPath);
@@ -260,7 +259,7 @@ public sealed class SaveSetCoordinator
                 }
                 prepared[count++] = state;
             }
-            IPersistentEntityResolver stagedResolver = new PreparedParticipantResolver(resolver, prepared, count);
+            IPersistentReferenceResolver stagedResolver = new PreparedParticipantResolver(resolver, prepared, count);
             for (int i = 0; i < count; i++) prepared[i].Resolve(stagedResolver);
             for (int i = 0; i < count; i++) prepared[i].Validate();
             return new PreparedLoadGeneration(manifest.Sequence, prepared);
@@ -334,16 +333,16 @@ public sealed class SaveSetCoordinator
     }
     private static bool IsRecoverableCandidateFailure(Exception exception) => exception is
         InvalidDataException or FileNotFoundException or DirectoryNotFoundException or
-        JsonException or PersistenceValidationException or PersistenceCompatibilityException;
+        JsonException;
 
-    private sealed class PreparedParticipantResolver : IPersistentEntityResolver
+    private sealed class PreparedParticipantResolver : IPersistentReferenceResolver
     {
-        private readonly IExternalPersistentEntityResolver _fallback;
+        private readonly IExternalPersistentReferenceResolver _fallback;
         private readonly IPreparedLoadParticipant[] _participants;
         private readonly int _count;
 
         internal PreparedParticipantResolver(
-            IExternalPersistentEntityResolver fallback,
+            IExternalPersistentReferenceResolver fallback,
             IPreparedLoadParticipant[] participants,
             int count)
         {
@@ -352,20 +351,28 @@ public sealed class SaveSetCoordinator
             _count = count;
         }
 
-        public bool TryResolve(PersistentEntityKey key, out object? value)
+        public bool TryResolve(PersistentReferenceKey key, out object? value)
         {
-            // Candidate providers are checked first so a staged durable entity
-            // cannot accidentally resolve to an old active-world object.
+            // A staged owner fences its entire namespace, even if an earlier
+            // non-owner provider claims the same key or the old generation has it.
+            IPreparedLoadParticipant? owner = null;
             for (int index = 0; index < _count; index++)
             {
-                if (_participants[index] is IPreparedPersistentEntityNamespace owner && owner.Owns(key))
+                if (_participants[index] is IPreparedPersistentReferenceNamespace candidate && candidate.Owns(key))
                 {
-                    if (_participants[index] is IPreparedPersistentEntityResolver ownedProvider)
-                        return ownedProvider.TryResolve(key, out value);
-                    value = null;
-                    return false;
+                    if (owner is null) owner = _participants[index];
+                    else throw new InvalidDataException("Multiple staged participants own one durable reference namespace.");
                 }
-                if (_participants[index] is IPreparedPersistentEntityResolver provider &&
+            }
+            if (owner is not null)
+            {
+                if (owner is IPreparedPersistentReferenceResolver staged)
+                    return staged.TryResolve(key, out value);
+                value = null; return false;
+            }
+            for (int index = 0; index < _count; index++)
+            {
+                if (_participants[index] is IPreparedPersistentReferenceResolver provider &&
                     provider.TryResolve(key, out value))
                 {
                     return true;

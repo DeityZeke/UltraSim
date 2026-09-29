@@ -1,6 +1,22 @@
-using UltraSim.ECS;
+namespace UltraSim.Framework.Persistence;
 
-namespace UltraSim.Server.Persistence;
+/// <summary>Neutral durable reference. Namespace is canonical; scope and local IDs are stable, never dense runtime indices.</summary>
+public readonly record struct PersistentReferenceKey
+{
+    public PersistentReferenceKey(string domain, ulong scope, ulong local)
+    {
+        if (string.IsNullOrEmpty(domain) || domain.Length > 64 || domain[0] is < 'a' or > 'z' ||
+            domain.Any(c => !(c is >= 'a' and <= 'z' or >= '0' and <= '9' or '.' or '-')) ||
+            domain[^1] == '.' || domain.Contains("..", StringComparison.Ordinal) ||
+            scope == 0 || local == 0)
+            throw new ArgumentException("Invalid durable reference identity.");
+        Domain = domain; Scope = scope; Local = local;
+    }
+    public string Domain { get; }
+    public ulong Scope { get; }
+    public ulong Local { get; }
+    public bool IsValid => Domain is not null && Scope != 0 && Local != 0;
+}
 
 /// <summary>Common logical identity and timestamp shared by every participant in one save set.</summary>
 public readonly record struct SaveSetContext(ulong Sequence, long UnixMilliseconds);
@@ -38,15 +54,15 @@ public interface IPreparedLoadParticipant : IDisposable
     /// <summary>Gets the participant key that must match its registration.</summary>
     string Key { get; }
     /// <summary>Resolves durable references only against admitted staged/external providers.</summary>
-    void Resolve(IPersistentEntityResolver resolver);
+    void Resolve(IPersistentReferenceResolver resolver);
     /// <summary>Performs all remaining failure-prone validation before publication.</summary>
     void Validate();
 }
 
 /// <summary>Resolves one complete persistent world/entity key to staged or admitted immutable authority.</summary>
-public interface IPersistentEntityResolver
+public interface IPersistentReferenceResolver
 {
-    bool TryResolve(PersistentEntityKey key, out object? value);
+    bool TryResolve(PersistentReferenceKey key, out object? value);
 }
 
 /// <summary>
@@ -57,16 +73,16 @@ public interface IPersistentEntityResolver
 /// Authoritative links owned by a staged participant resolve only from that
 /// participant; its namespace cannot fall through to this resolver.
 /// </remarks>
-public interface IExternalPersistentEntityResolver : IPersistentEntityResolver { }
+public interface IExternalPersistentReferenceResolver : IPersistentReferenceResolver { }
 
 /// <summary>
 /// A prepared participant can expose durable identities to later prepared
 /// participants during one staged load. Implementations must resolve only
 /// candidate state, never an independently active generation.
 /// </summary>
-public interface IPreparedPersistentEntityResolver
+public interface IPreparedPersistentReferenceResolver
 {
-    bool TryResolve(PersistentEntityKey key, out object? value);
+    bool TryResolve(PersistentReferenceKey key, out object? value);
 }
 
 /// <summary>Declares that a staged participant owns a durable identity namespace.</summary>
@@ -75,9 +91,9 @@ public interface IPreparedPersistentEntityResolver
 /// entity, resolution must fail. It must never fall through to active or
 /// external authority for the same namespace.
 /// </remarks>
-public interface IPreparedPersistentEntityNamespace
+public interface IPreparedPersistentReferenceNamespace
 {
-    bool Owns(PersistentEntityKey key);
+    bool Owns(PersistentReferenceKey key);
 }
 
 /// <summary>Owned participant captures from one common logical epoch.</summary>

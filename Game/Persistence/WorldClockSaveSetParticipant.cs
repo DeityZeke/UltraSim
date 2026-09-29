@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using UltraSim.ECS;
 using UltraSim.Server.Persistence;
+using UltraSim.Framework.Persistence;
 using UltraSim.Server.Runtime;
 
 namespace UltraSim.Game.Persistence;
@@ -150,7 +151,7 @@ public sealed class PreparedWorldClockParticipant : IPreparedLoadParticipant
 
     public string Key { get; }
     public PersistentWorldClockState State { get; }
-    public void Resolve(IPersistentEntityResolver resolver) => ArgumentNullException.ThrowIfNull(resolver);
+    public void Resolve(IPersistentReferenceResolver resolver) => ArgumentNullException.ThrowIfNull(resolver);
     public void Validate() { }
     public void Dispose() { }
 }

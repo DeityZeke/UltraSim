@@ -5,7 +5,7 @@ namespace UltraSim.Framework.RuntimeHost;
 /// <summary>Strict, finite on-disk package metadata; source paths and compiler output are a later seam.</summary>
 public static class ModuleManifestJson
 {
-    public const string Format = "UltraSim.ServerModule/v1";
+    public const string Format = "UltraSim.ServerModule/v2";
     public const int MaximumBytes = 32 * 1024;
 
     public static ModulePackageManifest Parse(ReadOnlySpan<byte> utf8)
@@ -76,7 +76,7 @@ public static class ModuleManifestJson
         {
             if (item.ValueKind != JsonValueKind.Object) throw Invalid("Dependency must be an object.");
             var seen = new HashSet<string>(StringComparer.Ordinal);
-            string? package = null, minimum = null;
+            string? package = null, minimum = null, maximum = null;
             foreach (JsonProperty property in item.EnumerateObject())
             {
                 if (!seen.Add(property.Name)) throw Invalid($"Duplicate dependency property {property.Name}.");
@@ -84,11 +84,12 @@ public static class ModuleManifestJson
                 {
                     case "package": package = Text(property.Value, "package"); break;
                     case "minimumVersion": minimum = Text(property.Value, "minimumVersion"); break;
+                    case "maximumVersionExclusive": maximum = Text(property.Value, "maximumVersionExclusive"); break;
                     default: throw Invalid($"Unknown dependency property {property.Name}.");
                 }
             }
             if (package is null || minimum is null) throw Invalid("Dependency requires package and minimumVersion.");
-            values.Add(new(new(package), ModuleVersion.Parse(minimum)));
+            values.Add(new(new(package), ModuleVersion.Parse(minimum), maximum is null ? null : ModuleVersion.Parse(maximum)));
         }
         return values;
     }
@@ -114,9 +115,10 @@ public static class ModuleManifestJson
         "RuntimeExtension" => ModulePackageClass.RuntimeExtension,
         "Definition" => ModulePackageClass.Definition,
         "System" => ModulePackageClass.System,
-        "Engine" => ModulePackageClass.Engine,
+        "EngineCore" => ModulePackageClass.EngineCore,
         "KernelExtension" => ModulePackageClass.KernelExtension,
         "SchemaExtension" => ModulePackageClass.SchemaExtension,
+        "FrameworkExtension" => ModulePackageClass.FrameworkExtension,
         _ => throw Invalid("Unknown package class.")
     };
 

@@ -1162,7 +1162,7 @@ static void ConceptDemoSaveSequenceSurvivesSessionReentry()
             Equal("after restored generation", speech[0].Text);
             Equal(loaded.GenerationId, speech[0].ServerGenerationId);
         }
-        var coordinator = new UltraSim.Server.Persistence.SaveSetCoordinator(root);
+        var coordinator = new UltraSim.Framework.Persistence.SaveSetCoordinator(root);
         True(coordinator.TryGetNextSequence(out ulong next));
         Equal(4UL, next);
         // Pending/malformed names cannot reserve a sequence. Complete names fence reuse even

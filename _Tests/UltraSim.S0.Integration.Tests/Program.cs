@@ -15,6 +15,7 @@ using UltraSim.Game.UI;
 using UltraSim.Game.World;
 using UltraSim.Server.Hosting;
 using UltraSim.Server.Persistence;
+using UltraSim.Framework.Persistence;
 using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
 using UltraSim.UI;

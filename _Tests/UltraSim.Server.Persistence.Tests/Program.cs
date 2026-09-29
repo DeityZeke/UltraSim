@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Reflection;
 using UltraSim.ECS;
 using UltraSim.Server.Persistence;
+using UltraSim.Framework.Persistence;
 
 if (args.Length == 3 && args[0] == "--crash-writer")
 {
@@ -348,6 +349,11 @@ static void StagedNamespaceCannotFallBackToExternalAuthority()
             [owner, consumer], new ExternalResolver(key, new object()));
         if (consumer.LastPrepared?.Resolved == true)
             throw new InvalidOperationException("A missing staged entity fell through to external authority.");
+        coordinator.Save([consumer, owner], new SaveSetContext(2, 2), action => action());
+        using PreparedLoadGeneration reversed = coordinator.PrepareLoad(
+            [consumer, owner], new ExternalResolver(key, new object()));
+        if (consumer.LastPrepared?.Resolved == true)
+            throw new InvalidOperationException("A later staged namespace owner was bypassed by external authority.");
     }
     finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
 }
@@ -470,14 +476,14 @@ sealed class NamespaceParticipant : ISaveSetParticipant
 }
 
 sealed class NamespacePrepared : IPreparedLoadParticipant,
-    IPreparedPersistentEntityResolver, IPreparedPersistentEntityNamespace
+    IPreparedPersistentReferenceResolver, IPreparedPersistentReferenceNamespace
 {
     private readonly PersistentWorldId _world;
     internal NamespacePrepared(string key, PersistentWorldId world) { Key = key; _world = world; }
     public string Key { get; }
-    public bool Owns(PersistentEntityKey key) => key.World == _world;
-    public bool TryResolve(PersistentEntityKey key, out object? value) { value = null; return false; }
-    public void Resolve(IPersistentEntityResolver resolver) { }
+    public bool Owns(PersistentReferenceKey key) => key.Domain == EcsPersistentReference.Domain && key.Scope == _world.Value;
+    public bool TryResolve(PersistentReferenceKey key, out object? value) { value = null; return false; }
+    public void Resolve(IPersistentReferenceResolver resolver) { }
     public void Validate() { }
     public void Dispose() { }
 }
@@ -500,19 +506,19 @@ sealed class ResolvingPrepared : IPreparedLoadParticipant
     internal ResolvingPrepared(string key, PersistentEntityKey entityKey) { Key = key; _key = entityKey; }
     public string Key { get; }
     internal bool Resolved { get; private set; }
-    public void Resolve(IPersistentEntityResolver resolver) => Resolved = resolver.TryResolve(_key, out _);
+    public void Resolve(IPersistentReferenceResolver resolver) => Resolved = resolver.TryResolve(_key, out _);
     public void Validate() { }
     public void Dispose() { }
 }
 
-sealed class ExternalResolver : IExternalPersistentEntityResolver
+sealed class ExternalResolver : IExternalPersistentReferenceResolver
 {
     private readonly PersistentEntityKey _key;
     private readonly object _value;
     internal ExternalResolver(PersistentEntityKey key, object value) { _key = key; _value = value; }
-    public bool TryResolve(PersistentEntityKey key, out object? value)
+    public bool TryResolve(PersistentReferenceKey key, out object? value)
     {
-        value = key.Equals(_key) ? _value : null;
+        value = key.Equals(EcsPersistentReference.From(_key)) ? _value : null;
         return value is not null;
     }
 }
@@ -523,15 +529,15 @@ sealed class FakePrepared : IPreparedLoadParticipant
     public string Key { get; }
     internal string Value { get; }
     internal bool Disposed { get; private set; }
-    public void Resolve(IPersistentEntityResolver resolver) { }
+    public void Resolve(IPersistentReferenceResolver resolver) { }
     public void Validate() { if (Value.Length == 0) throw new InvalidDataException(); }
     public void Dispose() => Disposed = true;
 }
 
-sealed class EmptyResolver : IExternalPersistentEntityResolver
+sealed class EmptyResolver : IExternalPersistentReferenceResolver
 {
     internal static readonly EmptyResolver Instance = new();
-    public bool TryResolve(PersistentEntityKey key, out object? value) { value = null; return false; }
+    public bool TryResolve(PersistentReferenceKey key, out object? value) { value = null; return false; }
 }
 
 sealed class ThrowAt : ISaveSetFaultInjector

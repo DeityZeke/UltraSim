@@ -54,9 +54,9 @@ public static class ModuleCompositionPlanner
             {
                 if (!packages.TryGetValue(dependency.Package, out ModulePackageManifest? provider))
                     return Fail("missing-package", item.Id, $"Required package {dependency.Package} is absent.", out error);
-                if (provider.Version.CompareTo(dependency.MinimumVersion) < 0)
+                if (!dependency.Accepts(provider.Version))
                     return Fail("package-version", item.Id,
-                        $"Required package {dependency.Package} needs at least {dependency.MinimumVersion}.", out error);
+                        $"Required package {dependency.Package} needs [{dependency.MinimumVersion}, {dependency.MaximumVersionExclusive?.ToString() ?? "unbounded"}).", out error);
                 if (!AddEdge(provider, item, edges, out error)) return false;
             }
             foreach (ModuleCapabilityId capability in item.Requires)
@@ -126,12 +126,12 @@ public static class ModuleCompositionPlanner
 
     private static string Fingerprint(IEnumerable<ModulePackageManifest> packages)
     {
-        var canonical = new StringBuilder("UltraSim.ModuleManifestComposition/v1\n");
+        var canonical = new StringBuilder("UltraSim.ModuleManifestComposition/v2\n");
         foreach (ModulePackageManifest item in packages.OrderBy(x => x.Id))
         {
             canonical.Append(item.Id.Value).Append('|').Append(item.Version).Append('|')
                 .Append((byte)item.Stage).Append('|').Append((byte)item.Class).Append('|');
-            Append(canonical, item.Dependencies.OrderBy(x => x.Package).Select(x => $"{x.Package}@{x.MinimumVersion}"));
+            Append(canonical, item.Dependencies.OrderBy(x => x.Package).Select(x => $"{x.Package}@{x.MinimumVersion}..{x.MaximumVersionExclusive?.ToString() ?? "*"}"));
             Append(canonical, item.Provides.Order());
             Append(canonical, item.Requires.Order());
             Append(canonical, item.Optional.Order());

@@ -9,6 +9,7 @@ using UltraSim.Game.Persistence;
 using UltraSim.Game.Physics;
 using UltraSim.Game.World;
 using UltraSim.Server.Persistence;
+using UltraSim.Framework.Persistence;
 using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
 using UltraSim.World.Testing;
@@ -6665,10 +6666,10 @@ static class WorldPackTestProfile
         new(0x1122_3344_5566_7788UL, 0x8877_6655_4433_2211UL);
 }
 
-sealed class EmptyPersistentResolver : IExternalPersistentEntityResolver
+sealed class EmptyPersistentResolver : IExternalPersistentReferenceResolver
 {
     internal static readonly EmptyPersistentResolver Instance = new();
-    public bool TryResolve(PersistentEntityKey key, out object? value)
+    public bool TryResolve(PersistentReferenceKey key, out object? value)
     {
         value = null;
         return false;

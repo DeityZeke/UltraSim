@@ -4,6 +4,7 @@ using System.Text;
 using UltraSim.ECS;
 using UltraSim.Game.Accounting;
 using UltraSim.Server.Persistence;
+using UltraSim.Framework.Persistence;
 
 namespace UltraSim.Game.Persistence;
 
@@ -324,7 +325,7 @@ public sealed class PreparedAccountingParticipant : IPreparedLoadParticipant
 
     public IReadOnlyDictionary<CharacterId, Entity> ResolvedEntities => _resolvedView;
 
-    public void Resolve(IPersistentEntityResolver resolver)
+    public void Resolve(IPersistentReferenceResolver resolver)
     {
         ArgumentNullException.ThrowIfNull(resolver);
         if (_store is not null)

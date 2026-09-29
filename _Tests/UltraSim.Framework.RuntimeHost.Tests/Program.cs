@@ -6,12 +6,14 @@ var tests = new (string Name, Action Run)[]
     ("ManifestCopiesBoundedInputs", ManifestCopiesBoundedInputs),
     ("PermutationStableStagesAndFingerprint", PermutationStableStagesAndFingerprint),
     ("MissingRequiredPackageFailsBeforeStart", MissingRequiredPackageFailsBeforeStart),
-    ("MinimumVersionFailsBeforeStart", MinimumVersionFailsBeforeStart),
+    ("VersionRangeFailsBeforeStart", VersionRangeFailsBeforeStart),
     ("CapabilityAdmissionAndConflict", CapabilityAdmissionAndConflict),
     ("CycleAndBackwardStageFail", CycleAndBackwardStageFail),
     ("ContractsOnlyPlanningSurvivesOptionalCoreRemoval", ContractsOnlyPlanningSurvivesOptionalCoreRemoval),
     ("CapacityAndDuplicateSelectionFail", CapacityAndDuplicateSelectionFail),
-    ("StrictFiniteManifestFormat", StrictFiniteManifestFormat)
+    ("StrictFiniteManifestFormat", StrictFiniteManifestFormat),
+    ("BuiltInLifecycleSidecarsAndRollback", RuntimeHostLifecycleTests.Run),
+    ("ExplicitControlPlanePublicationAndRetirement", RuntimeHostLifecycleTests.ControlPlane)
 };
 foreach (var (name, run) in tests) { run(); Console.WriteLine("PASS P2 " + name); }
 Console.WriteLine($"All {tests.Length} P2 manifest-planning foundation tests passed.");
@@ -71,11 +73,15 @@ static void MissingRequiredPackageFailsBeforeStart()
         requires: [new("missing.runtime")])]);
 }
 
-static void MinimumVersionFailsBeforeStart()
+static void VersionRangeFailsBeforeStart()
 {
     Error("package-version", [Package("provider.contracts", ModulePackageStage.Contracts),
         Package("consumer.scripts", ModulePackageStage.Scripts,
             dependencies: [new(new("provider.contracts"), ModuleVersion.Parse("2.0.0"))])]);
+    Error("package-version", [Package("provider.contracts", ModulePackageStage.Contracts, version: "3.0.0"),
+        Package("consumer.scripts", ModulePackageStage.Scripts,
+            dependencies: [new(new("provider.contracts"), new(1, 0, 0), new(2, 0, 0))])]);
+    Throws<ArgumentException>(() => new ModuleDependency(new("provider.contracts"), new(2, 0, 0), new(2, 0, 0)));
 }
 
 static void CapabilityAdmissionAndConflict()
@@ -129,21 +135,23 @@ static void CapacityAndDuplicateSelectionFail()
 static void StrictFiniteManifestFormat()
 {
     const string valid = """
-        {"format":"UltraSim.ServerModule/v1","id":"sample.core","version":"1.0.0",
-         "stage":"Core","class":"Engine","provides":["sample.runtime"],
-         "dependencies":[{"package":"sample.contracts","minimumVersion":"1.0.0"}]}
+        {"format":"UltraSim.ServerModule/v2","id":"sample.core","version":"1.0.0",
+         "stage":"Core","class":"EngineCore","provides":["sample.runtime"],
+         "dependencies":[{"package":"sample.contracts","minimumVersion":"1.0.0","maximumVersionExclusive":"2.0.0"}]}
         """;
     ModulePackageManifest parsed = ModuleManifestJson.Parse(System.Text.Encoding.UTF8.GetBytes(valid));
     Equal(new ModulePackageId("sample.core"), parsed.Id);
     Equal(new ModuleCapabilityId("sample.runtime"), parsed.Provides[0]);
     Equal(new ModulePackageId("sample.contracts"), parsed.Dependencies[0].Package);
+    Equal(new ModuleVersion(2, 0, 0), parsed.Dependencies[0].MaximumVersionExclusive);
     foreach (string invalid in new[]
     {
         valid.Replace("\"id\":\"sample.core\"", "\"id\":\"sample.core\",\"id\":\"other.core\""),
         valid.Replace("\"stage\":\"Core\"", "\"stage\":\"UNKNOWN\""),
-        valid.Replace("\"class\":\"Engine\"", "\"class\":\"Engine\",\"unknown\":1"),
+        valid.Replace("\"class\":\"EngineCore\"", "\"class\":\"EngineCore\",\"unknown\":1"),
         valid.Replace("\"package\":\"sample.contracts\"", "\"package\":\"sample.contracts\",\"package\":\"other.contracts\""),
-        valid.Replace("UltraSim.ServerModule/v1", "UltraSim.ServerModule/v2"),
+        valid.Replace("UltraSim.ServerModule/v2", "UltraSim.ServerModule/v1"),
+        valid.Replace("\"maximumVersionExclusive\":\"2.0.0\"", "\"maximumVersionExclusive\":\"1.0.0\""),
         valid.Replace("sample.core", "../sample.core"),
         valid.Replace("\"provides\":[\"sample.runtime\"]", "\"provides\":\"sample.runtime\"")
     }) Throws<FormatException>(() => ModuleManifestJson.Parse(System.Text.Encoding.UTF8.GetBytes(invalid)));
@@ -158,7 +166,7 @@ static ModulePackageManifest Package(string id, ModulePackageStage stage, string
     IEnumerable<ModulePackageId>? before = null,
     IEnumerable<ModulePackageId>? after = null,
     IEnumerable<ModulePackageId>? conflicts = null)
-    => new(new(id), ModuleVersion.Parse(version), stage, ModulePackageClass.Engine,
+    => new(new(id), ModuleVersion.Parse(version), stage, ModulePackageClass.EngineCore,
         dependencies, provides, requires, optional, before, after, conflicts);
 
 static ModuleCompositionPlan Resolve(IEnumerable<ModulePackageManifest> manifests)

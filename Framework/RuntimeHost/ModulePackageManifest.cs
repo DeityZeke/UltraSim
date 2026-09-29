@@ -8,11 +8,27 @@ public enum ModulePackageStage : byte { Contracts, Core, Scripts }
 /// <summary>Diagnostic classification; it does not grant runtime privileges.</summary>
 public enum ModulePackageClass : byte
 {
-    RuntimeExtension, Definition, System, Engine, KernelExtension, SchemaExtension
+    RuntimeExtension, Definition, System, EngineCore, KernelExtension, SchemaExtension, FrameworkExtension
 }
 
-/// <summary>A required package relationship. Optional capability references use capability IDs instead.</summary>
-public readonly record struct ModuleDependency(ModulePackageId Package, ModuleVersion MinimumVersion);
+/// <summary>A required half-open version range. An absent maximum leaves the upper bound open.</summary>
+public readonly record struct ModuleDependency
+{
+    public ModuleDependency(ModulePackageId package, ModuleVersion minimumVersion, ModuleVersion? maximumVersionExclusive = null)
+    {
+        if (!package.IsValid || !minimumVersion.IsValid || maximumVersionExclusive is { } maximum &&
+            (!maximum.IsValid || maximum.CompareTo(minimumVersion) <= 0))
+            throw new ArgumentException("Invalid package version range.");
+        Package = package;
+        MinimumVersion = minimumVersion;
+        MaximumVersionExclusive = maximumVersionExclusive;
+    }
+    public ModulePackageId Package { get; }
+    public ModuleVersion MinimumVersion { get; }
+    public ModuleVersion? MaximumVersionExclusive { get; }
+    public bool Accepts(ModuleVersion version) => version.CompareTo(MinimumVersion) >= 0 &&
+        (MaximumVersionExclusive is not { } maximum || version.CompareTo(maximum) < 0);
+}
 
 /// <summary>Immutable selected-package metadata for deterministic pre-authority planning.</summary>
 public sealed class ModulePackageManifest
@@ -43,7 +59,8 @@ public sealed class ModulePackageManifest
         if (!id.IsValid || !version.IsValid || !Enum.IsDefined(stage) || !Enum.IsDefined(@class))
             throw new ArgumentException("Package identity, version, stage and class must be valid.");
         Id = id; Version = version; Stage = stage; Class = @class;
-        Dependencies = Copy(dependencies, d => d.Package.IsValid && d.MinimumVersion.IsValid, d => d.Package);
+        Dependencies = Copy(dependencies, d => d.Package.IsValid && d.MinimumVersion.IsValid &&
+            (d.MaximumVersionExclusive is not { } maximum || maximum.IsValid && maximum.CompareTo(d.MinimumVersion) > 0), d => d.Package);
         Provides = Copy(provides, x => x.IsValid, x => x);
         Requires = Copy(requires, x => x.IsValid, x => x);
         Optional = Copy(optional, x => x.IsValid, x => x);
