@@ -74,6 +74,9 @@ AIOS files are listed separately because this catalog was created as part of the
 - [Client/PresentationAssets/README.md](../Client/PresentationAssets/README.md)
 - [Client/PresentationSource/README.md](../Client/PresentationSource/README.md)
 - [Client/StandardUi/README.md](../Client/StandardUi/README.md)
+- [Framework/ControlPlane/README.md](../Framework/ControlPlane/README.md)
+- [Framework/Persistence/README.md](../Framework/Persistence/README.md)
+- [Framework/RuntimeHost/README.md](../Framework/RuntimeHost/README.md)
 - [Game/Admission/README.md](../Game/Admission/README.md)
 - [Game/Chat/README.md](../Game/Chat/README.md)
 - [Game/Inventory/README.md](../Game/Inventory/README.md)
@@ -92,6 +95,7 @@ AIOS files are listed separately because this catalog was created as part of the
 - [Kernels/Network.Testing/README.md](../Kernels/Network.Testing/README.md)
 - [Kernels/Network/README.md](../Kernels/Network/README.md)
 - [Kernels/Spatial/README.md](../Kernels/Spatial/README.md)
+- [Server/Authoring/README.md](../Server/Authoring/README.md)
 - [Server/ConceptDemo.LocalHost/README.md](../Server/ConceptDemo.LocalHost/README.md)
 - [Server/ConceptDemo/README.md](../Server/ConceptDemo/README.md)
 - [Server/DirectConnect/README.md](../Server/DirectConnect/README.md)
@@ -101,6 +105,11 @@ AIOS files are listed separately because this catalog was created as part of the
 
 These files are evidence, not architectural authority. Start with the two README files before opening individual baselines.
 
+- [_Benchmarks/Baselines/framework-p1-control-plane-2026-09-27.md](../_Benchmarks/Baselines/framework-p1-control-plane-2026-09-27.md)
+- [_Benchmarks/Baselines/framework-p1-native-lifetime-closure-2026-09-28.md](../_Benchmarks/Baselines/framework-p1-native-lifetime-closure-2026-09-28.md)
+- [_Benchmarks/Baselines/framework-p2-runtime-semantics-2026-09-28.md](../_Benchmarks/Baselines/framework-p2-runtime-semantics-2026-09-28.md)
+- [_Benchmarks/Baselines/framework-p2-server-authoring-and-extension-terminology-2026-09-29.md](../_Benchmarks/Baselines/framework-p2-server-authoring-and-extension-terminology-2026-09-29.md)
+- [_Benchmarks/Baselines/framework-p2-closure-2026-09-29.md](../_Benchmarks/Baselines/framework-p2-closure-2026-09-29.md)
 - [_Benchmarks/Baselines/client-f1.0-pre-rework-baseline-2026-09-19.md](../_Benchmarks/Baselines/client-f1.0-pre-rework-baseline-2026-09-19.md)
 - [_Benchmarks/Baselines/client-f1.1-unified-content-scopes-2026-09-19.md](../_Benchmarks/Baselines/client-f1.1-unified-content-scopes-2026-09-19.md)
 - [_Benchmarks/Baselines/concept-demo-pf4e-r1-rated-replication-scaling-reconciliation-2026-09-13.md](../_Benchmarks/Baselines/concept-demo-pf4e-r1-rated-replication-scaling-reconciliation-2026-09-13.md)
