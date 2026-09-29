@@ -127,3 +127,37 @@ and animation-name wrappers have deterministic scopes, and the F1.12 probe dispo
 resources even on failure. Strong-reference native assertions, 20/20 separate-process warm Official
 launches, and canonical Release on the committed repair pass. This strengthens the known owner
 inventory but does not establish universal absence of future wrapper escapes. P5 remains unstarted.
+
+
+## Pre-P5 ownership sweep
+
+A focused audit after R1 found additional wrapper classes that already fit the same ownership model and were cheap to correct before P5 introduced more UI/native presentation work.
+
+Repairs included:
+
+- Local/Remote world palette Mesh and Material wrappers registered under explicit native ownership instead of being rediscovered for cleanup;
+- replaced roof Material wrappers retired as soon as the mesh switches away from them;
+- the missing-image UI ImageTexture made renderer/session-owned instead of living in an unretired static field;
+- the exact diagnostic fallback Shader wrapper retained and disposed by its owner;
+- temporary theme Font and animation-name StringName wrappers scoped deterministically;
+- F1.12 render-probe BoxMesh and StandardMaterial3D retired in finally, including failure paths;
+- GodotOwnedResources gained an explicit single-wrapper Release transition that disposes before dropping the strong reference.
+
+Strong-reference native tests cover the new owner-lived paths.
+
+The production tree passed the focused Godot gates, architecture verification, an uninterrupted canonical Release verifier, one retained-export cold fill plus 20/20 independent warm Official-content launches, and a real X11 render probe through clean retirement.
+
+This sweep reinforces rather than changes the durable rule:
+
+~~~text
+owner-lived wrapper
+    retain strongly + retire explicitly
+
+temporary wrapper
+    deterministic scope/dispose
+
+borrowed/engine-owned
+    prove that classification
+~~~
+
+Before future P5+ Godot code is accepted, new native-backed wrappers should be classified under one of those three cases during implementation/review.
