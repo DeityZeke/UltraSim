@@ -73,3 +73,45 @@ Fresh exact-source exported controls reproduced the same Finalizer/native path o
 Production repair `f46ee3bd8aff14a9516781d49d147a261dcacbb2` gives these application-reachable wrappers explicit Godot-thread owners or scoped disposal before language teardown. Native strong-reference assertions and removal mutations prove the major retirement boundaries; the same warm Official-content path passed 200/200, startup-close 30/30, window close 3/3, all three physical exports, architecture verification, and one uninterrupted canonical Release verifier on the repair commit. No engine patch, sleep, forced GC, finalizer drain, or exception suppression was used.
 
 The native `+0xb55d75` call path is source-correlated with the Godot 4.7.1 C# instance-binding lookup while its language singleton is null; the stripped binary does not provide direct source-line symbols. Full SOS/GDB evidence is linked in the R1 companion. The current known product blocker is **CLOSED**. P1/P4 historical records remain accurate as originally written; P5 is safe to begin but has not begun, and PF6 has not started. A newly reproduced wrapper failure would require fresh type/owner attribution.
+
+
+## R1 closure result
+
+The follow-up investigation established that the original P1 architecture was directionally correct but incomplete in coverage. A fresh P1 export itself reproduced the same teardown hazard, so P2–P4 were not the origin and the earlier 50/50 campaign was finite evidence that missed a residual race.
+
+Full dumps identified multiple concrete wrapper classes reaching the same finalizer/native teardown path across checkpoints, including Godot.Image, Godot.Animation, Godot.ViewportTexture, Godot.StyleBoxFlat, and ArrayMesh.
+
+The R1 repair reused the existing ownership model rather than replacing it:
+
+- long-lived wrappers returned/borrowed from Godot APIs are retained by an existing owner and explicitly retired with that owner;
+- short-lived temporary wrappers use deterministic Godot-thread scopes;
+- duplicate wrapper creation is avoided when an already-owned wrapper can be reused;
+- native tests retain strong references and assert NativeInstance reaches zero after retirement for representative owned wrappers;
+- the existing two-frame SceneTree deletion-queue shutdown boundary remains.
+
+Representative additions include:
+
+- SubViewport.GetTexture wrapper retained by UI composition;
+- GLTF-imported Mesh wrappers retained with content template ownership;
+- tooltip StyleBoxFlat retained/disposed by tooltip owner;
+- temporary Image wrappers scoped deterministically;
+- AnimationPlayer.GetAnimation results scoped;
+- root-motion NodePath wrappers scoped;
+- gameplay capture reusing the already-owned viewport texture.
+
+The repaired tree passed 200/200 warm Official-content launches, 30/30 rapid startup-close, 3/3 real window-close, focused native lifetime gates, architecture verification, and one uninterrupted canonical Release run.
+
+This does not prove that every future GodotObject wrapper is safe automatically. The durable engineering rule is that every new native-backed wrapper must be classified when introduced:
+
+~~~text
+owner-lived wrapper
+    retain strongly + explicit retirement
+
+temporary wrapper
+    deterministic scope/dispose
+
+engine-owned/reference-only value
+    prove no application finalizer responsibility
+~~~
+
+A new finalizer crash requires dump/type attribution and an ownership fix; do not weaken the shutdown gates.
