@@ -8,6 +8,7 @@ Start here. This file is intentionally small.
 
 - [Agent / contribution guide](AGENT_GUIDE.md) — required rules for reading, capturing, status, and promotion.
 - [AIOS overview](README.md)
+- [Current state snapshot](CURRENT_STATE.md)
 
 ## Repository documentation map
 
@@ -50,6 +51,9 @@ Start here. This file is intentionally small.
 ## Durable side-topic registry
 
 - [TOPICS.md](TOPICS.md) — nearly every project-relevant topic discussed or discovered.
+- [Framework Runtime Packages / Services / Object Extensions / ECS boundary](topics/framework-runtime-packages-services-extensions.md)
+- [Framework Persistence / Control Plane publication](topics/framework-persistence-and-control-plane.md)
+- [Definition / presentation / asset independence](topics/definition-presentation-asset-independence.md)
 - [Materials and processing](topics/materials-and-processing.md)
 - [UI nine-slice art / frame families](topics/ui-nine-slice-art-and-frame-families.md)
 - [Body Mail / hybrid armor](topics/armor-body-mail.md)

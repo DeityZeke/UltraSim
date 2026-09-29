@@ -1,6 +1,6 @@
 # UltraSim AIOS Current State
 
-**Updated:** 2026-09-23
+**Updated:** 2026-09-29
 
 This is a compact design-memory snapshot, not a replacement for implementation plans or source truth.
 
@@ -17,6 +17,19 @@ This is a compact design-memory snapshot, not a replacement for implementation p
 | Art / lighting / Cabin visual benchmark | CANONICAL visual direction + selected milestone | [Visual Art / Lighting / Cabin Benchmark](canonical/visual-art-lighting-and-cabin-benchmark.md) |
 | World history / knowledge | CANONICAL conceptual baseline | [History/Knowledge reference](../Docs/Plans/Content/UltraSim_World_History_Knowledge_Pools_Reference_v2.md) |
 | Magic | CANONICAL baseline with later refinements captured in AIOS | [Magic v2](../Docs/Plans/Content/UltraSim_Magic_Elements_Reification_Semantics_v2.md), [follow-up](topics/magic-post-v2-refinements.md) |
+
+## Current platform / authoring architecture
+
+| Area | Status | Reference |
+|---|---|---|
+| Framework Control Plane | CANONICAL implementation / P1 CLOSED | [Control Plane README](../Framework/ControlPlane/README.md) |
+| Framework Runtime Host + C# server authoring | CANONICAL implementation / P2 CLOSED | [Runtime Host README](../Framework/RuntimeHost/README.md), [Server Authoring README](../Server/Authoring/README.md), [AIOS synthesis](topics/framework-runtime-packages-services-extensions.md) |
+| Framework save-set persistence | CANONICAL implementation | [Framework Persistence README](../Framework/Persistence/README.md), [AIOS synthesis](topics/framework-persistence-and-control-plane.md) |
+| Runtime Package / Runtime Service / Object Extension terminology | CANONICAL | [Architecture](../Docs/ARCHITECTURE.md), [AIOS synthesis](topics/framework-runtime-packages-services-extensions.md) |
+| Framework adapter/runtime boundary migration | NEXT / P3 unstarted | [Pre-many-player roadmap](../Docs/Plans/UltraSim_Pre_Many_Person_Live_Testing_Roadmap.md) |
+| Definition ↔ presentation ↔ asset independence | CANONICAL presentation rules + P4-pending generalization | [UI](../Docs/UI.md), [Architecture](../Docs/ARCHITECTURE.md), [AIOS synthesis](topics/definition-presentation-asset-independence.md) |
+
+P2's closed vocabulary is precise: a **Runtime Package** is the authored/deployed composition unit; an **Engine Core** is a reusable domain capability; a **Runtime Service** is a live generation-fenced service object; an **Object Extension** (“Extension”) is sparse managed owner/global state or behavior outside ECS; and ECS remains the high-scale data-oriented substrate. Historical ACC “Module” maps to an UltraSim Object Extension, not to a Runtime Package.
 
 ## Recently explored but not yet promoted into a large canonical plan
 
@@ -35,4 +48,9 @@ Across current systems, prefer:
 - simulation consequences over arbitrary status labels where practical;
 - pooled/shared history over duplicated actor memory;
 - persistent intent and bounded reconsideration rather than constant global replanning;
-- data-driven extension points rather than exhaustive content taxonomies.
+- data-driven extension points rather than exhaustive content taxonomies;
+- Framework/OOP Extensions for sparse, rich, irregular behavior and ECS for numerous, homogeneous, hot data; do not grow Framework into a second ECS;
+- rich/cold composition may allocate when useful, while steady runtime paths should avoid polling/reflection/allocation taxes that add no gameplay value;
+- subsystems explicitly publish management semantics to the Control Plane; the Control Plane does not scan owners and is not a service locator;
+- persistence participants own durable meaning/schema while Framework Persistence owns coordinated capture, staged restore, integrity, recovery, and atomic save-set publication;
+- Game/content definitions should retain semantic/physical meaning independently from optional presentation assets; missing graphics should fall back rather than delete the object.
