@@ -1,7 +1,10 @@
 using Godot;
 using UltraSim.Client.Core;
 using UltraSim.Client.Godot;
+using UltraSim.Client.StandardUi;
 using UltraSim.Framework.ControlPlane;
+using UltraSim.Framework.Definitions;
+using UltraSim.UI;
 
 internal static class GodotLifetimeOwnershipTests
 {
@@ -57,6 +60,160 @@ internal static class GodotLifetimeOwnershipTests
         Expect(lifetime.ShutdownCompletion.IsCompletedSuccessfully, "Shutdown completion was not published.");
 
         AdapterControlPublication();
+        VisualRoleRealization();
+        GenericControlWidgets();
+    }
+
+    private static void VisualRoleRealization()
+    {
+        using var assets = new FixtureVisuals();
+        Texture2D retained = assets.Texture;
+        var source = new UiDefinitionBuilder("p5-visual-native");
+        UiSlotReference label = source.DeclareSlot("label", UiSlotValueKind.Text);
+        UiSlotReference selected = source.DeclareSlot("selected", UiSlotValueKind.Boolean);
+        UiActionReference click = source.DeclareAction("click");
+        UiActionReference flip = source.DeclareAction("flip", inputKind: UiValueKind.Boolean);
+        source.AddCanvas(canvas =>
+        {
+            canvas.AddPanel("frame", "ui.silver.frame", UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 120, 80)));
+            canvas.AddImage("tile", "ui.tile", UiChildLayout.Canvas(new UiCanvasPlacement(4, 4, 32, 32)));
+            canvas.AddButton("button", click, label, UiChildLayout.Canvas(new UiCanvasPlacement(40, 4, 70, 28)),
+                "ui.button");
+            canvas.AddToggle("toggle", selected, flip, UiChildLayout.Canvas(new UiCanvasPlacement(40, 38, 70, 28)),
+                "ui.toggle");
+        });
+        CompiledUiDefinition definition = UiDefinitionCompiler.Compile(source);
+        UiElementId tileElement = definition.Elements.ToArray().Single(element => element.Key == "tile").Id;
+        var semanticReference = new SemanticPresentationReference(new("world"), new("iron-sword"),
+            PresentationRoleId.InventoryPortrait);
+        var semanticImages = new UiSemanticImageBindings(definition, [(tileElement, semanticReference)]);
+        Expect(semanticImages.TryGet(definition, tileElement, out var readReference) &&
+            readReference == semanticReference, "Typed semantic image binding was not preserved.");
+        bool rejectedNonImage = false;
+        try
+        {
+            _ = new UiSemanticImageBindings(definition,
+                [(definition.Elements.ToArray().Single(element => element.Key == "button").Id, semanticReference)]);
+        }
+        catch (ArgumentException) { rejectedNonImage = true; }
+        Expect(rejectedNonImage, "A non-image element accepted a semantic image reference.");
+        var model = new UiModel(definition);
+        model.SetText(definition.Bindings.RequireSlot("label"), "Apply");
+        model.SetBoolean(definition.Bindings.RequireSlot("selected"), true);
+        using var renderer = new GodotUiRenderer(assets: assets, semanticImages: semanticImages);
+        var handle = (GodotUiRenderHandle)renderer.Create(new UiViewInstanceId(10_001), definition,
+            new UiModelView(model), _ => { });
+        Control root = handle.Root;
+        Control frame = root.FindChild("Element_frame", true, false) as Control ??
+            throw new InvalidOperationException("Nine-piece frame absent.");
+        TextureRect tile = root.FindChild("Element_tile", true, false) as TextureRect ??
+            throw new InvalidOperationException("Tiled image absent.");
+        Button button = root.FindChild("Element_button", true, false) as Button ??
+            throw new InvalidOperationException("Image-state button absent.");
+        CheckBox toggle = root.FindChild("Element_toggle", true, false) as CheckBox ??
+            throw new InvalidOperationException("Image-backed toggle absent.");
+        Expect(frame.GetChildCount() == 9 && frame.CustomMinimumSize == new Vector2(25, 25) &&
+            tile.StretchMode == TextureRect.StretchModeEnum.Tile && button.Icon is not null &&
+            toggle.ButtonPressed && toggle.Icon is not null && assets.LastSemanticReference == semanticReference,
+            "Neutral P5 visual roles did not realize through native Godot nodes.");
+        root.Free();
+        renderer.Dispose();
+        assets.Dispose();
+        Expect(retained.NativeInstance == IntPtr.Zero,
+            "New visual-role asset wrapper was left to native finalization.");
+    }
+
+    private sealed class FixtureVisuals : IGodotUiVisualResolver, IGodotUiSemanticImageResolver, IDisposable
+    {
+        private readonly GodotOwnedResources _owned = new();
+        internal Texture2D Texture { get; }
+        internal FixtureVisuals() => Texture = _owned.Own(GodotPrimitiveSubstrate.CreateMissingIcon());
+        public Texture2D? Resolve(string assetRole) => Texture;
+        public SemanticPresentationReference LastSemanticReference { get; private set; }
+        public Texture2D? Resolve(SemanticPresentationReference reference)
+        {
+            LastSemanticReference = reference;
+            return Texture;
+        }
+        public UiImageVisual? ResolveImage(string visualRole) =>
+            visualRole == "ui.tile" ? new("ui.tile", UiImageMode.Tile) : null;
+        public UiNinePieceVisual? ResolveFrame(string visualRole) => visualRole == "ui.silver.frame"
+            ? new(Enumerable.Repeat(new UiImageVisual("ui.frame.part"), 9), 12, 12, 12, 12,
+                UiFrameFillMode.Tile, UiFrameFillMode.Stretch) : null;
+        public UiButtonImageVisual? ResolveButton(string visualRole) => visualRole == "ui.button"
+            ? new(new("ui.button.normal"), hover: new("ui.button.hover"), pressed: new("ui.button.pressed")) : null;
+        public UiToggleImageVisual? ResolveToggle(string visualRole) => visualRole == "ui.toggle"
+            ? new(new("ui.toggle.off"), new("ui.toggle.on")) : null;
+        public void Dispose() => _owned.Dispose();
+    }
+
+    private static void GenericControlWidgets()
+    {
+        var registry = new ControlPlaneRegistry();
+        var provider = new WidgetProvider();
+        Expect(registry.TryRegister(provider, out _, out _), "P5 widget provider failed registration.");
+        var principal = new ControlPrincipal("native-widget-test", ControlPrincipalKind.TestAutomation,
+            [new("widget.read"), new("widget.write")]);
+        var viewer = new ControlPlaneViewer(registry, principal);
+        var native = new GodotControlPlaneView(viewer, _ => { });
+        var host = new VBoxContainer();
+        native.Build(host);
+        Expect(host.FindChild("ManagementCategories", true, false) is TabContainer &&
+            host.FindChild("ManagementControl_flag", true, false) is HBoxContainer flag &&
+            flag.GetChildren().OfType<CheckBox>().Count() == 1 &&
+            host.FindChild("ManagementControl_option", true, false) is HBoxContainer option &&
+            option.GetChildren().OfType<OptionButton>().Count() == 1 &&
+            host.FindChild("ManagementControl_count", true, false) is HBoxContainer count &&
+            count.GetChildren().OfType<SpinBox>().Count() == 1 &&
+            host.FindChild("ManagementControl_ratio", true, false) is HBoxContainer ratio &&
+            ratio.GetChildren().OfType<SpinBox>().Count() == 1 &&
+            host.FindChild("ManagementControl_name", true, false) is HBoxContainer name &&
+            name.GetChildren().OfType<LineEdit>().Count() == 1 &&
+            host.FindChild("ManagementAction_fire", true, false) is HBoxContainer action &&
+            action.GetChildren().OfType<LineEdit>().Count() == 1 &&
+            host.FindChild("Management_Sample_Table", true, false) is VBoxContainer table &&
+            table.GetChildren().OfType<GridContainer>().Single() is GridContainer grid &&
+            grid.GetChildCount() == 2 + 32 * 2 &&
+            (table.FindChild("ManagementCollectionNavigation", true, false) as HBoxContainer)!.GetChildren()
+                .OfType<Button>().Single(button => button.Text == "Next").Disabled == false,
+            "Generic management vocabulary did not map to native bounded controls.");
+        host.Free();
+    }
+
+    private sealed class WidgetProvider : IControlProvider
+    {
+        private static readonly ControlCapabilityId Read = new("widget.read"), Write = new("widget.write");
+        private static readonly ControlCategoryPath Category = new("Sample/Table");
+        public WidgetProvider()
+        {
+            ControlDescriptor Field(string id, ControlValueSchema schema, ControlValue value) =>
+                new(new(id), Category, id, "fixture", schema, value, Read, Write);
+            Definition = new(new("widget.fixture"),
+                [Field("flag", new(ControlValueKind.Bool), ControlValue.Bool(true)),
+                 Field("option", new(ControlValueKind.Option, options: [new("one"), new("two")]), ControlValue.Option(new("one"))),
+                 Field("count", new(ControlValueKind.Int64, ControlValue.Int64(0), ControlValue.Int64(10)), ControlValue.Int64(2)),
+                 Field("ratio", new(ControlValueKind.Float64, ControlValue.Float64(0), ControlValue.Float64(1)), ControlValue.Float64(.5)),
+                 Field("name", new(ControlValueKind.Text, maximumText: 8), ControlValue.Text("name"))],
+                actions: [new(new("fire"), Category, "fire", "fixture", [new(ControlValueKind.Text, maximumText: 8)], Read, Write)],
+                collections: [new(new("rows"), Category, "rows", "fixture", 40,
+                    [new(new("cell"), "cell", new(ControlValueKind.Int64))], Read)]);
+        }
+        public ControlProviderDefinition Definition { get; }
+        public ulong Revision => 1;
+        public ControlState Capture(ControlId id)
+        {
+            ControlDescriptor descriptor = Definition.Controls.Single(control => control.Id == id);
+            var provenance = new ControlProvenance(ControlProvenanceKind.BuiltInDefault);
+            return new(descriptor.DefaultValue, descriptor.DefaultValue, null, provenance, provenance, null, true);
+        }
+        public ControlValue Capture(DiagnosticId id) => throw new ArgumentException(nameof(id));
+        public IEnumerable<ControlCollectionRow> Capture(ControlCollectionId id) =>
+            Enumerable.Range(0, 33).Select(index =>
+                new ControlCollectionRow(new("row-" + index), [ControlValue.Int64(index)]));
+        public ControlOwnerResult Set(ControlRequestContext context, IReadOnlyList<ControlMutation> mutations) =>
+            ControlOwnerResult.Accepted;
+        public ControlOwnerResult Invoke(ControlRequestContext context, ControlActionId id,
+            IReadOnlyList<ControlValue> arguments) => ControlOwnerResult.Accepted;
     }
 
     private static void AdapterControlPublication()
@@ -91,6 +248,21 @@ internal static class GodotLifetimeOwnershipTests
                 new DiagnosticId("session-active"), out var session) == ControlResultCode.Accepted &&
             session?.Value.AsBool() == true && provider.Revision > before,
             "Adapter diagnostic did not track the owner lifecycle/session change.");
+        var localOperator = new ControlPrincipal("local-operator", ControlPrincipalKind.LocalOperator,
+            [GodotAdapterControlProvider.Read]);
+        var operatorViewer = new ControlPlaneViewer(registry, localOperator);
+        Expect(operatorViewer.Capture().Any(category => category.Path.Value == "Client/Adapter" &&
+            category.Items.Any(item => item.Diagnostic is not null)) &&
+            !operatorViewer.SetDraft(GodotAdapterControlProvider.Id, generation,
+                new ControlId("presentation-implementation"), ControlValue.Option(new("none"))),
+            "The generic Operator viewer bypassed owner-published read-only policy.");
+        var operatorHost = new VBoxContainer();
+        new GodotControlPlaneView(operatorViewer, _ => { }).Build(operatorHost);
+        Expect(operatorHost.FindChild("ManagementControl_presentation-implementation", true, false)
+                is HBoxContainer operatorControl &&
+            operatorControl.GetChildren().OfType<Button>().Single(button => button.Text == "Apply").Disabled,
+            "The generic Operator native viewer made a fixed adapter editable.");
+        operatorHost.Free();
         Expect(registry.Retire(GodotAdapterControlProvider.Id, generation), "Adapter publication did not retire.");
         Expect(registry.Read(reader, GodotAdapterControlProvider.Id, generation,
                 new DiagnosticId("phase"), out _) == ControlResultCode.UnknownProvider,

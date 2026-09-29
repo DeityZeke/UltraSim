@@ -46,6 +46,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../Core/UltraSim.Client.Core.csproj" />
+    <ProjectReference Include="../ControlPlane/UltraSim.Client.ControlPlane.csproj" />
     <ProjectReference Include="../../Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj" />
     <ProjectReference Include="../Content/UltraSim.Client.Content.csproj" />
     <ProjectReference Include="../StandardUi/UltraSim.Client.StandardUi.csproj" />

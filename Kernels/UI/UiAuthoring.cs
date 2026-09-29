@@ -249,16 +249,18 @@ public abstract class UiContainerBuilder
         string key,
         string actionKey,
         string labelSlotKey,
-        UiChildLayout placement = default) =>
-        AddElement(new UiSourceElement(UiElementKind.Button, key, placement, null, null,
+        UiChildLayout placement = default,
+        string? visualRole = null) =>
+        AddElement(new UiSourceElement(UiElementKind.Button, key, placement, visualRole, null,
             labelSlotKey, actionKey));
 
     public void AddButton(
         string key,
         UiActionReference action,
         UiSlotReference labelSlot,
-        UiChildLayout placement = default) =>
-        AddElement(new UiSourceElement(UiElementKind.Button, key, placement, null, null,
+        UiChildLayout placement = default,
+        string? visualRole = null) =>
+        AddElement(new UiSourceElement(UiElementKind.Button, key, placement, visualRole, null,
             labelSlot, action));
 
     public void AddTextInput(string key, string slotKey, UiChildLayout placement = default) =>
@@ -288,31 +290,35 @@ public abstract class UiContainerBuilder
         AddElement(new UiSourceElement(UiElementKind.TextInput, key, placement, null, null,
             slot, action));
 
-    public void AddToggle(string key, string slotKey, UiChildLayout placement = default) =>
-        AddElement(new UiSourceElement(UiElementKind.Toggle, key, placement, null, null,
+    public void AddToggle(string key, string slotKey, UiChildLayout placement = default,
+        string? visualRole = null) =>
+        AddElement(new UiSourceElement(UiElementKind.Toggle, key, placement, visualRole, null,
             slotKey, actionKey: null));
 
     public void AddToggle(
         string key,
         UiSlotReference slot,
-        UiChildLayout placement = default) =>
-        AddElement(new UiSourceElement(UiElementKind.Toggle, key, placement, null, null,
+        UiChildLayout placement = default,
+        string? visualRole = null) =>
+        AddElement(new UiSourceElement(UiElementKind.Toggle, key, placement, visualRole, null,
             slot, default));
 
     public void AddToggle(
         string key,
         string slotKey,
         string actionKey,
-        UiChildLayout placement = default) =>
-        AddElement(new UiSourceElement(UiElementKind.Toggle, key, placement, null, null,
+        UiChildLayout placement = default,
+        string? visualRole = null) =>
+        AddElement(new UiSourceElement(UiElementKind.Toggle, key, placement, visualRole, null,
             slotKey, actionKey));
 
     public void AddToggle(
         string key,
         UiSlotReference slot,
         UiActionReference action,
-        UiChildLayout placement = default) =>
-        AddElement(new UiSourceElement(UiElementKind.Toggle, key, placement, null, null,
+        UiChildLayout placement = default,
+        string? visualRole = null) =>
+        AddElement(new UiSourceElement(UiElementKind.Toggle, key, placement, visualRole, null,
             slot, action));
 
     public void AddList(string key, string rowsSlotKey, UiChildLayout placement = default) =>

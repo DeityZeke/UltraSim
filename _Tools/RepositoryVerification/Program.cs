@@ -2534,6 +2534,12 @@ foreach (string configuration in configurations)
             "--path", "Client/Godot",
             "--", "--shell-ui-smoke", "--expect-edition=SinglePlayer",
         ]);
+        Run(root, godot,
+        [
+            "--headless",
+            "--path", "Client/Godot",
+            "--", "--p5-management-smoke", "--expect-edition=SinglePlayer",
+        ]);
         foreach ((string variant, string human) in new[]
         {
             ("default", "x"),
@@ -5979,7 +5985,7 @@ static void VerifyArchitecture(string root)
             "Kernels/UI/UltraSim.UI.csproj",
         ],
         ["Client/StandardUi/UltraSim.Client.StandardUi.csproj"] =
-            ["Kernels/UI/UltraSim.UI.csproj"],
+            ["Kernels/UI/UltraSim.UI.csproj", "Framework/Definitions/UltraSim.Framework.Definitions.csproj"],
         ["Client/BuiltInTestWorlds/UltraSim.Client.BuiltInTestWorlds.csproj"] =
             ["Client/Content/UltraSim.Client.Content.csproj"],
         ["Client/Network/UltraSim.Client.Network.csproj"] =
@@ -6013,6 +6019,7 @@ static void VerifyArchitecture(string root)
         [
             "Client/BuiltInTestWorlds/UltraSim.Client.BuiltInTestWorlds.csproj",
             "Client/Content/UltraSim.Client.Content.csproj",
+            "Client/ControlPlane/UltraSim.Client.ControlPlane.csproj",
             "Client/Core/UltraSim.Client.Core.csproj",
             "Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj",
             "Client/Local/UltraSim.Client.Local.csproj",

@@ -105,16 +105,19 @@ public sealed class ControlActionDescriptor : ControlPublicationDescriptor
 {
     public ControlActionDescriptor(ControlActionId id, ControlCategoryPath category, string label, string description,
         IEnumerable<ControlValueSchema> arguments, ControlCapabilityId read, ControlCapabilityId invoke,
-        ControlAudience audience = ControlAudience.All) : base(category, label, description, read, audience)
+        ControlAudience audience = ControlAudience.All, string confirmationPrompt = "") : base(category, label, description, read, audience)
     {
         if (!id.IsValid || !invoke.IsValid) throw new ArgumentException("Invalid action.");
         Id = id; InvokeCapability = invoke;
         Arguments = Array.AsReadOnly(ControlLimits.Copy(arguments, ControlLimits.Arguments));
+        ConfirmationPrompt = ControlLimits.Bounded(confirmationPrompt, ControlLimits.Description);
         if (Arguments.Any(s => s is null)) throw new ArgumentException("Null action schema.");
     }
     public ControlActionId Id { get; }
     public ControlCapabilityId InvokeCapability { get; }
     public ReadOnlyCollection<ControlValueSchema> Arguments { get; }
+    /// <summary>Nonempty for actions which require a separate viewer confirmation gesture.</summary>
+    public string ConfirmationPrompt { get; }
 }
 public sealed class ControlCollectionColumn
 {

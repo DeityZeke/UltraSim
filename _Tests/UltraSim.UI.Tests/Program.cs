@@ -31,7 +31,47 @@ var tests = new (string Name, Action Body)[]
     ("HotOpenModelRebindRequiresExactCompiledIdentity", HotOpenModelRebindRequiresExactCompiledIdentity),
     ("ActionReasonMustRespectCompiledTextLimit", ActionReasonMustRespectCompiledTextLimit),
     ("TruncatedDeltaCountsMustNotCauseLargeAllocations", TruncatedDeltaCountsMustNotCauseLargeAllocations),
+    ("VisualRolesNinePieceAndButtonFallbackAreBounded", VisualRolesNinePieceAndButtonFallbackAreBounded),
 };
+
+static void VisualRolesNinePieceAndButtonFallbackAreBounded()
+{
+    var image = new UiImageVisual("ui.silver.corner", UiImageMode.Tile, .8f);
+    Assert.Throws<ArgumentException>(() => new UiImageVisual("../unsafe"));
+    Assert.Throws<ArgumentException>(() => new UiImageVisual("../unsafe" + new string('x', 260)));
+    Assert.Throws<ArgumentException>(() => new UiImageVisual("ui.invalid", opacity: float.NaN));
+    var pieces = Enumerable.Range(0, 9).Select(index => new UiImageVisual("ui.silver.part-" + index)).ToArray();
+    var frame = new UiNinePieceVisual(pieces, 16, 20, 16, 20, UiFrameFillMode.Tile, UiFrameFillMode.Stretch);
+    Assert.Equal(33, frame.MinimumWidth);
+    Assert.Equal(41, frame.MinimumHeight);
+    Assert.Equal(UiFrameFillMode.Tile, frame.Edge);
+    Assert.Throws<ArgumentException>(() => new UiNinePieceVisual(pieces.Take(8), 16, 20, 16, 20));
+    var button = new UiButtonImageVisual(new("ui.button.normal"), hover: new("ui.button.hover"),
+        active: new("ui.button.active"));
+    Assert.Equal("ui.button.hover", button.Resolve(UiButtonImageState.Pressed).Role);
+    Assert.Equal("ui.button.active", button.Resolve(UiButtonImageState.Normal, active: true).Role);
+    Assert.Equal("ui.button.hover", button.Resolve(UiButtonImageState.Released).Role);
+    var toggle = new UiToggleImageVisual(new("ui.toggle.off"), new("ui.toggle.on"));
+    Assert.Equal("ui.toggle.on", toggle.On.Role);
+    var source = new UiDefinitionBuilder("visual-role-proof");
+    UiSlotReference label = source.DeclareSlot("label", UiSlotValueKind.Text);
+    UiSlotReference enabled = source.DeclareSlot("enabled", UiSlotValueKind.Boolean);
+    UiActionReference click = source.DeclareAction("click");
+    UiActionReference flip = source.DeclareAction("flip", inputKind: UiValueKind.Boolean);
+    source.AddCanvas(canvas => canvas.AddVertical("content", content =>
+    {
+        content.AddPanel("frame", "ui.silver.frame");
+        content.AddImage("tile", image.Role!);
+        content.AddButton("button", click, label, visualRole: "ui.button.primary");
+        content.AddToggle("toggle", enabled, flip, visualRole: "ui.toggle.classic");
+    }, UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 320, 240))));
+    CompiledUiDefinition compiled = UiDefinitionCompiler.Compile(source);
+    Assert.True(UiDefinitionArtifactCodec.TryEncodeCanonical(compiled, out byte[] artifact));
+    Assert.True(UiDefinitionArtifactCodec.TryReadCanonical(artifact, out CompiledUiDefinition? restored));
+    Assert.True(restored!.Elements.ToArray().Any(element => element.StyleRole == "ui.silver.frame"));
+    Assert.True(restored.Elements.ToArray().Any(element => element.StyleRole == "ui.button.primary"));
+    Assert.True(restored.Elements.ToArray().Any(element => element.StyleRole == "ui.toggle.classic"));
+}
 
 static void OutsidePointerPolicyIsCanonicalAndValidated()
 {

@@ -1,5 +1,7 @@
 using Godot;
 using UltraSim.Client.Core;
+using UltraSim.Client.StandardUi;
+using UltraSim.Framework.Definitions;
 using UltraSim.UI;
 
 namespace UltraSim.Client.Godot;
@@ -10,6 +12,21 @@ public interface IGodotUiAssetResolver
     Texture2D? Resolve(string assetRole);
 }
 
+/// <summary>Optional adapter for an admitted typed image reference. Returned texture is borrowed.</summary>
+public interface IGodotUiSemanticImageResolver : IGodotUiAssetResolver
+{
+    Texture2D? Resolve(SemanticPresentationReference reference);
+}
+
+/// <summary>Optional cold role catalog. Textures returned by Resolve remain resolver-owned.</summary>
+public interface IGodotUiVisualResolver : IGodotUiAssetResolver
+{
+    UiImageVisual? ResolveImage(string visualRole);
+    UiNinePieceVisual? ResolveFrame(string visualRole);
+    UiButtonImageVisual? ResolveButton(string visualRole);
+    UiToggleImageVisual? ResolveToggle(string visualRole);
+}
+
 /// <summary>
 /// Minimal Godot UI adapter. Godot controls stay entirely in this project;
 /// Kernels/UI and Client/Core remain renderer-neutral.
@@ -17,6 +34,8 @@ public interface IGodotUiAssetResolver
 public sealed class GodotUiRenderer : IUiRenderer, IDisposable
 {
     private readonly IGodotUiAssetResolver? _assets;
+    private readonly IGodotUiVisualResolver? _visuals;
+    private readonly UiSemanticImageBindings? _semanticImages;
     private readonly Control? _host;
     private readonly GodotGumpWindowManager? _windows;
     private readonly List<GodotUiRenderHandle> _openHandles = [];
@@ -50,16 +69,22 @@ public sealed class GodotUiRenderer : IUiRenderer, IDisposable
             throw new InvalidOperationException("Godot UI native resources are engine-thread-bound.");
     }
 
-    public GodotUiRenderer(Control? host = null, IGodotUiAssetResolver? assets = null)
+    public GodotUiRenderer(Control? host = null, IGodotUiAssetResolver? assets = null,
+        UiSemanticImageBindings? semanticImages = null)
     {
         _host = host;
         _assets = assets;
+        _visuals = assets as IGodotUiVisualResolver;
+        _semanticImages = semanticImages;
     }
 
-    public GodotUiRenderer(GodotGumpWindowManager windows, IGodotUiAssetResolver? assets = null)
+    public GodotUiRenderer(GodotGumpWindowManager windows, IGodotUiAssetResolver? assets = null,
+        UiSemanticImageBindings? semanticImages = null)
     {
         _windows = windows ?? throw new ArgumentNullException(nameof(windows));
         _assets = assets;
+        _visuals = assets as IGodotUiVisualResolver;
+        _semanticImages = semanticImages;
     }
 
     public IUiRenderHandle Create(
@@ -72,7 +97,7 @@ public sealed class GodotUiRenderer : IUiRenderer, IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         GodotUiDefinitionAdmission.Validate(definition);
         var handle = new GodotUiRenderHandle(instance, definition, model, submitAction,
-            _assets, () => DiagnosticMissingIcon);
+            _assets, _visuals, _semanticImages, () => DiagnosticMissingIcon);
         if (_windows is not null)
         {
             _windows.Attach(handle);
@@ -226,6 +251,8 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
     private readonly CompiledUiDefinition _definition;
     private readonly UiViewInstanceId _instance;
     private readonly IGodotUiAssetResolver? _assets;
+    private readonly IGodotUiVisualResolver? _visuals;
+    private readonly UiSemanticImageBindings? _semanticImages;
     private readonly Func<Texture2D> _fallbackIcon;
     private readonly Dictionary<UiLayoutNodeId, Control> _layouts = [];
     private readonly Dictionary<UiLayoutNodeId, Control> _layoutHosts = [];
@@ -246,11 +273,15 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
         UiModelView model,
         Action<UiActionRequest> submitAction,
         IGodotUiAssetResolver? assets,
+        IGodotUiVisualResolver? visuals,
+        UiSemanticImageBindings? semanticImages,
         Func<Texture2D> fallbackIcon)
     {
         _instance = instance;
         _definition = definition;
         _assets = assets;
+        _visuals = visuals;
+        _semanticImages = semanticImages;
         _fallbackIcon = fallbackIcon;
         _submitAction = submitAction;
         Root = new Control
@@ -523,15 +554,15 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
     {
         Control control = element.Kind switch
         {
-            UiElementKind.Panel => new Panel(),
+            UiElementKind.Panel => CreatePanel(element),
             UiElementKind.Text => new Label
             {
                 AutowrapMode = TextServer.AutowrapMode.WordSmart,
             },
             UiElementKind.Image => CreateImage(element),
-            UiElementKind.Button => new Button(),
+            UiElementKind.Button => CreateButton(element),
             UiElementKind.TextInput => new LineEdit(),
-            UiElementKind.Toggle => new CheckBox(),
+            UiElementKind.Toggle => CreateToggle(element),
             UiElementKind.List => new VBoxContainer(),
             _ => throw new InvalidDataException($"Unsupported UI element '{element.Kind}'."),
         };
@@ -553,16 +584,103 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
 
     private Control CreateImage(UiCompiledElement element)
     {
+        UiImageVisual? visual = _visuals?.ResolveImage(element.AssetRole);
         var image = new TextureRect
         {
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
-            StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+            StretchMode = ToStretch(visual?.Mode ?? UiImageMode.Fit),
+            Modulate = new Color(1, 1, 1, visual?.Opacity ?? 1),
         };
-        if (!string.IsNullOrEmpty(element.AssetRole))
-            image.Texture = _assets?.Resolve(element.AssetRole) ??
-                _fallbackIcon();
+        if (_semanticImages?.TryGet(_definition, element.Id, out SemanticPresentationReference reference) == true)
+            image.Texture = (_assets as IGodotUiSemanticImageResolver)?.Resolve(reference) ?? _fallbackIcon();
+        else if (!string.IsNullOrEmpty(element.AssetRole))
+            image.Texture = _assets?.Resolve(visual?.Role ?? element.AssetRole) ?? _fallbackIcon();
         return image;
     }
+
+    private Control CreatePanel(UiCompiledElement element)
+    {
+        UiNinePieceVisual? frame = _visuals?.ResolveFrame(element.StyleRole);
+        if (frame is null) return new Panel();
+        if (element.Placement.HasCanvasPlacement &&
+            (element.Placement.CanvasPlacement.Width < frame.MinimumWidth ||
+             element.Placement.CanvasPlacement.Height < frame.MinimumHeight))
+            throw new InvalidDataException("Nine-piece frame is smaller than its preserved logical margins.");
+        var panel = new Control
+        {
+            CustomMinimumSize = new Vector2(frame.MinimumWidth, frame.MinimumHeight),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        // Nine independent regions permit edge and center policies to differ. Asset texture
+        // wrappers are borrowed from the resolver; this panel owns only its nine child nodes.
+        for (int index = 0; index < 9; index++)
+        {
+            UiImageVisual piece = frame[index];
+            var image = new TextureRect
+            {
+                Texture = _assets?.Resolve(piece.Role!) ?? _fallbackIcon(),
+                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                StretchMode = index == 4
+                    ? ToFrameStretch(frame.Center) : index is 1 or 3 or 5 or 7
+                        ? ToFrameStretch(frame.Edge) : TextureRect.StretchModeEnum.Scale,
+                Modulate = new Color(1, 1, 1, piece.Opacity),
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            };
+            int column = index % 3, row = index / 3;
+            image.AnchorLeft = column == 2 ? 1 : 0;
+            image.AnchorRight = column == 0 ? 0 : 1;
+            image.AnchorTop = row == 2 ? 1 : 0;
+            image.AnchorBottom = row == 0 ? 0 : 1;
+            image.OffsetLeft = column switch { 0 => 0, 1 => frame.Left, _ => -frame.Right };
+            image.OffsetRight = column switch { 0 => frame.Left, 1 => -frame.Right, _ => 0 };
+            image.OffsetTop = row switch { 0 => 0, 1 => frame.Top, _ => -frame.Bottom };
+            image.OffsetBottom = row switch { 0 => frame.Top, 1 => -frame.Bottom, _ => 0 };
+            panel.AddChild(image);
+        }
+        return panel;
+    }
+
+    private Button CreateButton(UiCompiledElement element)
+    {
+        var button = new Button();
+        UiButtonImageVisual? visual = _visuals?.ResolveButton(element.StyleRole);
+        if (visual is null) return button;
+        void Show(UiButtonImageState state) => button.Icon = _assets?.Resolve(
+            visual.Resolve(state).Role!) ?? _fallbackIcon();
+        Show(UiButtonImageState.Normal);
+        button.MouseEntered += () => Show(UiButtonImageState.Hover);
+        button.MouseExited += () => Show(UiButtonImageState.Normal);
+        button.ButtonDown += () => Show(UiButtonImageState.Pressed);
+        button.ButtonUp += () => Show(UiButtonImageState.Released);
+        button.FocusEntered += () => Show(UiButtonImageState.Focused);
+        button.FocusExited += () => Show(UiButtonImageState.Normal);
+        return button;
+    }
+
+    private CheckBox CreateToggle(UiCompiledElement element)
+    {
+        var toggle = new CheckBox();
+        UiToggleImageVisual? visual = _visuals?.ResolveToggle(element.StyleRole);
+        if (visual is null) return toggle;
+        void Show(bool pressed) => toggle.Icon = _assets?.Resolve(
+            (pressed ? visual.Value.On : visual.Value.Off).Role!) ?? _fallbackIcon();
+        toggle.Toggled += Show;
+        Show(false);
+        return toggle;
+    }
+
+    private static TextureRect.StretchModeEnum ToFrameStretch(UiFrameFillMode mode) =>
+        mode == UiFrameFillMode.Tile ? TextureRect.StretchModeEnum.Tile : TextureRect.StretchModeEnum.Scale;
+
+    private static TextureRect.StretchModeEnum ToStretch(UiImageMode mode) => mode switch
+    {
+        UiImageMode.Natural => TextureRect.StretchModeEnum.Keep,
+        UiImageMode.Fit => TextureRect.StretchModeEnum.KeepAspectCentered,
+        UiImageMode.Fill => TextureRect.StretchModeEnum.KeepAspectCovered,
+        UiImageMode.Stretch => TextureRect.StretchModeEnum.Scale,
+        UiImageMode.Tile => TextureRect.StretchModeEnum.Tile,
+        _ => throw new ArgumentOutOfRangeException(nameof(mode)),
+    };
 
     private void ConnectAction(Control control, UiCompiledElement element, Action<UiActionRequest> submitAction)
     {
@@ -769,6 +887,9 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
         {
             button.Disabled = !state.Enabled;
             button.TooltipText = state.UnavailableReason ?? string.Empty;
+            if (control is Button visualButton && _visuals?.ResolveButton(element.StyleRole) is { } visual)
+                visualButton.Icon = _assets?.Resolve(visual.Resolve(state.Enabled
+                    ? UiButtonImageState.Normal : UiButtonImageState.Disabled).Role!) ?? _fallbackIcon();
         }
         else if (control is LineEdit input)
         {

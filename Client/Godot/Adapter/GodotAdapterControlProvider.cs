@@ -5,7 +5,8 @@ namespace UltraSim.Client.Godot;
 /// <summary>Cold, engine-thread snapshot of the actual native adapter owner.</summary>
 internal readonly record struct GodotAdapterStatus(
     string Edition, GodotApplicationPhase Phase, bool SessionActive,
-    int WorldRootChildren, int UiLayerCount);
+    int WorldRootChildren, int UiLayerCount,
+    int OpenGumps = 0, int InternalRenderWidth = 0, int InternalRenderHeight = 0);
 
 /// <summary>
 /// Reports the fixed Godot implementation selection and its owned lifecycle. Selection is not
@@ -43,6 +44,9 @@ internal sealed class GodotAdapterControlProvider : IControlProvider
                 Diagnostic("session-active", ControlValueKind.Bool),
                 Diagnostic("world-root-children", ControlValueKind.Int64),
                 Diagnostic("ui-layer-count", ControlValueKind.Int64),
+                Diagnostic("open-gumps", ControlValueKind.Int64),
+                Diagnostic("internal-render-width", ControlValueKind.Int64),
+                Diagnostic("internal-render-height", ControlValueKind.Int64),
             ]);
     }
 
@@ -67,7 +71,8 @@ internal sealed class GodotAdapterControlProvider : IControlProvider
             throw new InvalidOperationException("Godot adapter diagnostics require the engine owner thread.");
         GodotAdapterStatus state = _capture();
         if (string.IsNullOrWhiteSpace(state.Edition) || state.Edition.Length > 128 ||
-            !Enum.IsDefined(state.Phase) || state.WorldRootChildren < 0 || state.UiLayerCount < 0)
+            !Enum.IsDefined(state.Phase) || state.WorldRootChildren < 0 || state.UiLayerCount < 0 ||
+            state.OpenGumps < 0 || state.InternalRenderWidth < 0 || state.InternalRenderHeight < 0)
             throw new InvalidOperationException("Invalid Godot adapter status.");
         if (!_hasPrevious || state != _previous)
         {
@@ -102,6 +107,9 @@ internal sealed class GodotAdapterControlProvider : IControlProvider
             "session-active" => ControlValue.Bool(state.SessionActive),
             "world-root-children" => ControlValue.Int64(state.WorldRootChildren),
             "ui-layer-count" => ControlValue.Int64(state.UiLayerCount),
+            "open-gumps" => ControlValue.Int64(state.OpenGumps),
+            "internal-render-width" => ControlValue.Int64(state.InternalRenderWidth),
+            "internal-render-height" => ControlValue.Int64(state.InternalRenderHeight),
             _ => throw new ArgumentException("Unknown adapter diagnostic.", nameof(id)),
         };
     }

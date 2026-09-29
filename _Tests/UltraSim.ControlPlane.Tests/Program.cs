@@ -18,6 +18,7 @@ var tests = new (string, Action)[]
     ("Actions_TypedArgumentsAndFailureAudit", Actions),
     ("Collections_BoundedStableRowsAndRevision", Collections),
     ("Viewer_DraftRequestedPendingAndRetirement", Viewer),
+    ("Viewer_SchemaAndDestructiveConfirmation", ViewerConfirmation),
     ("Ownership_NoCrossThreadOrReentrantRetirement", Ownership),
     ("ECS_GenericPanelAndPublicSnapshotParity", EcsPanel),
     ("ECS_ScheduleEnableGenerationAndReadOnlyFacts", EcsControls),
@@ -27,7 +28,8 @@ var tests = new (string, Action)[]
     ("Runtime_UnsafeBoundaryRemainsDisabled", RuntimeUnsafe),
     ("Settings_BatchPersistenceGlobalRealmAndProvenance", Settings),
     ("Settings_ConsentIsNotWriteAuthorityAndPendingIsReal", SettingsConsent),
-    ("Settings_FullRealmCapacityDoesNotBlockDeviceVegetation", SettingsCapacity)
+    ("Settings_FullRealmCapacityDoesNotBlockDeviceVegetation", SettingsCapacity),
+    ("P5_SettingsCameraDisplayAndAudienceParity", P5Settings)
 };
 foreach (var (name, test) in tests) { test(); Console.WriteLine("PASS P1 " + name); }
 Console.WriteLine($"All {tests.Length} P1 Control Plane tests passed.");
@@ -208,6 +210,90 @@ static void Viewer()
     Equal(ControlProvenanceKind.BuiltInDefault, after.EffectiveProvenance.Kind);
     Check(v.SetDraft(new("proof"), g, new("live"), ControlValue.Int64(2)));
     r.Retire(new("proof"), g); Equal(0, v.Capture().Count); Check(!v.TryGetDraft(new("proof"), g, new("live"), out _));
+}
+static void ViewerConfirmation()
+{
+    var registry = new ControlPlaneRegistry();
+    var provider = new ProofProvider();
+    Check(registry.TryRegister(provider, out ulong generation, out _));
+    var viewer = new ControlPlaneViewer(registry, Principal());
+    Check(!viewer.SetDraft(new("proof"), generation, new("live"), ControlValue.Text("wrong-kind")));
+    Check(!viewer.SetDraft(new("proof"), generation, new("live"), ControlValue.Int64(11)));
+    Check(!viewer.SetDraft(new("proof"), generation, new("disabled"), ControlValue.Int64(2)));
+    Check(viewer.RequestAction(new("confirm-one"), new("proof"), generation, new("erase"), []) is null);
+    Equal("Delete this fixture?", viewer.PendingConfirmation!.Prompt);
+    Equal(0, provider.Actions);
+    viewer.CancelAction();
+    Equal(0, provider.Actions);
+    Check(viewer.RequestAction(new("confirm-two"), new("proof"), generation, new("erase"), []) is null);
+    Equal(ControlResultStatus.Accepted, Set(registry, generation, "live", ControlValue.Int64(2)).Outcome.Status);
+    Equal(ControlResultCode.StaleRevision, viewer.ConfirmAction().Outcome.Code);
+    Equal(0, provider.Actions);
+    Check(viewer.RequestAction(new("confirm-two-fresh"), new("proof"), generation, new("erase"), []) is null);
+    Equal(ControlResultStatus.Accepted, viewer.ConfirmAction().Outcome.Status);
+    Equal(1, provider.Actions);
+    Check(viewer.RequestAction(new("confirm-three"), new("proof"), generation, new("erase"), []) is null);
+    Check(registry.Retire(new("proof"), generation));
+    viewer.Capture();
+    Check(viewer.PendingConfirmation is null);
+    Throws<InvalidOperationException>(() => viewer.ConfirmAction());
+}
+static void P5Settings()
+{
+    ClientSettingsDocument document = ClientSettingsDocument.Empty;
+    ResolvedClientSettings effective = ClientSettingsResolver.Resolve(document);
+    ResolvedClientDisplayConfiguration display = ClientDisplayResolver.Resolve(document.Display);
+    var provider = new ClientSettingsControlProvider(() => document, () => effective, candidate =>
+    {
+        display = ClientDisplayResolver.Resolve(candidate.Display);
+        document = candidate;
+        effective = ClientSettingsResolver.Resolve(document);
+    }, effectiveDisplay: () => display);
+    var registry = new ControlPlaneRegistry();
+    Check(registry.TryRegister(provider, out ulong generation, out _));
+    var user = new ControlPrincipal("user", ControlPrincipalKind.LocalUser,
+        [ClientSettingsControlProvider.Read, ClientSettingsControlProvider.Write]);
+    var developer = new ControlPrincipal("developer", ControlPrincipalKind.Developer,
+        [ClientSettingsControlProvider.Read]);
+    var operatorWithSettingsCapabilities = new ControlPrincipal("operator", ControlPrincipalKind.LocalOperator,
+        [ClientSettingsControlProvider.Read, ClientSettingsControlProvider.Write]);
+    var noRead = new ControlPrincipal("visitor", ControlPrincipalKind.LocalUser, []);
+    Equal(0, registry.Discover(noRead).Count);
+    Equal(0, registry.Discover(operatorWithSettingsCapabilities).Count);
+    var developerViewer = new ControlPlaneViewer(registry, developer);
+    Check(developerViewer.Capture().Any());
+    Check(developerViewer.Capture().SelectMany(category => category.Items)
+        .Where(item => item.Control is not null).All(item =>
+            !item.Control!.Writable && item.Control.DisabledCode == ControlResultCode.Unauthorized));
+    Check(!developerViewer.SetDraft(new("client.settings"), generation, new("ui-scale"), ControlValue.Float64(1.25)));
+    var viewer = new ControlPlaneViewer(registry, user);
+    Check(viewer.SetDraft(new("client.settings"), generation, new("camera-profile"),
+        ControlValue.Option(new("third-person-follow"))));
+    Check(viewer.SetDraft(new("client.settings"), generation, new("camera-distance"), ControlValue.Float64(12)));
+    Check(viewer.SetDraft(new("client.settings"), generation, new("display-mode"),
+        ControlValue.Option(new("borderless-fullscreen"))));
+    Equal(ControlResultStatus.Accepted, viewer.Apply(new("p5-settings"), new("client.settings"), generation).Outcome.Status);
+    Equal(ClientCameraProfile.ThirdPersonFollow, effective.CameraProfile);
+    Equal(12f, effective.CameraDistance);
+    Equal(ClientDisplayMode.BorderlessFullscreen, display.DisplayMode);
+    Check(document.Global.CameraRig.HasValue);
+    registry.Read(user, new("client.settings"), generation, new ControlCollectionId("bindings"), out var bindings);
+    Equal(Enum.GetValues<ClientSemanticAction>().Length, bindings!.Rows.Count);
+    var changed = viewer.RequestAction(new("p5-rebind"), new("client.settings"), generation, new("rebind"),
+        [ControlValue.Option(new("move-forward")), ControlValue.Option(new("keyboard")),
+         ControlValue.Text("UP"), ControlValue.Option(new("none"))]);
+    Equal(ControlResultStatus.Accepted, changed!.Outcome.Status);
+    Check(effective.TryGetBinding(ClientSemanticAction.MoveForward, out ClientPhysicalInput forward) &&
+        forward.Code == "UP");
+    var collision = viewer.RequestAction(new("p5-collision"), new("client.settings"), generation, new("rebind"),
+        [ControlValue.Option(new("move-forward")), ControlValue.Option(new("keyboard")),
+         ControlValue.Text("S"), ControlValue.Option(new("none"))]);
+    Equal(ControlResultCode.InvalidValue, collision!.Outcome.Code);
+    Equal("UP", forward.Code);
+    Equal(ControlResultCode.Unauthorized, registry.Set(new SetControlRequest(Context(developer),
+        new("client.settings"), new("camera-distance"), generation, ControlValue.Float64(15))).Outcome.Code);
+    Equal(ControlResultCode.StaleGeneration, registry.Read(user, new("client.settings"), generation + 1,
+        new ControlId("display-mode"), out _));
 }
 static void Ownership()
 {
@@ -420,7 +506,7 @@ static void SettingsConsent()
     Equal(ControlProvenanceKind.ServerRecommendation, grammar!.EffectiveProvenance.Kind);
     Equal(ControlProvenanceKind.BuiltInDefault, grammar.RequestedProvenance.Kind);
     var server = new ControlPrincipal("server-recommendation", ControlPrincipalKind.RemoteOperator, []);
-    Equal(ControlResultCode.Unauthorized, r.Set(SetControlsRequest.Create(Context(server), new("client.settings"), g,
+    Equal(ControlResultCode.NotVisible, r.Set(SetControlsRequest.Create(Context(server), new("client.settings"), g,
         [new(new("invert-y"), ControlValue.Bool(true))])).Outcome.Code); Check(doc.Global.InvertY is null);
     Equal(ControlResultStatus.Accepted, r.Set(SetControlsRequest.Create(Context(), new("client.settings"), g,
         [new(new("vegetation"), ControlValue.Bool(true))])).Outcome.Status);
@@ -504,7 +590,9 @@ sealed class ProofProvider : IControlProvider
         Definition = new(new(name), [Control("live"), Control("restart", ControlApplyMode.ServerRestart), Control("cold", ControlApplyMode.ReadOnly),
             Control("disabled"), Control("secret", audience: ControlAudience.Test)],
             [new(new("tick"), new("Proof/State"), "tick", "", new(ControlValueKind.UInt64), new("proof.read"))],
-            [new(new("pulse"), new("Proof/State"), "pulse", "", [new(ControlValueKind.UInt64)], new("proof.read"), new("proof.write"))],
+            [new(new("pulse"), new("Proof/State"), "pulse", "", [new(ControlValueKind.UInt64)], new("proof.read"), new("proof.write")),
+             new(new("erase"), new("Proof/State"), "erase", "", [], new("proof.read"), new("proof.write"),
+                 confirmationPrompt: "Delete this fixture?")],
             [new(new("rows"), new("Proof/State"), "rows", "", 2, [new(new("value"), "value", new(ControlValueKind.Int64))], new("proof.read"))]);
     }
     public ControlProviderDefinition Definition { get; }

@@ -2,7 +2,7 @@ using System.Collections.ObjectModel;
 
 namespace UltraSim.Framework.ControlPlane;
 
-public sealed record ControlProviderSnapshot(ControlProviderDefinition Definition, ulong Generation);
+public sealed record ControlProviderSnapshot(ControlProviderDefinition Definition, ulong Generation, ulong Revision);
 
 /// <summary>
 /// Explicit management-owner runtime. Dispatch is synchronous and non-reentrant; retirement cannot
@@ -67,7 +67,7 @@ public sealed class ControlPlaneRegistry
                     d.Controls.Where(c => Discoverable(c, principal)), d.Diagnostics.Where(c => Discoverable(c, principal)),
                     d.Actions.Where(c => Discoverable(c, principal)), d.Collections.Where(c => Discoverable(c, principal)));
                 if (visible.Controls.Count + visible.Diagnostics.Count + visible.Actions.Count + visible.Collections.Count != 0)
-                    result.Add(new(visible, e.Generation));
+                    result.Add(new(visible, e.Generation, e.Provider.Revision));
             }
             return result.AsReadOnly();
         }

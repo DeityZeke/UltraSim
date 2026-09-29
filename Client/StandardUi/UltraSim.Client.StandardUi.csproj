@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../Kernels/UI/UltraSim.UI.csproj" />
+    <ProjectReference Include="../../Framework/Definitions/UltraSim.Framework.Definitions.csproj" />
     <EmbeddedResource Include="Assets/*.usui" />
   </ItemGroup>
 </Project>

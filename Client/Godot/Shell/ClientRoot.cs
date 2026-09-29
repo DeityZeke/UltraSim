@@ -294,6 +294,11 @@ public abstract partial class ClientRoot : Control
                 Callable.From(RunShellUiSmoke).CallDeferred();
                 return;
             }
+            if (OS.GetCmdlineUserArgs().Contains("--p5-management-smoke", StringComparer.Ordinal))
+            {
+                Callable.From(() => { _ = RunP5ManagementSmokeAsync(); }).CallDeferred();
+                return;
+            }
             if (OS.GetCmdlineUserArgs().Contains("--composition-smoke", StringComparer.Ordinal))
             {
                 ValidateShellSmoke();
@@ -682,6 +687,33 @@ public abstract partial class ClientRoot : Control
                 "The interactive binding editor follows with a consuming gameplay shell.",
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
         });
+
+        // This is a cold, provider-published User surface. The existing display form stays
+        // intact for F1.12 compatibility while its owner semantics are migrated incrementally.
+        EnsureSettingsControl();
+        column.AddChild(Title("User Control Plane"));
+        if (_managementStatus.Length != 0)
+            column.AddChild(new Label { Text = _managementStatus,
+                AutowrapMode = TextServer.AutowrapMode.WordSmart });
+        var management = new VBoxContainer { Name = "UserManagementSurface" };
+        column.AddChild(management);
+        _userManagementSurface!.Build(management);
+        // Local read-only diagnostics are an explicit UI choice, never a server-claimed privilege.
+        var developerToggle = MenuButton(_showDeveloperManagement ? "Hide developer diagnostics" : "Developer diagnostics");
+        developerToggle.Name = "DeveloperManagementToggle";
+        ConnectDeferred(developerToggle, () =>
+        {
+            _showDeveloperManagement = !_showDeveloperManagement;
+            RenderCurrentSurface();
+        });
+        column.AddChild(developerToggle);
+        if (_showDeveloperManagement)
+        {
+            column.AddChild(Title("Developer diagnostics (read-only)"));
+            var diagnostics = new VBoxContainer { Name = "DeveloperManagementSurface" };
+            column.AddChild(diagnostics);
+            _developerManagementSurface!.Build(diagnostics);
+        }
 
         Button save = MenuButton("Save");
         save.Name = "SettingsSave";
