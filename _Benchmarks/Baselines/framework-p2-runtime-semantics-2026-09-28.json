@@ -1,0 +1,42 @@
+{
+  "checkpoint": "P2-runtime-semantics-foundation",
+  "status": "accepted-foundation-P2-active",
+  "startingHead": "d03a1f0c81a743f629dae2c82527543732cb1dae",
+  "testedImplementationHead": "7c55a99c0c837d4fe1d27c018a56518b0969ace5",
+  "environment": {
+    "os": "Linux 7.2.6-1-cachyos x86_64",
+    "logicalProcessors": 16,
+    "dotnetSdk": "8.0.125",
+    "dotnetRuntime": "8.0.25",
+    "godot": "4.7.1 Mono"
+  },
+  "formats": {
+    "packageManifest": "UltraSim.ServerModule/v2",
+    "saveSetArtifactFormatChanged": false
+  },
+  "dependencyGraph": {
+    "Framework.RuntimeHost": [],
+    "Framework.Persistence": [],
+    "Bridges.ControlPlane.RuntimeHost": ["Framework.ControlPlane", "Framework.RuntimeHost"],
+    "Server.Persistence": ["Framework.Persistence", "ECS"]
+  },
+  "focused": {
+    "runtimeHostTestsPassed": 12,
+    "frameworkOnlyPersistenceProof": "pass",
+    "serverSaveSetTests": "pass",
+    "gamePersistenceTestsPassed": 13,
+    "warmedDirectServiceAllocatedBytesPer10000Calls": [0, 0, 0, 0]
+  },
+  "canonical": {
+    "command": "env PATH=\"/home/nathan/.dotnet:$PATH\" bash ./verify.sh --configuration=Release",
+    "result": "pass-uninterrupted",
+    "logSha256": "a806b71421032c72861e86876f24d94021fe0e586ae2806f4152c982135d5bf2",
+    "singlePlayerAssemblies": 23,
+    "onlineAssemblies": 13,
+    "completeAssemblies": 32,
+    "contentlessOnline": true,
+    "exportedProductDogfood": ["SinglePlayer-installed", "SinglePlayer-absent", "SinglePlayer-primitive", "Complete-installed-vegetation"],
+    "mixedExportedClientSwarm": "pass"
+  },
+  "unstarted": ["dynamic C# source compiler", "compile cache", "isolated dynamic loader", "compiled Contracts-only survivability proof", "P3"]
+}
