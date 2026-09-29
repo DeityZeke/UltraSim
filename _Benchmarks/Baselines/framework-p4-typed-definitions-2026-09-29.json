@@ -1,0 +1,20 @@
+{
+  "checkpoint": "P4",
+  "status": "CLOSED_SCOPE_WITH_SEPARATE_NATIVE_LIFETIME_DEFECT",
+  "startingHead": "46dfbf1648eb8e01f574a7dde1f40c7d108bd93e",
+  "implementationCommits": [
+    "0ebd4c883390a834aa474ecf05a1afa5b46bad0c",
+    "9c0ca15b3393a3d1dcb2cad8f2993e55adbbd9cd",
+    "137289c9c195a42f78555b72d5c61d1515b1c6b9"
+  ],
+  "canonicallyTestedHead": "137289c9c195a42f78555b72d5c61d1515b1c6b9",
+  "configuration": "Release",
+  "runtime": { "sdk": "8.0.131", "netcore": "8.0.31", "aspnetcore": "8.0.31-isolated-temp-root", "godot": "4.7.1 Mono", "os": "CachyOS Linux 7.2.6 x86-64" },
+  "bounds": { "definitions": 4096, "facetFamilies": 64, "facetsPerDefinition": 32, "tags": 256, "tagMemberships": 8192 },
+  "representative": { "definition": "game.item.iron-sword", "facetCount": 7, "tags": ["weapons.swords", "materials.metals"], "prefabIdentityIsSeparate": true, "privateFactsInPublicDescriptor": false },
+  "focused": { "definitions": "pass", "serverAuthoringCompiledP4": "pass", "gameInventory": "36/36", "runtimeHost": "15/15", "gamePersistence": "13/13", "clientCore": "36/36", "architectureOnly": "pass", "pf1ExportedSwarm": "pass", "warmedAllocationsPer10000LookupsBytes": 0 },
+  "lookupNanosecondsDiagnostic": { "stableToHandle": 81.2, "typedFacet": 7.1, "denseTag": 4.7, "iterations": 200000 },
+  "canonicalRelease": { "finalAttempt": "pass-uninterrupted", "exports": ["SinglePlayer", "Online", "Complete"], "contentlessOnline": "pass", "mixedNativeBot": "pass", "priorAdverseAttemptsRetained": ["missing-aspnet-runtime", "p4-export-order-expectation", "existing-f18a-impairment", "warm-native-sigsegv", "p4-bot-closure-expectation"] },
+  "nativeFinding": { "classification": "confirmed-preexisting-product-lifetime-defect", "preP4WarmCrashes": 1, "preP4WarmRuns": 10, "p4WarmCrashes": 1, "p4WarmRuns": 10, "canonicalP4WarmCrash": 1, "thread": ".NET Finalizer", "signal": "SIGSEGV", "godotOffset": "+0xb55d75", "preP4CorePid": 584354, "p4CorePids": [581402, 581878], "causalOwnerIdentified": false, "pf6Ready": false },
+  "next": "P5; separately identify and repair the remaining native finalizer owner before PF6 readiness"
+}

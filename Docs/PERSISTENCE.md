@@ -26,6 +26,13 @@ partially live world.
 See [`../Kernels/ECS/PERSISTENCE.md`](../Kernels/ECS/PERSISTENCE.md) for the
 container and component contract.
 
+P4 authored Definition references use `StableDefinitionId` in save-set artifacts, not
+generation-local `DefinitionHandle`. A cold catalog resolves a saved ID or an explicitly
+owned single-hop alias before publishing the new generation; missing or converging duplicate
+identities reject. This does not reinterpret existing ECS `PrefabKey` provenance: that key
+continues to identify the persisted ECS realization of current item instances. Definition
+identity and prefab identity are separate contracts even when their current text matches.
+
 ## Save-set transaction
 
 The Framework coordinator gives all participants one sequence/epoch. Capture is a

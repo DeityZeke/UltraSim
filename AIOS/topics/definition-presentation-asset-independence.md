@@ -1,6 +1,6 @@
 # Definition, Presentation, and Asset Independence
 
-Status: CANONICAL presentation rules; TENTATIVE / P4-pending general definition and physical-semantics generalization
+Status: CANONICAL presentation rules and P4 typed representative Definition contract; broader physical-shape/art consumers remain future work
 
 Primary references:
 - [Architecture](../../Docs/ARCHITECTURE.md)
@@ -62,6 +62,14 @@ Authoring/import tools may warn when art does not fit the declared physical defi
 The exact generalized physical-shape vocabulary is still P4 work; do not infer that every future object must be only an AABB.
 
 ## Current implemented foothold
+
+P4 adds [Framework.Definitions](../../Framework/Definitions/README.md): stable authored
+Definition identity, typed independently contributed facets and tags, generation-fenced dense
+handles, single-hop aliases, and optional dormant Core semantics. The first-party Iron Sword
+has seven facets, including a semantic World presentation reference and public fallback bounds.
+The client primitive proof consumes only the bounded public descriptor; it does not receive
+private Combat/Durability/Skills facts. This is a representative contract, not a general new
+network descriptor or a finished Inventory portrait consumer.
 
 This separation already exists substantially for frozen world statics:
 

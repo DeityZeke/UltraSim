@@ -21,6 +21,13 @@ world → container → Main Hand → world. I0.13 projects its disclosed values
 `InspectionPropertySet`; Inventory retains typed facts and uses the same engine-neutral presentation
 catalog/profile as world hover. Inventory does not parse or own a delimiter-formatted weapon string.
 
+P4 authors the first-party Iron Sword through seven independent typed Definition facets.
+The Game composition reads Item/Inventory/Equipment/Combat/Durability values to build the
+existing prefab and inventory realization; Skills and public Presentation meaning are retained
+without making Inventory depend on their runtime Cores or concrete art. Current ECS item saves
+still persist prefab provenance and rolled instance state. A separate stable Definition-ID
+save-set control proves authored references survive recomposition and alias resolution.
+
 ## Owner-private UI
 
 `InventoryUiController.OpenOwned` is the private-container route. Trusted Game

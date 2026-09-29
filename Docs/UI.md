@@ -49,6 +49,12 @@ exists in the current model. Display-only controls are noneditable. Definition
 limits, text limits, row/cell limits, and cache-family limits are protocol
 boundaries, not renderer suggestions.
 
+P4's semantic presentation reference is a typed `(DefinitionDomainId,
+StableDefinitionId, PresentationRoleId)` value. The representative Iron Sword's public
+descriptor contains that World role and bounded fallback dimensions, not an asset path or
+private Combat/Durability/Skills data. A missing dedicated 2D portrait remains a later P6
+consumer concern, not grounds to remove a valid World-presentable Definition.
+
 ## UO-inspired authoring and visual vocabulary
 
 UltraSim's server-composed UI intentionally preserves the useful **authoring feel** of RunUO/UO
