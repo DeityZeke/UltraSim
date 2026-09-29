@@ -7,6 +7,7 @@ Primary references:
 - [Original native-lifetime repair candidate](../../_Benchmarks/Baselines/client-native-lifetime-repair-2026-09-28.md)
 - [P4 evidence / reproduced warm-exit finding](../../_Benchmarks/Baselines/framework-p4-typed-definitions-2026-09-29.md)
 - [R1 causal repair and acceptance](../../_Benchmarks/Baselines/client-native-lifetime-assurance-r1-2026-09-29.md)
+- [Pre-P5 wrapper ownership hardening](../../_Benchmarks/Baselines/client-native-lifetime-pre-p5-hardening-2026-09-29.md)
 
 Related:
 - [Godot adapter / headless boundary](../TOPICS.md)
@@ -115,3 +116,14 @@ engine-owned/reference-only value
 ~~~
 
 A new finalizer crash requires dump/type attribution and an ownership fix; do not weaken the shutdown gates.
+
+## Pre-P5 owner-inventory follow-up, 2026-09-29
+
+The integrated P1–P4 tree received a focused follow-up at `298607abd35f83ab8ee619aa5c6eeb8048448200`:
+the Local/Remote world palette now retains original mesh/material wrappers rather than rediscovering
+them through surface getters; its replaced roof material retires at refresh. A static UI missing-icon
+wrapper became session-renderer-owned, the fallback shader has an exact owner, temporary theme-font
+and animation-name wrappers have deterministic scopes, and the F1.12 probe disposes its native
+resources even on failure. Strong-reference native assertions, 20/20 separate-process warm Official
+launches, and canonical Release on the committed repair pass. This strengthens the known owner
+inventory but does not establish universal absence of future wrapper escapes. P5 remains unstarted.

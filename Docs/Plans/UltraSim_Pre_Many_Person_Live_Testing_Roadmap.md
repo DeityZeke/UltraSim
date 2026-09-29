@@ -2,7 +2,7 @@
 
 **Proposed status:** Candidate canonical roadmap / architecture checklist\
 **Current reference baseline:** F1.12-R3 / Gate 0 production closure — `e3a63ea21f8f5ea4fa69e3768a055c409edc8616`; documentation-only commits may advance `main` beyond that closure SHA.\
-**Immediate checkpoint:** P1 Framework Control Plane, P2 Runtime Host/C# Server Authoring, and P3 adapter boundaries are **CLOSED**. P4 Engine Contracts + typed definition facets is **CLOSED** with [P4 evidence](../../_Benchmarks/Baselines/framework-p4-typed-definitions-2026-09-29.md); P5 is **NEXT**, P6–P11 and Gate 1 remain **PLANNED**; PF6 remains **PLANNED / NOT READY / NOT STARTED**. A separately reproduced warm Official-content native Finalizer crash exists on both the pre-P4 and P4 exports; P4 closure does not close that product-lifetime defect.\
+**Immediate checkpoint:** P1 Framework Control Plane, P2 Runtime Host/C# Server Authoring, P3 adapter boundaries, and P4 Engine Contracts + typed definition facets are **CLOSED**. The previously reproduced warm Official-content Finalizer failure was repaired and accepted in [native-lifetime R1 evidence](../../_Benchmarks/Baselines/client-native-lifetime-assurance-r1-2026-09-29.md), with [pre-P5 wrapper hardening](../../_Benchmarks/Baselines/client-native-lifetime-pre-p5-hardening-2026-09-29.md) verified on the integrated tree. P5 is **NEXT / NOT STARTED**, P6–P11 and Gate 1 remain **PLANNED**, and PF6 remains **PLANNED / NOT READY / NOT STARTED**.\
 **End state of this document:** UltraSim is ready to move from individual/trusted dogfooding and closed validation into a many-player live test where human feedback is primarily about the intended game rather than known development-harness limitations.
 
 ---
@@ -1511,11 +1511,12 @@ It does not yet mean broad testing should begin.
 
 ## P1 — Framework Control Plane foundation
 
-**Status:** ACTIVE — implementation and focused owner/viewer proofs pass; canonical Release closure is blocked by the [exported Single Player native crash](../../_Benchmarks/Baselines/framework-p1-control-plane-2026-09-27.md), independently reproduced with unchanged pre-P1 source. Its precise native lifetime cause remains unresolved.
+**Status:** CLOSED — the [P1 acceptance companion](../../_Benchmarks/Baselines/framework-p1-native-lifetime-closure-2026-09-28.md) records the canonical closure after the native-lifetime repair. Later R1 and pre-P5 hardening found and explicitly retired additional Godot wrapper families without changing P1's Control Plane contract.
 See the [implemented contract](../../Framework/ControlPlane/README.md). The registry is bounded,
 synchronous and owner-thread-bound; provider generations fence lifetimes while revisions describe
 owner state. Batch atomicity is provider-local, not global. ECS Kernel dependencies remain unchanged.
-The proof adapters are opt-in; P1 has not redesigned F4/F10 or begun P2.
+The proof adapters remain opt-in; P1 did not redesign F4/F10. P2–P4 subsequently closed
+without changing this Control Plane ownership boundary.
 
 ### Goal
 
@@ -1737,6 +1738,13 @@ Skills
 ---
 
 ## P5 — User/Admin/Developer control surfaces
+
+Native-resource review requirement: every new Godot-backed wrapper produced or retrieved by a
+P5 surface must be classified as owner-lived (strongly retained and explicitly retired),
+temporary (scoped disposal on the Godot thread), or proven borrowed/engine-owned. Add a
+representative strong-reference `NativeInstance` retirement assertion when UltraSim owns a new
+wrapper family. Do not use GC finalization or a shutdown delay as an ownership policy. This is
+a guardrail for P5, not P5 implementation.
 
 ### Goal
 

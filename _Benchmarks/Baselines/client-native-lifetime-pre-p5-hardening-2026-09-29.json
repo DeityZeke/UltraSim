@@ -1,0 +1,20 @@
+{
+  "schema": "client-native-lifetime-pre-p5-hardening/v1",
+  "date": "2026-09-29",
+  "startingHead": "f3a62973ff360ffa049aeff8ebe7a227a0111cf8",
+  "testedImplementationCommit": "298607abd35f83ab8ee619aa5c6eeb8048448200",
+  "runtime": { "godot": "4.7.1 Mono a13da4feb", "dotnetSdk": "8.0.131", "dotnetRuntime": "8.0.31", "os": "Linux 7.2.6-1-cachyos x86-64", "cpu": "Ryzen 7 7800X3D" },
+  "gates": {
+    "architecture": "pass",
+    "canonicalReleaseUncommittedSource": "pass; embedded SHA was pre-commit HEAD",
+    "canonicalReleaseCommittedSource": "pass; PASS repository verification",
+    "native": ["F110ActorTierAcceptance:pass", "F111RendererStressAcceptance:pass", "S08HeadlessAcceptance:pass", "T010PlayableWorldAcceptance:pass"],
+    "physicalExports": ["SinglePlayer:pass", "Online:pass", "Complete:pass"],
+    "actualX11RenderProbe": "pass; 1920x1080 nonempty readback, PNG written, retired stage reached, exit 0",
+    "exportScriptIntermediateRetryDiagnostic": true
+  },
+  "warmOfficialContent": { "coldFillPass": 1, "warmAttempts": 20, "warmPasses": 20, "warmFailures": 0, "timeoutSecondsPerProcess": 80, "requiredMarker": "F1.4 OFFICIAL LOCAL PASS mode=installed", "productDllSha256": "c2598fac4f77f25914619e5a8183c22f24902db850a8b758e6a5324846e76d1a" },
+  "excludedSetupFailures": { "missingTemporaryExportPath": 25, "relativePathExport": 1 },
+  "p5Started": false,
+  "universalNativeCrashAbsenceClaimed": false
+}

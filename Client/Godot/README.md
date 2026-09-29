@@ -1,5 +1,14 @@
 # UltraSim client application project
 
+Native wrapper ownership rule: a managed Godot-backed object created or returned to this adapter
+must have an explicit lifetime classification. Owner-lived wrappers stay strongly referenced by
+their Godot-thread owner and retire after their consumers; temporary wrappers use deterministic
+scopes; borrowed/engine-owned values require a reason why no application finalizer obligation is
+acquired. Returning a native resource from a Godot getter does not by itself make the managed
+wrapper safe to abandon to GC. The [pre-P5 ownership evidence](../../_Benchmarks/Baselines/client-native-lifetime-pre-p5-hardening-2026-09-29.md)
+records the latest Local/Remote world, UI, and animation hardening. The existing application
+shutdown boundary remains responsible for owner retirement before Godot language teardown.
+
 P3 keeps Godot as the concrete client presentation/input/runtime adapter, not a Game
 Engine or a dependency of authoritative Game/Framework/Server code. The existing
 `GodotApplicationLifetime` is the single native application owner: it starts on the
