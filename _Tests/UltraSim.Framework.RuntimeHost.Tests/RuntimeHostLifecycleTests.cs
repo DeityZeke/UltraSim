@@ -25,15 +25,16 @@ internal static class RuntimeHostLifecycleTests
         var snapshot = host.CaptureSnapshot();
         Require(snapshot.Packages.Count == 3 && snapshot.Packages.All(p => p.State == RuntimePackageState.Running));
         for (int i = 0; i < 20_000; i++) service!.Tick(); // Warm JIT/tiering outside samples.
-        bool allocationFree = false;
+        var sampleBytes = new long[4];
         for (int sample = 0; sample < 4; sample++)
         {
             long before = GC.GetAllocatedBytesForCurrentThread();
             for (int i = 0; i < 10_000; i++) service!.Tick();
             long after = GC.GetAllocatedBytesForCurrentThread();
-            allocationFree |= after == before;
+            sampleBytes[sample] = after - before;
         }
-        Require(allocationFree && first.TickCount == 60_000);
+        Require(sampleBytes.Contains(0) && first.TickCount == 60_000);
+        Console.WriteLine($"P2_HOSTED_DIRECT_SERVICE allocations_10k=[{string.Join(',', sampleBytes)}] management_calls=0");
 
         // A Framework-only OOP owner can attach multiple instances of one family without an Entity.
         var sidecars = new RuntimeSidecars();
