@@ -375,10 +375,18 @@ internal static class F03bRemotePlayableTests
             Thread.Sleep(25);
             ClientResolvedMotionPose destinationPresentation =
                 temporal.Sample(MonotonicMicroseconds());
+            RemotePlayableClientSnapshot destinationObservation = fixture.Playable.GetSnapshot();
             destinationBeforeOwner =
                 destinationPresentation.Pose.GlobalXMillimeters >
                     finalOwner.Position.GlobalXMillimeters &&
-                fixture.Playable.GetSnapshot().StateSequence == ownerBeforeDestination;
+                destinationObservation.StateSequence == ownerBeforeDestination;
+            if (!destinationBeforeOwner)
+                Console.Error.WriteLine($"F1.8A destination-before-owner diagnostic: " +
+                    $"presentedX={destinationPresentation.Pose.GlobalXMillimeters} " +
+                    $"priorOwnerX={finalOwner.Position.GlobalXMillimeters} " +
+                    $"ownerState={ownerBeforeDestination}->{destinationObservation.StateSequence} " +
+                    $"processedCommand={destinationObservation.LastProcessedCommandSequence} " +
+                    $"destinationCommand={destinationSequence}");
             True(destinationBeforeOwner);
             RemotePlayableClientSnapshot destinationOwner = DriveMotionUntilAcknowledged(
                 fixture, temporal, ref lastOwnerSequence, destinationSequence);
