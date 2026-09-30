@@ -656,7 +656,7 @@ and additional structural surfaces can coexist. W7 still owns acquisition.
 Authenticate exact structural composition, acquire/prepare required Packs on demand, and preserve client residency across Pack seams without expanding semantic disclosure.
 
 The client-side prepared-subset publication seam and Content's independently verified passive
-structural-manifest kind are in use. Game protocol v33 has bounded structural control messages.
+structural-manifest kind are in use. Game protocol v34 retains the bounded structural control messages; the version increment adds P6 typed owner-private UI row attachments, not a WorldPack format change.
 The bootstrap contains the exact manifest and required UI but no Pack. After World validates the
 authenticated manifest, the client proves it, creates a zero-Pack structural source, and requests
 the server-owned initial Pack and any neighboring Packs needed by its starting 5×5 semantic

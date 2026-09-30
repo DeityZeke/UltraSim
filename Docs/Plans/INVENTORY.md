@@ -535,6 +535,18 @@ PresentationRoleId
 Game-level Inventory helpers may resolve an item definition into that reference, but
 `Kernels/UI` must not learn what an Inventory Item is.
 
+P6 implements the first bounded consumer of this contract. Existing prefab provenance is
+resolved through the P4 Definition catalog at Game UI projection time, without changing ECS item
+identity or persistence. The owner-private Inventory UI row carries numeric placement/equipment
+fields and a typed, bounded public portrait attachment; the neutral UI wire treats the latter as
+opaque bytes. The client selects D2 Grid or List by device preference, falling back to List for
+non-Grid containers. A one-by-three sword is one Grid footprint; equipped rows occupy an explicit
+non-Grid area. List can still submit an exact Grid-cell `PlaceAt` action. Both viewers use the same
+existing Game actions and retained semantic view. Iron Sword's admitted World mesh is the first
+no-icon portrait source: a single disposable staging scene builds a cached native image, while a
+primitive icon remains visible during generation or missing presentation. This is renderer-derived
+state, not an Inventory art database or a new authorization/persistence identity.
+
 ## 8.3 Optional live portrait and Examine presentation
 
 Normal D2/List Inventory should use cached portrait images, not one live 3D scene per visible item.

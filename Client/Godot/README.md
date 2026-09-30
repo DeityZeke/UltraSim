@@ -275,6 +275,13 @@ F1.7 realizes compiled UI Canvases as bounded native gameplay-gump windows above
 and Server Monitor may coexist, receive deterministic cascade/bring-to-front behavior, drag within
 the application clamp, and retire their native wrapper exactly when the semantic view closes. `I`
 and F4 each toggle only their matching view rather than preventing the other view from opening.
+P6 presents the authorized Inventory model through a client-only D2 Grid or List viewer, selected
+by a persisted User setting (schema v7). A non-Grid container explicitly falls back to List.
+Switching a live view preserves its semantic instance and Game placement; List offers a bounded
+cell selector for Grid `PlaceAt`. An admitted World mesh can generate a cached 128×128 portrait
+without dedicated icon art. The portrait staging scene retires when the last Inventory view
+closes, while derived textures remain cached until their explicit UI-renderer owner retires;
+missing/pending portraits use the primitive item icon.
 Compiled definitions still select a bounded
 outside-pointer policy. The modeless default blocks world click-through over the visible UI but
 allows outside gameplay input while the view remains open. Character Select explicitly blocks

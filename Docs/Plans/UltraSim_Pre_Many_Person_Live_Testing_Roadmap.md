@@ -2,7 +2,7 @@
 
 **Proposed status:** Candidate canonical roadmap / architecture checklist\
 **Current reference baseline:** F1.12-R3 / Gate 0 production closure — `e3a63ea21f8f5ea4fa69e3768a055c409edc8616`; documentation-only commits may advance `main` beyond that closure SHA.\
-**Immediate checkpoint:** P1–P5 are **CLOSED**; [P5's representative control-surface evidence](../../_Benchmarks/Baselines/framework-p5-control-surfaces-2026-09-29.md) records the generic F10 viewer, neutral UI roles, typed image seam and canonical Release/export acceptance. P6 is **NEXT**; P7–P11 and Gate 1 remain **PLANNED**, and PF6 remains **PLANNED / NOT READY / NOT STARTED**. The previously reproduced warm Official-content Finalizer failure remains closed by [native-lifetime R1 evidence](../../_Benchmarks/Baselines/client-native-lifetime-assurance-r1-2026-09-29.md) and [pre-P5 wrapper hardening](../../_Benchmarks/Baselines/client-native-lifetime-pre-p5-hardening-2026-09-29.md).\
+**Immediate checkpoint:** P1–P6 are **CLOSED**; [P6's Inventory viewer evidence](../../_Benchmarks/Baselines/framework-p6-inventory-viewer-profiles-2026-09-29.md) records D2/List semantic parity, native derived-portrait ownership and canonical Release/export acceptance. P7 is **NEXT**; P8–P11 and Gate 1 remain **PLANNED**, and PF6 remains **PLANNED / NOT READY / NOT STARTED**. The previously reproduced warm Official-content Finalizer failure remains closed by [native-lifetime R1 evidence](../../_Benchmarks/Baselines/client-native-lifetime-assurance-r1-2026-09-29.md) and [pre-P5 wrapper hardening](../../_Benchmarks/Baselines/client-native-lifetime-pre-p5-hardening-2026-09-29.md).\
 **End state of this document:** UltraSim is ready to move from individual/trusted dogfooding and closed validation into a many-player live test where human feedback is primarily about the intended game rather than known development-harness limitations.
 
 ---
@@ -1862,6 +1862,8 @@ Use the P1 ECS provider as a concrete proof of the inverted V1.5/ACC model. The 
 
 ## P6 — Inventory Engine viewer profiles
 
+**Status: CLOSED for the current product's supported Inventory shapes.** The [P6 acceptance evidence](../../_Benchmarks/Baselines/framework-p6-inventory-viewer-profiles-2026-09-29.md) pins the tested implementation, D2/List action parity, real 3D-derived portrait, reconnect/save/load, wrapper retirement, and Release/export gates. Current first-party 5×5 and upgraded 6×5 Grid capacities are proven; a future maximum-size container/pagination product is not claimed.
+
 ### Goal
 
 Make the intended D2-ish Inventory presentation real and human-testable.
@@ -3056,8 +3058,8 @@ This compact board is intended to sit near the top of active implementation note
 [x] P3      Framework adapter/runtime boundary migration — CLOSED
 [x] P4      Engine Contracts + typed definition facets — CLOSED
 [x] P5      User/Admin/Developer control surfaces — representative contract CLOSED
-[ ] P6      Inventory D2/List viewer profiles — NEXT
-[ ] P7      Server Operator Product + console + Godot GUI + save/backup/recovery
+[x] P6      Inventory D2/List viewer profiles — CLOSED for supported product shapes
+[ ] P7      Server Operator Product + console + Godot GUI + save/backup/recovery — NEXT
 [ ] P8      Audio Kernel + Sound Engine
 [ ] P9      Representative Cabin visual/content pass
 [ ] P10     UI/failure/product polish

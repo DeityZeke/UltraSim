@@ -67,8 +67,9 @@ boundaries, not renderer suggestions.
 P4's semantic presentation reference is a typed `(DefinitionDomainId,
 StableDefinitionId, PresentationRoleId)` value. The representative Iron Sword's public
 descriptor contains that World role and bounded fallback dimensions, not an asset path or
-private Combat/Durability/Skills data. A missing dedicated 2D portrait remains a later P6
-consumer concern, not grounds to remove a valid World-presentable Definition.
+private Combat/Durability/Skills data. P6's Inventory consumer can derive a bounded cached
+portrait from the admitted World presentation when no dedicated 2D portrait exists; missing art
+does not remove a valid item or Definition.
 
 ## UO-inspired authoring and visual vocabulary
 
@@ -817,6 +818,21 @@ replaces the temporary preformatted weapon string with a typed bounded Inspectio
 Game determines disclosed facts from persistent authoritative instance state and authorizes Drop
 only in an owner-bound view; an engine-neutral presentation profile determines labels, formatting,
 and category/property ordering. The current Inventory model slot receives the result of that shared
-formatter, while world hover consumes the same facts/profile. Godot still renders the generic
-compiled tree and returns a semantic action; it does not choose item stats, ownership, or world
+formatter, while world hover consumes the same facts/profile. Godot renders the compiled
+definition and returns a semantic action; it does not choose item stats, ownership, or world
 placement.
+
+P6 adds client-only D2 Grid and List Inventory viewers over that same retained model. The
+preferred viewer is a device User setting (settings schema v7); the effective viewer falls back
+to List when the authorized container has no valid Grid projection. Game publishes typed
+placement/equipment fields and a bounded opaque UI-row attachment carrying the public P4
+`SemanticPresentationReference` and fallback bounds. The neutral UI kernel transports this
+attachment but knows nothing about Inventory or Definitions; the Game protocol manifest is v34.
+Both viewers submit the existing selected-row and Grid-cell actions, so switching the native
+presentation neither reopens the semantic view nor mutates Inventory. List offers explicit Grid
+cell placement when it presents a Grid container. The first-party Iron Sword has no bespoke icon:
+one reusable Godot staging scene derives a 128×128 portrait from the authorized World mesh,
+caches the resulting image under the typed reference and resolver generation, and uses the
+primitive item icon while unavailable or still rendering. Staging wrappers retire as soon as the
+last Inventory view closes; cached textures retire with the Godot UI owner. Neither image nor
+renderer handle is persistent Game identity.

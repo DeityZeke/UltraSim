@@ -1,0 +1,86 @@
+{
+  "checkpoint": "P6 Inventory Engine viewer profiles",
+  "date": "2026-09-29",
+  "status": "closed_current_supported_product_shapes",
+  "starting_commit": "25cfaf5c024d5bb05f296074a9a162051467d048",
+  "tested_production_commit": "4f7fc2c50a7aa5e7da3efd6cb6ef1d3092f25839",
+  "implementation_commits": [
+    "d95587529e572af652629d1f6c877d5dff8da9ed",
+    "d94a64a2d360d08c6e3ade298dd642a4ad60ec06",
+    "757ce4831cfeb45b2810ddb9d8266706f49f5d88",
+    "d2aead903689a575b51958c57b80c91d34caed51",
+    "cab7876d912573ea5aa4bee0338ca71b0e44e7ca",
+    "4f7fc2c50a7aa5e7da3efd6cb6ef1d3092f25839"
+  ],
+  "platform": {
+    "os": "CachyOS Linux 7.2.6-1-cachyos",
+    "cpu": "AMD Ryzen 7 7800X3D 8C/16T",
+    "gpu": "NVIDIA RTX 4070 Ti SUPER",
+    "godot": "4.7.1 stable Mono a13da4feb",
+    "dotnet_sdk": "8.0.131",
+    "dotnet_runtime": "8.0.31"
+  },
+  "contracts": {
+    "settings_schema": 7,
+    "default_viewer": "D2Grid",
+    "fallback_viewer": "List",
+    "game_manifest_version": 34,
+    "game_manifest_fingerprint": "11011385010817065980",
+    "grid_sizes_proven": ["5x5", "6x5"],
+    "derived_portrait_size_pixels": [128, 128],
+    "native_cache_images_max": 32,
+    "inventory_authority_changed": false
+  },
+  "focused_tests": {
+    "ui_kernel": {"passed": 29, "failed": 0},
+    "game_inventory": {"passed": 37, "failed": 0},
+    "control_plane": {"passed": 21, "failed": 0},
+    "local_client_session": {"passed": 24, "failed": 0},
+    "client_core": {"passed": 36, "failed": 0},
+    "game_replication": {"passed": 181, "failed": 0},
+    "network_application": "passed"
+  },
+  "graphical_native_s08": {
+    "result": "pass",
+    "grid": "5x5",
+    "items": 2,
+    "portrait_builds": 1,
+    "portrait_cache_hits": 17,
+    "portrait_cold_build_ms_includes_frame_wait": 34.444,
+    "portrait_warm_lookup_ms_sum_17_hits": 0.320,
+    "portrait_reserved_pixel_bytes": 65536,
+    "list_switch_ms": 2.986,
+    "grid_switch_ms": 1.325,
+    "generated_sword_visible_pixels_min_exclusive": 100,
+    "strong_reference_native_retirement": "pass"
+  },
+  "headless_native_s08": {
+    "result": "pass",
+    "portrait_builds": 0,
+    "primitive_fallback": "pass"
+  },
+  "verification": {
+    "architecture_only": "pass",
+    "canonical_release": "pass_uninterrupted",
+    "physical_exports": ["SinglePlayer", "Online", "Complete"],
+    "contentless_online": "pass",
+    "complete_hosted": "pass",
+    "official_content_cold_launches": {"passed": 1, "attempted": 1},
+    "official_content_warm_launches": {"passed": 5, "attempted": 5}
+  },
+  "earlier_full_run_stops": [
+    "F1.8A timing-sensitive impaired-motion assertion (twice; unchanged suite later passed)",
+    "stale v33 manifest fingerprint expectation (repaired)",
+    "W7 stale-in-flight count threshold (unchanged suite later passed)",
+    "F0.2 gump background contract (repaired)",
+    "D0.3 stale portrait pump on closed sign (repaired)",
+    "Online composition stale edition restore (repaired)"
+  ],
+  "limits": [
+    "Current 5x5 and upgraded 6x5 product Grid shapes proven; theoretical 64x64 maximum not claimed",
+    "Native fixture timings are observations, not controlled production benchmark percentiles",
+    "Prior F1.8A and W7 test variability not repaired in P6"
+  ],
+  "next": "P7 Server Operator Product",
+  "pf6_started": false
+}
