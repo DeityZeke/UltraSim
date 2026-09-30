@@ -100,6 +100,8 @@ AIOS files are listed separately because this catalog was created as part of the
 - [Server/ConceptDemo.LocalHost/README.md](../Server/ConceptDemo.LocalHost/README.md)
 - [Server/ConceptDemo/README.md](../Server/ConceptDemo/README.md)
 - [Server/DirectConnect/README.md](../Server/DirectConnect/README.md)
+- [Server/Operator/README.md](../Server/Operator/README.md)
+- [Server/Godot/README.md](../Server/Godot/README.md)
 - [Tools/NetworkBots/README.md](../Tools/NetworkBots/README.md)
 
 ## Benchmark evidence
@@ -117,6 +119,7 @@ These files are evidence, not architectural authority. Start with the two README
 - [_Benchmarks/Baselines/client-native-lifetime-pre-p5-hardening-2026-09-29.md](../_Benchmarks/Baselines/client-native-lifetime-pre-p5-hardening-2026-09-29.md)
 - [_Benchmarks/Baselines/framework-p5-control-surfaces-2026-09-29.md](../_Benchmarks/Baselines/framework-p5-control-surfaces-2026-09-29.md)
 - [_Benchmarks/Baselines/framework-p6-inventory-viewer-profiles-2026-09-29.md](../_Benchmarks/Baselines/framework-p6-inventory-viewer-profiles-2026-09-29.md)
+- [_Benchmarks/Baselines/framework-p7-server-operator-product-2026-09-30.md](../_Benchmarks/Baselines/framework-p7-server-operator-product-2026-09-30.md)
 - [_Benchmarks/Baselines/client-f1.0-pre-rework-baseline-2026-09-19.md](../_Benchmarks/Baselines/client-f1.0-pre-rework-baseline-2026-09-19.md)
 - [_Benchmarks/Baselines/client-f1.1-unified-content-scopes-2026-09-19.md](../_Benchmarks/Baselines/client-f1.1-unified-content-scopes-2026-09-19.md)
 - [_Benchmarks/Baselines/concept-demo-pf4e-r1-rated-replication-scaling-reconciliation-2026-09-13.md](../_Benchmarks/Baselines/concept-demo-pf4e-r1-rated-replication-scaling-reconciliation-2026-09-13.md)
