@@ -68,6 +68,9 @@ public partial class S08HeadlessAcceptance
             applicationSessionEpoch: 8_001);
         InventoryUiController? inventory = null;
         Texture2D? retainedDerivedPortrait = null;
+        SubViewport? retainedPortraitViewport = null;
+        ViewportTexture? retainedPortraitViewportTexture = null;
+        World3D? retainedPortraitWorld = null;
 
         try
         {
@@ -105,6 +108,14 @@ public partial class S08HeadlessAcceptance
             Expect(renderer.InventoryPortraitSnapshot.Images == (hasGraphics ? 1 : 0) &&
                 renderer.InventoryPortraitSnapshot.Builds == (hasGraphics ? 1UL : 0UL),
                 "Inventory portrait generation did not match the available native renderer.");
+            (retainedPortraitViewport, retainedPortraitViewportTexture, retainedPortraitWorld) =
+                renderer.InventoryPortraitOwnedStaging;
+            Expect(!hasGraphics || retainedPortraitViewport is not null &&
+                retainedPortraitViewportTexture is not null && retainedPortraitWorld is not null &&
+                retainedPortraitViewport.NativeInstance != IntPtr.Zero &&
+                retainedPortraitViewportTexture.NativeInstance != IntPtr.Zero &&
+                retainedPortraitWorld.NativeInstance != IntPtr.Zero,
+                "The derived portrait staging wrappers lost their explicit native owners.");
             UiRowId initialSword = FindRow(client.GetRows(opened.View, InventoryUi.Items), "Iron Sword");
             retainedDerivedPortrait = ((TextureRect)Find<Control>(root,
                 $"Row_{initialSword.Value}").GetChild(0)).Texture;
@@ -475,6 +486,13 @@ public partial class S08HeadlessAcceptance
             Expect(retainedDerivedPortrait is null ||
                 retainedDerivedPortrait.NativeInstance == IntPtr.Zero,
                 "The retained derived portrait wrapper survived native UI retirement.");
+            Expect((retainedPortraitViewport is null ||
+                    retainedPortraitViewport.NativeInstance == IntPtr.Zero) &&
+                (retainedPortraitViewportTexture is null ||
+                    retainedPortraitViewportTexture.NativeInstance == IntPtr.Zero) &&
+                (retainedPortraitWorld is null ||
+                    retainedPortraitWorld.NativeInstance == IntPtr.Zero),
+                "A strongly retained portrait staging wrapper survived native UI retirement.");
             Expect(portraitWorld.ResolvePublicMesh(GameWorldPublicPrefabIds.IronSword).Mesh is { } retainedSource &&
                 retainedSource.NativeInstance != IntPtr.Zero,
                 "The borrowed World mesh was retired by the Inventory portrait cache.");

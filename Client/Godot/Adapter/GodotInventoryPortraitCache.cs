@@ -56,6 +56,12 @@ internal sealed class GodotInventoryPortraitCache : IGodotUiSemanticImageResolve
             (long)_images.Count * PortraitPixels * PortraitPixels * 4); }
     }
 
+    // Strong references to the actual owner-lived wrappers for native retirement tests.
+    internal (SubViewport? Viewport, ViewportTexture? Texture, World3D? World) OwnedStaging
+    {
+        get { EnsureOwner(); return (_viewport, _viewportTexture, _world3D); }
+    }
+
     public Texture2D? Resolve(string assetRole) => null;
 
     public Texture2D? Resolve(SemanticPresentationReference reference)

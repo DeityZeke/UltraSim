@@ -71,6 +71,9 @@ public sealed class GodotUiRenderer : IUiRenderer, IDisposable
         long ColdBuildTicks, long WarmLookupTicks, long ReservedPixelBytes) InventoryPortraitSnapshot =>
         _inventoryPortraits?.Snapshot ?? default;
 
+    internal (SubViewport? Viewport, ViewportTexture? Texture, World3D? World)
+        InventoryPortraitOwnedStaging => _inventoryPortraits?.OwnedStaging ?? default;
+
     public void Dispose()
     {
         EnsureOwner();
