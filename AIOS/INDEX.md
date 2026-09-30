@@ -55,6 +55,7 @@ Start here. This file is intentionally small.
 - [Framework Persistence / Control Plane publication](topics/framework-persistence-and-control-plane.md)
 - [Godot / .NET native shutdown lifetime assurance](topics/godot-dotnet-native-shutdown-lifetime.md)
 - [Definition / presentation / asset independence](topics/definition-presentation-asset-independence.md)
+- [Inventory viewer profiles / cached derived portraits](topics/inventory-viewer-profiles-and-derived-portraits.md)
 - [Renderer impostor LOD / far-field cards](topics/renderer-impostor-lod.md)
 - [Materials and processing](topics/materials-and-processing.md)
 - [UI nine-slice art / frame families](topics/ui-nine-slice-art-and-frame-families.md)

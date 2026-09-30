@@ -116,6 +116,7 @@ These files are evidence, not architectural authority. Start with the two README
 - [_Benchmarks/Baselines/client-native-lifetime-assurance-r1-2026-09-29.md](../_Benchmarks/Baselines/client-native-lifetime-assurance-r1-2026-09-29.md)
 - [_Benchmarks/Baselines/client-native-lifetime-pre-p5-hardening-2026-09-29.md](../_Benchmarks/Baselines/client-native-lifetime-pre-p5-hardening-2026-09-29.md)
 - [_Benchmarks/Baselines/framework-p5-control-surfaces-2026-09-29.md](../_Benchmarks/Baselines/framework-p5-control-surfaces-2026-09-29.md)
+- [_Benchmarks/Baselines/framework-p6-inventory-viewer-profiles-2026-09-29.md](../_Benchmarks/Baselines/framework-p6-inventory-viewer-profiles-2026-09-29.md)
 - [_Benchmarks/Baselines/client-f1.0-pre-rework-baseline-2026-09-19.md](../_Benchmarks/Baselines/client-f1.0-pre-rework-baseline-2026-09-19.md)
 - [_Benchmarks/Baselines/client-f1.1-unified-content-scopes-2026-09-19.md](../_Benchmarks/Baselines/client-f1.1-unified-content-scopes-2026-09-19.md)
 - [_Benchmarks/Baselines/concept-demo-pf4e-r1-rated-replication-scaling-reconciliation-2026-09-13.md](../_Benchmarks/Baselines/concept-demo-pf4e-r1-rated-replication-scaling-reconciliation-2026-09-13.md)

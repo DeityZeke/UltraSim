@@ -189,7 +189,7 @@ Still open for later checkpoints:
 - generalized physical/fallback shape contracts beyond the representative descriptor and current frozen-static proof;
 - generic non-actor 3D presentation/content realization;
 - authoring validation/warnings between physical semantics and visual mesh;
-- P6 derived/cached Inventory portraits and bounded Live/Inspection realization;
+- P6 now implements bounded cached Inventory portraits for the current Iron Sword proof; generalized arbitrary Definition→World portrait resolution and bounded Live/Inspection realization remain later;
 - any general Definition wire disclosure beyond explicitly earned public descriptors.
 
 Do not infer that P4 implemented those later rendering/content consumers.
