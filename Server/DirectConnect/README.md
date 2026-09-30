@@ -180,3 +180,14 @@ The endpoint publishes a self-signed candidate key before connection only to mak
 human onboarding possible. That candidate is untrusted. The real Hosted handshake
 continues to require the exact selected/saved key as its pin, and the realm becomes
 verified only after it arrives inside that authenticated session.
+
+P7 operator commands (`help`, `status`, `participants`, `logs`, `audit`, `save`,
+`backup`, `shutdown confirm`, `restart confirm`, `kick <participant> confirm`)
+route through the same typed Control Plane provider as the optional
+[Godot server window](../Godot/README.md). `run-managed.sh` supervises only the
+explicit restart exit code 75. `--list-backups` is read-only candidate inspection
+that can run beside a live server without hashing on its authority thread;
+`--restore-backup-sequence=N` is validated stopped-server maintenance, not a
+live mutation. The optional GUI child uses `--shutdown-on-stdin-eof` so parent
+loss requests ordinary host-owned shutdown. See [operator ownership](../Operator/README.md)
+for the exact recovery and identity contract.

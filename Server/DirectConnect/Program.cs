@@ -32,7 +32,7 @@ catch (Exception exception) when (exception is ArgumentException or FormatExcept
 ServerScriptComposition? scriptComposition = null;
 try
 {
-    if (options.ScriptsRoot is not null)
+    if (options.ScriptsRoot is not null && !options.ListBackups)
         scriptComposition = ServerScriptAuthoring.Start(options.ScriptsRoot,
             options.ScriptsCache ?? Path.Combine(options.IdentityDirectory, "script-cache"));
 }
@@ -63,6 +63,39 @@ if (options.EphemeralSmoke)
     return 0;
 }
 
+if (options.ListBackups)
+{
+    try
+    {
+        if (!File.Exists(Path.Combine(options.IdentityDirectory, "operator-policy.json")))
+        {
+            Console.WriteLine("P7 BACKUP CANDIDATES count=0");
+            return 0;
+        }
+        ServerOperatorConfiguration listingConfiguration =
+            ServerOperatorConfiguration.LoadOrCreate(options.IdentityDirectory);
+        var listingStore = new OperatorBackupStore(listingConfiguration.SaveRoot,
+            listingConfiguration.BackupRoot, listingConfiguration.Policy.BackupRetention,
+            createRoot: false);
+        var candidates = new OperatorBackupCandidate[128];
+        int count = listingStore.CopyCandidates(candidates);
+        if (count < 0) throw new InvalidDataException("Backup candidate count exceeds the bounded browser.");
+        Console.WriteLine($"P7 BACKUP CANDIDATES count={count}");
+        for (int index = 0; index < count; index++)
+        {
+            OperatorBackupCandidate candidate = candidates[index];
+            Console.WriteLine($"{candidate.Sequence} " +
+                (candidate.Complete ? "complete" : "rejected") + " " + candidate.Diagnostic);
+        }
+        return 0;
+    }
+    catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or
+        InvalidDataException or System.Text.Json.JsonException)
+    {
+        Console.Error.WriteLine("P7 backup inspection rejected: " + failure.Message);
+        return 5;
+    }
+}
 Directory.CreateDirectory(options.IdentityDirectory);
 using ServerOperatorInstanceLease instanceLease =
     ServerOperatorInstanceLease.Acquire(options.IdentityDirectory);
@@ -158,6 +191,7 @@ var consolePrincipal = new ControlPrincipal("local-console", ControlPrincipalKin
     [ServerOperatorProvider.Read, ServerOperatorProvider.Save, ServerOperatorProvider.Backup,
      ServerOperatorProvider.Lifecycle, ServerOperatorProvider.Sessions], "direct-connect/console");
 var operatorConsole = new OperatorConsole(operatorRegistry, consolePrincipal);
+var operatorGui = new OperatorGuiStdioAdapter(operatorRegistry, consolePrincipal);
 var operatorInput = new BoundedOperatorConsoleInput(Console.In);
 string fingerprint = Fingerprint(identity.PublicKey);
 Console.WriteLine("UltraSim Direct Connect Concept Demo server ready.");
@@ -255,9 +289,20 @@ while (true)
         Console.WriteLine("Ctrl+C: " + response);
         signalShutdownIssued = response.StartsWith("Accepted:", StringComparison.Ordinal);
     }
+    if (options.ShutdownOnStdinEof && operatorInput.Snapshot().Eof && !signalShutdownIssued)
+    {
+        string response = operatorConsole.Execute("shutdown confirm");
+        Console.WriteLine("GUI stdin retired: " + response);
+        signalShutdownIssued = response.StartsWith("Accepted:", StringComparison.Ordinal);
+    }
     for (int command = 0; command < 8 && operatorInput.TryDequeue(out string? line); command++)
         if (!string.IsNullOrWhiteSpace(line))
-            Console.WriteLine("Operator: " + operatorConsole.Execute(line));
+        {
+            if (operatorGui.TryExecute(line, out string guiResponse))
+                Console.WriteLine(guiResponse);
+            else
+                Console.WriteLine("Operator: " + operatorConsole.Execute(line));
+        }
     host.Pump();
     _ = authority.TickDue();
     operatorService.Pump();
@@ -588,6 +633,8 @@ internal readonly record struct DirectConnectOptions(
     RemoteChunkPublicationPolicy PublicationPolicy)
 {
     internal ulong RestoreBackupSequence { get; init; }
+    internal bool ShutdownOnStdinEof { get; init; }
+    internal bool ListBackups { get; init; }
 
     internal static DirectConnectOptions Parse(string[] arguments)
     {
@@ -601,6 +648,8 @@ internal readonly record struct DirectConnectOptions(
         string? scriptsCache = null;
         bool smoke = false;
         ulong restoreBackupSequence = 0;
+        bool shutdownOnStdinEof = false;
+        bool listBackups = false;
         string? readyFile = null;
         string? stopFile = null;
         string? summaryFile = null;
@@ -634,6 +683,16 @@ internal readonly record struct DirectConnectOptions(
             if (argument == "--ephemeral-smoke")
             {
                 smoke = true;
+                continue;
+            }
+            if (argument == "--shutdown-on-stdin-eof")
+            {
+                shutdownOnStdinEof = true;
+                continue;
+            }
+            if (argument == "--list-backups")
+            {
+                listBackups = true;
                 continue;
             }
             if (argument.StartsWith("--restore-backup-sequence=", StringComparison.Ordinal))
@@ -907,6 +966,10 @@ internal readonly record struct DirectConnectOptions(
                 "--accounting-test-marker requires the accounting window options.");
         if (scriptsCache is not null && scriptsRoot is null)
             throw new ArgumentException("--scripts-cache requires --scripts-root.");
+        if (listBackups && restoreBackupSequence != 0)
+            throw new ArgumentException("Backup inspection and selected restore are separate maintenance operations.");
+        if (listBackups && smoke)
+            throw new ArgumentException("Backup inspection and ephemeral hosting smoke are separate modes.");
         if (recommendedInputHz > maximumInputHz)
             throw new ArgumentException(
                 "--recommended-input-hz cannot exceed --maximum-input-hz.");
@@ -931,6 +994,8 @@ internal readonly record struct DirectConnectOptions(
             publicationPolicy)
         {
             RestoreBackupSequence = restoreBackupSequence,
+            ShutdownOnStdinEof = shutdownOnStdinEof,
+            ListBackups = listBackups,
         };
 
         static string RequiredPath(string argument, string prefix)

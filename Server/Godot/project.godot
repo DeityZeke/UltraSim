@@ -1,0 +1,21 @@
+config_version=5
+
+[application]
+
+config/name="UltraSim Server Operator"
+run/main_scene="res://Bootstrap.tscn"
+config/features=PackedStringArray("4.7", "C#")
+
+[display]
+
+window/size/viewport_width=1160
+window/size/viewport_height=780
+
+[dotnet]
+
+project/assembly_name="UltraSim.Server.Operator.Godot"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

@@ -1,0 +1,11 @@
+# Optional Godot server operator window (P7)
+
+Run `./export-gui.sh` (set `ULTRASIM_GODOT` to the Godot 4.7.1 Mono executable if it is not on `PATH`). It publishes the Godot frontend and a separate ServerOnly headless Direct Connect child under `.output/servers/gui/`. The exported GUI starts its packaged `headless/run-managed.sh` by default; .NET 8 and ASP.NET Core 8 runtime availability remains a host prerequisite for the current framework-dependent child. The GUI does not load Game/Network/Persistence assemblies or own authority.
+
+The only management channel is inherited bounded stdin/stdout. GUI frames name Control Plane action identities; the child resolves them on its owner thread under a trusted local principal, retains Control Plane capability/confirmation/audit checks, and returns bounded result text. No TCP/HTTP management listener, client-claimed operator capability or second save/Kick implementation exists. `--shutdown-on-stdin-eof` makes loss of the GUI parent request the same graceful Shutdown action. `run-managed.sh` alone handles supervised restart exit code 75.
+
+The Recovery Candidates tab launches a separate read-only `--list-backups` maintenance process on demand. Hashing backup candidates does not block the live authority thread. Selected restore is still an explicit stopped-server `--restore-backup-sequence=N` operation; the GUI does not pretend it can replace a live authority.
+
+For an editor run, pass `-- --p7-server-launcher=<absolute published run-managed.sh>` after the Godot options. Optional `--p7-identity-dir=<absolute path>` selects the deployment identity. Repeatable `--p7-server-arg=--bind=...` and other bounded server options are forwarded to the child. `--p7-gui-smoke` exercises actual Save, Backup and Shutdown through the published child; `--p7-gui-restart-smoke` exercises supervised cold reopen followed by Shutdown. Both return nonzero on failure.
+
+Godot UI nodes are owned by the scene root; this frontend creates no independent native RefCounted image, texture, material or mesh wrappers. It retires its children and crosses two `SceneTree.ProcessFrame` boundaries before normal exit. Its .NET `Process` wrapper is disposed after the child exits. Unexpected forced GUI termination closes inherited stdin and lets the separate server request host-owned shutdown.

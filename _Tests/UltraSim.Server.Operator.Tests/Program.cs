@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using UltraSim.Framework.ControlPlane;
 using UltraSim.Game.Application;
 using UltraSim.Game.Protocol;
@@ -23,11 +24,62 @@ var tests = new (string Name, Action Body)[]
     ("RestartRejectsExhaustedSaveSequenceWithoutClosingAdmission", RestartRejectsExhaustedSaveSequenceWithoutClosingAdmission),
     ("SelectedBackupColdRestorePublishesFreshLiveGeneration", SelectedBackupColdRestorePublishesFreshLiveGeneration),
     ("BoundedOperatorLogIsObservableWithoutChangingAuthority", BoundedOperatorLogIsObservableWithoutChangingAuthority),
+    ("LocalGuiFramingUsesSameTypedOwnerActions", LocalGuiFramingUsesSameTypedOwnerActions),
 };
 foreach ((string name, Action body) in tests)
 {
     body();
     Console.WriteLine("PASS " + name);
+}
+
+static void LocalGuiFramingUsesSameTypedOwnerActions()
+{
+    using var fixture = new Fixture(new ServerOperatorPolicy(false, 300, 2, false));
+    var gui = new OperatorGuiStdioAdapter(fixture.Registry, fixture.Principal);
+    static string Line(OperatorGuiRequest request) => OperatorGuiStdioAdapter.RequestPrefix +
+        JsonSerializer.Serialize(request);
+    Check(!gui.TryExecute("save", out _), "The GUI adapter intercepted ordinary console input.");
+    Check(gui.TryExecute(Line(new(1, "discover")), out string discovery) &&
+        discovery.StartsWith(OperatorGuiStdioAdapter.ResponsePrefix, StringComparison.Ordinal) &&
+        discovery.Contains("save-now", StringComparison.Ordinal) &&
+        discovery.Contains("Server/Persistence", StringComparison.Ordinal),
+        "The local GUI did not discover the owner-published action vocabulary.");
+    Check(gui.TryExecute(Line(new(2, "action", "shutdown")), out string confirmation) &&
+        confirmation.Contains("confirmation", StringComparison.OrdinalIgnoreCase) &&
+        !fixture.AdmissionClosed,
+        "The GUI initiated a destructive action without explicit confirmation.");
+    Check(gui.TryExecute(Line(new(3, "action", "save-now")), out string save) &&
+        save.Contains("Accepted", StringComparison.Ordinal),
+        "The GUI Save did not route through the typed owner action.");
+    Check(gui.TryExecute(Line(new(3, "action", "save-now")), out string replay) &&
+        replay.Contains("stale", StringComparison.OrdinalIgnoreCase),
+        "A repeated GUI request identity was accepted twice.");
+    fixture.PumpUntil(() => !fixture.Service.Capture().SaveInProgress);
+    Check(fixture.Service.Capture().LastSavedSequence == 1,
+        "The GUI Save did not publish the same durable owner generation as console Save.");
+    var console = new OperatorConsole(fixture.Registry, fixture.Principal);
+    Check(console.Execute("save").StartsWith("Accepted:", StringComparison.Ordinal),
+        "The independent console frontend did not reach the same owner action.");
+    fixture.PumpUntil(() => !fixture.Service.Capture().SaveInProgress);
+    Check(fixture.Service.Capture().LastSavedSequence == 2 && fixture.Audit.Sequence >= 2,
+        "Console and GUI Save did not converge on consecutive owner publications and audit.");
+    var auditRows = new OperatorAuditRow[OperatorAuditRing.Capacity];
+    int auditCount = fixture.Audit.CopyTo(auditRows);
+    Check(auditCount >= 2 && auditRows.Take(auditCount).Count(row =>
+        row.Provider == ServerOperatorProvider.ProviderId.Value &&
+        row.Action == ServerOperatorProvider.SaveNow.Value &&
+        row.Status == ControlResultStatus.Accepted) == 2,
+        "Console and GUI Save did not share the same audited owner action identity.");
+    Check(gui.TryExecute(Line(new(4, "status")), out string status) &&
+        status.Contains("last-save", StringComparison.Ordinal) &&
+        status.Contains("autosave-enabled", StringComparison.Ordinal),
+        "The GUI status did not expose current owner diagnostics and cold policy.");
+    Check(gui.TryExecute(Line(new(5, "participants")), out string participants) &&
+        participants.Contains("(empty)", StringComparison.Ordinal),
+        "The GUI participant query failed on an empty authority.");
+    Check(gui.TryExecute(Line(new(6, "log")), out string events) &&
+        events.Contains("Persistence", StringComparison.Ordinal),
+        "The GUI event query did not use the bounded owner log.");
 }
 
 static void BoundedOperatorLogIsObservableWithoutChangingAuthority()
@@ -86,6 +138,10 @@ static void SelectedBackupColdRestorePublishesFreshLiveGeneration()
         }
         string before = File.ReadAllText(Path.Combine(saves, "CURRENT"));
         var backupStore = new OperatorBackupStore(saves, backups, 2);
+        var candidateRows = new OperatorBackupCandidate[128];
+        Check(backupStore.CopyCandidates(candidateRows) == 1 &&
+            candidateRows[0].Sequence == 1 && candidateRows[0].Complete,
+            "The selected complete backup was not visible to the bounded recovery browser.");
         bool missingRejected = false;
         try { using OperatorColdRestoreStage missing = backupStore.StageSelectedForColdRecovery(2); }
         catch (Exception failure) when (failure is IOException or InvalidDataException)
@@ -125,6 +181,9 @@ static void SelectedBackupColdRestorePublishesFreshLiveGeneration()
             System.Text.Json.JsonException) { corruptRejected = true; }
         Check(corruptRejected && File.ReadAllText(Path.Combine(saves, "CURRENT")) == current,
             "Corrupt selected-backup bytes changed the recovered live generation.");
+        Check(backupStore.CopyCandidates(candidateRows) == 1 &&
+            candidateRows[0].Sequence == 1 && !candidateRows[0].Complete,
+            "The recovery browser falsely presented a corrupt candidate as complete.");
     }
     finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
 }

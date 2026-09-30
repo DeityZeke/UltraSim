@@ -2458,6 +2458,9 @@ foreach (string configuration in configurations)
     ]);
     VerifyDedicatedNetworkAssembly(root, configuration);
 
+    if (!options.SkipGodot)
+        VerifyP7GodotServerGui(root, configuration, ResolveGodot(options.GodotPath));
+
     VerifyClientCompositionArtifacts(root, configuration);
 
     if (!options.SkipGodot)
@@ -5968,6 +5971,9 @@ static void VerifyArchitecture(string root)
             "Server/Authoring/UltraSim.Server.Authoring.csproj",
             "Server/Operator/UltraSim.Server.Operator.csproj",
         ],
+        // Optional Godot frontend is a separate process and cannot pull the headless owner
+        // implementation into its managed assembly. The inherited stdio route is bounded.
+        ["Server/Godot/UltraSim.Server.Operator.Godot.csproj"] = [],
         ["Server/Operator/UltraSim.Server.Operator.csproj"] =
         [
             "Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj",
@@ -6209,6 +6215,7 @@ static void VerifyArchitecture(string root)
             (document.Descendants("FrameworkReference").Any() || document.Descendants("PackageReference").Any()))
             throw new InvalidOperationException("Framework foundation projects must remain BCL-only.");
         if (!project.StartsWith("Client/Godot/", StringComparison.Ordinal) &&
+            !project.StartsWith("Server/Godot/", StringComparison.Ordinal) &&
             (document.Root?.Attribute("Sdk")?.Value.Contains("Godot", StringComparison.OrdinalIgnoreCase) == true ||
              document.Descendants("PackageReference").Any(e =>
                  e.Attribute("Include")?.Value.Contains("Godot", StringComparison.OrdinalIgnoreCase) == true) ||
@@ -6220,7 +6227,8 @@ static void VerifyArchitecture(string root)
             "Client/Core", "Client/Local", "Client/Network" }
         .SelectMany(folder => Directory.EnumerateFiles(Path.Combine(root, folder), "*.cs", SearchOption.AllDirectories))
         .Where(path => !path.Contains("/obj/", StringComparison.Ordinal) &&
-                       !path.Contains("/bin/", StringComparison.Ordinal))
+                       !path.Contains("/bin/", StringComparison.Ordinal) &&
+                       !Relative(root, path).StartsWith("Server/Godot/", StringComparison.Ordinal))
         .Where(path => Regex.IsMatch(File.ReadAllText(path),
             @"^\s*(?:global\s+)?using\s+(?:static\s+)?Godot(?:\.[A-Za-z_][A-Za-z0-9_]*)*\s*;|\bglobal::Godot\.",
             RegexOptions.Multiline))
@@ -6468,6 +6476,89 @@ static string ResolveGodot(string? configured)
     if (File.Exists(known)) return known;
     throw new FileNotFoundException(
         "Godot was not found. Set ULTRASIM_GODOT, pass --godot=<path>, or explicitly use --skip-godot.");
+}
+
+static void VerifyP7GodotServerGui(string root, string configuration, string godot)
+{
+    string output = Path.Combine(root, ".output", "p7-gui-verification",
+        Environment.ProcessId.ToString(), configuration);
+    Directory.CreateDirectory(output);
+    Run(root, "Server/Godot/export-gui.sh", [output],
+        new Dictionary<string, string> { ["ULTRASIM_GODOT"] = godot });
+    string headless = Path.Combine(output, "headless");
+    if (File.Exists(Path.Combine(headless, "GodotSharp.dll")) ||
+        !File.Exists(Path.Combine(headless, "UltraSim.Server.DirectConnect")) ||
+        !File.Exists(Path.Combine(headless, "Content", "Official",
+            "ultrasim-official-actors-v1.uspkg")))
+        throw new InvalidOperationException(
+            "The optional GUI product did not package one Godot-free headless child and exact Official actor archive.");
+    string packagedActors = Path.Combine(headless, "Content", "Official",
+        "ultrasim-official-actors-v1.uspkg");
+    string sourceActors = Path.Combine(root, "Client", "OfficialContent",
+        "ultrasim-official-actors-v1.uspkg");
+    if (!SHA256.HashData(File.ReadAllBytes(packagedActors)).AsSpan().SequenceEqual(
+            SHA256.HashData(File.ReadAllBytes(sourceActors))))
+        throw new InvalidOperationException("The GUI child Official actor archive differs from the accepted bytes.");
+    string executable = Path.Combine(output, "UltraSimServerGui.x86_64");
+    string emptyIdentity = Path.Combine(output, "empty-inspection-identity");
+    string emptyCandidates = RunCaptured(root,
+        Path.Combine(headless, "UltraSim.Server.DirectConnect"),
+        ["--identity-dir=" + emptyIdentity, "--list-backups"], 30_000);
+    if (!emptyCandidates.Contains("P7 BACKUP CANDIDATES count=0", StringComparison.Ordinal) ||
+        Directory.Exists(emptyIdentity))
+        throw new InvalidOperationException("Read-only backup inspection created an identity or phantom candidate.");
+    Run(root, executable,
+    [
+        "--headless", "--", "--p7-gui-smoke",
+        "--p7-identity-dir=" + Path.Combine(output, "smoke-identity"),
+        "--p7-server-arg=--bind=127.0.0.1:0",
+    ]);
+    string candidateList = RunCaptured(root,
+        Path.Combine(headless, "UltraSim.Server.DirectConnect"),
+        ["--identity-dir=" + Path.Combine(output, "smoke-identity"), "--list-backups"],
+        30_000);
+    if (!candidateList.Contains("P7 BACKUP CANDIDATES count=1", StringComparison.Ordinal) ||
+        !candidateList.Contains("1 complete", StringComparison.Ordinal))
+        throw new InvalidOperationException("The published cold backup browser did not find the GUI-created snapshot.");
+    Run(root, executable,
+    [
+        "--headless", "--", "--p7-gui-restart-smoke",
+        "--p7-identity-dir=" + Path.Combine(output, "restart-identity"),
+        "--p7-server-arg=--bind=127.0.0.1:0",
+    ]);
+    string eofIdentity = Path.Combine(output, "eof-identity");
+    var eofStart = new ProcessStartInfo(Path.Combine(headless, "UltraSim.Server.DirectConnect"))
+    {
+        WorkingDirectory = root,
+        UseShellExecute = false,
+        RedirectStandardInput = true,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+    };
+    eofStart.ArgumentList.Add("--identity-dir=" + eofIdentity);
+    eofStart.ArgumentList.Add("--bind=127.0.0.1:0");
+    eofStart.ArgumentList.Add("--shutdown-on-stdin-eof");
+    using (Process eofProcess = Process.Start(eofStart) ??
+        throw new InvalidOperationException("P7 GUI EOF child did not start."))
+    {
+        Task<string> outputText = eofProcess.StandardOutput.ReadToEndAsync();
+        Task<string> errorText = eofProcess.StandardError.ReadToEndAsync();
+        eofProcess.StandardInput.Close();
+        if (!eofProcess.WaitForExit(30_000))
+        {
+            eofProcess.Kill(entireProcessTree: true);
+            throw new InvalidOperationException("P7 GUI EOF did not request bounded host shutdown.");
+        }
+        string lines = outputText.GetAwaiter().GetResult() + errorText.GetAwaiter().GetResult();
+        if (eofProcess.ExitCode != 0 ||
+            !lines.Contains("GUI stdin retired: Accepted", StringComparison.Ordinal) ||
+            !lines.Contains("clean=True", StringComparison.Ordinal))
+            throw new InvalidOperationException("P7 GUI EOF failed to retire the child cleanly: " +
+                Tail(lines, 2_000));
+    }
+    Console.WriteLine("PASS P7_ExportedGodotServerGui server=ServerOnly " +
+        "frontend=ControlPlaneStdio save=complete backup=complete restart=reopened " +
+        "shutdown=clean parentEof=clean");
 }
 
 static void Run(

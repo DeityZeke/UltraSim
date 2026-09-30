@@ -140,7 +140,9 @@ public sealed class OperatorConsole
 /// </summary>
 public sealed class BoundedOperatorConsoleInput
 {
-    private const int MaximumLine = 256;
+    // GUI stdin uses the same bounded owner-thread queue with a small JSON envelope.
+    // The human console parser itself continues to cap semantic command text at 256.
+    private const int MaximumLine = 1024;
     private const int MaximumQueued = 32;
     private readonly Queue<string> _lines = new();
     private readonly object _gate = new();

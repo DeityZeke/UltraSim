@@ -54,7 +54,22 @@ authority. Start the server normally afterward. Missing/corrupt backup selection
 without changing the live `CURRENT` pointer. `run-managed.sh` exits normally after a
 maintenance invocation; it does not loop the restore argument.
 
+`--list-backups` is a separate read-only maintenance process that can run while the
+server is live. It hashes each bounded published candidate and reports complete or
+rejected status without putting disk scans on the authority thread. The optional
+Godot server window starts this inspector on demand; the live Control Plane retains
+cheap latest-backup diagnostics. Inspection does not select or restore a generation.
+
+The optional exported `Server/Godot` frontend starts one separately published
+ServerOnly headless child. Its inherited bounded stdio frames carry Control Plane
+action identities, not an unauthenticated Network endpoint or duplicate save
+implementation. The server resolves each frame on its owner thread with its trusted
+local principal and existing confirmation/audit semantics. GUI parent loss closes
+stdin; the child treats EOF as the same graceful Shutdown request only when launched
+with `--shutdown-on-stdin-eof`. The GUI shows status, participants, bounded log/audit,
+on-demand backup candidates, discoverable categories, and the current action set.
+
 This is not the completed P7 product. Backup restoration is cold maintenance rather than
-a live GUI/console action, and there is no durable account/session rehydration. No Godot
-server GUI or remotely authorized in-game Admin route is present. Ordinary player
+a live GUI/console action, and there is no durable account/session rehydration. A remotely
+authorized in-game Admin route is not present. Ordinary player
 principals cannot see this provider, and no client-claimed capability list is trusted.

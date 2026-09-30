@@ -7,6 +7,8 @@ namespace UltraSim.Server.Operator;
 
 public readonly record struct OperatorBackupResult(bool Succeeded, ulong Sequence, bool Reused,
     string Diagnostic);
+public readonly record struct OperatorBackupCandidate(ulong Sequence, bool Complete,
+    string Diagnostic);
 
 /// <summary>Private, validated save-set-shaped copy of one selected backup.</summary>
 public sealed class OperatorColdRestoreStage : IDisposable
@@ -35,7 +37,8 @@ public sealed class OperatorBackupStore
     private readonly int _retention;
     private readonly IDurableFileSystem _durable = new DurableFileSystem();
 
-    public OperatorBackupStore(string saveRoot, string backupRoot, int retention)
+    public OperatorBackupStore(string saveRoot, string backupRoot, int retention,
+        bool createRoot = true)
     {
         _saveRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(saveRoot));
         _backupRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(backupRoot));
@@ -48,8 +51,8 @@ public sealed class OperatorBackupStore
             _backupRoot.StartsWith(_saveRoot + Path.DirectorySeparatorChar, comparison))
             throw new ArgumentException("Live saves and backups require disjoint roots.");
         _retention = retention;
-        Directory.CreateDirectory(_backupRoot);
-        RejectReparse(_backupRoot);
+        if (createRoot) Directory.CreateDirectory(_backupRoot);
+        if (Directory.Exists(_backupRoot)) RejectReparse(_backupRoot);
     }
 
     public string BackupRoot => _backupRoot;
@@ -158,6 +161,34 @@ public sealed class OperatorBackupStore
             destination[index] = ulong.Parse(sequences[index]!, System.Globalization.CultureInfo.InvariantCulture);
         }
         return sequences.Length;
+    }
+
+    /// <summary>Cold-on-demand candidate inspection; one corrupt backup cannot hide healthy ones.</summary>
+    public int CopyCandidates(Span<OperatorBackupCandidate> destination)
+    {
+        if (!Directory.Exists(_backupRoot)) return 0;
+        RejectReparse(_backupRoot);
+        string[] paths = Directory.GetDirectories(_backupRoot);
+        if (paths.Length > 128) throw new InvalidDataException("Backup root has too many entries.");
+        string[] names = paths.Select(Path.GetFileName).Where(IsSequenceName)
+            .OrderByDescending(static name => name, StringComparer.Ordinal).ToArray()!;
+        if (names.Length > destination.Length) return -1;
+        for (int index = 0; index < names.Length; index++)
+        {
+            string name = names[index];
+            ulong sequence = ulong.Parse(name, System.Globalization.CultureInfo.InvariantCulture);
+            try
+            {
+                ValidateGeneration(Path.Combine(_backupRoot, name), name);
+                destination[index] = new(sequence, true, "Complete and hash-validated");
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or
+                InvalidDataException or JsonException)
+            {
+                destination[index] = new(sequence, false, Bounded(error.Message));
+            }
+        }
+        return names.Length;
     }
 
     private void TrimOldSnapshots()
