@@ -105,12 +105,29 @@ static class ClientApplicationSettingsTests
         string vegetationJson = ClientSettingsJsonCodec.Write(opted);
         True(ClientSettingsJsonCodec.TryRead(vegetationJson, out var reopenedVegetation, out _));
         True(reopenedVegetation.ExperimentalVegetation);
-        string v5 = vegetationJson.Replace("\"version\": 6", "\"version\": 5", StringComparison.Ordinal)
-            .Replace("  \"experimentalVegetation\": true,\n", "", StringComparison.Ordinal);
+        string v5 = vegetationJson.Replace("\"version\": 7", "\"version\": 5", StringComparison.Ordinal)
+            .Replace("  \"experimentalVegetation\": true,\n", "", StringComparison.Ordinal)
+            .Replace("  \"inventoryViewer\": \"D2Grid\",\n", "", StringComparison.Ordinal);
         True(ClientSettingsJsonCodec.TryRead(v5, out var migratedVegetation, out _));
         True(!migratedVegetation.ExperimentalVegetation);
         True(!ClientSettingsJsonCodec.TryRead(vegetationJson.Replace(
             "  \"experimentalVegetation\": true,\n", "", StringComparison.Ordinal), out _, out _));
+
+        var list = opted.WithInventoryViewer(ClientInventoryViewerProfile.List);
+        Equal(ClientInventoryViewerProfile.List, ClientSettingsResolver.Resolve(list, scope).InventoryViewer);
+        Equal(ClientInventoryViewerProfile.List, list.WithGlobal(document.Global).WithDisplay(list.Display)
+            .WithExperimentalVegetation(false).InventoryViewer);
+        string listJson = ClientSettingsJsonCodec.Write(list);
+        True(ClientSettingsJsonCodec.TryRead(listJson, out var reopenedList, out _));
+        Equal(ClientInventoryViewerProfile.List, reopenedList.InventoryViewer);
+        string v6 = listJson.Replace("\"version\": 7", "\"version\": 6", StringComparison.Ordinal)
+            .Replace("  \"inventoryViewer\": \"List\",\n", "", StringComparison.Ordinal);
+        True(ClientSettingsJsonCodec.TryRead(v6, out var migratedViewer, out _));
+        Equal(ClientInventoryViewerProfile.D2Grid, migratedViewer.InventoryViewer);
+        True(!ClientSettingsJsonCodec.TryRead(listJson.Replace(
+            "  \"inventoryViewer\": \"List\",\n", "", StringComparison.Ordinal), out _, out _));
+        Throws<ArgumentOutOfRangeException>(() => new ClientSettingsDocument(
+            inventoryViewer: (ClientInventoryViewerProfile)255));
 
         string json = ClientSettingsJsonCodec.Write(document);
         True(json.Contains("\"uiScale\": 1.25", StringComparison.Ordinal));

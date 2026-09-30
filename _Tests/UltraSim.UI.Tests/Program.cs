@@ -810,7 +810,8 @@ static void SemanticWireCodecIsCanonicalBoundedAndTransactional()
     model.SetText(title, "Inventory");
     model.ReplaceRows(rows,
     [
-        new UiListRow(new UiRowId(7), [UiValue.FromText("Bread")]),
+        new UiListRow(new UiRowId(7), [UiValue.FromText("Bread")],
+            new UiRowAttachment(1, [1, 2, 3, 4])),
     ]);
     var operation = new UiOpenView(
         cacheKey, definition, model, new UiViewInstanceId(11), sequence: 3);
@@ -825,6 +826,11 @@ static void SemanticWireCodecIsCanonicalBoundedAndTransactional()
     Assert.Equal(definition.Hash, decoded.Definition.Hash);
     Assert.Equal("Inventory", decoded.SnapshotModel().Get(title).Text);
     Assert.Equal("Bread", decoded.SnapshotModel().GetRows(rows)[0].Values[0].Text);
+    Assert.True(decoded.SnapshotModel().GetRows(rows)[0].Attachment.Payload.SequenceEqual(
+        new byte[] { 1, 2, 3, 4 }));
+    Assert.Throws<ArgumentException>(() => _ = new UiRowAttachment(0, [1]));
+    Assert.Throws<ArgumentException>(() => _ = new UiRowAttachment(1,
+        new byte[UiRowAttachment.MaximumBytes + 1]));
 
     for (int length = 0; length < written; length++)
         Assert.False(UiSemanticWireCodec.TryReadColdOpen(

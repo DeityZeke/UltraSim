@@ -6071,6 +6071,8 @@ static void VerifyArchitecture(string root)
         ["Game/UI/UltraSim.Game.UI.csproj"] =
         [
             "Game/Inventory/UltraSim.Game.Inventory.csproj",
+            // P6 projects an admitted public Definition portrait without giving UI/Inventory art ownership.
+            "Game/Presentation.Contracts/UltraSim.Game.Presentation.Contracts.csproj",
             "Kernels/ECS/UltraSim.ECS.csproj",
             "Kernels/UI/UltraSim.UI.csproj",
             "Server/Runtime/UltraSim.Server.Runtime.csproj",

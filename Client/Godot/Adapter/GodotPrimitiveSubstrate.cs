@@ -72,4 +72,16 @@ internal static class GodotPrimitiveSubstrate
         Texture2D texture = ImageTexture.CreateFromImage(image);
         return texture;
     }
+
+    /// <summary>Neutral bounded silhouette for a valid item lacking optional portrait art.</summary>
+    internal static Texture2D CreateInventoryPrimitiveIcon()
+    {
+        using Image image = Image.CreateEmpty(32, 32, false, Image.Format.Rgba8);
+        image.Fill(new Color(0.12f, 0.17f, 0.22f));
+        for (int y = 7; y < 25; y++)
+        for (int x = 7; x < 25; x++)
+            image.SetPixel(x, y, x is 7 or 24 || y is 7 or 24
+                ? new Color(0.69f, 0.74f, 0.77f) : new Color(0.36f, 0.43f, 0.49f));
+        return ImageTexture.CreateFromImage(image);
+    }
 }

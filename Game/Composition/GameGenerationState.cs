@@ -2,6 +2,7 @@ using System.Diagnostics;
 using UltraSim.ECS;
 using UltraSim.Game.Accounting;
 using UltraSim.Game.Inventory;
+using UltraSim.Game.Presentation.Contracts;
 using UltraSim.Game.Physics;
 using UltraSim.Game.World;
 using UltraSim.Server.Runtime;
@@ -53,6 +54,7 @@ public interface IGameGenerationStateProvider :
 /// </summary>
 public sealed class GameGenerationState :
     IGameGenerationStateProvider,
+    IInventoryPresentationLookup,
     IInventoryWorldItemActions,
     IServerGenerationStepParticipant,
     IDisposable
@@ -92,6 +94,10 @@ public sealed class GameGenerationState :
     public InventoryGenerationState Inventory { get; }
     public GameItemGenerationState Items { get; }
     public GameContent Content { get; }
+
+    public bool TryResolveInventoryPresentation(string prefabKey,
+        out PublicDefinitionPresentationDescriptor descriptor) =>
+        Content.TryResolveInventoryPresentation(prefabKey, out descriptor);
     public GameWorldState WorldState { get; }
     public GameWorldActions WorldActions => _worldActions ??
         throw new InvalidOperationException("World actions are unavailable before generation initialization.");

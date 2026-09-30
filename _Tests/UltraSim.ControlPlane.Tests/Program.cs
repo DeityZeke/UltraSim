@@ -472,7 +472,7 @@ static void Settings()
             [new(new("ui-scale"), ControlValue.Float64(1.5)), new(new("invert-y"), ControlValue.Bool(true)),
              new(new("render-distance"), ControlValue.Int64(3)), new(new("grammar"), ControlValue.Option(new("third-person")))]));
         Equal(ControlResultStatus.Accepted, result.Outcome.Status); Equal(1, commits);
-        Equal(1.5f, store.Load().Document.Global.UiScale!.Value); Equal(6, ClientSettingsDocument.CurrentVersion);
+        Equal(1.5f, store.Load().Document.Global.UiScale!.Value); Equal(7, ClientSettingsDocument.CurrentVersion);
         string bytes = File.ReadAllText(store.Path);
         result = r.Set(SetControlsRequest.Create(Context(), new("client.settings"), g,
             [new(new("ui-scale"), ControlValue.Float64(2)), new(new("render-distance"), ControlValue.Int64(4))]));
@@ -490,6 +490,13 @@ static void Settings()
         r.Read(Principal(), new("client.settings"), g, new ControlId("ui-scale"), out var realm);
         Equal(ControlProvenanceKind.UserRealm, realm!.RequestedProvenance.Kind);
         Equal(1.5f, doc.Global.UiScale!.Value); Equal(2f, ClientSettingsResolver.Resolve(store.Load().Document, scope).UiScale);
+        result = r.Set(SetControlsRequest.Create(Context(), new("client.settings"), g,
+            [new(new("inventory-viewer"), ControlValue.Option(new("list")))]));
+        Equal(ControlResultStatus.Accepted, result.Outcome.Status);
+        Equal(ClientInventoryViewerProfile.List, store.Load().Document.InventoryViewer);
+        r.Read(Principal(), new("client.settings"), g, new ControlId("inventory-viewer"), out var viewer);
+        Equal(ControlProvenanceKind.UserGlobal, viewer!.RequestedProvenance.Kind);
+        Equal("list", viewer.Effective.AsOption().Value);
         Check(!Directory.EnumerateFiles(root).Any(path => path.Contains("control-plane")));
     }
     finally { Directory.Delete(root, recursive: true); }

@@ -327,6 +327,7 @@ public partial class LocalCabinClient : Node3D
         ArgumentNullException.ThrowIfNull(settings);
         int previousRenderDistance = _settings?.RenderDistanceChunks ?? settings.RenderDistanceChunks;
         _settings = settings;
+        _uiRenderer?.SetInventoryViewerProfile(settings.InventoryViewer);
         ApplyResolvedSettings();
         if (_initialized && previousRenderDistance != settings.RenderDistanceChunks &&
             _localSession is not null && _localSession.TryGetLatestView(out LocalPlayableAuthorityView view))
@@ -1668,8 +1669,9 @@ public partial class LocalCabinClient : Node3D
         if (_localSession is null || _inventoryHost is null)
             throw new InvalidOperationException("Inventory presentation was composed out of order.");
         _uiRenderer = _sessionUi is not null
-            ? new GodotUiRenderer(_sessionUi.Gumps)
-            : new GodotUiRenderer(_inventoryHost);
+            ? new GodotUiRenderer(_sessionUi.Gumps, portraitWorld: () => _assetResolver)
+            : new GodotUiRenderer(_inventoryHost, portraitWorld: () => _assetResolver);
+        _uiRenderer.SetInventoryViewerProfile(_settings!.InventoryViewer);
         _uiClient = new UiClientRuntime(_uiRenderer, new UiClientLimits(8, 8));
         _uiBridge = _localSession.AttachUiClient(
             _uiClient,
@@ -4352,6 +4354,7 @@ public partial class LocalCabinClient : Node3D
                 _presentationGeneration, _derivedResources);
         }
         _presentationSelectionRevision = _presentationCache!.UserResourcePackSelectionRevision;
+        _uiRenderer?.RefreshInventoryPresentation();
         _actorVisuals = new GodotContentActorVisualResolver(_presentationGeneration);
     }
 
@@ -4413,6 +4416,7 @@ public partial class LocalCabinClient : Node3D
             _presentationGeneration = candidate;
             _assetResolver = candidateResolver ?? _assetResolver;
             if (candidateResolver is not null) _renderer?.RefreshAssets(candidateResolver);
+            _uiRenderer?.RefreshInventoryPresentation();
             candidate = null;
             candidateResolver = null;
             _actorVisuals.UpdateSource(_presentationGeneration);

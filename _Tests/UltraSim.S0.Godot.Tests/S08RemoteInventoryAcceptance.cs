@@ -1,7 +1,9 @@
+using System.Diagnostics;
 using Godot;
 using UltraSim.Client.Core;
 using UltraSim.Client.Godot;
 using UltraSim.Client.Network;
+using UltraSim.Client.StandardUi;
 using UltraSim.ECS;
 using UltraSim.Game.Accounting;
 using UltraSim.Game.Admission;
@@ -11,6 +13,7 @@ using UltraSim.Game.Persistence;
 using UltraSim.Game.Protocol;
 using UltraSim.Game.Replication;
 using UltraSim.Game.UI;
+using UltraSim.Game.World;
 using UltraSim.Network;
 using UltraSim.Server.Persistence;
 using UltraSim.Framework.Persistence;
@@ -23,7 +26,7 @@ public partial class S08HeadlessAcceptance
     /// Real authenticated owner-private path: Game inventory authority -> generic Game UI
     /// protocol -> secure Network peer -> production client state -> native Godot controls.
     /// </summary>
-    private void RunRemoteInventoryAcceptance()
+    private async Task RunRemoteInventoryAcceptance()
     {
         string saveRoot = Path.Combine(
             Path.GetTempPath(), $"ultrasim-i08-remote-inventory-{Guid.NewGuid():N}");
@@ -51,7 +54,9 @@ public partial class S08HeadlessAcceptance
                 UltraSimGameProtocol.Manifest),
             "The remote Inventory protocol loopback could not be established.");
         using ProtocolLoopback loopback = created!;
-        var renderer = new GodotUiRenderer(this);
+        using var portraitWorld = new InventoryPortraitWorldFixture();
+        bool hasGraphics = DisplayServer.GetName() != "headless";
+        var renderer = new GodotUiRenderer(this, portraitWorld: () => portraitWorld);
         var client = new UiClientRuntime(renderer);
         var bridge = new RemoteUiClientBridge(loopback.Client, client);
         var server = new RemoteGameApplicationSession(
@@ -62,6 +67,7 @@ public partial class S08HeadlessAcceptance
             new ParticipantId(88),
             applicationSessionEpoch: 8_001);
         InventoryUiController? inventory = null;
+        Texture2D? retainedDerivedPortrait = null;
 
         try
         {
@@ -84,11 +90,41 @@ public partial class S08HeadlessAcceptance
             InventoryUiOpenResult opened = inventory.OpenOwned(backpack, alice, pouch);
             Expect(opened.Succeeded, "The authorized remote Backpack did not open.");
             DriveRemote(loopback, bridge, server, () => client.OpenViewCount == 1);
+            if (hasGraphics)
+                for (int frame = 0; frame < 8 && renderer.InventoryPortraitSnapshot.Builds == 0; frame++)
+                    await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
             Control root = GetNode<Control>($"UiView_{opened.View.Value}");
             VBoxContainer rows = Find<VBoxContainer>(root, "Element_items");
             Expect(rows.GetChildCount() == 2 && ContainsLabel(rows, "Bread") &&
                 ContainsLabel(rows, "Iron Sword") && !ContainsLabel(root, "Apple"),
                 "The remote native Backpack projection was incomplete or disclosed foreign state.");
+            Expect(Find<Label>(root, "EffectiveInventoryViewer").Text == "List" &&
+                Find<Label>(root, "InventoryViewerFallback").Text.Contains("no valid Grid",
+                    StringComparison.Ordinal),
+                "Preferred D2 did not fall back explicitly for an Unplaced container.");
+            Expect(renderer.InventoryPortraitSnapshot.Images == (hasGraphics ? 1 : 0) &&
+                renderer.InventoryPortraitSnapshot.Builds == (hasGraphics ? 1UL : 0UL),
+                "Inventory portrait generation did not match the available native renderer.");
+            UiRowId initialSword = FindRow(client.GetRows(opened.View, InventoryUi.Items), "Iron Sword");
+            retainedDerivedPortrait = ((TextureRect)Find<Control>(root,
+                $"Row_{initialSword.Value}").GetChild(0)).Texture;
+            Expect(retainedDerivedPortrait is not null &&
+                retainedDerivedPortrait.NativeInstance != IntPtr.Zero,
+                "The 3D-derived portrait did not reach the native Inventory row.");
+            if (hasGraphics) using (Image portraitPixels = retainedDerivedPortrait!.GetImage())
+            {
+                int visiblePixels = 0;
+                for (int y = 0; y < portraitPixels.GetHeight(); y++)
+                for (int x = 0; x < portraitPixels.GetWidth(); x++)
+                    if (portraitPixels.GetPixel(x, y).A > .05f) visiblePixels++;
+                Expect(visiblePixels > 100,
+                    "The cached portrait image contained no rendered 3D World sword pixels.");
+            }
+            renderer.RefreshInventoryPresentation();
+            Expect(!hasGraphics || renderer.InventoryPortraitSnapshot.Images == 1 &&
+                renderer.InventoryPortraitSnapshot.Builds == 1 &&
+                renderer.InventoryPortraitSnapshot.Hits > 0,
+                "An unchanged Inventory portrait recreated native 3D work instead of using its cache.");
 
             UiRowId bread = FindRow(client.GetRows(opened.View, InventoryUi.Items), "Bread");
             ClickRemoteRow(root, "Element_items", bread);
@@ -177,22 +213,89 @@ public partial class S08HeadlessAcceptance
 
             Expect(inventory.Close(opened.View), "The remote Backpack did not close before Grid placement.");
             DriveRemote(loopback, bridge, server, () => client.OpenViewCount == 0);
+            Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+                    (world, _, game) => game.Inventory.Move(world,
+                        ResolveRemoteInventory(world, fixture.Sword),
+                        ResolveRemoteInventory(world, fixture.Backpack),
+                        ResolveRemoteInventory(world, fixture.GridBackpack),
+                        InventoryPlacement.Grid(1, 1, 1, 3)).Accepted,
+                    out bool movedSword) && movedSword,
+                "The 1x3 sword could not enter the native Grid viewer fixture.");
             InventoryUiOpenResult gridView = inventory.OpenOwned(gridBackpack, alice);
             Expect(gridView.Succeeded, "The authorized remote Grid Backpack did not open.");
             DriveRemote(loopback, bridge, server, () => client.OpenViewCount == 1);
             root = GetNode<Control>($"UiView_{gridView.View.Value}");
-            Expect(client.GetRows(gridView.View, InventoryUi.GridCells).Length == 25,
-                "The remote Grid view did not project its 5x5 placement cells.");
+            Control gridCanvas = Find<Control>(root, "InventoryGridCanvas");
+            UiRowId gridSword = FindRow(client.GetRows(gridView.View, InventoryUi.Items), "Iron Sword");
+            Control swordFootprint = Find<Control>(gridCanvas, $"GridItem_{gridSword.Value}");
+            Expect(Mathf.IsEqualApprox(swordFootprint.Position.X, 58f) &&
+                Mathf.IsEqualApprox(swordFootprint.Position.Y, 58f) &&
+                Mathf.IsEqualApprox(swordFootprint.Size.X, 52f) &&
+                Mathf.IsEqualApprox(swordFootprint.Size.Y, 164f),
+                "One native sword footprint did not occupy its canonical 1x3 Grid rectangle.");
+            InventoryPlacement beforeSwitch = ReadRemotePlacement(runtime, fixture.Sword);
+            long switchStarted = Stopwatch.GetTimestamp();
+            renderer.SetInventoryViewerProfile(ClientInventoryViewerProfile.List);
+            long listSwitchTicks = Stopwatch.GetTimestamp() - switchStarted;
+            Expect(ReferenceEquals(root, GetNode<Control>($"UiView_{gridView.View.Value}")) &&
+                Find<Label>(root, "EffectiveInventoryViewer").Text == "List" &&
+                ReadRemotePlacement(runtime, fixture.Sword) == beforeSwitch,
+                "Live List switching changed the UI instance or authoritative sword placement.");
             UiRowId gridApple = FindRow(client.GetRows(gridView.View, InventoryUi.Items), "Apple");
             ClickRemoteRow(root, "Element_items", gridApple);
             DriveRemote(loopback, bridge, server, () =>
                 client.GetActionState(gridView.View, InventoryUi.PlaceAt).Enabled);
-            ClickRemoteRow(root, "Element_grid-cells", new UiRowId(18));
+            Find<OptionButton>(root, "InventoryPlacementCell").Select(17);
+            PressRemoteButton(root, "InventoryPlaceSelected");
             DriveRemote(loopback, bridge, server, () =>
-                ReadRowPlacement(client, gridView.View, gridApple) == "Grid (2,3) 1×1");
-            Expect(ReadRemotePlacement(runtime, fixture.GridApple) ==
-                InventoryPlacement.Grid(2, 3, 1, 1),
-                "The native remote Grid placement did not commit authoritative truth.");
+                ReadRemotePlacement(runtime, fixture.GridApple) ==
+                    InventoryPlacement.Grid(2, 3, 1, 1));
+            Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+                    (world, _, game) => game.Inventory.Reposition(world,
+                        ResolveRemoteInventory(world, fixture.GridApple),
+                        ResolveRemoteInventory(world, fixture.GridBackpack),
+                        InventoryPlacement.Grid(0, 0, 1, 1)).Accepted,
+                    out bool listReset) && listReset && inventory.Refresh(gridView.View, "Placement reset."),
+                "The matched List/D2 placement control could not restore its initial state.");
+            DriveRemote(loopback, bridge, server, () =>
+                ReadRowPlacement(client, gridView.View, gridApple) == "Grid (0,0) 1×1");
+            switchStarted = Stopwatch.GetTimestamp();
+            renderer.SetInventoryViewerProfile(ClientInventoryViewerProfile.D2Grid);
+            long gridSwitchTicks = Stopwatch.GetTimestamp() - switchStarted;
+            Expect(ReferenceEquals(root, GetNode<Control>($"UiView_{gridView.View.Value}")) &&
+                Find<Label>(root, "EffectiveInventoryViewer").Text == "D2 Grid" &&
+                ReadRemotePlacement(runtime, fixture.Sword) == beforeSwitch,
+                "Live D2 switching changed the UI instance or authoritative sword placement.");
+            var portraitCost = renderer.InventoryPortraitSnapshot;
+            GD.Print($"P6 INVENTORY VIEWER METRICS grid=5x5 items=2 " +
+                $"portrait_builds={portraitCost.Builds} portrait_hits={portraitCost.Hits} " +
+                $"portrait_cold_ms={portraitCost.ColdBuildTicks * 1000.0 / Stopwatch.Frequency:F3} " +
+                $"portrait_warm_ms={portraitCost.WarmLookupTicks * 1000.0 / Stopwatch.Frequency:F3} " +
+                $"portrait_reserved_pixels={portraitCost.ReservedPixelBytes} " +
+                $"list_switch_ms={listSwitchTicks * 1000.0 / Stopwatch.Frequency:F3} " +
+                $"grid_switch_ms={gridSwitchTicks * 1000.0 / Stopwatch.Frequency:F3}");
+            Expect(client.GetRows(gridView.View, InventoryUi.GridCells).Length == 25,
+                "The remote Grid view did not project its 5x5 placement cells.");
+            ClickRemoteRow(root, "Element_items", gridApple);
+            DriveRemote(loopback, bridge, server, () =>
+                client.GetActionState(gridView.View, InventoryUi.PlaceAt).Enabled);
+            ulong gridAcceptedBefore = server.Ui.GetSnapshot().AcceptedActions;
+            ulong gridRejectedBefore = server.Ui.GetSnapshot().RejectedActions;
+            Find<Control>(root, "InventoryGridCanvas")._GuiInput(new InputEventMouseButton
+            {
+                ButtonIndex = MouseButton.Left,
+                Pressed = true,
+                Position = new Vector2(2.5f * 56f, 3.5f * 56f),
+            });
+            DriveRemote(loopback, bridge, server, () =>
+                ReadRowPlacement(client, gridView.View, gridApple) == "Grid (2,3) 1×1" &&
+                ReadRemotePlacement(runtime, fixture.GridApple) ==
+                    InventoryPlacement.Grid(2, 3, 1, 1));
+            InventoryPlacement gridActual = ReadRemotePlacement(runtime, fixture.GridApple);
+            Expect(gridActual == InventoryPlacement.Grid(2, 3, 1, 1),
+                $"The native remote Grid placement did not commit authoritative truth: " +
+                $"actual={gridActual} accepted={server.Ui.GetSnapshot().AcceptedActions-gridAcceptedBefore} " +
+                $"rejected={server.Ui.GetSnapshot().RejectedActions-gridRejectedBefore}.");
             ulong acceptedBefore = server.Ui.GetSnapshot().AcceptedActions;
             QueueRawRemoteAction(
                 loopback.Client,
@@ -221,7 +324,10 @@ public partial class S08HeadlessAcceptance
             DriveRemote(loopback, bridge, server, () =>
                 client.GetRows(gridView.View, InventoryUi.GridCells).Length == 30 &&
                 client.GetValue(gridView.View, InventoryUi.Status).Text == "Backpack upgraded.");
-            Expect(Find<VBoxContainer>(root, "Element_grid-cells").GetChildCount() == 30,
+            Expect(Mathf.IsEqualApprox(Find<Control>(root,
+                    "InventoryGridCanvas").CustomMinimumSize.X, 6f * 56f) &&
+                Mathf.IsEqualApprox(Find<Control>(root,
+                    "InventoryGridCanvas").CustomMinimumSize.Y, 5f * 56f),
                 "The native remote Grid did not render its upgraded 6x5 capacity.");
 
             var persistence = new GameRuntimePersistence(
@@ -272,7 +378,9 @@ public partial class S08HeadlessAcceptance
             server.Dispose();
             bridge.Dispose();
 
-            using var reconnectedRenderer = new GodotUiRenderer(this);
+            using var reconnectedRenderer = new GodotUiRenderer(this,
+                portraitWorld: () => portraitWorld);
+            reconnectedRenderer.SetInventoryViewerProfile(ClientInventoryViewerProfile.List);
             using var reconnectedClient = new UiClientRuntime(reconnectedRenderer);
             using var reconnectedBridge = new RemoteUiClientBridge(
                 loopback.Client, reconnectedClient);
@@ -313,9 +421,16 @@ public partial class S08HeadlessAcceptance
                 "Reconnect could not authorize the restored Grid Backpack.");
             DriveRemote(loopback, reconnectedBridge, reconnectedServer, () =>
                 reconnectedClient.OpenViewCount == 1);
+            if (hasGraphics)
+                for (int frame = 0; frame < 8 && reconnectedRenderer.InventoryPortraitSnapshot.Builds == 0; frame++)
+                    await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
             Expect(reconnectedClient.GetRows(
                     reconnectedGrid.View, InventoryUi.GridCells).Length == 30,
                 "Reconnect did not resynchronize the restored 6x5 Grid capacity.");
+            Expect(Find<Label>(GetNode<Control>($"UiView_{reconnectedGrid.View.Value}"),
+                    "EffectiveInventoryViewer").Text == "List" &&
+                reconnectedRenderer.InventoryPortraitSnapshot.Builds == (hasGraphics ? 1UL : 0UL),
+                "Reconnect did not reapply the client-only viewer preference and rebuild its portrait binding.");
             Expect(reconnectedInventory.Close(reconnectedGrid.View),
                 "The reconnected Grid Inventory did not close.");
             DriveRemote(loopback, reconnectedBridge, reconnectedServer, () =>
@@ -357,6 +472,12 @@ public partial class S08HeadlessAcceptance
             catch (ObjectDisposedException) { }
             client.Dispose();
             renderer.Dispose();
+            Expect(retainedDerivedPortrait is null ||
+                retainedDerivedPortrait.NativeInstance == IntPtr.Zero,
+                "The retained derived portrait wrapper survived native UI retirement.");
+            Expect(portraitWorld.ResolvePublicMesh(GameWorldPublicPrefabIds.IronSword).Mesh is { } retainedSource &&
+                retainedSource.NativeInstance != IntPtr.Zero,
+                "The borrowed World mesh was retired by the Inventory portrait cache.");
             runtime.Stop();
             if (Directory.Exists(saveRoot)) Directory.Delete(saveRoot, recursive: true);
         }
@@ -495,7 +616,7 @@ public partial class S08HeadlessAcceptance
 
     private static void ClickRemoteRow(Node root, string listName, UiRowId row)
     {
-        VBoxContainer list = Find<VBoxContainer>(root, listName);
+        Container list = Find<Container>(root, listName);
         Control control = list.GetNodeOrNull<Control>($"Row_{row.Value}") ??
             throw new InvalidOperationException(
                 $"Native list '{listName}' does not contain row {row.Value}.");
@@ -679,4 +800,27 @@ public partial class S08HeadlessAcceptance
         PersistentEntityId Sword,
         PersistentEntityId GridApple,
         PersistentEntityId ForeignBackpack);
+}
+
+/// <summary>Test-only admitted World mesh source; the product uses its catalog-backed resolver.</summary>
+sealed class InventoryPortraitWorldFixture : IGodotWorldAssetResolver, IDisposable
+{
+    private readonly StandardMaterial3D _material = new() { AlbedoColor = new Color(.7f, .74f, .8f) };
+    private readonly BoxMesh _sword;
+    internal InventoryPortraitWorldFixture()
+    {
+        _sword = new BoxMesh { Size = new Vector3(.12f, 1.15f, .20f), Material = _material };
+    }
+    public GodotWorldMeshResolution ResolvePublicMesh(uint prefabId) =>
+        prefabId == GameWorldPublicPrefabIds.IronSword
+            ? GodotWorldMeshResolution.Available(_sword)
+            : GodotWorldMeshResolution.MissingModel();
+    public GodotWorldMeshResolution ResolveStaticMesh(WorldStaticRenderKey key) =>
+        GodotWorldMeshResolution.MissingModel();
+    public Material? ResolveTerrainMaterial(ushort materialId) => null;
+    public void Dispose()
+    {
+        _sword.Dispose();
+        _material.Dispose();
+    }
 }

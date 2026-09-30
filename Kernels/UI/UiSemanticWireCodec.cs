@@ -648,11 +648,15 @@ public static class UiSemanticWireCodec
 
     private static bool WriteRow(ref WireWriter writer, in UiListRow row)
     {
+        bool attached = row.Attachment.IsValid;
         if (!writer.TryWriteUInt64(row.Id.Value) ||
-            !writer.TryWriteUInt16(checked((ushort)row.Values.Length))) return false;
+            !writer.TryWriteUInt16(checked((ushort)(row.Values.Length | (attached ? 0x8000 : 0))))) return false;
         foreach (UiValue value in row.Values)
             if (!WriteValue(ref writer, value)) return false;
-        return true;
+        return !attached ||
+            (writer.TryWriteUInt16(row.Attachment.Kind) &&
+             writer.TryWriteUInt16(checked((ushort)row.Attachment.Payload.Length)) &&
+             writer.TryWriteBytes(row.Attachment.Payload));
     }
 
     private static bool ReadRow(
@@ -662,14 +666,26 @@ public static class UiSemanticWireCodec
     {
         row = default;
         if (!reader.TryReadUInt64(out ulong id) || id == 0 ||
-            !reader.TryReadUInt16(out ushort count) || count > UiListRow.MaximumValues ||
+            !reader.TryReadUInt16(out ushort rawCount)) return false;
+        bool attached = (rawCount & 0x8000) != 0;
+        int count = rawCount & 0x7fff;
+        if (count > UiListRow.MaximumValues ||
             count > reader.RemainingCount) return false;
         var values = new UiValue[count];
         for (int index = 0; index < values.Length; index++)
             if (!ReadValue(ref reader, out values[index]) ||
                 (values[index].Kind == UiValueKind.Text &&
                     values[index].Text!.Length > limits.MaximumTextCharacters)) return false;
-        row = new UiListRow(new UiRowId(id), values);
+        UiRowAttachment attachment = default;
+        if (attached)
+        {
+            if (!reader.TryReadUInt16(out ushort kind) || kind == 0 ||
+                !reader.TryReadUInt16(out ushort length) ||
+                length is 0 or > UiRowAttachment.MaximumBytes ||
+                !reader.TryReadBytes(length, out ReadOnlySpan<byte> payload)) return false;
+            attachment = new UiRowAttachment(kind, payload);
+        }
+        row = new UiListRow(new UiRowId(id), values, attachment);
         return true;
     }
 
@@ -858,6 +874,11 @@ public static class UiSemanticWireCodec
             if (_position >= _destination.Length) return false;
             _destination[_position++] = value; return true;
         }
+        internal bool TryWriteBytes(ReadOnlySpan<byte> value)
+        {
+            if (value.Length > _destination.Length - _position) return false;
+            value.CopyTo(_destination[_position..]); _position += value.Length; return true;
+        }
         internal bool TryWriteBoolean(bool value) => TryWriteByte(value ? (byte)1 : (byte)0);
         internal bool TryWriteUInt16(ushort value)
         {
@@ -902,6 +923,12 @@ public static class UiSemanticWireCodec
         {
             if (_position >= _source.Length) { value = 0; return false; }
             value = _source[_position++]; return true;
+        }
+        internal bool TryReadBytes(int length, out ReadOnlySpan<byte> value)
+        {
+            if (length < 0 || length > _source.Length - _position)
+            { value = default; return false; }
+            value = _source.Slice(_position, length); _position += length; return true;
         }
         internal bool TryReadBoolean(out bool value)
         {

@@ -157,7 +157,7 @@ internal static class Program
 
 static void W7StructuralProtocolV33IsCanonicalAndBounded()
 {
-    Equal((ushort)33, UltraSimGameProtocol.Manifest.Version);
+    Equal((ushort)34, UltraSimGameProtocol.Manifest.Version);
     var header = new RemoteStructuralWorldAdvertisementHeader
     {
         ApplicationSessionEpoch = 17,

@@ -27,7 +27,8 @@ public sealed class ClientSettingsControlProvider : IControlProvider
     private static readonly ControlOptionId[] RebindableOptions = RebindableActions
         .Select(action => new ControlOptionId(ActionId(action))).ToArray();
     private static readonly string[] Fields = ["ui-scale", "volume", "pointer-sensitivity", "invert-y", "grammar",
-        "camera-profile", "camera-distance", "camera-fov", "render-distance", "vegetation", "display-mode"];
+        "camera-profile", "camera-distance", "camera-fov", "render-distance", "vegetation", "display-mode",
+        "inventory-viewer"];
     public ClientSettingsControlProvider(Func<ClientSettingsDocument> document, Func<ResolvedClientSettings> effective,
         Action<ClientSettingsDocument> commit, ClientSettingsScopeKey editScope = default,
         ClientProfileRecommendation? recommendation = null, ClientProfileApplicationMode consent = ClientProfileApplicationMode.Ignore,
@@ -50,20 +51,20 @@ public sealed class ClientSettingsControlProvider : IControlProvider
             new(ControlValueKind.Int64, ControlValue.Int64(ClientSettingsResolver.MinimumRenderDistanceChunks),
                 ControlValue.Int64(ClientSettingsResolver.MaximumRenderDistanceChunks)),
             new(ControlValueKind.Bool),
-            new(ControlValueKind.Option, options: [new("windowed"), new("borderless-fullscreen"), new("fullscreen")])];
+            new(ControlValueKind.Option, options: [new("windowed"), new("borderless-fullscreen"), new("fullscreen")]),
+            new(ControlValueKind.Option, options: [new("d2-grid"), new("list")])];
         Definition = new(new("client.settings"), Fields.Select((f, i) =>
             new ControlDescriptor(new(f), new(f is "pointer-sensitivity" or "invert-y" or "grammar" ? "Client/Input" :
                     f == "display-mode" ? "Client/Display" : f.StartsWith("camera-", StringComparison.Ordinal) ? "Client/Camera" : "Client/Presentation"),
                 f, f == "volume" ? "Persisted preference; no Audio consumer is implemented." :
-                    f == "vegetation" ? "Device-owned, default Off, applies on next world entry." : "Existing user-owned settings resolver.",
+                f == "vegetation" ? "Device-owned, default Off, applies on next world entry." :
+                f == "inventory-viewer" ? "Client-owned viewer preference; non-Grid containers use List without changing Inventory." :
+                "Existing user-owned settings resolver.",
                 schemas[i], Value(defaults, ClientDisplaySettings.Default, f), Read, Write,
                 f == "vegetation" ? ControlApplyMode.SessionRestart : ControlApplyMode.Live,
                 ControlPersistenceClass.UserSettings,
                 ControlAudience.User | ControlAudience.Developer | ControlAudience.Test)),
-            diagnostics: [new(new("inventory-viewer-contract"), new("Client/Presentation"),
-                "Inventory viewer", "P6 will add D2/List viewer preferences; no P5 setting is invented.",
-                new(ControlValueKind.Text, maximumText: 96), Read,
-                ControlAudience.User | ControlAudience.Developer | ControlAudience.Test)],
+            diagnostics: [],
             actions: [new(new("rebind"), new("Client/Input"), "Rebind input", "Change one non-reserved user binding. Enter a canonical physical code; collisions reject.",
                 [new(ControlValueKind.Option, options: RebindableOptions),
                  new(ControlValueKind.Option, options: [new("keyboard"), new("mouse-button"), new("gamepad-button")]),
@@ -103,6 +104,7 @@ public sealed class ClientSettingsControlProvider : IControlProvider
         "render-distance" => ControlValue.Int64(s.RenderDistanceChunks), "vegetation" => ControlValue.Bool(s.ExperimentalVegetation),
         "display-mode" => ControlValue.Option(new(displayMode switch
         { ClientDisplayMode.Windowed => "windowed", ClientDisplayMode.BorderlessFullscreen => "borderless-fullscreen", _ => "fullscreen" })),
+        "inventory-viewer" => ControlValue.Option(new(s.InventoryViewer == ClientInventoryViewerProfile.D2Grid ? "d2-grid" : "list")),
         _ => throw new ArgumentException("Unknown setting.")
     };
     private static bool Defined(ClientSettingsLayer layer, string field) => field switch
@@ -121,7 +123,7 @@ public sealed class ClientSettingsControlProvider : IControlProvider
         var actual = Value(effective, _display?.Invoke().DisplayMode ?? doc.Display.DisplayMode, f);
         ControlProvenance provenance;
         bool realm = _scope.IsValid && doc.TryGetScope(_scope, out var layer) && Defined(layer, f);
-        if (f is "vegetation" or "display-mode") provenance = new(ControlProvenanceKind.UserGlobal, "device-owned");
+        if (f is "vegetation" or "display-mode" or "inventory-viewer") provenance = new(ControlProvenanceKind.UserGlobal, "device-owned");
         else if (realm) provenance = new(ControlProvenanceKind.UserRealm, _scope.Value!);
         else provenance = new(Defined(doc.Global, f) ? ControlProvenanceKind.UserGlobal : ControlProvenanceKind.BuiltInDefault);
         var actualProvenance = provenance;
@@ -132,7 +134,7 @@ public sealed class ClientSettingsControlProvider : IControlProvider
         var resolvedWithConsent = Value(ClientSettingsResolver.Resolve(doc, _scope, _recommendation, _consent), doc.Display, f);
         if (actual != resolvedWithConsent) actualProvenance = new(ControlProvenanceKind.RuntimeConstraint, "actual consumer state");
         bool pending = f == "vegetation" && requested != actual;
-        bool scopeFull = f is not ("vegetation" or "display-mode") && _scope.IsValid && doc.Scopes.Count == ClientSettingsDocument.MaximumScopes &&
+        bool scopeFull = f is not ("vegetation" or "display-mode" or "inventory-viewer") && _scope.IsValid && doc.Scopes.Count == ClientSettingsDocument.MaximumScopes &&
             !doc.TryGetScope(_scope, out _);
         return new(requested, actual, pending ? requested : null, provenance, actualProvenance,
             pending ? provenance : null, !scopeFull,
@@ -143,7 +145,7 @@ public sealed class ClientSettingsControlProvider : IControlProvider
     {
         var (doc, _) = Refresh();
         var values = mutations.ToDictionary(m => m.Id.Value!, m => m.Value, StringComparer.Ordinal);
-        bool changesLayer = values.Keys.Any(static key => key is not ("vegetation" or "display-mode"));
+        bool changesLayer = values.Keys.Any(static key => key is not ("vegetation" or "display-mode" or "inventory-viewer"));
         if (changesLayer && _scope.IsValid && doc.Scopes.Count == ClientSettingsDocument.MaximumScopes &&
             !doc.TryGetScope(_scope, out _))
             return ControlOwnerResult.Reject(ControlResultCode.OwnerRejected, "Realm settings scope capacity exhausted.");
@@ -176,14 +178,16 @@ public sealed class ClientSettingsControlProvider : IControlProvider
             { "windowed" => ClientDisplayMode.Windowed, "borderless-fullscreen" => ClientDisplayMode.BorderlessFullscreen,
                 "fullscreen" => ClientDisplayMode.Fullscreen, _ => throw new ArgumentException("Invalid display mode.") }
         });
+        if (values.TryGetValue("inventory-viewer", out var viewer)) candidate = candidate.WithInventoryViewer(
+            viewer.AsOption().Value switch
+            { "d2-grid" => ClientInventoryViewerProfile.D2Grid, "list" => ClientInventoryViewerProfile.List,
+              _ => throw new ArgumentException("Invalid Inventory viewer.") });
         // Exercise the existing exact resolver before the owner commits/persists anything.
         _ = ClientSettingsResolver.Resolve(candidate, _scope, _recommendation, _consent);
         _commit(candidate);
         Refresh(); return ControlOwnerResult.Accepted;
     }
-    public ControlValue Capture(DiagnosticId id) => id.Value == "inventory-viewer-contract"
-        ? ControlValue.Text("Current viewer; D2/List selection belongs to P6.")
-        : throw new ArgumentException("Unknown Settings diagnostic.");
+    public ControlValue Capture(DiagnosticId id) => throw new ArgumentException("Unknown Settings diagnostic.");
     public IEnumerable<ControlCollectionRow> Capture(ControlCollectionId id)
     {
         if (id.Value != "bindings") throw new ArgumentException("Unknown Settings collection.");

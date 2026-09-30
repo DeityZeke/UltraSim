@@ -16,7 +16,7 @@ using UltraSim.UI;
 /// </summary>
 public partial class S08HeadlessAcceptance : Control
 {
-    public override void _Ready()
+    public override async void _Ready()
     {
         try
         {
@@ -26,7 +26,7 @@ public partial class S08HeadlessAcceptance : Control
             RunF17WorkspaceAndGumpAcceptance();
             RunF19DisplayCompositionAcceptance();
             RunF18CameraRayAcceptance();
-            RunRemoteInventoryAcceptance();
+            await RunRemoteInventoryAcceptance();
             GD.Print("S0.8 / I0.11 GODOT ACCEPTANCE PASS");
             GetTree().Quit(0);
         }
@@ -666,7 +666,7 @@ public partial class S08HeadlessAcceptance : Control
         Expect(opened.Succeeded, "Native Inventory did not open.");
         UiViewInstanceId inventoryView = opened.View;
         Control inventoryRoot = GetNode<Control>($"UiView_{inventoryView.Value}");
-        Panel inventorySurface = Find<Panel>(inventoryRoot, "Element_background");
+        PanelContainer inventorySurface = Find<PanelContainer>(inventoryRoot, "InventoryPresentation");
         Expect(renderer.ResolveGameplayInput(new InputEventMouseButton
             {
                 Position = inventorySurface.GetGlobalRect().GetCenter(),
@@ -697,13 +697,14 @@ public partial class S08HeadlessAcceptance : Control
         client.SubmitAction(inventoryView, InventoryUi.Split);
         Expect(ReferenceEquals(inventoryRoot, GetNode<Control>($"UiView_{inventoryView.Value}")),
             "Inventory row deltas rebuilt the native root control.");
-        Expect(inventoryRows.GetChildCount() == 3,
+        Expect(Find<VBoxContainer>(inventoryRoot, "Element_items").GetChildCount() == 3,
             "The native Split delta did not update and add rows.");
 
         UiRowId sword = FindRow(client.GetRows(inventoryView, InventoryUi.Items), "Iron Sword");
         client.SubmitAction(inventoryView, InventoryUi.Select, sword);
         client.SubmitAction(inventoryView, InventoryUi.Equip);
-        Expect(inventoryRows.GetChildCount() == 2 && !ContainsLabel(inventoryRows, "Iron Sword"),
+        VBoxContainer equippedRows = Find<VBoxContainer>(inventoryRoot, "Element_items");
+        Expect(equippedRows.GetChildCount() == 2 && !ContainsLabel(equippedRows, "Iron Sword"),
             "The native Equip delta did not remove Iron Sword.");
         Expect(inventory.Close(inventoryView), "The native Inventory view did not close.");
         InventoryUiOpenResult hotInventory = inventory.OpenHot(fixture.Backpack);
@@ -728,7 +729,8 @@ public partial class S08HeadlessAcceptance : Control
 
     private static bool ContainsLabel(Node root, string text)
     {
-        if (root is Label label && label.Text == text) return true;
+        if (root is Label label && (label.Text == text ||
+            label.Text.StartsWith(text + " ", StringComparison.Ordinal))) return true;
         foreach (Node child in root.GetChildren())
         {
             if (ContainsLabel(child, text)) return true;

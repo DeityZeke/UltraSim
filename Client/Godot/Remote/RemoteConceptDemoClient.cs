@@ -240,7 +240,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             _ownedHud = FullRectControl("RemotePlayableHUD");
             sessionUi.HudHost.AddChild(_ownedHud);
             _uiHost = sessionUi.Gumps.Host;
-            _uiRenderer = new GodotUiRenderer(sessionUi.Gumps);
+            _uiRenderer = new GodotUiRenderer(sessionUi.Gumps, portraitWorld: () => _worldAssets);
+            _uiRenderer.SetInventoryViewerProfile(settings.InventoryViewer);
             _session = new RemotePlayableSession(
                 peer,
                 applicationSessionEpoch,
@@ -279,6 +280,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     {
         EnsureOperational();
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _uiRenderer?.SetInventoryViewerProfile(settings.InventoryViewer);
         _orbit.Reset();
         _direct.Reset();
         _independent.Reset();
@@ -689,6 +691,10 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         _systemChatBanner?.Dispose();
         _hoverTooltip?.Dispose();
         _renderer?.Dispose();
+        // UI portraits borrow World meshes during generation. Retire their native images and
+        // staging scene before the source resolver is retired.
+        _uiRenderer?.Dispose();
+        _uiRenderer = null;
         _worldAssets?.Dispose();
         _worldDerived?.Dispose();
         _worldAssets = null;
@@ -697,8 +703,6 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         _diagnosticEnvironment = null;
         _ = _session?.TryRequestDetach();
         _session?.Dispose();
-        _uiRenderer?.Dispose();
-        _uiRenderer = null;
         _source?.Dispose();
         _cache?.Dispose();
         _renderer = null;
@@ -743,6 +747,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         GodotCatalogWorldAssetResolver? previous = _worldAssets;
         _worldAssets = next;
         _renderer?.RefreshAssets(next);
+        _uiRenderer?.RefreshInventoryPresentation();
         previous?.Dispose();
     }
 

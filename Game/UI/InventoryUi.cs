@@ -1,6 +1,8 @@
 using UltraSim.ECS;
 using UltraSim.Game.Inspection;
 using UltraSim.Game.Inventory;
+using UltraSim.Game.Presentation.Contracts;
+using UltraSim.Framework.Definitions;
 using UltraSim.Server.Runtime;
 using UltraSim.UI;
 
@@ -296,7 +298,7 @@ public sealed class InventoryUiController : IDisposable
         if (!projection.Succeeded)
             return new InventoryUiOpenResult(false, UiViewInstanceId.Invalid, projection.Message);
         UiModel model = CreateModel(
-            projection.Items,
+            projection.ItemRows,
             projection.Destinations,
             projection.Title,
             "Ready",
@@ -427,8 +429,8 @@ public sealed class InventoryUiController : IDisposable
                             }
                             listPatches =
                             [
-                                UiListPatch.Update(InventoryUi.Items, ToRow(source)),
-                                UiListPatch.Add(InventoryUi.Items, ToRow(created)),
+                                UiListPatch.Update(InventoryUi.Items, ToRow(source, provider as IInventoryPresentationLookup)),
+                                UiListPatch.Add(InventoryUi.Items, ToRow(created, provider as IInventoryPresentationLookup)),
                             ];
                         }
                     }
@@ -487,7 +489,7 @@ public sealed class InventoryUiController : IDisposable
                                     throw new InvalidOperationException(
                                         "An accepted inventory equip produced an unprojectable result.");
                                 listPatches =
-                                [UiListPatch.Update(InventoryUi.Items, ToRow(equipped))];
+                                [UiListPatch.Update(InventoryUi.Items, ToRow(equipped, provider as IInventoryPresentationLookup))];
                             }
                             else
                             {
@@ -527,7 +529,7 @@ public sealed class InventoryUiController : IDisposable
                                 throw new InvalidOperationException(
                                     "An accepted inventory unequip produced an unprojectable result.");
                             listPatches =
-                            [UiListPatch.Update(InventoryUi.Items, ToRow(contained))];
+                            [UiListPatch.Update(InventoryUi.Items, ToRow(contained, provider as IInventoryPresentationLookup))];
                         }
                     }
                     else if (request.Action == InventoryUi.Drop)
@@ -586,7 +588,7 @@ public sealed class InventoryUiController : IDisposable
                             if (!state.TryProjectItem(world, item, out InventoryItemView placed))
                                 throw new InvalidOperationException(
                                     "An accepted Grid placement produced an unprojectable result.");
-                            listPatches = [UiListPatch.Update(InventoryUi.Items, ToRow(placed))];
+                            listPatches = [UiListPatch.Update(InventoryUi.Items, ToRow(placed, provider as IInventoryPresentationLookup))];
                         }
                     }
                     else
@@ -679,7 +681,7 @@ public sealed class InventoryUiController : IDisposable
     {
         bool ran = _runtime.TryUseActiveGeneration<IInventoryGenerationStateProvider, InventoryProjection>(
             (world, _, provider) => CaptureProjectionCore(
-                world, provider.Inventory, container, requiredOwner, transferDestinations),
+                world, provider, container, requiredOwner, transferDestinations),
             out InventoryProjection projection);
         return ran
             ? projection
@@ -688,11 +690,12 @@ public sealed class InventoryUiController : IDisposable
 
     private static InventoryProjection CaptureProjectionCore(
         EcsWorld world,
-        InventoryGenerationState state,
+        IInventoryGenerationStateProvider provider,
         Entity container,
         Entity requiredOwner,
         IReadOnlyList<Entity> transferDestinations)
     {
+        InventoryGenerationState state = provider.Inventory;
         if (!state.Index.ContainsContainer(container))
             return InventoryProjection.Rejected("The container is missing.");
         if (!world.TryGetPersistentId(container, out PersistentEntityId id))
@@ -751,12 +754,14 @@ public sealed class InventoryUiController : IDisposable
                 destinationDefinition.DisplayName);
         }
         items.Sort(static (left, right) => left.PersistentId.CompareTo(right.PersistentId));
+        InventoryItemView[] projectedItems = items.ToArray();
         return new InventoryProjection(
             true,
             new PersistentEntityKey(world.PersistentWorldId, id),
             ownerKey,
             definition.DisplayName,
-            items.ToArray(),
+            projectedItems,
+            ToRows(projectedItems, provider as IInventoryPresentationLookup),
             destinations,
             rules.PlacementMode == InventoryPlacementMode.Grid ? rules.GridWidth : (ushort)0,
             rules.PlacementMode == InventoryPlacementMode.Grid ? rules.GridHeight : (ushort)0,
@@ -856,7 +861,7 @@ public sealed class InventoryUiController : IDisposable
     }
 
     private static UiModel CreateModel(
-        IReadOnlyList<InventoryItemView> items,
+        IReadOnlyList<UiListRow> itemRows,
         IReadOnlyList<InventoryDestination> destinations,
         string title,
         string status,
@@ -865,7 +870,7 @@ public sealed class InventoryUiController : IDisposable
     {
         var model = new UiModel(InventoryUi.Definition);
         model.SetText(InventoryUi.Title, title);
-        model.ReplaceRows(InventoryUi.Items, ToRows(items));
+        model.ReplaceRows(InventoryUi.Items, itemRows.ToArray());
         model.SetText(InventoryUi.Status, status);
         model.SetText(InventoryUi.Details, "Select an item to inspect its authoritative properties.");
         model.SetText(InventoryUi.TransferLabel,
@@ -883,16 +888,25 @@ public sealed class InventoryUiController : IDisposable
         return model;
     }
 
-    private static UiListRow[] ToRows(IReadOnlyList<InventoryItemView> items)
+    private static UiListRow[] ToRows(IReadOnlyList<InventoryItemView> items,
+        IInventoryPresentationLookup? presentation)
     {
         var rows = new UiListRow[items.Count];
         for (int index = 0; index < rows.Length; index++)
-            rows[index] = ToRow(items[index]);
+            rows[index] = ToRow(items[index], presentation);
         return rows;
     }
 
-    private static UiListRow ToRow(in InventoryItemView item) => new(
-        new UiRowId(item.PersistentId.Value),
+    private static UiListRow ToRow(in InventoryItemView item,
+        IInventoryPresentationLookup? presentation)
+    {
+        PublicDefinitionPresentationDescriptor descriptor = default;
+        bool authored = presentation?.TryResolveInventoryPresentation(item.Prefab.Value,
+            out descriptor) == true && descriptor.IsValid;
+        SemanticPresentationReference portrait = authored
+            ? descriptor.World with { Role = PresentationRoleId.InventoryPortrait }
+            : default;
+        return new UiListRow(new UiRowId(item.PersistentId.Value),
         [
             UiValue.FromText(item.DisplayName),
             UiValue.FromNumber(item.Quantity),
@@ -900,7 +914,15 @@ public sealed class InventoryUiController : IDisposable
             UiValue.FromText(item.Placement.Mode == InventoryPlacementMode.Grid
                 ? $"Grid ({item.Placement.X},{item.Placement.Y}) {item.Placement.Width}×{item.Placement.Height}"
                 : "Unplaced"),
-        ]);
+            UiValue.FromNumber((int)item.Placement.Mode),
+            UiValue.FromNumber(item.Placement.X),
+            UiValue.FromNumber(item.Placement.Y),
+            UiValue.FromNumber(item.Placement.Width),
+            UiValue.FromNumber(item.Placement.Height),
+            UiValue.FromNumber((int)item.EquipSlot),
+        ], authored ? new UiRowAttachment(InventoryPortraitAttachmentCodec.AttachmentKind,
+            InventoryPortraitAttachmentCodec.Encode(portrait, descriptor.FallbackBounds)) : default);
+    }
 
     private static UiListRow[] ToGridRows(ushort width, ushort height)
     {
@@ -913,7 +935,7 @@ public sealed class InventoryUiController : IDisposable
         {
             rows[index++] = new UiListRow(
                 new UiRowId(checked((ulong)(y * width + x + 1))),
-                [UiValue.FromText($"({x},{y})")]);
+                [UiValue.FromText($"({x},{y})"), UiValue.FromNumber(x), UiValue.FromNumber(y)]);
         }
         return rows;
     }
@@ -1005,7 +1027,7 @@ public sealed class InventoryUiController : IDisposable
         in InventoryProjection projection,
         string status)
     {
-        UiListRow[] itemRows = ToRows(projection.Items);
+        UiListRow[] itemRows = projection.ItemRows;
         UiListRow[] destinationRows = ToRows(projection.Destinations);
         UiActionStatePatch[] actions = DisabledActionPatches();
         ulong sequence = checked(session.Sequence + 1);
@@ -1090,7 +1112,7 @@ public sealed class InventoryUiController : IDisposable
                     }
                 }
                 return CaptureProjectionCore(
-                    world, provider.Inventory, container, owner, destinations);
+                    world, provider, container, owner, destinations);
             },
             out InventoryProjection projection);
         return ran
@@ -1284,13 +1306,14 @@ public sealed class InventoryUiController : IDisposable
         PersistentEntityKey RequiredOwner,
         string Title,
         InventoryItemView[] Items,
+        UiListRow[] ItemRows,
         InventoryDestination[] Destinations,
         ushort GridWidth,
         ushort GridHeight,
         string Message)
     {
         internal static InventoryProjection Rejected(string message) =>
-            new(false, default, default, "", [], [], 0, 0, message);
+            new(false, default, default, "", [], [], [], 0, 0, message);
     }
 
     private readonly record struct InventoryDestination(

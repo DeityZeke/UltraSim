@@ -41,6 +41,7 @@ var tests = new (string Name, Action Body)[]
     ("MostlyEmptyContainersDoNotReserveTheoreticalChildCapacity", MostlyEmptyContainersDoNotReserveTheoreticalChildCapacity),
     ("AccountingAdmissionAndInventoryShareGameGeneration", AccountingAdmissionAndInventoryShareGameGeneration),
     ("InventoryUiPublishesGranularRowDeltas", InventoryUiPublishesGranularRowDeltas),
+    ("InventoryViewerProfilesPreserveTypedGridAndAuthority", InventoryViewerProfilesPreserveTypedGridAndAuthority),
     ("OwnedInventoryUiAuthorizesMoveEquipAndUnequip", OwnedInventoryUiAuthorizesMoveEquipAndUnequip),
     ("OwnedInventoryUiRepositionsGridItem", OwnedInventoryUiRepositionsGridItem),
     ("OwnedInventoryUiRefreshesCapacityUpgrade", OwnedInventoryUiRefreshesCapacityUpgrade),
@@ -1028,6 +1029,91 @@ static void OwnedInventoryUiAuthorizesMoveEquipAndUnequip()
     Assert.Equal("Container", unequipped.Values[2].Text);
     Assert.False(fixture.Use((_, _, game) => game.Inventory.Index.TryGetEquipped(
         fixture.Character, InventoryEquipSlot.MainHand, out _)));
+}
+
+static void InventoryViewerProfilesPreserveTypedGridAndAuthority()
+{
+    var composition = new UltraSimGameComposition(new InventoryLimits(16, 64, 32));
+    using var runtime = new ServerRuntime(composition, new ServerRuntimeOptions(
+        UltraSimGameComposition.CreateWorldOptions(128,
+            new PersistenceIdentityOptions(new PersistentWorldId(0x70_9193))),
+        WorldClockOptions.Default));
+    runtime.Initialize();
+    runtime.Start();
+    Assert.True(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider,
+        (Entity Owner, Entity Grid, Entity Backpack, Entity Sword)>(
+        (world, _, game) =>
+        {
+            Assert.True(world.TryInstantiate(game.Content.Character, out Entity owner));
+            Assert.True(game.Inventory.TryCreateOwnedContainer(world, game.Content.GridBackpack,
+                owner, 20, out Entity grid));
+            Assert.True(game.Inventory.TryCreateOwnedContainer(world, game.Content.Backpack,
+                owner, 20, out Entity backpack));
+            Assert.True(game.Inventory.TryCreateItem(world, grid, game.Content.IronSword, 1,
+                InventoryPlacement.Grid(2, 1, 1, 3), out Entity sword));
+            return (owner, grid, backpack, sword);
+        }, out var fixture));
+
+    var renderer = new MemoryRenderer();
+    using var client = new UiClientRuntime(renderer);
+    var link = new LocalSemanticLink(client);
+    using var port = new RecordingInventoryUiPort(link);
+    using var controller = new InventoryUiController(runtime.Game, port);
+    InventoryUiOpenResult opened = controller.OpenOwned(fixture.Grid, fixture.Owner);
+    Assert.True(opened.Succeeded);
+    UiModelView model = renderer.LastModel;
+    InventoryViewerProjection d2 = InventoryViewerProjection.Read(model,
+        ClientInventoryViewerProfile.D2Grid);
+    InventoryViewerProjection list = InventoryViewerProjection.Read(model,
+        ClientInventoryViewerProfile.List);
+    Assert.Equal(ClientInventoryViewerProfile.D2Grid, d2.Effective);
+    Assert.Equal(ClientInventoryViewerProfile.List, list.Effective);
+    Assert.Equal(5, d2.GridWidth);
+    Assert.Equal(5, d2.GridHeight);
+    Assert.Equal(1, d2.Items.Count);
+    InventoryPresentedItem sword = d2.Items[0];
+    Assert.Equal(2, sword.X);
+    Assert.Equal(1, sword.Y);
+    Assert.Equal(1, sword.Width);
+    Assert.Equal(3, sword.Height);
+    Assert.Equal(PresentationRoleId.InventoryPortrait, sword.Portrait.Role);
+    Assert.Equal(GameDefinitionIds.IronSword, sword.Portrait.Definition);
+    Assert.Equal(sword, list.Items[0]);
+    byte[] portraitPayload = InventoryPortraitAttachmentCodec.Encode(
+        sword.Portrait, sword.FallbackBounds);
+    Assert.True(InventoryPortraitAttachmentCodec.TryDecode(portraitPayload,
+        out SemanticPresentationReference decodedPortrait, out PublicFallbackBounds decodedBounds) &&
+        decodedPortrait == sword.Portrait && decodedBounds == sword.FallbackBounds);
+    portraitPayload[0]++;
+    Assert.True(!InventoryPortraitAttachmentCodec.TryDecode(portraitPayload, out _, out _));
+    var bindings = new UiDynamicSemanticImageBindings(opened.View, model.Definition);
+    bindings.Reconcile(opened.View, model.Definition, d2);
+    Assert.True(bindings.TryGet(opened.View, model.Definition, sword.Row, out var portrait) &&
+        portrait == sword.Portrait);
+    Assert.True(!bindings.TryGet(new UiViewInstanceId(opened.View.Value + 1),
+        model.Definition, sword.Row, out _));
+    Assert.True(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+        (world, _, game) => game.Inventory.TryProjectItem(world, fixture.Sword,
+            out InventoryItemView item) &&
+            item.Placement == InventoryPlacement.Grid(2, 1, 1, 3), out bool unchanged) && unchanged);
+    Assert.True(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+        (world, _, game) => game.Inventory.Move(world, fixture.Sword,
+            fixture.Grid, fixture.Backpack).Accepted, out bool moved) && moved);
+    Assert.True(controller.Refresh(opened.View, "Item moved."));
+    bindings.Reconcile(opened.View, renderer.LastModel.Definition,
+        InventoryViewerProjection.Read(renderer.LastModel, ClientInventoryViewerProfile.D2Grid));
+    Assert.True(!bindings.TryGet(opened.View, model.Definition, sword.Row, out _));
+    bindings.Retire();
+    Assert.True(!bindings.TryGet(opened.View, model.Definition, sword.Row, out _));
+    Assert.True(controller.Close(opened.View));
+
+    InventoryUiOpenResult unplaced = controller.OpenOwned(fixture.Backpack, fixture.Owner);
+    Assert.True(unplaced.Succeeded);
+    InventoryViewerProjection fallback = InventoryViewerProjection.Read(renderer.LastModel,
+        ClientInventoryViewerProfile.D2Grid);
+    Assert.Equal(ClientInventoryViewerProfile.List, fallback.Effective);
+    Assert.True(fallback.FallbackReason is not null);
+    Assert.True(controller.Close(unplaced.View));
 }
 
 static void OwnedInventoryUiRepositionsGridItem()
@@ -2113,11 +2199,13 @@ sealed class InventoryBenchmarkFixture : IDisposable
 
 sealed class MemoryRenderer : IUiRenderer
 {
+    public UiModelView LastModel { get; private set; }
     public IUiRenderHandle Create(
         UiViewInstanceId instance,
         CompiledUiDefinition definition,
         UiModelView model,
-        Action<UiActionRequest> submitAction) => new Handle();
+        Action<UiActionRequest> submitAction)
+    { LastModel = model; return new Handle(); }
 
     public void Apply(
         IUiRenderHandle handle,
@@ -2125,7 +2213,7 @@ sealed class MemoryRenderer : IUiRenderer
         UiModelView previous,
         UiModelView current,
         UiModelDelta delta,
-        Action<UiActionRequest> submitAction) { }
+        Action<UiActionRequest> submitAction) { LastModel = current; }
 
     public void Close(IUiRenderHandle handle) { }
     private sealed class Handle : IUiRenderHandle;

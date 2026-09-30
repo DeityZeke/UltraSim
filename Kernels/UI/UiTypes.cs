@@ -684,13 +684,38 @@ public readonly struct UiValue : IEquatable<UiValue>
     public override int GetHashCode() => HashCode.Combine(Kind, Text, Number, Boolean);
 }
 
+/// <summary>
+/// Opaque, finite application-owned presentation attachment. The UI kernel transports and fences
+/// bytes but does not interpret Definition identities, Inventory facts, assets, or authority.
+/// </summary>
+public readonly struct UiRowAttachment : IEquatable<UiRowAttachment>
+{
+    public const int MaximumBytes = 384;
+    private readonly byte[]? _payload;
+
+    public UiRowAttachment(ushort kind, ReadOnlySpan<byte> payload)
+    {
+        if (kind == 0 || payload.Length is <= 0 or > MaximumBytes)
+            throw new ArgumentException("A row attachment requires a kind and bounded payload.");
+        Kind = kind;
+        _payload = payload.ToArray();
+    }
+
+    public ushort Kind { get; }
+    public bool IsValid => Kind != 0 && _payload is { Length: > 0 };
+    public ReadOnlySpan<byte> Payload => _payload ?? ReadOnlySpan<byte>.Empty;
+    public bool Equals(UiRowAttachment other) => Kind == other.Kind && Payload.SequenceEqual(other.Payload);
+    public override bool Equals(object? obj) => obj is UiRowAttachment other && Equals(other);
+    public override int GetHashCode() => HashCode.Combine(Kind, Payload.Length);
+}
+
 /// <summary>Immutable dynamic row for a List/Repeater model slot.</summary>
 public readonly struct UiListRow : IEquatable<UiListRow>
 {
     public const int MaximumValues = 256;
     private readonly UiValue[] _values;
 
-    public UiListRow(UiRowId id, ReadOnlySpan<UiValue> values)
+    public UiListRow(UiRowId id, ReadOnlySpan<UiValue> values, UiRowAttachment attachment = default)
     {
         if (!id.IsValid)
             throw new ArgumentException("A list row requires a valid row ID.", nameof(id));
@@ -698,9 +723,11 @@ public readonly struct UiListRow : IEquatable<UiListRow>
             throw new ArgumentOutOfRangeException(nameof(values));
         _values = values.ToArray();
         Id = id;
+        Attachment = attachment;
     }
 
     public UiRowId Id { get; }
+    public UiRowAttachment Attachment { get; }
 
     public ReadOnlySpan<UiValue> Values => _values ?? ReadOnlySpan<UiValue>.Empty;
 
@@ -710,7 +737,8 @@ public readonly struct UiListRow : IEquatable<UiListRow>
 
     public bool Equals(UiListRow other)
     {
-        if (Id != other.Id || Values.Length != other.Values.Length)
+        if (Id != other.Id || Values.Length != other.Values.Length ||
+            !Attachment.Equals(other.Attachment))
             return false;
         for (int index = 0; index < Values.Length; index++)
         {

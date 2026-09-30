@@ -36,11 +36,14 @@ public sealed class GodotUiRenderer : IUiRenderer, IDisposable
     private readonly IGodotUiAssetResolver? _assets;
     private readonly IGodotUiVisualResolver? _visuals;
     private readonly UiSemanticImageBindings? _semanticImages;
+    private readonly GodotInventoryPortraitCache? _inventoryPortraits;
     private readonly Control? _host;
     private readonly GodotGumpWindowManager? _windows;
     private readonly List<GodotUiRenderHandle> _openHandles = [];
+    private ClientInventoryViewerProfile _inventoryViewer = ClientInventoryViewerProfile.D2Grid;
     private readonly int _ownerThread = System.Environment.CurrentManagedThreadId;
     private Texture2D? _missingIcon;
+    private Texture2D? _inventoryPrimitiveIcon;
     private bool _disposed;
 
     internal Texture2D DiagnosticMissingIcon
@@ -53,11 +56,31 @@ public sealed class GodotUiRenderer : IUiRenderer, IDisposable
         }
     }
 
+    internal Texture2D DiagnosticInventoryPrimitiveIcon
+    {
+        get
+        {
+            EnsureOwner();
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _inventoryPrimitiveIcon ??= GodotPrimitiveSubstrate.CreateInventoryPrimitiveIcon();
+        }
+    }
+
+    /// <summary>Bounded native-derived portrait census; no semantic or content ownership.</summary>
+    public (int Images, ulong Builds, ulong Hits, bool StagingScene,
+        long ColdBuildTicks, long WarmLookupTicks, long ReservedPixelBytes) InventoryPortraitSnapshot =>
+        _inventoryPortraits?.Snapshot ?? default;
+
     public void Dispose()
     {
         EnsureOwner();
         if (_disposed) return;
         while (_openHandles.Count != 0) Close(_openHandles[^1]);
+        if (_inventoryPortraits is not null)
+            _inventoryPortraits.PortraitReady -= RefreshInventoryPresentation;
+        _inventoryPortraits?.Dispose();
+        _inventoryPrimitiveIcon?.Dispose();
+        _inventoryPrimitiveIcon = null;
         _missingIcon?.Dispose();
         _missingIcon = null;
         _disposed = true;
@@ -70,21 +93,56 @@ public sealed class GodotUiRenderer : IUiRenderer, IDisposable
     }
 
     public GodotUiRenderer(Control? host = null, IGodotUiAssetResolver? assets = null,
-        UiSemanticImageBindings? semanticImages = null)
+        UiSemanticImageBindings? semanticImages = null,
+        Func<IGodotWorldAssetResolver?>? portraitWorld = null)
     {
         _host = host;
         _assets = assets;
         _visuals = assets as IGodotUiVisualResolver;
         _semanticImages = semanticImages;
+        if (portraitWorld is not null && host is not null)
+        {
+            _inventoryPortraits = new GodotInventoryPortraitCache(host, portraitWorld);
+            _inventoryPortraits.PortraitReady += RefreshInventoryPresentation;
+        }
     }
 
     public GodotUiRenderer(GodotGumpWindowManager windows, IGodotUiAssetResolver? assets = null,
-        UiSemanticImageBindings? semanticImages = null)
+        UiSemanticImageBindings? semanticImages = null,
+        Func<IGodotWorldAssetResolver?>? portraitWorld = null)
     {
         _windows = windows ?? throw new ArgumentNullException(nameof(windows));
         _assets = assets;
         _visuals = assets as IGodotUiVisualResolver;
         _semanticImages = semanticImages;
+        if (portraitWorld is not null)
+        {
+            _inventoryPortraits = new GodotInventoryPortraitCache(windows.Host, portraitWorld);
+            _inventoryPortraits.PortraitReady += RefreshInventoryPresentation;
+        }
+    }
+
+    /// <summary>Rebuilds only native Inventory presentation; retained model, view and authority stay unchanged.</summary>
+    public void SetInventoryViewerProfile(ClientInventoryViewerProfile profile)
+    {
+        EnsureOwner();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (profile is not (ClientInventoryViewerProfile.D2Grid or ClientInventoryViewerProfile.List))
+            throw new ArgumentOutOfRangeException(nameof(profile));
+        if (_inventoryViewer == profile) return;
+        _inventoryViewer = profile;
+        foreach (GodotUiRenderHandle handle in _openHandles)
+            handle.SetInventoryViewerProfile(profile);
+    }
+
+    /// <summary>Re-resolve open portraits after a presentation source becomes available.</summary>
+    public void RefreshInventoryPresentation()
+    {
+        EnsureOwner();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _inventoryPortraits?.CancelStaleSource();
+        foreach (GodotUiRenderHandle handle in _openHandles)
+            handle.RefreshInventoryPresentation();
     }
 
     public IUiRenderHandle Create(
@@ -97,7 +155,8 @@ public sealed class GodotUiRenderer : IUiRenderer, IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         GodotUiDefinitionAdmission.Validate(definition);
         var handle = new GodotUiRenderHandle(instance, definition, model, submitAction,
-            _assets, _visuals, _semanticImages, () => DiagnosticMissingIcon);
+            _assets, _visuals, _semanticImages, () => DiagnosticMissingIcon, _inventoryViewer,
+            _inventoryPortraits, () => DiagnosticInventoryPrimitiveIcon);
         if (_windows is not null)
         {
             _windows.Attach(handle);
@@ -264,6 +323,7 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
     private readonly Dictionary<UiElementId, Dictionary<UiRowId, Control>> _listRows = [];
     private readonly Dictionary<UiActionId, UiActionState> _actionStates = [];
     private readonly Action<UiActionRequest> _submitAction;
+    private readonly GodotInventoryViewer? _inventory;
     private bool _updating;
     private bool _outsideCloseSubmitted;
 
@@ -275,7 +335,10 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
         IGodotUiAssetResolver? assets,
         IGodotUiVisualResolver? visuals,
         UiSemanticImageBindings? semanticImages,
-        Func<Texture2D> fallbackIcon)
+        Func<Texture2D> fallbackIcon,
+        ClientInventoryViewerProfile inventoryViewer = ClientInventoryViewerProfile.D2Grid,
+        IGodotUiSemanticImageResolver? inventoryPortraits = null,
+        Func<Texture2D>? inventoryPrimitiveIcon = null)
     {
         _instance = instance;
         _definition = definition;
@@ -293,7 +356,14 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
         UiCompiledLayoutNode root = FindRootLayout();
         Root.Size = new Vector2(root.Canvas.Width, root.Canvas.Height);
         _layouts.Add(root.Id, Root);
-        BuildChildren(root.Id, model, submitAction);
+        if (definition.Key.Value == "game.inventory.gump")
+        {
+            _inventory = new GodotInventoryViewer(instance, definition, model, submitAction,
+                inventoryViewer, assets as IGodotUiSemanticImageResolver, inventoryPortraits,
+                inventoryPrimitiveIcon ?? fallbackIcon);
+            Root.AddChild(_inventory.Root);
+        }
+        else BuildChildren(root.Id, model, submitAction);
     }
 
     public Control Root { get; }
@@ -311,6 +381,8 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
     {
         if (!GodotObject.IsInstanceValid(Root) || !Root.IsVisibleInTree())
             return false;
+        if (_inventory is not null && _inventory.Root.GetGlobalRect().HasPoint(viewportPosition))
+            return true;
         foreach (Control control in _elements.Values)
         {
             if (GodotObject.IsInstanceValid(control) && control.IsVisibleInTree() &&
@@ -344,6 +416,11 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
 
     internal void Apply(UiModelView model, UiModelDelta delta, Action<UiActionRequest> submitAction)
     {
+        if (_inventory is not null)
+        {
+            _inventory.Apply(model, submitAction);
+            return;
+        }
         _updating = true;
         try
         {
@@ -390,6 +467,7 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
 
     internal void CloseNative()
     {
+        _inventory?.Retire();
         Control native = NativeWindowRoot ?? Root;
         NativeWindowRoot = null;
         if (GodotObject.IsInstanceValid(native))
@@ -398,6 +476,11 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
             native.QueueFree();
         }
     }
+
+    internal void SetInventoryViewerProfile(ClientInventoryViewerProfile profile) =>
+        _inventory?.SetPreferred(profile);
+
+    internal void RefreshInventoryPresentation() => _inventory?.RefreshPresentation();
 
     internal void CenterInHost()
     {

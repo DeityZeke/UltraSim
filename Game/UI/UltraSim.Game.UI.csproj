@@ -14,6 +14,7 @@
     <ProjectReference Include="../../Kernels/ECS/UltraSim.ECS.csproj" />
     <ProjectReference Include="../../Kernels/UI/UltraSim.UI.csproj" />
     <ProjectReference Include="../Inventory/UltraSim.Game.Inventory.csproj" />
+    <ProjectReference Include="../Presentation.Contracts/UltraSim.Game.Presentation.Contracts.csproj" />
     <ProjectReference Include="../../Server/Runtime/UltraSim.Server.Runtime.csproj" />
   </ItemGroup>
 </Project>

@@ -18,6 +18,13 @@ public enum ClientCameraProfile : byte
     IndependentMoveLook = 3,
 }
 
+/// <summary>Client-owned Inventory presentation preference; never a container rule or Game state.</summary>
+public enum ClientInventoryViewerProfile : byte
+{
+    D2Grid = 1,
+    List = 2,
+}
+
 /// <summary>Finite client action vocabulary earned by the current playable client.</summary>
 public enum ClientSemanticAction : byte
 {
@@ -318,7 +325,7 @@ public readonly record struct ClientScopedSettings(
 /// </summary>
 public sealed class ClientSettingsDocument
 {
-    public const int CurrentVersion = 6;
+    public const int CurrentVersion = 7;
     public const int MaximumScopes = 128;
     private readonly ReadOnlyCollection<ClientScopedSettings> _scopes;
     private readonly ReadOnlyCollection<ClientNamedControlProfile> _namedProfiles;
@@ -328,8 +335,12 @@ public sealed class ClientSettingsDocument
         IEnumerable<ClientScopedSettings>? scopes = null,
         IEnumerable<ClientNamedControlProfile>? namedProfiles = null,
         ClientDisplaySettings? display = null,
-        bool experimentalVegetation = false)
+        bool experimentalVegetation = false,
+        ClientInventoryViewerProfile inventoryViewer = ClientInventoryViewerProfile.D2Grid)
     {
+        if (inventoryViewer is not (ClientInventoryViewerProfile.D2Grid or ClientInventoryViewerProfile.List))
+            throw new ArgumentOutOfRangeException(nameof(inventoryViewer));
+        InventoryViewer = inventoryViewer;
         ExperimentalVegetation = experimentalVegetation;
         Display = display ?? ClientDisplaySettings.Default;
         _ = ClientDisplayResolver.Resolve(Display);
@@ -359,6 +370,7 @@ public sealed class ClientSettingsDocument
     public ClientDisplaySettings Display { get; }
     /// <summary>Device-owned prototype opt-in. Not a realm override or server profile field.</summary>
     public bool ExperimentalVegetation { get; }
+    public ClientInventoryViewerProfile InventoryViewer { get; }
     public ReadOnlyCollection<ClientScopedSettings> Scopes => _scopes;
     public ReadOnlyCollection<ClientNamedControlProfile> NamedProfiles => _namedProfiles;
 
@@ -375,7 +387,7 @@ public sealed class ClientSettingsDocument
         ClientNamedControlProfile[] values = _namedProfiles
             .Where(value => !string.Equals(value.Name, profile.Name, StringComparison.OrdinalIgnoreCase))
             .Append(profile).ToArray();
-        return new ClientSettingsDocument(Global, _scopes, values, Display, ExperimentalVegetation);
+        return new ClientSettingsDocument(Global, _scopes, values, Display, ExperimentalVegetation, InventoryViewer);
     }
 
     public bool TryGetScope(ClientSettingsScopeKey scope, out ClientSettingsLayer layer)
@@ -400,13 +412,16 @@ public sealed class ClientSettingsDocument
     }
 
     public ClientSettingsDocument WithGlobal(ClientSettingsLayer layer) =>
-        new(layer ?? throw new ArgumentNullException(nameof(layer)), _scopes, _namedProfiles, Display, ExperimentalVegetation);
+        new(layer ?? throw new ArgumentNullException(nameof(layer)), _scopes, _namedProfiles, Display, ExperimentalVegetation, InventoryViewer);
 
     public ClientSettingsDocument WithDisplay(ClientDisplaySettings display) =>
-        new(Global, _scopes, _namedProfiles, display, ExperimentalVegetation);
+        new(Global, _scopes, _namedProfiles, display, ExperimentalVegetation, InventoryViewer);
 
     public ClientSettingsDocument WithExperimentalVegetation(bool enabled) =>
-        new(Global, _scopes, _namedProfiles, Display, enabled);
+        new(Global, _scopes, _namedProfiles, Display, enabled, InventoryViewer);
+
+    public ClientSettingsDocument WithInventoryViewer(ClientInventoryViewerProfile profile) =>
+        new(Global, _scopes, _namedProfiles, Display, ExperimentalVegetation, profile);
 
     public ClientSettingsDocument WithScope(ClientSettingsScopeKey scope, ClientSettingsLayer layer)
     {
@@ -424,7 +439,7 @@ public sealed class ClientSettingsDocument
             else values.Add(value);
         }
         if (!replaced) values.Add(new ClientScopedSettings(scope, layer));
-        return new ClientSettingsDocument(Global, values, _namedProfiles, Display, ExperimentalVegetation);
+        return new ClientSettingsDocument(Global, values, _namedProfiles, Display, ExperimentalVegetation, InventoryViewer);
     }
 }
 
@@ -444,9 +459,11 @@ public sealed class ResolvedClientSettings
         ClientCameraRig cameraRig,
         int renderDistanceChunks,
         ClientPhysicalBinding[] bindings,
-        bool experimentalVegetation = false)
+        bool experimentalVegetation = false,
+        ClientInventoryViewerProfile inventoryViewer = ClientInventoryViewerProfile.D2Grid)
     {
         ExperimentalVegetation = experimentalVegetation;
+        InventoryViewer = inventoryViewer;
         UiScale = uiScale;
         MasterVolume = masterVolume;
         PointerSensitivity = pointerSensitivity;
@@ -471,6 +488,7 @@ public sealed class ResolvedClientSettings
     public ClientCameraRig CameraRig { get; }
     public int RenderDistanceChunks { get; }
     public bool ExperimentalVegetation { get; }
+    public ClientInventoryViewerProfile InventoryViewer { get; }
     public ReadOnlyCollection<ClientPhysicalBinding> Bindings => _bindings;
 
     public bool TryGetBinding(ClientSemanticAction action, out ClientPhysicalInput input)
@@ -557,7 +575,7 @@ public static class ClientSettingsResolver
             current.UiScale, current.MasterVolume, current.PointerSensitivity, current.InvertY,
             current.ControlGrammar, current.CameraProfile, current.CameraDistance,
             current.CameraFovDegrees, current.CameraRig, current.RenderDistanceChunks, bindings,
-            document.ExperimentalVegetation);
+            document.ExperimentalVegetation, document.InventoryViewer);
     }
 
     private static MutableSettings BuiltIn()
@@ -729,6 +747,7 @@ public static class ClientSettingsJsonCodec
         {
             Version = ClientSettingsDocument.CurrentVersion,
             ExperimentalVegetation = document.ExperimentalVegetation,
+            InventoryViewer = document.InventoryViewer,
             Display = ToDto(document.Display),
             Global = ToDto(document.Global),
             Scopes = document.Scopes.Select(scope => new ScopeDto
@@ -796,7 +815,10 @@ public static class ClientSettingsJsonCodec
                 : ClientDisplaySettings.Default;
             bool vegetation = value.Version < 6 ? false : value.ExperimentalVegetation ??
                 throw new JsonException("ExperimentalVegetation is required in v6.");
-            document = new ClientSettingsDocument(global, scopes, namedProfiles, display, vegetation);
+            ClientInventoryViewerProfile inventoryViewer = value.Version < 7
+                ? ClientInventoryViewerProfile.D2Grid
+                : value.InventoryViewer ?? throw new JsonException("InventoryViewer is required in v7.");
+            document = new ClientSettingsDocument(global, scopes, namedProfiles, display, vegetation, inventoryViewer);
             ValidateDocument(document);
             error = null;
             return true;
@@ -907,6 +929,7 @@ public static class ClientSettingsJsonCodec
     {
         public int Version { get; set; }
         public bool? ExperimentalVegetation { get; set; }
+        public ClientInventoryViewerProfile? InventoryViewer { get; set; }
         public DisplayDto? Display { get; set; }
         public LayerDto? Global { get; set; }
         public List<ScopeDto>? Scopes { get; set; }

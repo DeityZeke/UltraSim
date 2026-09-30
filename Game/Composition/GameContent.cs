@@ -142,6 +142,19 @@ public sealed class GameContent : IInventoryContentCatalog
     public WorldContentBinding World { get; }
     public DefinitionCatalog Definitions { get; }
 
+    /// <summary>Only explicitly mapped prefab provenance may disclose an authored Definition.</summary>
+    public bool TryResolveInventoryPresentation(string prefabKey,
+        out PublicDefinitionPresentationDescriptor descriptor)
+    {
+        descriptor = default;
+        if (!string.Equals(prefabKey, GamePrefabKeys.IronSword.Value, StringComparison.Ordinal) ||
+            !Definitions.TryResolve(GameDefinitionIds.IronSword, out DefinitionHandle handle) ||
+            !Definitions.Bind(PresentationDefinitionFacets.Presentation).TryGet(handle, out PresentationFacet facet))
+            return false;
+        descriptor = facet.PublicDescriptor(interactionVisible: true);
+        return true;
+    }
+
     // Governance: bump this identity whenever the semantic meaning of any packed numeric world-content
     // ID changes incompatibly, even when the numeric value itself remains admitted and unchanged.
     public static WorldContentFingerprint WorldFingerprint { get; } =
