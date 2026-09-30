@@ -6527,6 +6527,18 @@ static void VerifyP7GodotServerGui(string root, string configuration, string god
         "--p7-identity-dir=" + Path.Combine(output, "restart-identity"),
         "--p7-server-arg=--bind=127.0.0.1:0",
     ]);
+    Run(root, executable,
+    [
+        "--headless", "--", "--p7-gui-restore-smoke",
+        "--p7-identity-dir=" + Path.Combine(output, "restore-identity"),
+        "--p7-server-arg=--bind=127.0.0.1:0",
+    ]);
+    Run(root, executable,
+    [
+        "--headless", "--", "--p7-gui-restore-reject-smoke",
+        "--p7-identity-dir=" + Path.Combine(output, "restore-reject-identity"),
+        "--p7-server-arg=--bind=127.0.0.1:0",
+    ]);
     string eofIdentity = Path.Combine(output, "eof-identity");
     var eofStart = new ProcessStartInfo(Path.Combine(headless, "UltraSim.Server.DirectConnect"))
     {
@@ -6559,6 +6571,7 @@ static void VerifyP7GodotServerGui(string root, string configuration, string god
     }
     Console.WriteLine("PASS P7_ExportedGodotServerGui server=ServerOnly " +
         "frontend=ControlPlaneStdio save=complete backup=complete restart=reopened " +
+        "selected-restore=staged-and-reopened rejected-restore=original-reopened " +
         "shutdown=clean parentEof=clean");
 }
 

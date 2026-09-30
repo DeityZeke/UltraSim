@@ -21,6 +21,7 @@ public partial class ServerGuiRoot : Control
     private ChildProcess? _child;
     private string? _headlessBinary;
     private string? _identityDirectory;
+    private string[] _launchArgs = [];
     private Label _banner = null!;
     private TextEdit _status = null!;
     private TextEdit _participants = null!;
@@ -30,9 +31,13 @@ public partial class ServerGuiRoot : Control
     private TextEdit _console = null!;
     private LineEdit _command = null!;
     private LineEdit _kickTarget = null!;
+    private LineEdit _restoreTarget = null!;
     private ConfirmationDialog _confirmation = null!;
     private string? _pendingAction;
     private ulong _pendingTarget;
+    private ulong _confirmationRestoreSequence;
+    private ulong _pendingRestoreSequence;
+    private int _restoreWorkerRunning;
     private ulong _requestId;
     private int _pendingCount;
     private int _droppedLines;
@@ -43,6 +48,9 @@ public partial class ServerGuiRoot : Control
     private bool _quitting;
     private bool _smoke;
     private bool _restartSmoke;
+    private bool _restoreSmoke;
+    private bool _restoreRejectSmoke;
+    private bool _restorePublishedForSmoke;
     private int _smokeStage;
     private long _smokeDeadline;
 
@@ -52,8 +60,12 @@ public partial class ServerGuiRoot : Control
         BuildInterface();
         string[] args = OS.GetCmdlineUserArgs();
         _restartSmoke = args.Contains("--p7-gui-restart-smoke", StringComparer.Ordinal);
-        _smoke = _restartSmoke || args.Contains("--p7-gui-smoke", StringComparer.Ordinal);
-        _smokeDeadline = System.Environment.TickCount64 + 60_000;
+        _restoreSmoke = args.Contains("--p7-gui-restore-smoke", StringComparer.Ordinal);
+        _restoreRejectSmoke = args.Contains("--p7-gui-restore-reject-smoke", StringComparer.Ordinal);
+        _smoke = _restartSmoke || _restoreSmoke || _restoreRejectSmoke ||
+            args.Contains("--p7-gui-smoke", StringComparer.Ordinal);
+        _smokeDeadline = System.Environment.TickCount64 +
+            (_restoreSmoke || _restoreRejectSmoke ? 180_000 : 60_000);
         try { StartChild(args); }
         catch (Exception error) when (error is IOException or ArgumentException or InvalidOperationException)
         {
@@ -73,6 +85,7 @@ public partial class ServerGuiRoot : Control
         }
         int dropped = Interlocked.Exchange(ref _droppedLines, 0);
         if (dropped != 0) AddVisible("[bounded GUI output queue dropped " + dropped + " lines]");
+        if (_smoke && System.Environment.TickCount64 > _smokeDeadline) SmokeFailure("timeout");
 
         if (_child is { HasExited: true } child && !_quitting)
         {
@@ -83,14 +96,28 @@ public partial class ServerGuiRoot : Control
             _child = null;
             if (_smoke)
             {
-                if ((_smokeStage == 4 || _smokeStage == 11) && exit == 0)
+                if (_pendingRestoreSequence != 0 && exit == 0)
+                    StartRestoreMaintenance(_pendingRestoreSequence);
+                else if ((_smokeStage == 4 || _smokeStage == 11 || _smokeStage == 22 ||
+                    _smokeStage == 32) && exit == 0)
                 {
-                    GD.Print(_restartSmoke
-                        ? "PASS P7_GodotServerGuiSupervisedRestart reopened=true shutdown=clean"
-                        : "PASS P7_GodotServerGuiPhysicalActions save=complete backup=complete shutdown=clean");
+                    GD.Print(_restoreRejectSmoke
+                        ? "PASS P7_GodotServerGuiRejectedRestore live-generation-preserved=true"
+                        : _restoreSmoke
+                        ? "PASS P7_GodotServerGuiSelectedRestore staged=true reopened=true shutdown=clean"
+                        : _restartSmoke
+                            ? "PASS P7_GodotServerGuiSupervisedRestart reopened=true shutdown=clean"
+                            : "PASS P7_GodotServerGuiPhysicalActions save=complete backup=complete shutdown=clean");
                     _ = QuitAfterRetirement();
                 }
                 else SmokeFailure("server-exit-" + exit);
+            }
+            else if (_pendingRestoreSequence != 0 && exit == 0)
+                StartRestoreMaintenance(_pendingRestoreSequence);
+            else if (_pendingRestoreSequence != 0)
+            {
+                _pendingRestoreSequence = 0;
+                _banner.Text = "Shutdown failed; restore was not attempted.";
             }
             else if (_shutdownRequested && exit == 0)
                 _ = QuitAfterRetirement();
@@ -104,12 +131,16 @@ public partial class ServerGuiRoot : Control
             Send("status");
             if (!_smoke) { Send("participants"); Send("log"); }
         }
-        if (_smoke && System.Environment.TickCount64 > _smokeDeadline) SmokeFailure("timeout");
     }
 
     public override void _Notification(int what)
     {
         if (what != NotificationWMCloseRequest) return;
+        if (_pendingRestoreSequence != 0 || Volatile.Read(ref _restoreWorkerRunning) != 0)
+        {
+            _banner.Text = "Cold restore owns this deployment; wait for its result before closing.";
+            return;
+        }
         if (_child is { HasExited: false })
         {
             _shutdownRequested = true;
@@ -148,6 +179,12 @@ public partial class ServerGuiRoot : Control
             "Save and stop this server?"));
         AddButton(toolbar, "Refresh", () => { Send("status"); Send("participants");
             Send("log"); Send("audit"); RefreshBackups(); });
+        AddButton(toolbar, "Start Server", () =>
+        {
+            if (_child is null && _pendingRestoreSequence == 0 &&
+                Volatile.Read(ref _restoreWorkerRunning) == 0)
+                StartChild(_launchArgs);
+        });
         _kickTarget = new LineEdit { PlaceholderText = "Participant ID", MaxLength = 20,
             CustomMinimumSize = new Vector2(130, 0) };
         toolbar.AddChild(_kickTarget);
@@ -161,8 +198,11 @@ public partial class ServerGuiRoot : Control
         _confirmation = new ConfirmationDialog { Name = "OperatorConfirmation" };
         _confirmation.Confirmed += () =>
         {
-            if (_pendingAction is { } action) Send("action", action, _pendingTarget, true);
+            if (_confirmationRestoreSequence != 0)
+                BeginRestore(_confirmationRestoreSequence);
+            else if (_pendingAction is { } action) Send("action", action, _pendingTarget, true);
             _pendingAction = null;
+            _confirmationRestoreSequence = 0;
         };
         AddChild(_confirmation);
 
@@ -173,6 +213,27 @@ public partial class ServerGuiRoot : Control
         _participants = AddPage(tabs, "Participants");
         _events = AddPage(tabs, "Live Log and Audit");
         _backups = AddPage(tabs, "Recovery Candidates");
+        var restoreInput = new HBoxContainer { Name = "ColdRestoreSelection" };
+        layout.AddChild(restoreInput);
+        _restoreTarget = new LineEdit { PlaceholderText = "Published backup sequence",
+            MaxLength = 20, CustomMinimumSize = new Vector2(240, 0) };
+        restoreInput.AddChild(_restoreTarget);
+        AddButton(restoreInput, "Restore Selected Backup", () =>
+        {
+            if (!ulong.TryParse(_restoreTarget.Text, NumberStyles.None,
+                    CultureInfo.InvariantCulture, out ulong sequence) || sequence == 0)
+            {
+                AddVisible("Restore requires a positive sequence from validated Recovery Candidates.");
+                return;
+            }
+            if (_pendingRestoreSequence != 0 || Volatile.Read(ref _restoreWorkerRunning) != 0)
+                return;
+            _pendingAction = null;
+            _confirmationRestoreSequence = sequence;
+            _confirmation.DialogText = "Stop the server, validate backup " + sequence +
+                ", publish it as a NEW live generation, then reopen? Current live state will be replaced.";
+            _confirmation.PopupCentered();
+        });
         _actions = AddPage(tabs, "Control Plane");
         _console = AddPage(tabs, "Console Output");
         var input = new HBoxContainer { Name = "OperatorCommandInput" };
@@ -206,6 +267,7 @@ public partial class ServerGuiRoot : Control
 
     private void Confirm(string action, ulong target, string prompt)
     {
+        _confirmationRestoreSequence = 0;
         _pendingAction = action;
         _pendingTarget = target;
         _confirmation.DialogText = prompt;
@@ -214,6 +276,11 @@ public partial class ServerGuiRoot : Control
 
     private void StartChild(string[] args)
     {
+        if (_child is not null || Volatile.Read(ref _restoreWorkerRunning) != 0)
+            throw new InvalidOperationException("The server or cold restore already owns this deployment.");
+        _launchArgs = args;
+        _ready = false;
+        _shutdownRequested = false;
         string executableDirectory = Path.GetDirectoryName(OS.GetExecutablePath()) ??
             throw new InvalidOperationException("The Godot executable has no parent directory.");
         string launcher = args.FirstOrDefault(arg => arg.StartsWith("--p7-server-launcher=", StringComparison.Ordinal))?
@@ -280,6 +347,49 @@ public partial class ServerGuiRoot : Control
             catch (JsonException error) { _backups.Text = "Invalid backup inspection: " + error.Message; }
             return;
         }
+        if (line.StartsWith("P7RESTORE ", StringComparison.Ordinal))
+        {
+            try
+            {
+                MaintenanceReply? reply = JsonSerializer.Deserialize<MaintenanceReply>(line.AsSpan(10));
+                if (reply is null) throw new JsonException("Empty restore response.");
+                AddVisible(reply.Text);
+                _pendingRestoreSequence = 0;
+                if (reply.Succeeded)
+                {
+                    if (_restoreSmoke)
+                    {
+                        _restorePublishedForSmoke = reply.Text.Contains("selected=1", StringComparison.Ordinal) &&
+                            reply.Text.Contains("live-generation=3", StringComparison.Ordinal);
+                        if (!_restorePublishedForSmoke) { SmokeFailure("restore-generation-mismatch"); return; }
+                    }
+                    _banner.Text = "Selected backup published; reopening the server.";
+                    try { StartChild(_launchArgs); }
+                    catch (Exception error) when (error is IOException or ArgumentException or InvalidOperationException)
+                    {
+                        _banner.Text = "Backup restored, but server reopen failed: " + error.Message;
+                        AddVisible(_banner.Text);
+                        if (_smoke) SmokeFailure("reopen-failed");
+                        return;
+                    }
+                    if (_restoreSmoke) _smokeStage = 21;
+                }
+                else
+                {
+                    _banner.Text = "Restore rejected; server remains stopped. Inspect the error before restart.";
+                    if (_restoreRejectSmoke)
+                    {
+                        if (!reply.Text.Contains("P7 backup restore rejected", StringComparison.Ordinal))
+                        { SmokeFailure("wrong-restore-rejection"); return; }
+                        try { StartChild(_launchArgs); _smokeStage = 31; }
+                        catch (Exception error) { SmokeFailure("reject-reopen-failed: " + error); }
+                    }
+                    else if (_smoke) SmokeFailure("restore-rejected: " + reply.Text);
+                }
+            }
+            catch (JsonException error) { AddVisible("Invalid restore result: " + error.Message); }
+            return;
+        }
         if (line.StartsWith("P7GUI ", StringComparison.Ordinal))
         {
             try
@@ -323,6 +433,15 @@ public partial class ServerGuiRoot : Control
                     Send("action", "restart-with-save", confirmed: true);
                     _smokeStage = 10;
                 }
+            }
+            else if (_restoreSmoke && _smokeStage == 21)
+            {
+                // Wait for the cold-reopen owner snapshot before declaring the journey complete.
+            }
+            else if (_restoreRejectSmoke)
+            {
+                if (_smokeStage == 0) { _smokeStage = 30; BeginRestore(999); }
+                // After rejection, wait for the original live generation's owner snapshot.
             }
             else if (_smoke) { Send("action", "save-now"); _smokeStage = 1; }
         }
@@ -384,6 +503,67 @@ public partial class ServerGuiRoot : Control
         });
     }
 
+    private void BeginRestore(ulong sequence)
+    {
+        _pendingRestoreSequence = sequence;
+        if (_child is { HasExited: false })
+        {
+            _pendingRestoreSequence = sequence;
+            _shutdownRequested = true;
+            _banner.Text = "Retiring server before selected cold restore…";
+            Send("action", "shutdown", confirmed: true);
+        }
+        else StartRestoreMaintenance(sequence);
+    }
+
+    private void StartRestoreMaintenance(ulong sequence)
+    {
+        if (_headlessBinary is null || _identityDirectory is null ||
+            Interlocked.CompareExchange(ref _restoreWorkerRunning, 1, 0) != 0) return;
+        string binary = _headlessBinary;
+        string identity = _identityDirectory;
+        _banner.Text = "Validating and publishing selected backup " + sequence + " offline…";
+        _ = Task.Run(() =>
+        {
+            MaintenanceReply reply;
+            try
+            {
+                var start = new ProcessStartInfo(binary)
+                {
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                };
+                start.ArgumentList.Add("--identity-dir=" + identity);
+                start.ArgumentList.Add("--restore-backup-sequence=" + sequence.ToString(CultureInfo.InvariantCulture));
+                using ChildProcess process = ChildProcess.Start(start) ??
+                    throw new IOException("Cold restore maintenance did not start.");
+                Task<string> output = process.StandardOutput.ReadToEndAsync();
+                Task<string> error = process.StandardError.ReadToEndAsync();
+                if (!process.WaitForExit(120_000))
+                {
+                    process.Kill(entireProcessTree: true);
+                    process.WaitForExit(5_000);
+                    reply = new(false, "Cold restore exceeded its 120-second frontend bound.");
+                }
+                else
+                {
+                    string result = output.GetAwaiter().GetResult() + error.GetAwaiter().GetResult();
+                    reply = new(process.ExitCode == 0 &&
+                        result.Contains("P7 BACKUP RESTORE PASS", StringComparison.Ordinal), result);
+                }
+            }
+            catch (Exception failure)
+            {
+                reply = new(false, "Cold restore maintenance failed: " + failure);
+            }
+            finally { Interlocked.Exchange(ref _restoreWorkerRunning, 0); }
+            string bounded = reply.Text.Length > 16_384 ? reply.Text[..16_384] + "\n[truncated]" : reply.Text;
+            Queue(false, "P7RESTORE " + JsonSerializer.Serialize(new MaintenanceReply(reply.Succeeded, bounded)));
+        });
+    }
+
     private void Send(string kind, string? action = null, ulong target = 0,
         bool confirmed = false, string? command = null)
     {
@@ -414,9 +594,27 @@ public partial class ServerGuiRoot : Control
         else if (_smokeStage == 2 && text.Contains("last-backup=1", StringComparison.Ordinal) &&
             text.Contains("backup-in-progress=false", StringComparison.Ordinal))
         {
+            if (_restoreSmoke) { _smokeStage = 20; BeginRestore(1); }
+            else
+            {
+                Send("action", "shutdown", confirmed: true);
+                _shutdownRequested = true;
+                _smokeStage = 4;
+            }
+        }
+        else if (_restoreSmoke && _smokeStage == 21 && _restorePublishedForSmoke &&
+            text.Contains("restored-save=3", StringComparison.Ordinal))
+        {
             Send("action", "shutdown", confirmed: true);
             _shutdownRequested = true;
-            _smokeStage = 4;
+            _smokeStage = 22;
+        }
+        else if (_restoreRejectSmoke && _smokeStage == 31 &&
+            text.Contains("restored-save=1", StringComparison.Ordinal))
+        {
+            Send("action", "shutdown", confirmed: true);
+            _shutdownRequested = true;
+            _smokeStage = 32;
         }
     }
 
@@ -448,4 +646,5 @@ public partial class ServerGuiRoot : Control
         ulong Target, bool Confirmed, string? Command);
     private sealed record OperatorGuiReply(ulong RequestId, string Kind, string Status, string Text);
     private sealed record InspectorReply(string Text);
+    private sealed record MaintenanceReply(bool Succeeded, string Text);
 }
