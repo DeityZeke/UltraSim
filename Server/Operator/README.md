@@ -1,4 +1,4 @@
-# Server operator foundation (P7 active)
+# Server Operator Product (P7 closed)
 
 `ServerOperatorService` owns server-side operations on the Direct Connect owner thread.
 `ServerOperatorProvider` publishes those operations through `Framework.ControlPlane`;
@@ -74,8 +74,14 @@ local principal and existing confirmation/audit semantics. GUI parent loss close
 stdin; the child treats EOF as the same graceful Shutdown request only when launched
 with `--shutdown-on-stdin-eof`. The GUI shows status, participants, bounded log/audit,
 on-demand backup candidates, discoverable categories, and the current action set.
+Its confirmed selected-restore UI first shuts down the child, then runs the same
+exclusive, validated cold-maintenance command before reopening the deployment.
+Failure leaves the prior live generation intact and the server stopped for diagnosis.
 
-This is not the completed P7 product. Backup restoration is cold maintenance rather than
-a live GUI/console action, and there is no durable account/session rehydration. A remotely
-authorized in-game Admin route is not present. Ordinary player
-principals cannot see this provider, and no client-claimed capability list is trusted.
+P7 is closed within an explicit identity boundary: there is no durable account/session
+rehydration and no remotely authorized in-game Admin route. No selected trusted
+session-bound operator grant exists yet. Ordinary player principals cannot see this
+provider, and no client-claimed capability list is trusted. The generic Admin viewer's
+trusted local/test route proves the same audited Save and confirmed Shutdown owner
+actions as console/GUI without claiming that F4 can administer a remote server.
+See the [P7 closure record](../../_Benchmarks/Baselines/framework-p7-server-operator-product-2026-09-30.md).

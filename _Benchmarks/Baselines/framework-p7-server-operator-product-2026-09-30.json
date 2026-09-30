@@ -1,0 +1,51 @@
+{
+  "checkpoint": "P7 Server Operator Product",
+  "status": "closed-with-remote-admin-unavailable",
+  "startCommit": "75e7b1c9e3c99c8199459104b0a0d8aeec263b2a",
+  "testedImplementationCommit": "81b1c7d7f032688a7eeb2f0fd7a7cd24bba15804",
+  "environment": {
+    "os": "Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D",
+    "dotnetSdk": "8.0.131",
+    "dotnetRuntime": "8.0.31",
+    "godot": "4.7.1 stable Mono",
+    "guiTopology": "separate Godot frontend and ServerOnly headless child over inherited bounded stdio"
+  },
+  "controls": {
+    "operatorTests": { "passed": 10, "total": 10 },
+    "architectureOnly": "pass",
+    "networkApplication": "pass including exact live UDP Kick and participant retirement",
+    "exportedGui": {
+      "saveBackupShutdown": "pass",
+      "supervisedRestart": "pass",
+      "selectedBackupRestore": "backup 1 to new live generation 3, cold reopen pass",
+      "rejectedSelectedRestore": "original live generation 1 reopened, pass",
+      "nativeNodeRetirement": "pass",
+      "parentEofShutdown": "pass"
+    },
+    "finalCanonicalRelease": "uninterrupted pass"
+  },
+  "rawLogs": [
+    {
+      "path": ".output/p7-operator-verification/release-4710601e.log",
+      "sha256": "35486963f8f4b4edc4284ffafbb6556300a59e94aea6cbf93d5023c0bb68a68a",
+      "result": "failed at existing F1.8A impaired-motion destinationBeforeOwner timing assertion before GUI gate"
+    },
+    {
+      "path": ".output/p7-operator-verification/release-4710601e-rerun.log",
+      "sha256": "b43ecb4dbf1ab5a97fa94767e2c7d6b25118400d3afbe1f95044865995288eab",
+      "result": "unchanged-tree uninterrupted pass"
+    },
+    {
+      "path": ".output/p7-operator-verification/release-81b1c7d7.log",
+      "sha256": "5ac5725dfdd6e0c4be0bda077c2405896e4c9a0b5fe6a81e4e1ad29896a802b4",
+      "result": "final implementation uninterrupted pass"
+    }
+  ],
+  "admin": {
+    "trustedLocalTestViewer": "same audited Save owner action and confirmed Shutdown",
+    "remoteInGame": "unavailable: no selected server-authoritative session-bound operator grant"
+  },
+  "next": "P8 Audio Kernel and Sound Engine",
+  "pf6": "not ready"
+}

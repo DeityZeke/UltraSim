@@ -2,7 +2,7 @@
 
 **Proposed status:** Candidate canonical roadmap / architecture checklist\
 **Current reference baseline:** F1.12-R3 / Gate 0 production closure — `e3a63ea21f8f5ea4fa69e3768a055c409edc8616`; documentation-only commits may advance `main` beyond that closure SHA.\
-**Immediate checkpoint:** P1–P6 are **CLOSED**; [P6's Inventory viewer evidence](../../_Benchmarks/Baselines/framework-p6-inventory-viewer-profiles-2026-09-29.md) records D2/List semantic parity, native derived-portrait ownership and canonical Release/export acceptance. P7 is **ACTIVE, not closed**: the [headless operator foundation](../../_Benchmarks/Baselines/framework-p7-operator-foundation-2026-09-29.md) and [cold recovery/restart follow-up](../../_Benchmarks/Baselines/framework-p7-operator-recovery-restart-2026-09-30.md) establish typed Save/backup/Kick/shutdown, staged recovery and supervised restart. An optional separate-process Godot GUI now consumes the same owner actions through inherited local stdio; frontend restore and in-game Admin acceptance remain open. P8–P11 and Gate 1 remain **PLANNED**, and PF6 remains **PLANNED / NOT READY / NOT STARTED**. The previously reproduced warm Official-content Finalizer failure remains closed by [native-lifetime R1 evidence](../../_Benchmarks/Baselines/client-native-lifetime-assurance-r1-2026-09-29.md) and [pre-P5 wrapper hardening](../../_Benchmarks/Baselines/client-native-lifetime-pre-p5-hardening-2026-09-29.md).\
+**Immediate checkpoint:** P1–P7 are **CLOSED**. [P7's Server Operator Product evidence](../../_Benchmarks/Baselines/framework-p7-server-operator-product-2026-09-30.md) records typed Save/backup/Kick/shutdown, staged recovery and supervised restart, an exported separate-process Godot GUI, confirmed selected cold restore, trusted local/test Admin action parity and uninterrupted canonical Release acceptance. Remotely authorized in-game Admin remains explicitly unavailable until a server-authoritative session-bound operator grant is chosen; ordinary players cannot claim it. P8 is **NEXT / PLANNED**; P9–P11 and Gate 1 remain **PLANNED**, and PF6 remains **PLANNED / NOT READY / NOT STARTED**. The previously reproduced warm Official-content Finalizer failure remains closed by [native-lifetime R1 evidence](../../_Benchmarks/Baselines/client-native-lifetime-assurance-r1-2026-09-29.md) and [pre-P5 wrapper hardening](../../_Benchmarks/Baselines/client-native-lifetime-pre-p5-hardening-2026-09-29.md).\
 **End state of this document:** UltraSim is ready to move from individual/trusted dogfooding and closed validation into a many-player live test where human feedback is primarily about the intended game rather than known development-harness limitations.
 
 ---
@@ -1739,7 +1739,7 @@ Skills
 
 ## P5 — User/Admin/Developer control surfaces
 
-**Status: CLOSED (representative P5 contract).** The [P5 evidence](../../_Benchmarks/Baselines/framework-p5-control-surfaces-2026-09-29.md) pins the canonical Release/export pass and exact scope. F10 now contains an owner-backed generic User viewer while its detailed Advanced display form remains for parity. A discoverable local Developer viewer and a generic authorized Operator read-only proof exist; P7 still owns an actual remote Server Operator product. F4 remains a sanitized Game-authored read-only monitor until a real authenticated management projection is warranted. The P4 typed-reference image seam is proven without implementing P6 dynamic portraits or P9 art.
+**Status: CLOSED (representative P5 contract).** The [P5 evidence](../../_Benchmarks/Baselines/framework-p5-control-surfaces-2026-09-29.md) pins the canonical Release/export pass and exact scope. F10 now contains an owner-backed generic User viewer while its detailed Advanced display form remains for parity. A discoverable local Developer viewer and a generic authorized Operator read-only proof exist; P7 subsequently supplied the actual server-side operator actions and local GUI/console. F4 remains a sanitized Game-authored read-only monitor until a real authenticated management projection is warranted. The P4 typed-reference image seam is proven without implementing P6 dynamic portraits or P9 art.
 
 Native-resource review requirement: every new Godot-backed wrapper produced or retrieved by a
 P5 surface must be classified as owner-lived (strongly retained and explicitly retired),
@@ -1899,7 +1899,7 @@ Make the intended D2-ish Inventory presentation real and human-testable.
 
 ## P7 — Server Operator Product: command authority, console, GUI, save/backup/recovery
 
-**Status: ACTIVE.** The headless slice has typed capability-gated actions, bounded audit,
+**Status: CLOSED within the explicit remote-Admin identity boundary.** The headless slice has typed capability-gated actions, bounded audit,
 Save Now, host-owned autosave, bounded complete-generation backups, exact participant/session
 correlation for Kick, and a console. A follow-up adds cold strict/fallback save reopening,
 guest-only session cleanup and a supervised restart-with-save exit contract; the same deployment
@@ -1908,8 +1908,13 @@ command can stage a selected validated backup and publish a new forward live gen
 Network admission. An owner-local bounded operational log is available separately from audit.
 The exported Godot server GUI shares the exact owner action route through inherited bounded
 stdio, with a separate read-only maintenance process for on-demand validated backup browsing.
-A frontend-selected restore workflow and any authorized in-game Admin route remain P7 work.
-No P8 work has begun.
+Confirmed frontend-selected restore retires the server, uses the existing exclusive cold
+maintenance path and reopens a new forward generation. The exact accepted scope and
+canonical gate are pinned in the [P7 closure record](../../_Benchmarks/Baselines/framework-p7-server-operator-product-2026-09-30.md).
+The generic Admin viewer proves the same trusted local/test Save and lifecycle owner actions.
+Remote in-game Admin is **unavailable**, not simulated: no trusted operator grant tied to an
+authenticated live session has been selected. This is the permitted P7/Gate-1-dependent
+identity limitation; F4 remains a sanitized read-only Game monitor. No P8 work has begun.
 
 ### Goal
 
@@ -1984,7 +1989,7 @@ Expose the identity information that actually exists, without pretending missing
 
 ### Exit criteria
 
-- Console, GUI, and in-game Admin invoke the same semantic actions.
+- Console, GUI and the trusted local/test generic Admin viewer invoke the same semantic actions; remote in-game Admin remains unavailable without a trusted grant.
 - unauthorized requests reject cleanly and authoritative mutations are auditable.
 - scheduled autosave and explicit Save are exercised.
 - backup/restore/recovery workflow is exercised against real save generations.
@@ -3071,7 +3076,7 @@ This compact board is intended to sit near the top of active implementation note
 [x] P4      Engine Contracts + typed definition facets — CLOSED
 [x] P5      User/Admin/Developer control surfaces — representative contract CLOSED
 [x] P6      Inventory D2/List viewer profiles — CLOSED for supported product shapes
-[ ] P7      Server Operator Product + console + Godot GUI + save/backup/recovery — ACTIVE
+[x] P7      Server Operator Product + console + Godot GUI + save/backup/recovery — CLOSED (remote Admin unavailable pending trusted grant)
 [ ] P8      Audio Kernel + Sound Engine
 [ ] P9      Representative Cabin visual/content pass
 [ ] P10     UI/failure/product polish
