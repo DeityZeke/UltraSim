@@ -57,6 +57,7 @@ Start here. This file is intentionally small.
 - [Definition / presentation / asset independence](topics/definition-presentation-asset-independence.md)
 - [Inventory viewer profiles / cached derived portraits](topics/inventory-viewer-profiles-and-derived-portraits.md)
 - [Server Operator Product](../Server/Operator/README.md)
+- [Audio Kernel + Sound Engine](../_Benchmarks/Baselines/framework-p8-audio-kernel-sound-engine-2026-09-30.md)
 - [Renderer impostor LOD / far-field cards](topics/renderer-impostor-lod.md)
 - [Materials and processing](topics/materials-and-processing.md)
 - [UI nine-slice art / frame families](topics/ui-nine-slice-art-and-frame-families.md)

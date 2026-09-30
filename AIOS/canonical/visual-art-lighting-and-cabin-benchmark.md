@@ -1,7 +1,7 @@
 # Visual Art, Lighting, and Cabin Benchmark
 
 **Status:** CANONICAL visual/presentation direction and selected benchmark milestone  
-**Implementation status:** upcoming client/presentation work; this document defines the target and test seam, not a claim that the complete lighting system or final art already exists.
+**Implementation status:** P9 NEXT. P1–P8 provide the client/content/control/audio foundations; this document defines the P9 visual target and test seam, not a claim that the complete lighting system or final art already exists.
 
 Primary references:
 - [Client Presentation Architecture](../../Docs/Plans/CLIENT_PRESENTATION_ARCHITECTURE.md)
