@@ -14,10 +14,12 @@ using UltraSim.Game.World;
 using UltraSim.Network;
 using UltraSim.Spatial;
 using UltraSim.UI;
+using UltraSim.Framework.ControlPlane;
+using UltraSim.Server.Operator;
 
 internal static class M00SharedAuthorityTests
 {
-    internal const int TestCount = 3;
+    internal const int TestCount = 4;
 
     internal static void RunAll()
     {
@@ -27,6 +29,78 @@ internal static class M00SharedAuthorityTests
         Console.WriteLine("PASS PF5R10SharedPresentationPreparationIsSharedAndProofWakeDeliversNewerState");
         ExistingLocalAuthorityAddsAndRetiresRemoteRecipients();
         Console.WriteLine("PASS M00ExistingLocalAuthorityAddsAndRetiresRemoteRecipients");
+        LiveOperatorKickRetiresExactGuestSession();
+        Console.WriteLine("PASS P7LiveOperatorKickRetiresExactGuestSession");
+    }
+
+    private static void LiveOperatorKickRetiresExactGuestSession()
+    {
+        using NetworkServerIdentity identity = NetworkServerIdentity.CreateEphemeral();
+        using SharedPlayableAuthority authority = SharedPlayableAuthority.CreateConceptDemo(
+            new SharedPlayableAuthorityLimits(1));
+        using var host = new HostedUdpAdmissionHost(
+            new IPEndPoint(IPAddress.Loopback, 0), identity,
+            NetworkProtocolLimits.Default, UdpProtocolLimits.Default,
+            SharedUdpProtocolLimits.Default with { MaximumSessions = 1 },
+            HostedUdpAdmissionLimits.Default with
+            {
+                MaximumChallengesPerAddressPerBucket = 64,
+                MaximumValidationsPerAddressPerBucket = 64,
+            },
+            new SharedRemoteGuestPlayableApplicationFactory(authority,
+                new ApplicationRealmId(0x7, 0x11)), UltraSimGameProtocol.Manifest);
+        string root = Path.Combine(Path.GetTempPath(),
+            $"ultrasim-p7-live-kick-{Environment.ProcessId}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        ClientNode? client = null;
+        try
+        {
+            using var service = new ServerOperatorService(authority, host,
+                authority.Runtime.Game, authority.Composition,
+                Path.Combine(root, "saves"), Path.Combine(root, "backups"),
+                new ServerOperatorPolicy(false, 300, 2, false));
+            var audit = new OperatorAuditRing();
+            var registry = new ControlPlaneRegistry(audit);
+            using var publication = new ServerOperatorPublication(registry,
+                new ServerOperatorProvider(service, audit));
+            var principal = new ControlPrincipal("p7-test-operator", ControlPrincipalKind.TestAutomation,
+                [ServerOperatorProvider.Read, ServerOperatorProvider.Sessions], "test/live-kick");
+            client = ClientNode.Connect(root, "guest", host, identity);
+            True(client.Session.TrySubmitGuest(new GameGuestAdmissionRequest(
+                GameGuestBody.HumanFemale, "Kick Guest")));
+            DriveUntil(host, authority, [client], () =>
+                client.Session.Playable.GetSnapshot().State == RemotePlayableClientState.Active &&
+                authority.GetSnapshot().ParticipantCount == 1);
+            var participants = new SharedPlayableParticipant[1];
+            Equal(1, authority.CopyParticipants(participants));
+            ulong target = participants[0].Participant.Value;
+            True(host.TryGetSession(0, out HostedUdpProtocolSession? session) &&
+                session!.OperatorParticipantId == target);
+            ControlProviderSnapshot provider = registry.Discover(principal).Single();
+            ControlActionRequest Kick(string request) => ControlActionRequest.Create(
+                new(new(request), principal), ServerOperatorProvider.ProviderId,
+                ServerOperatorProvider.Kick, provider.Generation,
+                [ControlValue.UInt64(target)]);
+            Equal(ControlResultStatus.Accepted, registry.Invoke(Kick("p7.kick.one")).Outcome.Status);
+            long deadline = Environment.TickCount64 + 15_000;
+            while (authority.GetSnapshot().ParticipantCount != 0 && Environment.TickCount64 < deadline)
+            {
+                client.Direct.Pump();
+                host.Pump();
+                _ = authority.TickDue();
+                _ = client.Session.ProcessReceived();
+                Thread.Sleep(1);
+            }
+            Equal(0, authority.GetSnapshot().ParticipantCount);
+            Equal(ControlResultCode.OwnerRejected,
+                registry.Invoke(Kick("p7.kick.stale")).Outcome.Code);
+            Equal(2, audit.Count);
+        }
+        finally
+        {
+            client?.Dispose();
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
     }
 
     private static void SharedPresentationPreparationIsSharedAndProofWakeDeliversNewerState()

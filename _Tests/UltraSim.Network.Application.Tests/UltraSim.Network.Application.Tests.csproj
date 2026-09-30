@@ -10,6 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../../Server/Operator/UltraSim.Server.Operator.csproj" />
     <ProjectReference Include="../../Client/BuiltInTestWorlds/UltraSim.Client.BuiltInTestWorlds.csproj" />
     <ProjectReference Include="../../Client/Content/UltraSim.Client.Content.csproj" />
     <ProjectReference Include="../../Client/Core/UltraSim.Client.Core.csproj" />
