@@ -1,0 +1,62 @@
+{
+  "checkpoint": "P8 Audio Kernel + Sound Engine",
+  "date": "2026-09-30",
+  "startingHead": "00e49fb29f1e0643f405fe67a3abafe72937f060",
+  "testedImplementationHead": "365f535253182d836af62506dd4e40ffb6218984",
+  "sourceCommits": [
+    "efcb3a16c28ada7b492a5e517e8e0208831e9fbe",
+    "48d4a764531c2b9d8f2220854154c9d3dbcf55c4",
+    "8b29cf4fb25d0c838255774deeb60133421a7093",
+    "61fcfa04ebefd7cdda73804e5b6d85dafce81b2f",
+    "365f535253182d836af62506dd4e40ffb6218984"
+  ],
+  "environment": {
+    "os": "Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D",
+    "dotnetSdk": "8.0.131",
+    "dotnetRuntime": "8.0.31",
+    "godot": "4.7.1 stable Mono",
+    "physicalAudioDriver": "PulseAudio 17.0 via PipeWire",
+    "physicalSink": "HyperX Cloud III stereo",
+    "aspNetRuntime": "8.0.31 via isolated existing-package DOTNET_ROOT overlay"
+  },
+  "scope": {
+    "semanticEvents": 14,
+    "cueIdentities": 14,
+    "productVoiceBudget": 16,
+    "genericMaximumVoiceBudget": 128,
+    "worldCullMeters": 28,
+    "audioFormat": "exact 44-byte-header mono PCM16 WAV at 22050 or 44100 Hz; <=20 s; <=2 MiB",
+    "contentScope": "world.local",
+    "categories": ["SFX", "Ambient", "UI"],
+    "serverAudioAdapterDependency": false,
+    "gameAuthorityChanged": false
+  },
+  "verification": {
+    "audioFocused": {"passed": 9, "total": 9},
+    "contentFocused": {"passed": 38, "total": 38},
+    "controlPlaneFocused": {"passed": 21, "total": 21},
+    "serverHostingFocused": {"passed": 18, "total": 18},
+    "localClientFocused": {"passed": 24, "total": 24},
+    "nativeGenerationReplacementIndependentRuns": {"passed": 30, "total": 30},
+    "rapidAudioExitRuns": {"passed": 20, "total": 20},
+    "architectureOnly": "pass",
+    "canonicalRelease": "pass uninterrupted on testedImplementationHead",
+    "physicalAudioDriverExit": 0,
+    "physicalAudioConceptDemoExit": 0,
+    "physicalAudioConceptDemoCueAssertions": ["pickup", "equip", "jump", "footstep"],
+    "physicalAudioHumanListening": "not performed",
+    "preFinalManualSmokeProcess": "one stale process found after about 50 minutes; exact revision unknown; targeted SIGTERM; not counted as final-tree exit evidence",
+    "physicalExports": {"singlePlayerAssemblies": 32, "onlineAssemblies": 13, "completeAssemblies": 41}
+  },
+  "warmPrimitiveCensus": {
+    "iterations": 200000,
+    "cueNanosecondsPerOperation": 9.8,
+    "admitRetireNanosecondsPerOperation": 34.9,
+    "cadenceNanosecondsPerOperation": 7.9,
+    "mutedGainNanosecondsPerOperation": 7.9,
+    "managedBytesAllocated": 0,
+    "nativeCallsIncluded": false
+  },
+  "disposition": {"p8": "closed", "next": "P9", "pf6": "not ready; not started"}
+}

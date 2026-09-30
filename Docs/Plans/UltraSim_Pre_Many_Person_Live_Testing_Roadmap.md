@@ -2,7 +2,7 @@
 
 **Proposed status:** Candidate canonical roadmap / architecture checklist\
 **Current reference baseline:** F1.12-R3 / Gate 0 production closure — `e3a63ea21f8f5ea4fa69e3768a055c409edc8616`; documentation-only commits may advance `main` beyond that closure SHA.\
-**Immediate checkpoint:** P1–P7 are **CLOSED**. [P7's Server Operator Product evidence](../../_Benchmarks/Baselines/framework-p7-server-operator-product-2026-09-30.md) records typed Save/backup/Kick/shutdown, staged recovery and supervised restart, an exported separate-process Godot GUI, confirmed selected cold restore, trusted local/test Admin action parity and uninterrupted canonical Release acceptance. Remotely authorized in-game Admin remains explicitly unavailable until a server-authoritative session-bound operator grant is chosen; ordinary players cannot claim it. P8 is **NEXT / PLANNED**; P9–P11 and Gate 1 remain **PLANNED**, and PF6 remains **PLANNED / NOT READY / NOT STARTED**. The previously reproduced warm Official-content Finalizer failure remains closed by [native-lifetime R1 evidence](../../_Benchmarks/Baselines/client-native-lifetime-assurance-r1-2026-09-29.md) and [pre-P5 wrapper hardening](../../_Benchmarks/Baselines/client-native-lifetime-pre-p5-hardening-2026-09-29.md).\
+**Immediate checkpoint:** P1–P8 are **CLOSED**. [P7's Server Operator Product evidence](../../_Benchmarks/Baselines/framework-p7-server-operator-product-2026-09-30.md) retains its trusted-grant limitation. [P8 audio evidence](../../_Benchmarks/Baselines/framework-p8-audio-kernel-sound-engine-2026-09-30.md) records the engine-neutral kernel and semantic cues, bounded Godot realization, passive `world.local` PCM admission, physical PulseAudio routing, native retirement and uninterrupted canonical Release pass. P9 is **NEXT**; P10–P11 and Gate 1 remain **PLANNED**, and PF6 remains **PLANNED / NOT READY / NOT STARTED**. The previously reproduced warm Official-content Finalizer failure remains closed by [native-lifetime R1 evidence](../../_Benchmarks/Baselines/client-native-lifetime-assurance-r1-2026-09-29.md) and [pre-P5 wrapper hardening](../../_Benchmarks/Baselines/client-native-lifetime-pre-p5-hardening-2026-09-29.md).\
 **End state of this document:** UltraSim is ready to move from individual/trusted dogfooding and closed validation into a many-player live test where human feedback is primarily about the intended game rather than known development-harness limitations.
 
 ---
@@ -2000,6 +2000,8 @@ Expose the identity information that actually exists, without pretending missing
 
 ## P8 — Audio Kernel + Sound Engine representative implementation
 
+**Status: CLOSED.** The [P8 closure record](../../_Benchmarks/Baselines/framework-p8-audio-kernel-sound-engine-2026-09-30.md) pins the implementation and Release/export result. `UltraSim.Audio` is an engine-neutral, bounded source contract; `Client.Sound` maps accepted presentation events to stable cue families and cadence. Godot owns the finite native players, listener and explicit stream/playback retirement. Generated, distinct short PCM clips are ordinary validated `world.local` content, not Game or server-issued asset paths. Master Volume is applied live through the existing user settings owner. The three physical client editions passed their audio smokes; dedicated ServerOnly remains Godot/audio-adapter free. The PulseAudio device route was exercised, but subjective audibility remains a human P9/P11/PF6 quality check.
+
 ### Goal
 
 Make the vertical slice audibly representative and prove new Framework/adapter/control boundaries.
@@ -3077,7 +3079,7 @@ This compact board is intended to sit near the top of active implementation note
 [x] P5      User/Admin/Developer control surfaces — representative contract CLOSED
 [x] P6      Inventory D2/List viewer profiles — CLOSED for supported product shapes
 [x] P7      Server Operator Product + console + Godot GUI + save/backup/recovery — CLOSED (remote Admin unavailable pending trusted grant)
-[ ] P8      Audio Kernel + Sound Engine
+[x] P8      Audio Kernel + Sound Engine — CLOSED
 [ ] P9      Representative Cabin visual/content pass
 [ ] P10     UI/failure/product polish
 [ ] P11     Focused trusted dogfood burn-down

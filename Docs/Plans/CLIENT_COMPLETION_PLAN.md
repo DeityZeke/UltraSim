@@ -1,8 +1,8 @@
 # UltraSim Client Completion Plan
 
-**Status:** **F1.0–F1.12 CLOSED / Gate 0 CLOSED. P1–P6 CLOSED; P7 NEXT; P8–P11 and Gate 1 PLANNED. PF6 PLANNED / NOT READY / NOT STARTED; many-player live testing NOT READY.** The [P6 evidence](../../_Benchmarks/Baselines/framework-p6-inventory-viewer-profiles-2026-09-29.md) records D2/List Inventory viewer acceptance and canonical Release/export verification. The [P3 boundary evidence](../../_Benchmarks/Baselines/framework-p3-adapter-boundary-2026-09-29.md) records the selective client adapter publication and headless guard. The [P1 closure companion](../../_Benchmarks/Baselines/framework-p1-native-lifetime-closure-2026-09-28.md) records the merged native-lifetime repair; the [original P1 evidence](../../_Benchmarks/Baselines/framework-p1-control-plane-2026-09-27.md) preserves the earlier native failure. The [R3 closure evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3.md) records the supported Framework HTTP Endpoint/Kestrel replacement. No W8/W9/W10 or PF6 work has started.
+**Status:** **F1.0–F1.12 CLOSED / Gate 0 CLOSED. P1–P8 CLOSED; P9 NEXT; P10–P11 and Gate 1 PLANNED. PF6 PLANNED / NOT READY / NOT STARTED; many-player live testing NOT READY.** The [P8 audio evidence](../../_Benchmarks/Baselines/framework-p8-audio-kernel-sound-engine-2026-09-30.md) records the engine-neutral kernel, semantic cues, bounded Godot adapter, native retirement, physical audio route and Release/export acceptance. The [P6 evidence](../../_Benchmarks/Baselines/framework-p6-inventory-viewer-profiles-2026-09-29.md) records D2/List Inventory viewer acceptance. The [P3 boundary evidence](../../_Benchmarks/Baselines/framework-p3-adapter-boundary-2026-09-29.md) records selective adapter publication and the headless guard. The [P1 closure companion](../../_Benchmarks/Baselines/framework-p1-native-lifetime-closure-2026-09-28.md) records native-lifetime repair; the [original P1 evidence](../../_Benchmarks/Baselines/framework-p1-control-plane-2026-09-27.md) preserves the earlier failure. The [R3 closure evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r3.md) records the supported Framework HTTP Endpoint/Kestrel replacement. No W8/W9/W10 or PF6 work has started.
 
-P2 has a server-owned, opt-in compiled `Scripts/` path, exact compile cache identity, a real Contracts-only/Core-optional proof, explicit RuntimeHost/Control Plane diagnostics, and Package/Runtime Service/Object Extension terminology. The [authoring foundation](../../_Benchmarks/Baselines/framework-p2-server-authoring-and-extension-terminology-2026-09-29.md) passed canonical Release on `98586fbe`; the [P2 closure companion](../../_Benchmarks/Baselines/framework-p2-closure-2026-09-29.md) records package aliases, deterministic remap order, durable-schema load admission, the initial transient canonical build failure, and the uninterrupted successful rerun on `e6b6f7cd`. P2–P6 are **CLOSED**. The Server Operator Product is P7 **NEXT**; PF6 is not ready.
+P2 has a server-owned, opt-in compiled `Scripts/` path, exact compile cache identity, a real Contracts-only/Core-optional proof, explicit RuntimeHost/Control Plane diagnostics, and Package/Runtime Service/Object Extension terminology. The [authoring foundation](../../_Benchmarks/Baselines/framework-p2-server-authoring-and-extension-terminology-2026-09-29.md) passed canonical Release on `98586fbe`; the [P2 closure companion](../../_Benchmarks/Baselines/framework-p2-closure-2026-09-29.md) records package aliases, deterministic remap order, durable-schema load admission, the initial transient canonical build failure, and the uninterrupted successful rerun on `e6b6f7cd`. P2–P8 are **CLOSED**. The representative Cabin visual pass is P9 **NEXT**; PF6 is not ready.
 
 The [partial F1.12 evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.md) and [R1 assurance evidence](../../_Benchmarks/Baselines/client-f1.12-product-dogfood-pf6-readiness-2026-09-26.r1.md) remain immutable. Bounded native Cabin capture, pointer/tier/nameplate controls, retired-memory high-water reuse and the device-owned Advanced vegetation preference remain accepted. The historical obsolete capture-stall trigger remains unisolated, not a proven engine defect or a new blocker. The [F1.11 evidence](../../_Benchmarks/Baselines/client-f1.11-renderer-stress-vegetation-2026-09-25.md) closes shared Local/Remote world-resource consumption and bounded renderer stress; vegetation remains opt-in/default Off. F1.10 retains the conservative Detailed/BatchedPrimitive hybrid and F1.9B retains NodeMultiMesh/PerRow. The [F1.8A corrective evidence](../../_Benchmarks/Baselines/client-f1.8a-r1-motion-correction-2026-09-23.md) supersedes its initial closure claim without erasing the earlier failures.
 
@@ -102,7 +102,7 @@ F1.12 Product dogfooding and PF6 readiness (CLOSED after R3; Gate 0 CLOSED)
 P1    Framework Control Plane (CLOSED after native-lifetime acceptance)
 P2    Runtime Host + C# Server Authoring Environment (CLOSED)
 P3    Framework adapter/runtime boundary (CLOSED)
-P4–P6 (CLOSED); P7 (NEXT); P8–P11 / Gate 1 (PLANNED; productization and identity/character-mode gate)
+P4–P8 (CLOSED); P9 (NEXT); P10–P11 / Gate 1 (PLANNED; productization and identity/character-mode gate)
 PF6   External human validation (PLANNED / NOT READY / NOT STARTED)
 ~~~
 
@@ -1526,8 +1526,8 @@ PF6 begins only when:
 
 # 17. PF6 - External human validation
 
-F1.12/Gate 0 and P1–P6 are closed; PF6 remains planned, not ready and not started. P7 is next,
-followed by the planned P8–P11 work and Gate 1. Only after that productization and
+F1.12/Gate 0 and P1–P8 are closed; PF6 remains planned, not ready and not started. P9 is next,
+followed by the planned P10–P11 work and Gate 1. Only after that productization and
 identity/character-mode gate closes may the existing PF6 campaign begin. R3 did not implement
 these future capabilities or begin human validation.
 

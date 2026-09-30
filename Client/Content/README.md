@@ -48,6 +48,13 @@ acquisition outside the protocol/UI owner while still joining the operation befo
 shared source/cache lifetime. Catalog publication remains immutable and application proof remains
 an owner/session concern above this component.
 
+P8 admits one narrow passive audio leaf: `PcmWav` / `AudioClip`. Admission requires
+an exact 44-byte-header, mono PCM16 WAV at 22.05 or 44.1 kHz, no extra chunks or
+external references, at most 20 seconds and 2 MiB, with ordinary extension/hash,
+scope authorization and CAS rules. The generated representative cues install into
+`world.local` through this same store. A missing optional cue skips sound; neither a
+blob nor a server-provided path becomes a native Godot resource without validation.
+
 ## F1.2 semantic activation and presentation generations
 
 `AuthorizedSemanticActivation` identifies exact scope, activation, plan, resolved semantic

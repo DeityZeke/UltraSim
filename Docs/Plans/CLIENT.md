@@ -35,7 +35,7 @@ supported Kestrel Bridge. Uninterrupted canonical Release passes on integrated c
 ownership, complete unexpected-failure retention and real socket retirement are covered.
 P1 Framework Control Plane is closed after the [native-lifetime acceptance](../../_Benchmarks/Baselines/framework-p1-native-lifetime-closure-2026-09-28.md)
 and uninterrupted canonical Release on the merged repair tree. The original native failure remains
-preserved in its historical P1 evidence. P2 is closed; P3 is next and P4–P11/Gate 1 remain planned. PF6 is planned/not ready/not
+preserved in its historical P1 evidence. P1–P8 are closed; P9 is next and P10–P11/Gate 1 remain planned. The [P8 audio closure](../../_Benchmarks/Baselines/framework-p8-audio-kernel-sound-engine-2026-09-30.md) adds engine-neutral semantic cues and a bounded Godot realization without changing Game authority. PF6 is planned/not ready/not
 started; many-player live testing is not ready. The grass preference is directly beneath
 Show Advanced, still default Off/next-entry.
 The historical capture-stall trigger was not reproduced and is not claimed as an engine diagnosis.

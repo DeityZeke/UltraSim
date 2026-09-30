@@ -6,6 +6,8 @@
 
 **Implementation campaign:** [CLIENT_COMPLETION_PLAN.md](CLIENT_COMPLETION_PLAN.md) turns this architecture into the ordered F1.0-F1.12 pre-PF6 execution plan, with a dedicated F1.8A remote-motion checkpoint between F1.8 and F1.9.
 
+**Current audio realization:** P8 is closed by the [Audio Kernel/Sound Engine evidence](../../_Benchmarks/Baselines/framework-p8-audio-kernel-sound-engine-2026-09-30.md). Semantic cue identity and finite source admission are engine-neutral; Godot alone owns native players, the listener and stream retirement. This is a presentation consumer, not a new Game authority or a replacement for the later P9 visual pass.
+
 **F1.2 implementation boundary:** the current Concept Demo now proves WorldPack and compiled
 Inventory/Server Monitor UI through one exact Realm semantic activation, while an independent
 authenticated message-149 plan authorizes X/Y actor art. Actor-art acquisition is non-gating.

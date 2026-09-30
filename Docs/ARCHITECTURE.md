@@ -55,6 +55,12 @@ provider. Implementation selection is fixed by composition; settings such as
 vegetation remain distinct runtime/device configuration. The existing native
 application owner is retained rather than wrapped in a universal platform interface.
 
+P8 follows the same boundary for audio: `Kernels/Audio` owns device-neutral source
+contracts and finite admission, `Client/Sound` maps observed presentation semantics
+to stable cue identities, and `Client/Godot` alone owns physical streams, players and
+listener state. Sound playback cannot mutate Game authority. Dedicated ServerOnly
+composition does not select or depend on the Godot audio adapter.
+
 ## Gameplay realization: OOP Extensions, ECS, or hybrid
 
 UltraSim does **not** require gameplay to be modeled as ECS.
