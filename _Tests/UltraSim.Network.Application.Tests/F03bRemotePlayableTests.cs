@@ -259,7 +259,13 @@ internal static class F03bRemotePlayableTests
         // Continue past the interpolation delay: the first owner round trip is shorter than
         // the deliberately delayed public-pose presentation window on the zero-delay control.
         var publicWindow = Stopwatch.StartNew();
-        while (publicWindow.ElapsedMilliseconds < 1_500)
+        // With deterministic packet loss, the first two public updates can be delayed
+        // beyond a fixed 1.5-second wall window. Keep the same motion/public-sample
+        // obligations, but observe until they are met or a strict finite deadline.
+        while (publicWindow.ElapsedMilliseconds < 4_000 &&
+            (publicWindow.ElapsedMilliseconds < 1_500 ||
+             publicInterpolation.GetSnapshot().SamplesReceived < 2 ||
+             publicInterpolation.GetSnapshot().InterpolatedFrames == 0))
         {
             fixture.DriveSteps(1);
             long now = MonotonicMicroseconds();
@@ -402,8 +408,14 @@ internal static class F03bRemotePlayableTests
         ClientControlledMotionSnapshot metrics = temporal.GetSnapshot();
         ClientRemoteActorInterpolationSnapshot publicMetrics =
             publicInterpolation.GetSnapshot();
-        True(publicMetrics.SamplesReceived >= 2);
-        True(publicMetrics.InterpolatedFrames > 0);
+        if (publicMetrics.SamplesReceived < 2 || publicMetrics.InterpolatedFrames == 0)
+            throw new InvalidOperationException(
+                $"Public interpolation did not receive two samples and interpolate within " +
+                $"the bounded impairment window: delay={oneWayDelayMilliseconds}ms " +
+                $"jitter={jitterMilliseconds}ms dropPeriod={dropPeriod} " +
+                $"samples={publicMetrics.SamplesReceived} " +
+                $"interpolated={publicMetrics.InterpolatedFrames} " +
+                $"forwarded={fixture.MotionForwarded} dropped={fixture.MotionDropped}.");
         Console.WriteLine($"EVIDENCE F1.8A UDP one_way_ms={oneWayDelayMilliseconds} " +
             $"jitter_ms={jitterMilliseconds} drop_period={dropPeriod} " +
             $"input_to_present_us={firstPresented} input_to_owner_us={firstOwner} " +
