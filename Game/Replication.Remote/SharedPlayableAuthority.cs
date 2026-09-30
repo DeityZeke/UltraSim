@@ -687,6 +687,13 @@ public sealed class SharedPlayableAuthority : IDisposable
         return new GameTestMarkerResult(true, sequence, phase, canonical, text);
     }
 
+    /// <summary>Captures the generic owner-thread Runtime control policy without exposing mutable state.</summary>
+    public ServerRuntimeControlSnapshot CaptureRuntimeControlSnapshot()
+    {
+        EnsureOperational();
+        return Runtime.CaptureControlSnapshot();
+    }
+
     /// <summary>Captures one bounded sanitized monitor view of this authority.</summary>
     public ServerMonitorSnapshot CaptureServerMonitor(
         RemoteServerPerformanceProfile? performanceProfile = null,

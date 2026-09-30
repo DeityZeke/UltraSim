@@ -5,6 +5,7 @@ using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Persistence;
 using UltraSim.Game.Replication;
+using UltraSim.Game.UI;
 using UltraSim.Network;
 using UltraSim.Server.Runtime;
 
@@ -86,6 +87,10 @@ public sealed class ServerOperatorService : IDisposable
     public ulong Revision { get { EnsureOwner(); return _revision; } }
     public ServerOperatorPolicy Policy => _policy;
     public OperatorBackupStore Backups => _backups;
+    public int PlaybackRate
+    {
+        get { EnsureOwner(); return _authority.CaptureRuntimeControlSnapshot().PlaybackRate; }
+    }
     internal SharedPlayableAuthoritySnapshot CaptureAuthority()
     {
         EnsureOwner();
@@ -286,6 +291,12 @@ public sealed class ServerOperatorService : IDisposable
     {
         EnsureOwner();
         return _authority.CopyParticipants(destination);
+    }
+
+    public ServerMonitorSnapshot CaptureParticipantMonitor()
+    {
+        EnsureOwner();
+        return _authority.CaptureServerMonitor();
     }
 
     public void Dispose()

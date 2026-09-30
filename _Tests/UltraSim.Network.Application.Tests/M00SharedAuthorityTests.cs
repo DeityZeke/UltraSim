@@ -77,6 +77,16 @@ internal static class M00SharedAuthorityTests
             True(host.TryGetSession(0, out HostedUdpProtocolSession? session) &&
                 session!.OperatorParticipantId == target);
             ControlProviderSnapshot provider = registry.Discover(principal).Single();
+            Equal(ControlResultCode.Accepted, registry.Read(principal,
+                ServerOperatorProvider.ProviderId, provider.Generation,
+                new ControlCollectionId("participants"), out ControlCollectionSnapshot? operatorRows));
+            True(operatorRows is not null && operatorRows.Rows.Count == 1);
+            ControlCollectionRow visible = operatorRows!.Rows[0];
+            Equal(target, visible.Values[0].AsUInt64());
+            Equal(participants[0].ControlSession.Value, visible.Values[4].AsUInt64());
+            True(visible.Values[3].AsBool() &&
+                visible.Values[5].AsText().Contains(':', StringComparison.Ordinal) &&
+                visible.Values[7].AsText().Contains(',', StringComparison.Ordinal));
             ControlActionRequest Kick(string request) => ControlActionRequest.Create(
                 new(new(request), principal), ServerOperatorProvider.ProviderId,
                 ServerOperatorProvider.Kick, provider.Generation,
@@ -92,6 +102,10 @@ internal static class M00SharedAuthorityTests
                 Thread.Sleep(1);
             }
             Equal(0, authority.GetSnapshot().ParticipantCount);
+            Equal(ControlResultCode.Accepted, registry.Read(principal,
+                ServerOperatorProvider.ProviderId, provider.Generation,
+                new ControlCollectionId("participants"), out ControlCollectionSnapshot? retiredRows));
+            True(retiredRows is not null && retiredRows.Rows.Count == 0);
             Equal(ControlResultCode.OwnerRejected,
                 registry.Invoke(Kick("p7.kick.stale")).Outcome.Code);
             Equal(2, audit.Count);

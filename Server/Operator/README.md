@@ -21,6 +21,12 @@ if moving those roots outside the private identity directory. The console accept
 `kick <participant-id> confirm`, and `restart confirm`. Ctrl+C uses the same Shutdown
 action. The verifier's
 stop-file remains test plumbing, not an operator API.
+The entered-participant collection reuses the already sanitized Game Server Monitor
+snapshot for display label, Local/Remote kind, round-trip estimate and public chunk,
+then joins it to the exact current control-session epoch and public actor identity.
+It does not invent Account/Character identities or publish private coordinates.
+The selected Concept Demo composition has fixed playback; its read-only playback
+control explicitly reports that variable playback and Pause are disabled.
 
 On startup, Direct Connect automatically reopens a complete saved generation when `CURRENT`
 or any generation directory exists. `operator-policy.json` selects `RecoveryMode`:

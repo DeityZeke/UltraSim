@@ -72,14 +72,51 @@ static void LocalGuiFramingUsesSameTypedOwnerActions()
         "Console and GUI Save did not share the same audited owner action identity.");
     Check(gui.TryExecute(Line(new(4, "status")), out string status) &&
         status.Contains("last-save", StringComparison.Ordinal) &&
-        status.Contains("autosave-enabled", StringComparison.Ordinal),
+        status.Contains("autosave-enabled", StringComparison.Ordinal) &&
+        status.Contains("playback-rate=1", StringComparison.Ordinal),
         "The GUI status did not expose current owner diagnostics and cold policy.");
+    ControlProviderSnapshot playbackPublication = fixture.Registry.Discover(fixture.Principal).Single();
+    Check(fixture.Registry.Read(fixture.Principal, ServerOperatorProvider.ProviderId,
+        playbackPublication.Generation, new ControlId("playback-rate"),
+        out ControlState? playback) == ControlResultCode.Accepted &&
+        playback is { Writable: false, DisabledCode: ControlResultCode.Disabled } &&
+        playback.DisabledReason.Contains("Pause", StringComparison.Ordinal),
+        "The fixed-rate product did not explicitly disable unsupported Pause/playback controls.");
     Check(gui.TryExecute(Line(new(5, "participants")), out string participants) &&
         participants.Contains("(empty)", StringComparison.Ordinal),
         "The GUI participant query failed on an empty authority.");
     Check(gui.TryExecute(Line(new(6, "log")), out string events) &&
         events.Contains("Persistence", StringComparison.Ordinal),
         "The GUI event query did not use the bounded owner log.");
+    // The same generic viewer model used by Godot management surfaces is the trusted
+    // local/test Admin route. No remote player principal or claimed operator flag is used.
+    var adminViewer = new ControlPlaneViewer(fixture.Registry, fixture.Principal);
+    ControlViewerItem saveItem = adminViewer.Capture().SelectMany(category => category.Items)
+        .Single(item => item.Descriptor is ControlActionDescriptor action &&
+            action.Id == ServerOperatorProvider.SaveNow);
+    ControlResult? adminSave = adminViewer.RequestAction(new("admin.save.1"),
+        saveItem.Provider, saveItem.Generation, ServerOperatorProvider.SaveNow, []);
+    Check(adminSave?.Outcome.Status == ControlResultStatus.Accepted,
+        "The trusted local Admin viewer did not reach the shared Save action.");
+    fixture.PumpUntil(() => !fixture.Service.Capture().SaveInProgress);
+    Check(fixture.Service.Capture().LastSavedSequence == 3,
+        "Console, GUI and local Admin did not publish through one durable owner.");
+    int threeCount = fixture.Audit.CopyTo(auditRows);
+    Check(auditRows.Take(threeCount).Count(row =>
+        row.Provider == ServerOperatorProvider.ProviderId.Value &&
+        row.Action == ServerOperatorProvider.SaveNow.Value &&
+        row.Status == ControlResultStatus.Accepted) == 3,
+        "The three frontends did not share one audited Save action identity.");
+    ControlViewerItem shutdownItem = adminViewer.Capture().SelectMany(category => category.Items)
+        .Single(item => item.Descriptor is ControlActionDescriptor action &&
+            action.Id == ServerOperatorProvider.Shutdown);
+    Check(adminViewer.RequestAction(new("admin.stop.1"), shutdownItem.Provider,
+        shutdownItem.Generation, ServerOperatorProvider.Shutdown, []) is null &&
+        adminViewer.PendingConfirmation is not null,
+        "The local Admin viewer skipped the required lifecycle confirmation gesture.");
+    Check(adminViewer.ConfirmAction().Outcome.Status == ControlResultStatus.Accepted &&
+        fixture.Service.Capture().ExitDisposition == OperatorExitDisposition.Shutdown,
+        "The local Admin viewer did not route confirmed Shutdown to the host owner.");
 }
 
 static void BoundedOperatorLogIsObservableWithoutChangingAuthority()

@@ -5980,6 +5980,7 @@ static void VerifyArchitecture(string root)
             "Framework/Persistence/UltraSim.Framework.Persistence.csproj",
             "Game/Persistence/UltraSim.Game.Persistence.csproj",
             "Game/Replication.Remote/UltraSim.Game.Replication.Remote.csproj",
+            "Game/UI/UltraSim.Game.UI.csproj",
             "Kernels/Network/UltraSim.Network.csproj",
         ],
         ["Server/ConceptDemo/UltraSim.Server.ConceptDemo.csproj"] =

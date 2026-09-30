@@ -1,5 +1,6 @@
 using UltraSim.Framework.ControlPlane;
 using UltraSim.Game.Replication;
+using UltraSim.Game.UI;
 
 namespace UltraSim.Server.Operator;
 
@@ -42,7 +43,12 @@ public sealed class ServerOperatorProvider : IControlProvider
                     "Cold server policy; changing it requires a server restart.",
                     new(ControlValueKind.Int64, ControlValue.Int64(10), ControlValue.Int64(86_400)),
                     ControlValue.Int64(service.Policy.AutosaveSeconds), Read, Lifecycle,
-                    ControlApplyMode.ReadOnly, ControlPersistenceClass.ServerColdConfiguration, OperatorAudience)],
+                    ControlApplyMode.ReadOnly, ControlPersistenceClass.ServerColdConfiguration, OperatorAudience),
+                new(new("playback-rate"), new("Server/Runtime"), "Playback rate",
+                    "The fixed-rate Concept Demo composition does not admit variable playback or Pause.",
+                    new(ControlValueKind.Int64, ControlValue.Int64(1), ControlValue.Int64(int.MaxValue)),
+                    ControlValue.Int64(1), Read, Lifecycle,
+                    ControlApplyMode.ReadOnly, ControlPersistenceClass.None, OperatorAudience)],
             diagnostics: new[] { "generation", "tick", "participant-count", "sessions", "save-in-progress",
                 "backup-in-progress", "last-save", "last-backup", "autosave-skipped", "restored-save",
                 "recovered-guests", "last-failure", "exit" }
@@ -72,7 +78,12 @@ public sealed class ServerOperatorProvider : IControlProvider
                     "Current guest identities only; not durable accounts or characters.", 64,
                     [new(new("participant"), "Participant", new(ControlValueKind.UInt64)),
                      new(new("display"), "Display", new(ControlValueKind.Text, maximumText: 96)),
-                     new(new("connection"), "Connection", new(ControlValueKind.Text, maximumText: 16))],
+                     new(new("connection"), "Connection", new(ControlValueKind.Text, maximumText: 16)),
+                     new(new("entered"), "Entered", new(ControlValueKind.Bool)),
+                     new(new("control-session"), "Control session", new(ControlValueKind.UInt64)),
+                     new(new("public-actor"), "Public actor", new(ControlValueKind.Text, maximumText: 32)),
+                     new(new("rtt-ms"), "RTT ms", new(ControlValueKind.Text, maximumText: 16)),
+                     new(new("chunk"), "Public chunk", new(ControlValueKind.Text, maximumText: 32))],
                     Read, OperatorAudience),
                 new(new("audit"), new("Server/Audit"), "Recent operator actions",
                     "Bounded audit; text arguments are redacted.", OperatorAuditRing.Capacity,
@@ -127,11 +138,16 @@ public sealed class ServerOperatorProvider : IControlProvider
         {
             "autosave-enabled" => ControlValue.Bool(_service.Policy.AutosaveEnabled),
             "autosave-seconds" => ControlValue.Int64(_service.Policy.AutosaveSeconds),
+            "playback-rate" => ControlValue.Int64(_service.PlaybackRate),
             _ => throw new ArgumentException("Unknown server operator control.")
         };
-        var provenance = new ControlProvenance(ControlProvenanceKind.ServerColdConfig);
+        bool playback = id.Value == "playback-rate";
+        var provenance = new ControlProvenance(playback ?
+            ControlProvenanceKind.RuntimeConstraint : ControlProvenanceKind.ServerColdConfig);
         return new(value, value, null, provenance, provenance, null, false,
-            ControlResultCode.NotWritable, "Cold server configuration requires restart.");
+            playback ? ControlResultCode.Disabled : ControlResultCode.NotWritable,
+            playback ? "Variable playback and Pause are disabled by this composition." :
+                "Cold server configuration requires restart.");
     }
 
     public ControlValue Capture(DiagnosticId id)
@@ -163,13 +179,25 @@ public sealed class ServerOperatorProvider : IControlProvider
             var participants = new SharedPlayableParticipant[64];
             int count = _service.CopyParticipants(participants);
             if (count < 0) throw new InvalidOperationException("Operator participant census exceeded capacity.");
-            for (int index = 0; index < count; index++)
+            ServerMonitorSnapshot monitor = _service.CaptureParticipantMonitor();
+            SharedPlayableParticipant[] currentParticipants = participants.AsSpan(0, count).ToArray();
+            foreach (ServerMonitorParticipant observed in monitor.Participants.ToArray())
             {
-                SharedPlayableParticipant participant = participants[index];
-                yield return new(new("p." + participant.Participant.Value),
-                    [ControlValue.UInt64(participant.Participant.Value),
-                     ControlValue.Text(participant.GuestIdentity.DisplayName!),
-                     ControlValue.Text("remote")]);
+                SharedPlayableParticipant participant = Array.Find(currentParticipants,
+                    current => current.Participant == observed.Participant);
+                if (!participant.IsValid)
+                    throw new InvalidOperationException("Operator and sanitized monitor participant identities diverged.");
+                yield return new(new("p." + observed.Participant.Value),
+                    [ControlValue.UInt64(observed.Participant.Value),
+                     ControlValue.Text(observed.DisplayName),
+                     ControlValue.Text(observed.Connection.ToString().ToLowerInvariant()),
+                     ControlValue.Bool(true),
+                     ControlValue.UInt64(participant.ControlSession.Value),
+                     ControlValue.Text(observed.PublicActorIndex + ":" +
+                        observed.PublicActorGeneration),
+                     ControlValue.Text(observed.RoundTripMilliseconds < 0 ? "N/A" :
+                         observed.RoundTripMilliseconds.ToString()),
+                     ControlValue.Text(observed.ChunkX + "," + observed.ChunkZ)]);
             }
             yield break;
         }
