@@ -1,4 +1,5 @@
 using System.Text.Json;
+using UltraSim.Framework.Persistence;
 
 namespace UltraSim.Server.Operator;
 
@@ -6,6 +7,9 @@ namespace UltraSim.Server.Operator;
 public sealed record ServerOperatorConfiguration(
     string SaveRoot, string BackupRoot, ServerOperatorPolicy Policy)
 {
+    /// <summary>Cold selection policy for a saved world; never changes a running authority.</summary>
+    public SaveSetRecoveryMode RecoveryMode { get; init; } = SaveSetRecoveryMode.StrictCurrent;
+
     public static ServerOperatorConfiguration LoadOrCreate(string identityDirectory)
     {
         string root = Path.GetFullPath(identityDirectory);
@@ -47,6 +51,9 @@ public sealed record ServerOperatorConfiguration(
             !Path.IsPathFullyQualified(SaveRoot) || !Path.IsPathFullyQualified(BackupRoot))
             throw new InvalidDataException("Operator roots must be absolute paths.");
         Policy.Validate();
+        if (RecoveryMode is not (SaveSetRecoveryMode.StrictCurrent or
+            SaveSetRecoveryMode.CurrentThenNewestComplete))
+            throw new InvalidDataException("Operator recovery mode is invalid.");
     }
 
     private static void RejectReparse(string path)

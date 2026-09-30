@@ -3,21 +3,127 @@ using UltraSim.Framework.ControlPlane;
 using UltraSim.Game.Application;
 using UltraSim.Game.Protocol;
 using UltraSim.Game.Replication;
+using UltraSim.Game.Composition;
+using UltraSim.Game.Persistence;
+using UltraSim.Game.Admission;
+using UltraSim.Game.World;
+using UltraSim.ECS;
+using UltraSim.Framework.Persistence;
 using UltraSim.Network;
 using UltraSim.Server.Operator;
 
 var tests = new (string Name, Action Body)[]
 {
     ("AuthorizationAuditAndFencing", AuthorizationAuditAndFencing),
-    ("SaveBackupAndDisabledRestart", SaveBackupAndDisabledRestart),
+    ("SaveBackupAndSupervisedRestart", SaveBackupAndSupervisedRestart),
     ("AutosaveCadenceAndConsole", AutosaveCadenceAndConsole),
     ("BackupRetentionAndIntegrity", BackupRetentionAndIntegrity),
     ("ShutdownWaitsForBackupThenSaves", ShutdownWaitsForBackupThenSaves),
+    ("ColdRecoveryRetiresSavedGuestsAndFencesCorruptCurrent", ColdRecoveryRetiresSavedGuestsAndFencesCorruptCurrent),
+    ("RestartRejectsExhaustedSaveSequenceWithoutClosingAdmission", RestartRejectsExhaustedSaveSequenceWithoutClosingAdmission),
 };
 foreach ((string name, Action body) in tests)
 {
     body();
     Console.WriteLine("PASS " + name);
+}
+
+static void RestartRejectsExhaustedSaveSequenceWithoutClosingAdmission()
+{
+    using var fixture = new Fixture(new ServerOperatorPolicy(false, 300, 2, true));
+    Directory.CreateDirectory(Path.Combine(fixture.SaveRoot, "generations",
+        ulong.MaxValue.ToString("D20")));
+    ControlResult restart = fixture.Invoke(fixture.Principal,
+        ServerOperatorProvider.RestartWithSave);
+    Check(restart.Outcome.Status == ControlResultStatus.Rejected &&
+        !fixture.AdmissionClosed &&
+        fixture.Service.Capture().ExitDisposition == OperatorExitDisposition.None,
+        "A final save that cannot reserve a sequence still closed admission or requested restart.");
+}
+
+static void ColdRecoveryRetiresSavedGuestsAndFencesCorruptCurrent()
+{
+    string root = Path.Combine(Path.GetTempPath(),
+        $"ultrasim-p7-cold-recovery-{Environment.ProcessId}-{Guid.NewGuid():N}");
+    string saves = Path.Combine(root, "saves");
+    try
+    {
+        using (SharedPlayableAuthority original = SharedPlayableAuthority.CreateConceptDemo(
+            new SharedPlayableAuthorityLimits(2)))
+        {
+            bool created = original.Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+                (world, _, game) =>
+                {
+                    if (!original.Composition.TryCreateGuestPlayable(world, new ParticipantId(1),
+                            GameGuestBody.HumanFemale, out Entity actor))
+                        return false;
+                    return GamePlayableWorld.PopulateSharedParticipant(world, game, actor,
+                        GamePlayableWorld.PlayerStart).IsValid;
+                }, out bool populated) && populated;
+            Check(created, "The durable guest fixture could not be populated.");
+            original.Runtime.Tick();
+            var coordinator = new SaveSetCoordinator(saves);
+            var persistence = new GameRuntimePersistence(original.Runtime.Game, original.Composition,
+                new PersistenceRestoreOptions(PersistenceLimits.ServerDefault, ChunkLayoutOptions.KiB16),
+                coordinator);
+            Check(persistence.TrySave(new SaveSetContext(1, 1), static capture => capture()).Succeeded,
+                "The first recovery generation did not publish.");
+            Check(persistence.TrySave(new SaveSetContext(2, 2), static capture => capture()).Succeeded,
+                "The second recovery generation did not publish.");
+        }
+
+        using (SharedPlayableAuthority strict = SharedPlayableAuthority.CreateConceptDemo(
+            new SharedPlayableAuthorityLimits(2),
+            coldRestore: (runtime, composition) => ServerOperatorColdRecovery.Restore(
+                runtime, composition, saves, SaveSetRecoveryMode.StrictCurrent)))
+            Check(strict.RestoredSaveSequence == 2 && strict.RecoveredGuestCount == 1,
+                "Strict cold recovery did not reopen CURRENT and retire its process-local guest.");
+
+        string current = File.ReadAllText(Path.Combine(saves, "CURRENT"));
+        string corrupt = Path.Combine(saves, "generations", 2UL.ToString("D20"), "world.bin");
+        using (var stream = new FileStream(corrupt, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            int first = stream.ReadByte();
+            Check(first >= 0, "The ECS artifact was empty.");
+            stream.Position = 0;
+            stream.WriteByte((byte)(first ^ 0xFF));
+        }
+        bool strictRejected = false;
+        try
+        {
+            using SharedPlayableAuthority rejected = SharedPlayableAuthority.CreateConceptDemo(
+                new SharedPlayableAuthorityLimits(2),
+                coldRestore: (runtime, composition) => ServerOperatorColdRecovery.Restore(
+                    runtime, composition, saves, SaveSetRecoveryMode.StrictCurrent));
+        }
+        catch (InvalidDataException) { strictRejected = true; }
+        Check(strictRejected, "Strict cold recovery accepted a corrupt CURRENT generation.");
+        using SharedPlayableAuthority recovered = SharedPlayableAuthority.CreateConceptDemo(
+            new SharedPlayableAuthorityLimits(2),
+            coldRestore: (runtime, composition) => ServerOperatorColdRecovery.Restore(
+                runtime, composition, saves, SaveSetRecoveryMode.CurrentThenNewestComplete));
+        Check(recovered.RestoredSaveSequence == 1 && recovered.RecoveredGuestCount == 1,
+            "Fallback did not select the intact first generation and retire the saved guest.");
+        Check(recovered.GetSnapshot().ParticipantCount == 0 && recovered.Admission.SessionCount == 0,
+            "Cold recovery invented a live participant session.");
+        Check(File.ReadAllText(Path.Combine(saves, "CURRENT")) == current,
+            "Cold recovery rewrote the durable CURRENT pointer.");
+        Check(recovered.Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (world, _, game) =>
+            {
+                if (!world.TryResolvePersistentEntity(recovered.Scene.CabinDoorId, out Entity door) ||
+                    door != recovered.Scene.CabinDoor)
+                    return false;
+                for (uint index = 0; index < (uint)world.Options.EntityCapacity.MaximumEntities; index++)
+                    if (world.TryGetEntity(index, out Entity entity) &&
+                        world.TryGetPrefabProvenance(entity, out PrefabKey prefab) &&
+                        (prefab == GamePrefabKeys.Character || prefab == GamePrefabKeys.CharacterMale))
+                        return false;
+                return true;
+            }, out bool clean) && clean,
+            "Recovered scene identity or transient guest retirement was incorrect.");
+    }
+    finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
 }
 
 static void AuthorizationAuditAndFencing()
@@ -66,7 +172,7 @@ static void AuthorizationAuditAndFencing()
         "Bounded audit could not be read after invalid oversized argument set.");
 }
 
-static void SaveBackupAndDisabledRestart()
+static void SaveBackupAndSupervisedRestart()
 {
     using var fixture = new Fixture(new ServerOperatorPolicy(false, 300, 2, true));
     Check(fixture.Invoke(fixture.Principal, ServerOperatorProvider.BackupNow).Outcome.Status ==
@@ -88,10 +194,14 @@ static void SaveBackupAndDisabledRestart()
     Check(fixture.Service.Backups.CopyCompleteSequences(sequences) == 1 && sequences[0] == 1,
         "Validated backup was not published.");
     ControlResult restart = fixture.Invoke(fixture.Principal, ServerOperatorProvider.RestartWithSave);
-    Check(restart.Outcome.Code == ControlResultCode.Disabled &&
+    Check(restart.Outcome.Status == ControlResultStatus.Accepted &&
         fixture.Service.Capture().ExitDisposition == OperatorExitDisposition.None &&
-        fixture.Service.Capture().LastSavedSequence == 1 && !fixture.AdmissionClosed,
-        "Unsupported restart changed authority or host lifecycle.");
+        fixture.AdmissionClosed,
+        "Restart did not close admission immediately after its coherent final capture.");
+    fixture.PumpUntil(() => fixture.Service.Capture().ExitDisposition != OperatorExitDisposition.None);
+    Check(fixture.Service.Capture().ExitDisposition == OperatorExitDisposition.RestartRequested &&
+        fixture.Service.Capture().LastSavedSequence == 2 && fixture.AdmissionClosed,
+        "Restart did not publish a fresh save before closing admission and requesting supervisor exit.");
 }
 
 static void AutosaveCadenceAndConsole()
@@ -157,6 +267,8 @@ static void ShutdownWaitsForBackupThenSaves()
         ControlResultStatus.Accepted, "Backup was rejected.");
     Check(fixture.Invoke(fixture.Principal, ServerOperatorProvider.Shutdown).Outcome.Status ==
         ControlResultStatus.Accepted, "Shutdown did not coalesce behind backup.");
+    Check(!fixture.AdmissionClosed,
+        "Shutdown closed admission before the prior backup and final capture completed.");
     fixture.PumpUntil(() => fixture.Service.Capture().ExitDisposition ==
         OperatorExitDisposition.Shutdown);
     Check(fixture.Service.Capture().LastBackupSequence == 1 &&
@@ -213,6 +325,7 @@ sealed class Fixture : IDisposable
     public ControlPlaneRegistry Registry { get; }
     public ControlPrincipal Principal { get; }
     public bool AdmissionClosed => _host.AdmissionClosed;
+    public string SaveRoot => Path.Combine(_root, "saves");
 
     public ControlResult Invoke(ControlPrincipal principal, ControlActionId action,
         ControlProviderSnapshot? publication = null, ControlValue[]? arguments = null)

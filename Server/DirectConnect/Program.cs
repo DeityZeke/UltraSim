@@ -14,6 +14,7 @@ using UltraSim.Game.World;
 using UltraSim.Server.Authoring;
 using UltraSim.Server.Operator;
 using UltraSim.Framework.ControlPlane;
+using UltraSim.Framework.Persistence;
 
 DirectConnectOptions options;
 try
@@ -63,9 +64,18 @@ if (options.EphemeralSmoke)
 Directory.CreateDirectory(options.IdentityDirectory);
 using NetworkServerIdentity identity = LoadOrCreateIdentity(options.IdentityDirectory);
 ApplicationRealmId realm = LoadOrCreateRealm(options.IdentityDirectory);
+ServerOperatorConfiguration operatorConfiguration =
+    ServerOperatorConfiguration.LoadOrCreate(options.IdentityDirectory);
+string generationsRoot = Path.Combine(operatorConfiguration.SaveRoot, "generations");
+bool restoreExisting = File.Exists(Path.Combine(operatorConfiguration.SaveRoot, "CURRENT")) ||
+    (Directory.Exists(generationsRoot) && Directory.EnumerateDirectories(generationsRoot).Any());
 using SharedPlayableAuthority authority = SharedPlayableAuthority.CreateConceptDemo(
     new SharedPlayableAuthorityLimits(options.MaximumParticipants),
-    options.SimulationFrequencyHz);
+    options.SimulationFrequencyHz,
+    coldRestore: restoreExisting
+        ? (runtime, composition) => ServerOperatorColdRecovery.Restore(runtime, composition,
+            operatorConfiguration.SaveRoot, operatorConfiguration.RecoveryMode)
+        : null);
 using ConceptDemoContentDeployment content = ConceptDemoContentDeployment.Create(
     realm, options.ContentEndPoint, options.OfficialContentRoot);
 RemoteClientProfileAdvertisement clientProfile =
@@ -95,8 +105,6 @@ authority.ConfigureTelemetry(options.TelemetryLevel == NetworkTelemetryLevel.Off
     : options.TelemetryLevel == NetworkTelemetryLevel.Detailed
         ? GameTelemetryLevel.Detailed
         : GameTelemetryLevel.Basic);
-ServerOperatorConfiguration operatorConfiguration =
-    ServerOperatorConfiguration.LoadOrCreate(options.IdentityDirectory);
 using var operatorService = new ServerOperatorService(
     authority, host, authority.Runtime.Game, authority.Composition,
     operatorConfiguration.SaveRoot, operatorConfiguration.BackupRoot,
@@ -114,6 +122,8 @@ string fingerprint = Fingerprint(identity.PublicKey);
 Console.WriteLine("UltraSim Direct Connect Concept Demo server ready.");
 Console.WriteLine($"Endpoint: {host.LocalEndPoint}");
 Console.WriteLine($"Application realm: {realm}");
+Console.WriteLine($"World recovery: mode={operatorConfiguration.RecoveryMode} " +
+    $"selected={authority.RestoredSaveSequence} retired-guests={authority.RecoveredGuestCount}");
 Console.WriteLine($"Deployment key SHA-256: {Group(fingerprint)}");
 Console.WriteLine($"Content archive: {content.Snapshot.ArchiveUri} ({content.Snapshot.ArchiveBytes} bytes)");
 Console.WriteLine(
@@ -304,6 +314,11 @@ Console.WriteLine(
     $"joins={finalAuthority.Joins} leaves={finalAuthority.Leaves} clean={cleanRetirement}.");
 if (!cleanRetirement) return 3;
 if (signalShutdownIssued && requestedExit == OperatorExitDisposition.None) return 4;
+if (requestedExit == OperatorExitDisposition.RestartRequested)
+{
+    Console.WriteLine("P7 supervised restart requested after durable save and clean retirement.");
+    return 75;
+}
 return 0;
 
 static HostedUdpAdmissionHost CreateHost(

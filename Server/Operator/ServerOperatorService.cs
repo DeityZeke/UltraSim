@@ -10,7 +10,7 @@ using UltraSim.Server.Runtime;
 
 namespace UltraSim.Server.Operator;
 
-public enum OperatorExitDisposition : byte { None, Shutdown }
+public enum OperatorExitDisposition : byte { None, Shutdown, RestartRequested }
 
 /// <summary>Cold server-owned policy, deliberately not saved as Game world state.</summary>
 public readonly record struct ServerOperatorPolicy(bool AutosaveEnabled, int AutosaveSeconds,
@@ -28,7 +28,11 @@ public readonly record struct ServerOperatorSnapshot(
     ulong AuthorityGeneration, ulong SimulationTick, int Participants, int Sessions,
     bool SaveInProgress, bool BackupInProgress, ulong LastSavedSequence,
     DateTimeOffset? LastSavedAt, long LastSaveMilliseconds, ulong LastBackupSequence,
-    ulong AutosaveSkipped, string LastFailure, OperatorExitDisposition ExitDisposition);
+    ulong AutosaveSkipped, string LastFailure, OperatorExitDisposition ExitDisposition)
+{
+    public ulong RestoredSaveSequence { get; init; }
+    public int RecoveredGuestCount { get; init; }
+}
 
 /// <summary>
 /// Direct Connect owner-thread operator semantics. Control Plane is the admission/audit surface;
@@ -48,7 +52,8 @@ public sealed class ServerOperatorService : IDisposable
     private Task<GameSaveResult>? _save;
     private Task<OperatorBackupResult>? _backup;
     private long _saveStartedTimestamp;
-    private bool _shutdownAfterSave;
+    private OperatorExitDisposition _exitAfterSave;
+    private bool _finalSaveStarted;
     private bool _disposed;
     private ulong _lastSavedSequence;
     private DateTimeOffset? _lastSavedAt;
@@ -89,11 +94,15 @@ public sealed class ServerOperatorService : IDisposable
     {
         EnsureOwner();
         SharedPlayableAuthoritySnapshot authority = _authority.GetSnapshot();
-        return new(authority.GenerationId, authority.SimulationTick,
+        return new ServerOperatorSnapshot(authority.GenerationId, authority.SimulationTick,
             authority.ParticipantCount, _host.SessionCount,
             _save is not null, _backup is not null, _lastSavedSequence,
             _lastSavedAt, _lastSaveMilliseconds, _lastBackupSequence,
-            _autosaveSkipped, _lastFailure, _exit);
+            _autosaveSkipped, _lastFailure, _exit)
+        {
+            RestoredSaveSequence = _authority.RestoredSaveSequence,
+            RecoveredGuestCount = _authority.RecoveredGuestCount,
+        };
     }
 
     /// <summary>Service at the host owner boundary after Network and authority progress.</summary>
@@ -110,12 +119,19 @@ public sealed class ServerOperatorService : IDisposable
                 _lastSavedSequence = result.Manifest.Sequence;
                 _lastSavedAt = _time.GetUtcNow();
                 _lastFailure = "";
-                if (_shutdownAfterSave) PublishExit(OperatorExitDisposition.Shutdown);
+                if (_exitAfterSave != OperatorExitDisposition.None && _finalSaveStarted)
+                {
+                    OperatorExitDisposition requested = _exitAfterSave;
+                    _exitAfterSave = OperatorExitDisposition.None;
+                    _finalSaveStarted = false;
+                    PublishExit(requested);
+                }
             }
             else
             {
                 _lastFailure = Bounded(result.Failure?.Message ?? "Save did not publish.");
-                _shutdownAfterSave = false;
+                _exitAfterSave = OperatorExitDisposition.None;
+                _finalSaveStarted = false;
             }
             _revision++;
         }
@@ -127,19 +143,20 @@ public sealed class ServerOperatorService : IDisposable
             else _lastFailure = Bounded(result.Diagnostic);
             _revision++;
         }
-        if (_exit == OperatorExitDisposition.None && _shutdownAfterSave &&
+        if (_exit == OperatorExitDisposition.None && _exitAfterSave != OperatorExitDisposition.None &&
+            !_finalSaveStarted &&
             _save is null && _backup is null)
         {
-            ControlOwnerResult started = TryStartSave();
+            ControlOwnerResult started = TryStartFinalSave();
             if (started.Status != ControlResultStatus.Accepted)
             {
-                _shutdownAfterSave = false;
+                _exitAfterSave = OperatorExitDisposition.None;
                 _lastFailure = Bounded(started.Diagnostic);
                 _revision++;
             }
         }
         if (!_policy.AutosaveEnabled || _exit != OperatorExitDisposition.None ||
-            _shutdownAfterSave) return;
+            _exitAfterSave != OperatorExitDisposition.None) return;
         long now = _time.GetTimestamp();
         if (now < _nextAutosaveTimestamp) return;
         _nextAutosaveTimestamp = checked(now + CadenceTicks());
@@ -180,16 +197,19 @@ public sealed class ServerOperatorService : IDisposable
     public ControlOwnerResult RequestShutdown()
     {
         EnsureOwner();
-        if (_exit != OperatorExitDisposition.None || _shutdownAfterSave)
+        if (_exit != OperatorExitDisposition.None || _exitAfterSave != OperatorExitDisposition.None)
             return ControlOwnerResult.Reject(ControlResultCode.Disabled, "Exit is already requested.");
         if (_policy.SaveOnShutdown)
         {
-            if (_save is not null || _backup is not null) _shutdownAfterSave = true;
-            else
+            _exitAfterSave = OperatorExitDisposition.Shutdown;
+            if (_save is null && _backup is null)
             {
-                ControlOwnerResult saved = TryStartSave();
-                if (saved.Status != ControlResultStatus.Accepted) return saved;
-                _shutdownAfterSave = true;
+                ControlOwnerResult start = TryStartFinalSave();
+                if (start.Status != ControlResultStatus.Accepted)
+                {
+                    _exitAfterSave = OperatorExitDisposition.None;
+                    return start;
+                }
             }
         }
         else PublishExit(OperatorExitDisposition.Shutdown);
@@ -200,8 +220,20 @@ public sealed class ServerOperatorService : IDisposable
     public ControlOwnerResult RequestRestartWithSave()
     {
         EnsureOwner();
-        return ControlOwnerResult.Reject(ControlResultCode.Disabled,
-            "Restart requires a verified supervisor and durable authority/session rehydration; use Save Now and a managed deployment restart.");
+        if (_exit != OperatorExitDisposition.None || _exitAfterSave != OperatorExitDisposition.None)
+            return ControlOwnerResult.Reject(ControlResultCode.Disabled, "Exit is already requested.");
+        _exitAfterSave = OperatorExitDisposition.RestartRequested;
+        if (_save is null && _backup is null)
+        {
+            ControlOwnerResult start = TryStartFinalSave();
+            if (start.Status != ControlResultStatus.Accepted)
+            {
+                _exitAfterSave = OperatorExitDisposition.None;
+                return start;
+            }
+        }
+        _revision++;
+        return ControlOwnerResult.Accepted;
     }
 
     public ControlOwnerResult TryKick(ulong participantId)
@@ -252,6 +284,31 @@ public sealed class ServerOperatorService : IDisposable
     }
 
     private long CadenceTicks() => checked((long)(_policy.AutosaveSeconds * _time.TimestampFrequency));
+    private ControlOwnerResult TryStartFinalSave()
+    {
+        ControlOwnerResult result = TryStartSave();
+        if (result.Status == ControlResultStatus.Accepted)
+        {
+            if (_save is { IsCompleted: true } completed)
+            {
+                GameSaveResult immediate = completed.GetAwaiter().GetResult();
+                if (!immediate.Succeeded)
+                {
+                    _lastFailure = Bounded(immediate.Failure?.Message ??
+                        "Final authority capture did not complete.");
+                    _save = null;
+                    return ControlOwnerResult.Reject(ControlResultCode.OwnerRejected, _lastFailure);
+                }
+            }
+            // TrySaveAsync captured coherently before returning. No Network pump runs between
+            // that capture and closing admission, so no later accepted client action can claim
+            // to be part of this final durable boundary.
+            _finalSaveStarted = true;
+            _host.BeginShutdown();
+        }
+        return result;
+    }
+
     private void PublishExit(OperatorExitDisposition disposition)
     {
         _host.BeginShutdown();

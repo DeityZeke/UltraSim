@@ -12,6 +12,7 @@
     <WarningsAsErrors>$(WarningsAsErrors);CS1570;CS1572;CS1573;CS1574;CS1580;CS1581;CS1584;CS1587;CS1711;CS1734;CS1735</WarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
+    <None Include="run-managed.sh" CopyToPublishDirectory="Always" />
     <ProjectReference Include="../../Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj" />
     <ProjectReference Include="../ConceptDemo/UltraSim.Server.ConceptDemo.csproj" />
     <ProjectReference Include="../Authoring/UltraSim.Server.Authoring.csproj" />

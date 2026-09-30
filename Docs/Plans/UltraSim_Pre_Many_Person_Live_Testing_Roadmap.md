@@ -1899,11 +1899,12 @@ Make the intended D2-ish Inventory presentation real and human-testable.
 
 ## P7 — Server Operator Product: command authority, console, GUI, save/backup/recovery
 
-**Status: ACTIVE.** The first headless slice has typed capability-gated actions, bounded audit,
+**Status: ACTIVE.** The headless slice has typed capability-gated actions, bounded audit,
 Save Now, host-owned autosave, bounded complete-generation backups, exact participant/session
-correlation for Kick, and a console. Restart-with-save is deliberately disabled: an exit code
-without a verified supervisor and durable authority/session rehydration would be a false restart.
-Restore/recovery, richer logs, the Godot server GUI, and any
+correlation for Kick, and a console. A follow-up adds cold strict/fallback save reopening,
+guest-only session cleanup and a supervised restart-with-save exit contract; the same deployment
+identity and configuration are reopened by the exported launcher. Selected-backup restoration,
+richer logs, the Godot server GUI, and any
 authorized in-game Admin route remain P7 work. No P8 work has begun.
 
 ### Goal

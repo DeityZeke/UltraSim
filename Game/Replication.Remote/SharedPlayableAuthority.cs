@@ -322,6 +322,12 @@ public sealed class SharedPlayableAuthority : IDisposable
     private bool _publicItemPresentationDirty = true;
     private bool _disposed;
 
+    /// <summary>Complete durable generation selected at cold startup, or zero for a fresh world.</summary>
+    public ulong RestoredSaveSequence { get; private set; }
+
+    /// <summary>Transient guest actors retired after a cold reopen; sessions themselves are never durable.</summary>
+    public int RecoveredGuestCount { get; private set; }
+
     private SharedPlayableAuthority(
         WorldPack worldPack,
         UltraSimGameComposition composition,
@@ -372,7 +378,8 @@ public sealed class SharedPlayableAuthority : IDisposable
     /// <summary>Creates and owns a fresh shared Concept Demo server on the calling thread.</summary>
     public static SharedPlayableAuthority CreateConceptDemo(
         SharedPlayableAuthorityLimits limits = default,
-        int simulationFrequencyHz = WorldClockOptions.DefaultSimulationFrequencyHz)
+        int simulationFrequencyHz = WorldClockOptions.DefaultSimulationFrequencyHz,
+        Func<ServerRuntime, UltraSimGameComposition, ulong>? coldRestore = null)
     {
         if (limits == default) limits = SharedPlayableAuthorityLimits.Default;
         limits.Validate();
@@ -411,6 +418,31 @@ public sealed class SharedPlayableAuthority : IDisposable
             long initialTickStarted = Stopwatch.GetTimestamp();
             runtime.Tick();
             tickTimings.RecordElapsed(initialTickStarted);
+            ulong restoredSequence = 0;
+            int recoveredGuests = 0;
+            if (coldRestore is not null)
+            {
+                restoredSequence = coldRestore(runtime, composition);
+                if (restoredSequence == 0)
+                    throw new InvalidDataException("The cold restore callback selected no complete generation.");
+                if (!runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider,
+                        (GamePlayableWorldScene Scene, int Guests)>(
+                        (world, _, game) =>
+                        {
+                            GamePlayableWorldScene rebound = RebindSavedScene(world, game, scene);
+                            int guests = RetireSavedConceptDemoGuests(world, game);
+                            return (rebound, guests);
+                        }, out var recovered))
+                    throw new InvalidOperationException("The restored shared authority has no active generation.");
+                scene = recovered.Scene;
+                recoveredGuests = recovered.Guests;
+                if (recoveredGuests != 0)
+                {
+                    long cleanupStarted = Stopwatch.GetTimestamp();
+                    runtime.Tick();
+                    tickTimings.RecordElapsed(cleanupStarted);
+                }
+            }
             var chatLimits = GameChatLimits.Default with
             {
                 MaximumParticipants = limits.MaximumParticipants,
@@ -427,9 +459,12 @@ public sealed class SharedPlayableAuthority : IDisposable
                     8,
                     2_000,
                     1_000));
-            return new SharedPlayableAuthority(
+            var authority = new SharedPlayableAuthority(
                 pack, composition, runtime, admission, chat, delivery, scene,
                 ownsRuntime: true, tickTimings, generationStartedTimestamp, limits);
+            authority.RestoredSaveSequence = restoredSequence;
+            authority.RecoveredGuestCount = recoveredGuests;
+            return authority;
         }
         catch
         {
@@ -440,6 +475,77 @@ public sealed class SharedPlayableAuthority : IDisposable
             runtime.Dispose();
             throw;
         }
+    }
+
+    private static GamePlayableWorldScene RebindSavedScene(
+        EcsWorld world, IGameGenerationStateProvider game, in GamePlayableWorldScene original)
+    {
+        Entity Match(PersistentEntityId id, PrefabKey expected)
+        {
+            if (!world.TryResolvePersistentEntity(id, out Entity entity) ||
+                !world.TryGetPrefabProvenance(entity, out PrefabKey actual) || actual != expected)
+                throw new InvalidDataException(
+                    "The restored Concept Demo scene does not match its fixed authored identities.");
+            return entity;
+        }
+
+        GamePlayableWorldScene rebound = original with
+        {
+            CabinDoor = Match(original.CabinDoorId, GamePrefabKeys.CabinDoor),
+            CabinChest = Match(original.CabinChestId, GamePrefabKeys.WorldChest),
+            WoodlandAnimal = Match(original.WoodlandAnimalId, GamePrefabKeys.WoodlandAnimal),
+            SkyTelepad = Match(original.SkyTelepadId, GamePrefabKeys.SkyTelepad),
+            CentralFarGate = Match(original.CentralFarGateId, GamePrefabKeys.FarGate),
+            FarReturnGate = Match(original.FarReturnGateId, GamePrefabKeys.FarGate),
+            WelcomeSign = Match(original.WelcomeSignId, GamePrefabKeys.InformationalSign),
+            FallbackLabSign = Match(original.FallbackLabSignId, GamePrefabKeys.InformationalSign),
+            IronSwordSpawner = Match(original.IronSwordSpawnerId, GamePrefabKeys.IronSwordSpawner),
+        };
+        // Generation initialization already rebuilt and validated dynamic blocker projection.
+        if (!game.WorldState.TryReadPublic(world, rebound.CabinDoor, out _) ||
+            !game.WorldState.TryReadPublic(world, rebound.CabinChest, out _))
+            throw new InvalidDataException("The restored scene has no public blocker truth.");
+        return rebound;
+    }
+
+    private static int RetireSavedConceptDemoGuests(EcsWorld world, IGameGenerationStateProvider game)
+    {
+        // This composition admits accountless guests only. Admission sessions and control epochs
+        // are process-local, so persisted guest actors must be retired before new admission opens.
+        // Do not apply this policy to an account-backed world without durable session ownership.
+        var guests = new Entity[64];
+        int count = 0;
+        uint capacity = checked((uint)world.Options.EntityCapacity.MaximumEntities);
+        for (uint index = 0; index < capacity; index++)
+        {
+            if (!world.TryGetEntity(index, out Entity entity) ||
+                !world.TryGetPrefabProvenance(entity, out PrefabKey prefab) ||
+                (prefab != GamePrefabKeys.Character && prefab != GamePrefabKeys.CharacterMale))
+                continue;
+            if (count == guests.Length)
+                throw new InvalidDataException("The saved guest census exceeds the product participant bound.");
+            guests[count++] = entity;
+        }
+        for (int guest = 0; guest < count; guest++)
+        {
+            Entity actor = guests[guest];
+            Entity backpack = Entity.Null;
+            for (uint index = 0; index < capacity; index++)
+            {
+                if (!world.TryGetEntity(index, out Entity entity) ||
+                    !game.Inventory.TryGetContainerOwner(world, entity, out Entity owner) || owner != actor)
+                    continue;
+                if (backpack.IsValid || !world.TryGetPrefabProvenance(entity, out PrefabKey prefab) ||
+                    prefab != GamePrefabKeys.Backpack)
+                    throw new InvalidDataException("A saved guest has ambiguous or invalid inventory ownership.");
+                backpack = entity;
+            }
+            if (!backpack.IsValid ||
+                !game.TryRetireTransientParticipantInventory(world, actor, backpack) ||
+                !world.TryDestroy(actor))
+                throw new InvalidDataException("A saved guest could not retire through Game lifetime policy.");
+        }
+        return count;
     }
 
     /// <summary>

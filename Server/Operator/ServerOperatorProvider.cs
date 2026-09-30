@@ -43,7 +43,8 @@ public sealed class ServerOperatorProvider : IControlProvider
                     ControlValue.Int64(service.Policy.AutosaveSeconds), Read, Lifecycle,
                     ControlApplyMode.ReadOnly, ControlPersistenceClass.ServerColdConfiguration, OperatorAudience)],
             diagnostics: new[] { "generation", "tick", "participant-count", "sessions", "save-in-progress",
-                "backup-in-progress", "last-save", "last-backup", "autosave-skipped", "last-failure", "exit" }
+                "backup-in-progress", "last-save", "last-backup", "autosave-skipped", "restored-save",
+                "recovered-guests", "last-failure", "exit" }
                 .Select(name => new DiagnosticDescriptor(new(name), new("Server/Status"), name,
                     "Owner-captured operator status.", new(name switch
                     {
@@ -59,7 +60,7 @@ public sealed class ServerOperatorProvider : IControlProvider
                 new(Shutdown, new("Server/Lifecycle"), "Shutdown", "Request graceful host retirement.",
                     [], Read, Lifecycle, OperatorAudience, "Stop this server?"),
                 new(RestartWithSave, new("Server/Lifecycle"), "Restart with save",
-                    "Unavailable until supervisor restart and durable authority/session rehydration are verified.",
+                    "Save, retire this process, then request a supervised cold reopen of the same deployment.",
                     [], Read, Lifecycle, OperatorAudience, "Save and restart this server?"),
                 new(Kick, new("Server/Sessions"), "Kick participant",
                     "Drain one exact currently entered remote participant session.",
@@ -135,6 +136,8 @@ public sealed class ServerOperatorProvider : IControlProvider
             "last-save" => ControlValue.UInt64(s.LastSavedSequence),
             "last-backup" => ControlValue.UInt64(s.LastBackupSequence),
             "autosave-skipped" => ControlValue.UInt64(s.AutosaveSkipped),
+            "restored-save" => ControlValue.UInt64(s.RestoredSaveSequence),
+            "recovered-guests" => ControlValue.UInt64(checked((ulong)s.RecoveredGuestCount)),
             "last-failure" => ControlValue.Text(s.LastFailure),
             "exit" => ControlValue.Text(s.ExitDisposition.ToString()),
             _ => throw new ArgumentException("Unknown server operator diagnostic.")

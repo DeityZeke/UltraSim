@@ -18,7 +18,11 @@ public readonly record struct GameSaveResult(
 public readonly record struct GameLoadResult(
     bool Succeeded,
     ulong GenerationId,
-    Exception? Failure);
+    Exception? Failure)
+{
+    /// <summary>The exact complete save generation selected by staged recovery.</summary>
+    public ulong SelectedSequence { get; init; }
+}
 
 /// <summary>
 /// Whole-game persistence composition. Feature-owned derived state contributes
@@ -207,7 +211,10 @@ public sealed class GameRuntimePersistence
                     throw new InvalidOperationException("The prepared game generation was not published.");
                 }
             });
-            return new GameLoadResult(true, publishedGeneration, null);
+            return new GameLoadResult(true, publishedGeneration, null)
+            {
+                SelectedSequence = prepared.Sequence,
+            };
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
