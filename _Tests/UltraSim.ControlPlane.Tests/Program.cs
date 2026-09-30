@@ -522,7 +522,9 @@ static void SettingsConsent()
     effective = ClientSettingsResolver.Resolve(doc, recommendation: recommendation, mode: ClientProfileApplicationMode.UseServerDefaults);
     r.Read(Principal(), new("client.settings"), g, new ControlId("vegetation"), out var applied);
     Check(applied!.Pending is null && applied.Effective.AsBool()); Check(applied.Revision > pending.Revision);
-    Check(p.Definition.Controls.First(c => c.Id.Value == "volume").Description.Contains("no Audio"));
+    var volume = p.Definition.Controls.First(c => c.Id.Value == "volume");
+    Check(volume.Category.Value == "Client/Audio" &&
+        volume.Description.Contains("applied live", StringComparison.Ordinal));
 }
 static void SettingsCapacity()
 {
