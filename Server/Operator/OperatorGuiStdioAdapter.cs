@@ -103,8 +103,12 @@ public sealed class OperatorGuiStdioAdapter
             if (_registry.Read(_principal, provider.Definition.Id, provider.Generation,
                     control.Id, out ControlState? snapshot) !=
                 ControlResultCode.Accepted || snapshot is null) continue;
-            builder.Append(control.Id.Value).Append('=').Append(FormatValue(snapshot.Effective))
-                .Append(" (cold configuration)").AppendLine();
+            builder.Append(control.Id.Value).Append('=').Append(FormatValue(snapshot.Effective));
+            if (snapshot.DisabledCode == ControlResultCode.Disabled)
+                builder.Append(" (disabled: ").Append(snapshot.DisabledReason).Append(')');
+            else if (control.Persistence == ControlPersistenceClass.ServerColdConfiguration)
+                builder.Append(" (cold configuration)");
+            builder.AppendLine();
         }
         return builder.ToString();
     }

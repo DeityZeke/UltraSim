@@ -73,7 +73,7 @@ static void LocalGuiFramingUsesSameTypedOwnerActions()
     Check(gui.TryExecute(Line(new(4, "status")), out string status) &&
         status.Contains("last-save", StringComparison.Ordinal) &&
         status.Contains("autosave-enabled", StringComparison.Ordinal) &&
-        status.Contains("playback-rate=1", StringComparison.Ordinal),
+        status.Contains("playback-rate=1 (disabled: Variable playback and Pause", StringComparison.Ordinal),
         "The GUI status did not expose current owner diagnostics and cold policy.");
     ControlProviderSnapshot playbackPublication = fixture.Registry.Discover(fixture.Principal).Single();
     Check(fixture.Registry.Read(fixture.Principal, ServerOperatorProvider.ProviderId,
