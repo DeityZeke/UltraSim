@@ -56,6 +56,7 @@ Start here. This file is intentionally small.
 - [Godot / .NET native shutdown lifetime assurance](topics/godot-dotnet-native-shutdown-lifetime.md)
 - [Definition / presentation / asset independence](topics/definition-presentation-asset-independence.md)
 - [Inventory viewer profiles / cached derived portraits](topics/inventory-viewer-profiles-and-derived-portraits.md)
+- [Shared Inventory presentation world / impostor hybrid](topics/inventory-shared-presentation-world.md)
 - [Server Operator Product](../Server/Operator/README.md)
 - [Audio Kernel + Sound Engine](../_Benchmarks/Baselines/framework-p8-audio-kernel-sound-engine-2026-09-30.md)
 - [Renderer impostor LOD / far-field cards](topics/renderer-impostor-lod.md)
