@@ -3172,11 +3172,13 @@ static ContentlessOnlineExport VerifyContentlessOnlineExport(string root, string
 
     string[] expectedAssemblies =
     [
+        "UltraSim.Audio",
         "UltraSim.Client.Application.Godot",
         "UltraSim.Client.Content",
         "UltraSim.Client.ControlPlane",
         "UltraSim.Client.Core",
         "UltraSim.Client.Network",
+        "UltraSim.Client.Sound",
         "UltraSim.Client.StandardUi",
         "UltraSim.ECS",
         "UltraSim.Framework.ControlPlane",
@@ -3265,12 +3267,14 @@ static FinalClientProductExports VerifyFinalClientProductExports(
     ExportClient(root, godot, "SinglePlayer", singlePlayerExecutable);
     string[] singlePlayerAssemblies =
     [
+        "UltraSim.Audio",
         "UltraSim.Client.Application.Godot",
         "UltraSim.Client.BuiltInTestWorlds",
         "UltraSim.Client.Content",
         "UltraSim.Client.ControlPlane",
         "UltraSim.Client.Core",
         "UltraSim.Client.Local",
+        "UltraSim.Client.Sound",
         "UltraSim.Client.StandardUi",
         "UltraSim.ECS",
         "UltraSim.Framework.ControlPlane",
@@ -3345,6 +3349,7 @@ static FinalClientProductExports VerifyFinalClientProductExports(
     ExportClient(root, godot, "Complete", completeExecutable);
     string[] completeAssemblies =
     [
+        "UltraSim.Audio",
         "UltraSim.Bridges.Http.Kestrel",
         "UltraSim.Client.Application.Godot",
         "UltraSim.Client.BuiltInTestWorlds",
@@ -3353,6 +3358,7 @@ static FinalClientProductExports VerifyFinalClientProductExports(
         "UltraSim.Client.Core",
         "UltraSim.Client.Local",
         "UltraSim.Client.Network",
+        "UltraSim.Client.Sound",
         "UltraSim.Client.StandardUi",
         "UltraSim.ECS",
         "UltraSim.Framework.ControlPlane",
