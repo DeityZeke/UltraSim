@@ -193,6 +193,8 @@ public sealed class GodotUiRenderer : IUiRenderer, IDisposable
         _openHandles.Remove(godotHandle);
         if (_windows is not null) _windows.Detach(godotHandle);
         else godotHandle.CloseNative();
+        if (!_openHandles.Exists(static open => open.IsInventory))
+            _inventoryPortraits?.SuspendStaging();
     }
 
     /// <summary>
@@ -372,6 +374,8 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
     public Control Root { get; }
 
     internal UiViewInstanceId Instance => _instance;
+
+    internal bool IsInventory => _inventory is not null;
 
     internal string Title => _definition.Key.ToString();
 

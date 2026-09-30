@@ -152,6 +152,12 @@ public partial class S08HeadlessAcceptance
                 "The native remote Move did not commit authoritative Inventory truth.");
             Expect(inventory.Close(opened.View), "The remote Backpack did not close.");
             DriveRemote(loopback, bridge, server, () => client.OpenViewCount == 0);
+            Expect(renderer.InventoryPortraitOwnedStaging.Viewport is null &&
+                (retainedPortraitViewport is null ||
+                    retainedPortraitViewport.NativeInstance == IntPtr.Zero),
+                "Closing the portrait-bearing Inventory left its native staging viewport live.");
+            Expect(GetNodeOrNull<Node>("InventoryPortraitPump") is null,
+                "Closing the Inventory left its portrait pump in the gameplay UI host.");
 
             InventoryUiOpenResult pouchView = inventory.OpenOwned(pouch, alice, backpack);
             Expect(pouchView.Succeeded, "The authorized remote Pouch did not open.");

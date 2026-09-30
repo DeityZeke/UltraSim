@@ -43,9 +43,8 @@ internal sealed class GodotInventoryPortraitCache : IGodotUiSemanticImageResolve
     {
         _parent = parent ?? throw new ArgumentNullException(nameof(parent));
         _world = world ?? throw new ArgumentNullException(nameof(world));
-        _pump = new PortraitPump { Step = CompleteDraw };
+        _pump = new PortraitPump { Name = "InventoryPortraitPump", Step = CompleteDraw };
         _pump.SetProcess(false);
-        _parent.AddChild(_pump);
     }
 
     internal (int Images, ulong Builds, ulong Hits, bool StagingScene,
@@ -190,6 +189,9 @@ internal sealed class GodotInventoryPortraitCache : IGodotUiSemanticImageResolve
         viewport.AddChild(light);
         try
         {
+            // Only an open Inventory needs staging. This host becomes empty again as soon as
+            // its last Inventory view closes; cached images do not need a live staging scene.
+            if (_pump.GetParent() is null) _parent.AddChild(_pump);
             _parent.AddChild(viewport);
             camera.LookAt(new Vector3(0, 0.58f, 0));
             _viewportTexture = viewport.GetTexture(); // one owner-lived returned native wrapper
@@ -209,11 +211,19 @@ internal sealed class GodotInventoryPortraitCache : IGodotUiSemanticImageResolve
     {
         EnsureOwner();
         if (_disposed) return;
-        CancelPending();
+        SuspendStaging();
         PortraitReady = null;
         foreach (ImageTexture image in _images.Values) image.Dispose();
         _images.Clear();
         _unavailable.Clear();
+        _pump.Free();
+        _disposed = true;
+    }
+
+    internal void SuspendStaging()
+    {
+        EnsureOwner();
+        CancelPending();
         _viewportTexture?.Dispose();
         _viewportTexture = null;
         _viewport?.GetParent()?.RemoveChild(_viewport);
@@ -223,8 +233,7 @@ internal sealed class GodotInventoryPortraitCache : IGodotUiSemanticImageResolve
         _world3D?.Dispose();
         _world3D = null;
         _pump.GetParent()?.RemoveChild(_pump);
-        _pump.Free();
-        _disposed = true;
+        _pump.SetProcess(false);
     }
 
     private void EnsureOwner()
