@@ -25,6 +25,7 @@ public sealed class ServerOperatorProvider : IControlProvider
     private ulong _observedJoins;
     private ulong _observedLeaves;
     private ulong _observedAuditSequence;
+    private ulong _observedLogSequence;
 
     public ServerOperatorProvider(ServerOperatorService service, OperatorAuditRing audit)
     {
@@ -82,6 +83,15 @@ public sealed class ServerOperatorProvider : IControlProvider
                      new(new("action"), "Action", new(ControlValueKind.Text, maximumText: 256)),
                      new(new("arguments"), "Arguments", new(ControlValueKind.Text, maximumText: 256)),
                      new(new("outcome"), "Outcome", new(ControlValueKind.Text, maximumText: 64))],
+                    Read, OperatorAudience),
+                new(new("log"), new("Server/Log"), "Recent server events",
+                    "Bounded owner-published operational events; not authoritative world history.",
+                    OperatorLogRing.Capacity,
+                    [new(new("sequence"), "Sequence", new(ControlValueKind.UInt64)),
+                     new(new("time"), "UTC time", new(ControlValueKind.Text, maximumText: 48)),
+                     new(new("severity"), "Severity", new(ControlValueKind.Text, maximumText: 16)),
+                     new(new("category"), "Category", new(ControlValueKind.Text, maximumText: 24)),
+                     new(new("message"), "Message", new(ControlValueKind.Text, maximumText: 256))],
                     Read, OperatorAudience)]);
     }
 
@@ -94,11 +104,13 @@ public sealed class ServerOperatorProvider : IControlProvider
             SharedPlayableAuthoritySnapshot authority = _serviceAuthority();
             if (_observedServiceRevision != _service.Revision ||
                 _observedAuditSequence != _audit.Sequence ||
+                _observedLogSequence != _service.Logs.Sequence ||
                 _observedJoins != authority.Joins || _observedLeaves != authority.Leaves)
             {
                 _revision = checked(_revision + 1);
                 _observedServiceRevision = _service.Revision;
                 _observedAuditSequence = _audit.Sequence;
+                _observedLogSequence = _service.Logs.Sequence;
                 _observedJoins = authority.Joins;
                 _observedLeaves = authority.Leaves;
             }
@@ -174,6 +186,21 @@ public sealed class ServerOperatorProvider : IControlProvider
                      ControlValue.Text(row.Principal), ControlValue.Text(row.Context),
                      ControlValue.Text(row.Provider + "/" + row.Action), ControlValue.Text(row.Arguments),
                      ControlValue.Text(row.Status + "/" + row.Code)]);
+            }
+            yield break;
+        }
+        if (id.Value == "log")
+        {
+            var rows = new OperatorLogEntry[OperatorLogRing.Capacity];
+            int count = _service.Logs.CopyTo(rows);
+            if (count < 0) throw new InvalidOperationException("Operator log census exceeded capacity.");
+            for (int index = 0; index < count; index++)
+            {
+                OperatorLogEntry row = rows[index];
+                yield return new(new("log." + row.Sequence),
+                    [ControlValue.UInt64(row.Sequence), ControlValue.Text(row.Time.ToString("O")),
+                     ControlValue.Text(row.Severity.ToString()), ControlValue.Text(row.Category.ToString()),
+                     ControlValue.Text(row.Message)]);
             }
             yield break;
         }

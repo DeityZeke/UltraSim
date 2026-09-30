@@ -17,7 +17,7 @@ The Direct Connect identity directory owns `operator-policy.json` (cold configur
 `saves/`, and `backups/` by default. A configured path must be absolute and the save and
 backup roots must be disjoint. The operator is responsible for filesystem access control
 if moving those roots outside the private identity directory. The console accepts `help`,
-`status`, `participants`, `audit`, `save`, `backup`, `shutdown confirm`, and
+`status`, `participants`, `audit`, `logs`, `save`, `backup`, `shutdown confirm`, and
 `kick <participant-id> confirm`, and `restart confirm`. Ctrl+C uses the same Shutdown
 action. The verifier's
 stop-file remains test plumbing, not an operator API.
@@ -40,8 +40,21 @@ process with the same arguments, identity directory, policy, and save root. Dire
 the binary returns 75 to an external supervisor; it never self-spawns. A failed final save
 does not request restart; admission remains closed so the operator can diagnose/retry
 without admitting new work outside the intended final boundary.
+The owner-local `OperatorLogRing` retains 256 bounded operational events with severity,
+category, UTC time and sequence. Its Control Plane `log` collection is distinct from
+the action audit and authoritative world history; no event is generated per idle tick.
 
-This is not the completed P7 product. There is no selected-backup restore or durable
-account/session rehydration. No Godot
+To restore one selected backup while the server is **stopped**, run the published
+`UltraSim.Server.DirectConnect --identity-dir=<same directory>
+--restore-backup-sequence=<sequence>`. The maintenance process takes the same exclusive
+deployment lease as the live server, validates and privately stages the selected backup,
+runs normal staged Game restore, retires saved transient guests, then publishes a **new**
+forward live SaveSet generation. It does not open Network admission or replace a running
+authority. Start the server normally afterward. Missing/corrupt backup selection fails
+without changing the live `CURRENT` pointer. `run-managed.sh` exits normally after a
+maintenance invocation; it does not loop the restore argument.
+
+This is not the completed P7 product. Backup restoration is cold maintenance rather than
+a live GUI/console action, and there is no durable account/session rehydration. No Godot
 server GUI or remotely authorized in-game Admin route is present. Ordinary player
 principals cannot see this provider, and no client-claimed capability list is trusted.

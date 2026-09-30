@@ -53,13 +53,18 @@ dotnet run --project Server/DirectConnect/UltraSim.Server.DirectConnect.csproj \
 
 P7's active headless operator slice adds a bounded stdin command reader and owner-thread
 Control Plane routing. Type `help` for the currently published actions. `save`, `backup`,
-`status`, `participants`, `audit`, `shutdown confirm`, `restart confirm`, and
+`status`, `participants`, `audit`, `logs`, `shutdown confirm`, `restart confirm`, and
 `kick <participant-id> confirm` are available. For managed restart, launch the published
 `run-managed.sh`; a successful final save yields exit code 75, and that launcher reopens
 the same identity/configuration from a validated cold save. Running the binary directly
 leaves code 75 for another supervisor to interpret. `operator-policy.json` in the identity
 directory is cold configuration for autosave cadence, backup retention, recovery mode and roots. See
 [Server Operator](../Operator/README.md) for exact limitations. This slice does not close P7.
+
+Selected backup recovery is an exclusive offline command on the same published binary:
+`--identity-dir=<existing directory> --restore-backup-sequence=<positive sequence>`.
+It validates a separate backup and publishes a new forward live generation before returning;
+run the server normally afterward. This command never admits clients.
 
 The canonical Network development default is Full. Dedicated product builds select
 `ServerOnly` explicitly so their physical output omits the unused Hosted client

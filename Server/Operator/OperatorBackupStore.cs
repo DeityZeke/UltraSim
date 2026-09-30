@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using UltraSim.Framework.Persistence;
 
@@ -6,6 +7,21 @@ namespace UltraSim.Server.Operator;
 
 public readonly record struct OperatorBackupResult(bool Succeeded, ulong Sequence, bool Reused,
     string Diagnostic);
+
+/// <summary>Private, validated save-set-shaped copy of one selected backup.</summary>
+public sealed class OperatorColdRestoreStage : IDisposable
+{
+    private readonly string _root;
+    private bool _disposed;
+    internal OperatorColdRestoreStage(string root) => _root = root;
+    public string SaveRoot => _disposed ? throw new ObjectDisposedException(nameof(OperatorColdRestoreStage)) : _root;
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
+    }
+}
 
 /// <summary>
 /// Copies only a complete, hash-validated published save generation into a separate bounded
@@ -37,6 +53,49 @@ public sealed class OperatorBackupStore
     }
 
     public string BackupRoot => _backupRoot;
+
+    /// <summary>
+    /// Validates and stages one selected complete backup as a private SaveSet root. The caller
+    /// must cold-load through normal Prepare/Resolve/Validate/Commit, then publish a new live
+    /// generation before admitting clients. This method never edits the live save root.
+    /// </summary>
+    public OperatorColdRestoreStage StageSelectedForColdRecovery(ulong sequence)
+    {
+        if (sequence == 0) throw new ArgumentOutOfRangeException(nameof(sequence));
+        string name = sequence.ToString("D20", System.Globalization.CultureInfo.InvariantCulture);
+        string source = Path.Combine(_backupRoot, name);
+        ValidateGeneration(source, name);
+        string stage = Path.Combine(_backupRoot, ".restore-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(stage);
+        try
+        {
+            string generations = Path.Combine(stage, "generations");
+            string selected = Path.Combine(generations, name);
+            Directory.CreateDirectory(generations);
+            Directory.CreateDirectory(selected);
+            SaveSetManifest manifest = ReadManifest(source);
+            CopyDurably(Path.Combine(source, "manifest.json"), Path.Combine(selected, "manifest.json"));
+            foreach (SaveSetArtifact artifact in manifest.Artifacts)
+                CopyDurably(Path.Combine(source, artifact.FileName),
+                    Path.Combine(selected, artifact.FileName));
+            ValidateGeneration(selected, name);
+            _durable.FlushDirectory(selected);
+            _durable.FlushDirectory(generations);
+            using (var pointer = new FileStream(Path.Combine(stage, "CURRENT"),
+                FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                pointer.Write(Encoding.ASCII.GetBytes(name + "\n"));
+                pointer.Flush(flushToDisk: true);
+            }
+            _durable.FlushDirectory(stage);
+            return new OperatorColdRestoreStage(stage);
+        }
+        catch
+        {
+            Directory.Delete(stage, recursive: true);
+            throw;
+        }
+    }
 
     public OperatorBackupResult TryBackupCurrent()
     {

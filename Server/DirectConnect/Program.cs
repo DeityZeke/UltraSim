@@ -15,6 +15,8 @@ using UltraSim.Server.Authoring;
 using UltraSim.Server.Operator;
 using UltraSim.Framework.ControlPlane;
 using UltraSim.Framework.Persistence;
+using UltraSim.Game.Persistence;
+using UltraSim.ECS;
 
 DirectConnectOptions options;
 try
@@ -62,10 +64,49 @@ if (options.EphemeralSmoke)
 }
 
 Directory.CreateDirectory(options.IdentityDirectory);
-using NetworkServerIdentity identity = LoadOrCreateIdentity(options.IdentityDirectory);
-ApplicationRealmId realm = LoadOrCreateRealm(options.IdentityDirectory);
+using ServerOperatorInstanceLease instanceLease =
+    ServerOperatorInstanceLease.Acquire(options.IdentityDirectory);
 ServerOperatorConfiguration operatorConfiguration =
     ServerOperatorConfiguration.LoadOrCreate(options.IdentityDirectory);
+if (options.RestoreBackupSequence != 0)
+{
+    try
+    {
+        var backups = new OperatorBackupStore(operatorConfiguration.SaveRoot,
+            operatorConfiguration.BackupRoot, operatorConfiguration.Policy.BackupRetention);
+        using OperatorColdRestoreStage stage = backups.StageSelectedForColdRecovery(
+            options.RestoreBackupSequence);
+        using SharedPlayableAuthority restored = SharedPlayableAuthority.CreateConceptDemo(
+            new SharedPlayableAuthorityLimits(options.MaximumParticipants),
+            options.SimulationFrequencyHz,
+            coldRestore: (runtime, composition) => ServerOperatorColdRecovery.Restore(
+                runtime, composition, stage.SaveRoot, SaveSetRecoveryMode.StrictCurrent));
+        var coordinator = new SaveSetCoordinator(operatorConfiguration.SaveRoot);
+        if (!coordinator.TryGetNextSequence(out ulong sequence))
+            throw new InvalidDataException("The live save sequence space is exhausted.");
+        var persistence = new GameRuntimePersistence(restored.Runtime.Game, restored.Composition,
+            new PersistenceRestoreOptions(PersistenceLimits.ServerDefault, ChunkLayoutOptions.KiB16),
+            coordinator);
+        GameSaveResult published = persistence.TrySave(
+            new SaveSetContext(sequence, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+            static capture => capture());
+        if (!published.Succeeded || published.Manifest is null)
+            throw new InvalidDataException("The restored backup did not publish a new live generation.",
+                published.Failure);
+        Console.WriteLine($"P7 BACKUP RESTORE PASS selected={restored.RestoredSaveSequence} " +
+            $"retired-guests={restored.RecoveredGuestCount} live-generation={published.Manifest.Sequence}. " +
+            "Start the server normally; no Network admission occurred in maintenance mode.");
+        return 0;
+    }
+    catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or
+        InvalidDataException or System.Text.Json.JsonException)
+    {
+        Console.Error.WriteLine("P7 backup restore rejected: " + failure.Message);
+        return 5;
+    }
+}
+using NetworkServerIdentity identity = LoadOrCreateIdentity(options.IdentityDirectory);
+ApplicationRealmId realm = LoadOrCreateRealm(options.IdentityDirectory);
 string generationsRoot = Path.Combine(operatorConfiguration.SaveRoot, "generations");
 bool restoreExisting = File.Exists(Path.Combine(operatorConfiguration.SaveRoot, "CURRENT")) ||
     (Directory.Exists(generationsRoot) && Directory.EnumerateDirectories(generationsRoot).Any());
@@ -546,6 +587,8 @@ internal readonly record struct DirectConnectOptions(
     NetworkTelemetryLevel TelemetryLevel,
     RemoteChunkPublicationPolicy PublicationPolicy)
 {
+    internal ulong RestoreBackupSequence { get; init; }
+
     internal static DirectConnectOptions Parse(string[] arguments)
     {
         var endpoint = new IPEndPoint(IPAddress.Loopback, 7777);
@@ -557,6 +600,7 @@ internal readonly record struct DirectConnectOptions(
         string? scriptsRoot = null;
         string? scriptsCache = null;
         bool smoke = false;
+        ulong restoreBackupSequence = 0;
         string? readyFile = null;
         string? stopFile = null;
         string? summaryFile = null;
@@ -590,6 +634,13 @@ internal readonly record struct DirectConnectOptions(
             if (argument == "--ephemeral-smoke")
             {
                 smoke = true;
+                continue;
+            }
+            if (argument.StartsWith("--restore-backup-sequence=", StringComparison.Ordinal))
+            {
+                if (!ulong.TryParse(argument["--restore-backup-sequence=".Length..],
+                        out restoreBackupSequence) || restoreBackupSequence == 0)
+                    throw new ArgumentException("--restore-backup-sequence requires a positive 64-bit sequence.");
                 continue;
             }
             if (argument.StartsWith("--bind=", StringComparison.Ordinal))
@@ -877,7 +928,10 @@ internal readonly record struct DirectConnectOptions(
             networkServiceDelayMilliseconds, smoke,
             maximumParticipants, admissionBurstPerAddress,
             unreliableFrameCap, unreliableAggregationScope, telemetryLevel,
-            publicationPolicy);
+            publicationPolicy)
+        {
+            RestoreBackupSequence = restoreBackupSequence,
+        };
 
         static string RequiredPath(string argument, string prefix)
         {

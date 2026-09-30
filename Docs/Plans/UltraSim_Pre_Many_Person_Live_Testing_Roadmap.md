@@ -1903,8 +1903,11 @@ Make the intended D2-ish Inventory presentation real and human-testable.
 Save Now, host-owned autosave, bounded complete-generation backups, exact participant/session
 correlation for Kick, and a console. A follow-up adds cold strict/fallback save reopening,
 guest-only session cleanup and a supervised restart-with-save exit contract; the same deployment
-identity and configuration are reopened by the exported launcher. Selected-backup restoration,
-richer logs, the Godot server GUI, and any
+identity and configuration are reopened by the exported launcher. An exclusive cold maintenance
+command can stage a selected validated backup and publish a new forward live generation without
+Network admission. An owner-local bounded operational log is available separately from audit.
+A GUI/console restore action and recovery candidate browser,
+the Godot server GUI, and any
 authorized in-game Admin route remain P7 work. No P8 work has begun.
 
 ### Goal

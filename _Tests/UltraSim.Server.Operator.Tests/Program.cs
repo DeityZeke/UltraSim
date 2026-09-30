@@ -21,11 +21,112 @@ var tests = new (string Name, Action Body)[]
     ("ShutdownWaitsForBackupThenSaves", ShutdownWaitsForBackupThenSaves),
     ("ColdRecoveryRetiresSavedGuestsAndFencesCorruptCurrent", ColdRecoveryRetiresSavedGuestsAndFencesCorruptCurrent),
     ("RestartRejectsExhaustedSaveSequenceWithoutClosingAdmission", RestartRejectsExhaustedSaveSequenceWithoutClosingAdmission),
+    ("SelectedBackupColdRestorePublishesFreshLiveGeneration", SelectedBackupColdRestorePublishesFreshLiveGeneration),
+    ("BoundedOperatorLogIsObservableWithoutChangingAuthority", BoundedOperatorLogIsObservableWithoutChangingAuthority),
 };
 foreach ((string name, Action body) in tests)
 {
     body();
     Console.WriteLine("PASS " + name);
+}
+
+static void BoundedOperatorLogIsObservableWithoutChangingAuthority()
+{
+    var ring = new OperatorLogRing();
+    for (int index = 1; index <= 300; index++)
+        ring.Write(OperatorLogSeverity.Information, OperatorLogCategory.Lifecycle,
+            "event." + index, DateTimeOffset.UnixEpoch);
+    var rows = new OperatorLogEntry[OperatorLogRing.Capacity];
+    Check(ring.Count == OperatorLogRing.Capacity && ring.CopyTo(rows) == rows.Length &&
+        rows[0].Sequence == 45 && rows[^1].Sequence == 300 && ring.Dropped == 0,
+        "Operational log retention did not retain the latest finite event window.");
+
+    using var fixture = new Fixture(new ServerOperatorPolicy(false, 300, 2, false));
+    var console = new OperatorConsole(fixture.Registry, fixture.Principal);
+    Check(fixture.Invoke(fixture.Principal, ServerOperatorProvider.SaveNow).Outcome.Status ==
+        ControlResultStatus.Accepted, "Log control Save was rejected.");
+    fixture.PumpUntil(() => !fixture.Service.Capture().SaveInProgress);
+    Check(console.Execute("logs").Contains("Persistence", StringComparison.Ordinal),
+        "Console did not discover owner-published operational log events.");
+    ControlProviderSnapshot published = fixture.Registry.Discover(fixture.Principal).Single();
+    Check(fixture.Registry.Read(fixture.Principal, ServerOperatorProvider.ProviderId,
+        published.Generation, new ControlCollectionId("log"), out ControlCollectionSnapshot? log) ==
+        ControlResultCode.Accepted && log is not null && log.Rows.Count >= 2,
+        "The generic Control Plane did not expose the bounded operational log.");
+}
+
+static void SelectedBackupColdRestorePublishesFreshLiveGeneration()
+{
+    string root = Path.Combine(Path.GetTempPath(),
+        $"ultrasim-p7-backup-recovery-{Environment.ProcessId}-{Guid.NewGuid():N}");
+    string saves = Path.Combine(root, "saves");
+    string backups = Path.Combine(root, "backups");
+    try
+    {
+        using (ServerOperatorInstanceLease first = ServerOperatorInstanceLease.Acquire(root))
+        {
+            bool rejected = false;
+            try { using ServerOperatorInstanceLease duplicate = ServerOperatorInstanceLease.Acquire(root); }
+            catch (IOException) { rejected = true; }
+            Check(rejected, "The identity lease admitted concurrent live/recovery ownership.");
+        }
+        using ServerOperatorInstanceLease exclusive = ServerOperatorInstanceLease.Acquire(root);
+        using (SharedPlayableAuthority source = SharedPlayableAuthority.CreateConceptDemo())
+        {
+            var coordinator = new SaveSetCoordinator(saves);
+            var persistence = new GameRuntimePersistence(source.Runtime.Game, source.Composition,
+                new PersistenceRestoreOptions(PersistenceLimits.ServerDefault, ChunkLayoutOptions.KiB16),
+                coordinator);
+            Check(persistence.TrySave(new SaveSetContext(1, 1), static capture => capture()).Succeeded,
+                "Backup source generation did not publish.");
+            var store = new OperatorBackupStore(saves, backups, 2);
+            Check(store.TryBackupCurrent().Succeeded, "The selected backup did not publish.");
+            Check(persistence.TrySave(new SaveSetContext(2, 2), static capture => capture()).Succeeded,
+                "Newer live generation did not publish.");
+        }
+        string before = File.ReadAllText(Path.Combine(saves, "CURRENT"));
+        var backupStore = new OperatorBackupStore(saves, backups, 2);
+        bool missingRejected = false;
+        try { using OperatorColdRestoreStage missing = backupStore.StageSelectedForColdRecovery(2); }
+        catch (Exception failure) when (failure is IOException or InvalidDataException)
+        { missingRejected = true; }
+        Check(missingRejected && File.ReadAllText(Path.Combine(saves, "CURRENT")) == before,
+            "An unavailable selected backup changed the live CURRENT generation.");
+        string stagedRoot;
+        using (OperatorColdRestoreStage staged = backupStore.StageSelectedForColdRecovery(1))
+        {
+            stagedRoot = staged.SaveRoot;
+            using SharedPlayableAuthority restored = SharedPlayableAuthority.CreateConceptDemo(
+                coldRestore: (runtime, composition) => ServerOperatorColdRecovery.Restore(
+                    runtime, composition, staged.SaveRoot, SaveSetRecoveryMode.StrictCurrent));
+            Check(restored.RestoredSaveSequence == 1,
+                "The selected backup did not pass normal staged restore validation.");
+            var live = new SaveSetCoordinator(saves);
+            Check(live.TryGetNextSequence(out ulong sequence) && sequence == 3,
+                "The recovery publication did not respect live save high-water.");
+            var persistence = new GameRuntimePersistence(restored.Runtime.Game, restored.Composition,
+                new PersistenceRestoreOptions(PersistenceLimits.ServerDefault, ChunkLayoutOptions.KiB16),
+                live);
+            Check(persistence.TrySave(new SaveSetContext(sequence, 3), static capture => capture()).Succeeded,
+                "The recovered backup did not publish a fresh live generation.");
+        }
+        Check(!Directory.Exists(stagedRoot), "Private selected-backup staging was retained.");
+        using SharedPlayableAuthority reopened = SharedPlayableAuthority.CreateConceptDemo(
+            coldRestore: (runtime, composition) => ServerOperatorColdRecovery.Restore(
+                runtime, composition, saves, SaveSetRecoveryMode.StrictCurrent));
+        Check(reopened.RestoredSaveSequence == 3 &&
+            File.ReadAllText(Path.Combine(saves, "CURRENT")) == 3UL.ToString("D20") + "\n",
+            "A normal cold start did not select the newly published recovery generation.");
+        string current = File.ReadAllText(Path.Combine(saves, "CURRENT"));
+        File.AppendAllText(Path.Combine(backups, 1UL.ToString("D20"), "manifest.json"), "corrupt");
+        bool corruptRejected = false;
+        try { using OperatorColdRestoreStage corrupt = backupStore.StageSelectedForColdRecovery(1); }
+        catch (Exception failure) when (failure is IOException or InvalidDataException or
+            System.Text.Json.JsonException) { corruptRejected = true; }
+        Check(corruptRejected && File.ReadAllText(Path.Combine(saves, "CURRENT")) == current,
+            "Corrupt selected-backup bytes changed the recovered live generation.");
+    }
+    finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
 }
 
 static void RestartRejectsExhaustedSaveSequenceWithoutClosingAdmission()

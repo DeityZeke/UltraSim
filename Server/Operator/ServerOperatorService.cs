@@ -64,6 +64,8 @@ public sealed class ServerOperatorService : IDisposable
     private OperatorExitDisposition _exit;
     private ulong _revision = 1;
 
+    public OperatorLogRing Logs { get; } = new();
+
     public ServerOperatorService(SharedPlayableAuthority authority, HostedUdpAdmissionHost host,
         ServerGameFacet game, UltraSimGameComposition composition, string saveRoot,
         string backupRoot, ServerOperatorPolicy policy, TimeProvider? time = null)
@@ -119,6 +121,8 @@ public sealed class ServerOperatorService : IDisposable
                 _lastSavedSequence = result.Manifest.Sequence;
                 _lastSavedAt = _time.GetUtcNow();
                 _lastFailure = "";
+                Log(OperatorLogSeverity.Information, OperatorLogCategory.Persistence,
+                    "Complete save generation published.");
                 if (_exitAfterSave != OperatorExitDisposition.None && _finalSaveStarted)
                 {
                     OperatorExitDisposition requested = _exitAfterSave;
@@ -130,6 +134,8 @@ public sealed class ServerOperatorService : IDisposable
             else
             {
                 _lastFailure = Bounded(result.Failure?.Message ?? "Save did not publish.");
+                Log(OperatorLogSeverity.Error, OperatorLogCategory.Persistence,
+                    "Save capture or durable publication failed; prior CURRENT remains authoritative.");
                 _exitAfterSave = OperatorExitDisposition.None;
                 _finalSaveStarted = false;
             }
@@ -139,8 +145,18 @@ public sealed class ServerOperatorService : IDisposable
         {
             _backup = null;
             OperatorBackupResult result = backup.GetAwaiter().GetResult();
-            if (result.Succeeded) { _lastBackupSequence = result.Sequence; _lastFailure = ""; }
-            else _lastFailure = Bounded(result.Diagnostic);
+            if (result.Succeeded)
+            {
+                _lastBackupSequence = result.Sequence; _lastFailure = "";
+                Log(OperatorLogSeverity.Information, OperatorLogCategory.Backup,
+                    "Complete backup snapshot published or verified reusable.");
+            }
+            else
+            {
+                _lastFailure = Bounded(result.Diagnostic);
+                Log(OperatorLogSeverity.Error, OperatorLogCategory.Backup,
+                    "Backup validation or publication failed; no incomplete snapshot was admitted.");
+            }
             _revision++;
         }
         if (_exit == OperatorExitDisposition.None && _exitAfterSave != OperatorExitDisposition.None &&
@@ -181,6 +197,8 @@ public sealed class ServerOperatorService : IDisposable
             new SaveSetContext(sequence, _time.GetUtcNow().ToUnixTimeMilliseconds()),
             static capture => capture());
         _revision++;
+        Log(OperatorLogSeverity.Information, OperatorLogCategory.Persistence,
+            "Coherent save capture admitted for durable publication.");
         return ControlOwnerResult.Accepted;
     }
 
@@ -191,6 +209,8 @@ public sealed class ServerOperatorService : IDisposable
             return ControlOwnerResult.Reject(ControlResultCode.Disabled, "A save, backup or exit owns the operation slot.");
         _backup = Task.Run(_backups.TryBackupCurrent);
         _revision++;
+        Log(OperatorLogSeverity.Information, OperatorLogCategory.Backup,
+            "Backup of current complete generation requested.");
         return ControlOwnerResult.Accepted;
     }
 
@@ -214,6 +234,8 @@ public sealed class ServerOperatorService : IDisposable
         }
         else PublishExit(OperatorExitDisposition.Shutdown);
         _revision++;
+        Log(OperatorLogSeverity.Information, OperatorLogCategory.Lifecycle,
+            "Graceful shutdown requested.");
         return ControlOwnerResult.Accepted;
     }
 
@@ -233,6 +255,8 @@ public sealed class ServerOperatorService : IDisposable
             }
         }
         _revision++;
+        Log(OperatorLogSeverity.Information, OperatorLogCategory.Lifecycle,
+            "Supervised restart requested after a fresh durable save.");
         return ControlOwnerResult.Accepted;
     }
 
@@ -251,6 +275,8 @@ public sealed class ServerOperatorService : IDisposable
             {
                 session.BeginDrain();
                 _revision++;
+                Log(OperatorLogSeverity.Information, OperatorLogCategory.Sessions,
+                    "One exact entered participant session began draining by operator request.");
                 return ControlOwnerResult.Accepted;
             }
         return ControlOwnerResult.Reject(ControlResultCode.OwnerRejected, "Participant has no current remote session.");
@@ -284,6 +310,8 @@ public sealed class ServerOperatorService : IDisposable
     }
 
     private long CadenceTicks() => checked((long)(_policy.AutosaveSeconds * _time.TimestampFrequency));
+    private void Log(OperatorLogSeverity severity, OperatorLogCategory category, string message) =>
+        Logs.Write(severity, category, message, _time.GetUtcNow());
     private ControlOwnerResult TryStartFinalSave()
     {
         ControlOwnerResult result = TryStartSave();

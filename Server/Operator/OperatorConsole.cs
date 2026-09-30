@@ -26,6 +26,7 @@ public sealed class OperatorConsole
         if (tokens[0] == "status" && tokens.Length == 1) return Status();
         if (tokens[0] == "participants" && tokens.Length == 1) return Collection("participants");
         if (tokens[0] == "audit" && tokens.Length == 1) return Collection("audit");
+        if (tokens[0] == "logs" && tokens.Length == 1) return Collection("log");
 
         ControlActionId action;
         ControlValue[] arguments = [];
@@ -64,7 +65,7 @@ public sealed class OperatorConsole
     {
         ControlProviderSnapshot? provider = Find();
         if (provider is null) return "No operator actions are visible.";
-        return "status | participants | audit | help\n" + string.Join('\n',
+        return "status | participants | audit | logs | help\n" + string.Join('\n',
             provider.Definition.Actions.Select(d => d.Id.Value switch
             {
                 "save-now" => "save",
