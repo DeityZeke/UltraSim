@@ -2957,6 +2957,17 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
             configuration, gate.Name);
         if (Directory.Exists(output)) Directory.Delete(output, recursive: true);
         Directory.CreateDirectory(output);
+        // Edition changes alter conditional ProjectReferences. NuGet's shared Godot project
+        // assets may otherwise retain the preceding SinglePlayer/Complete graph even when
+        // publish is passed Online properties. Match the physical export's exact restore seam.
+        Run(root, "dotnet",
+        [
+            "restore",
+            "Client/Godot/UltraSim.Client.Application.Godot.csproj",
+            "--force",
+            $"-p:UltraSimEdition={gate.Name}",
+            $"-p:UltraSimNetworkFlavor={networkFlavor}",
+        ]);
         Run(root, "dotnet",
         [
             "publish",
@@ -2964,6 +2975,7 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
             "-c", configuration,
             $"-p:UltraSimEdition={gate.Name}",
             $"-p:UltraSimNetworkFlavor={networkFlavor}",
+            "--no-restore",
             "--output", output,
         ]);
 
