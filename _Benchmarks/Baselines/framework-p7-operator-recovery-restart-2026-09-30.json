@@ -1,0 +1,24 @@
+{
+  "checkpoint": "P7-cold-recovery-restart-selected-backup",
+  "status": "ACTIVE_NOT_CLOSED",
+  "startingCommit": "75e7b1c9e3c99c8199459104b0a0d8aeec263b2a",
+  "implementationCommits": [
+    "360901fbef2059cd06c607d51a115adbe3411ffd",
+    "75dd6c19be18c7f385dab1983efba6a7dde97566"
+  ],
+  "testedImplementationCommit": "75dd6c19be18c7f385dab1983efba6a7dde97566",
+  "host": { "os": "Linux 7.2.6-1-cachyos x86_64", "cpu": "AMD Ryzen 7 7800X3D", "dotnetSdk": "8.0.131", "dotnetRuntime": "8.0.31", "godot": "4.7.1 stable Mono" },
+  "focusedOperatorTests": { "passed": 9, "failed": 0 },
+  "architectureOnly": "passed",
+  "networkApplication": "passed_including_live_udp_kick",
+  "physicalRestart": { "restartExitCode": 75, "reopenedSavedSequence": 1, "freshGeneration": 2, "sameDeploymentKeyAndRealm": true, "launcherTwoProcessControl": "passed" },
+  "physicalSelectedBackup": { "selectedSequence": 2, "publishedLiveSequence": 4, "subsequentNormalStartupSequence": 4, "networkAdmissionDuringMaintenance": false },
+  "canonicalRelease": [
+    { "tree": "360901fbef2059cd06c607d51a115adbe3411ffd", "status": "failed_W7_stale_in_flight_threshold", "logSha256": "7c23c47139239f423e9e8db2ad3650d0ee9813b3620d988c1071db224a9c75d8" },
+    { "tree": "360901fbef2059cd06c607d51a115adbe3411ffd", "status": "passed_uninterrupted_unchanged_tree", "logSha256": "a3630f8b95dee9ad80c05067abd7ae809688838fb88bc42e37d218891be591ed" },
+    { "tree": "75dd6c19be18c7f385dab1983efba6a7dde97566", "status": "passed_uninterrupted", "logSha256": "55641e94aa70d4622c25abdc400ed8608bc30f867ebf20c41375c50dccaf3294", "logLines": 4587 }
+  ],
+  "remaining": ["godot_server_gui", "frontend_recovery_browser_and_restore", "richer_session_diagnostics", "authorized_in_game_admin_or_accepted_local_only_limit", "frontend_equivalence_and_native_gui_lifetime"],
+  "p8": "not_started",
+  "pf6": "not_ready"
+}
