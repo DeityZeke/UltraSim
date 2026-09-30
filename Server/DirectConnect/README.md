@@ -51,6 +51,14 @@ dotnet run --project Server/DirectConnect/UltraSim.Server.DirectConnect.csproj \
     -p:UltraSimNetworkFlavor=ServerOnly
 ```
 
+P7's active headless operator slice adds a bounded stdin command reader and owner-thread
+Control Plane routing. Type `help` for the currently published actions. `save`, `backup`,
+`status`, `participants`, `audit`, `shutdown confirm`, and `kick <participant-id> confirm`
+are available; `restart confirm` currently reports `Disabled` until durable restart is
+implemented and verified. `operator-policy.json` in the identity directory is cold
+configuration for autosave cadence, backup retention and roots. See
+[Server Operator](../Operator/README.md) for exact limitations. This slice does not close P7.
+
 The canonical Network development default is Full. Dedicated product builds select
 `ServerOnly` explicitly so their physical output omits the unused Hosted client
 role; switching this product to Full later requires no consumer-code change.

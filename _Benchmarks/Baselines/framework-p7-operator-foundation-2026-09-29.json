@@ -1,0 +1,33 @@
+{
+  "checkpoint": "P7-headless-foundation",
+  "status": "ACTIVE_NOT_CLOSED",
+  "startingCommit": "75e7b1c9e3c99c8199459104b0a0d8aeec263b2a",
+  "implementationCommits": [
+    "e060879960a154eedb6453bf0d8f54ebafe917f0",
+    "93311a973294280022b81ab000f3dfc93ac75f17"
+  ],
+  "testedImplementationCommit": "93311a973294280022b81ab000f3dfc93ac75f17",
+  "runtime": ".NET/ASP.NET Core 8.0.31",
+  "godot": "4.7.1 stable Mono",
+  "os": "Linux 7.2.6-1-cachyos x86_64",
+  "cpu": "AMD Ryzen 7 7800X3D",
+  "operatorFocusedTests": { "passed": 5, "failed": 0 },
+  "architectureOnly": "passed",
+  "headlessPublish": "passed",
+  "publishedConsoleBackupThenShutdown": "accepted_and_clean_exit_0",
+  "canonicalFirstRun": {
+    "status": "failed_environment_build",
+    "cause": "transient_missing_ECS.Generators_project.assets.json",
+    "logSha256": "deb43c33665de816f4cacccfa89937cd325aad1c15179546dac3128020821909"
+  },
+  "canonicalUnchangedRerun": {
+    "status": "passed_uninterrupted",
+    "logSha256": "3f5639ad794b7ce47b2fbb33f191d37bf0043dd45c3a198bd35f090a8931574a"
+  },
+  "restart": "disabled_until_supervisor_and_durable_rehydration",
+  "restore": "not_implemented",
+  "godotServerGui": "not_implemented",
+  "remoteAdmin": "not_implemented",
+  "liveKickAcceptance": "not_run",
+  "pf6": "not_ready"
+}

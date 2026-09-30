@@ -2,7 +2,7 @@
 
 **Proposed status:** Candidate canonical roadmap / architecture checklist\
 **Current reference baseline:** F1.12-R3 / Gate 0 production closure — `e3a63ea21f8f5ea4fa69e3768a055c409edc8616`; documentation-only commits may advance `main` beyond that closure SHA.\
-**Immediate checkpoint:** P1–P6 are **CLOSED**; [P6's Inventory viewer evidence](../../_Benchmarks/Baselines/framework-p6-inventory-viewer-profiles-2026-09-29.md) records D2/List semantic parity, native derived-portrait ownership and canonical Release/export acceptance. P7 is **NEXT**; P8–P11 and Gate 1 remain **PLANNED**, and PF6 remains **PLANNED / NOT READY / NOT STARTED**. The previously reproduced warm Official-content Finalizer failure remains closed by [native-lifetime R1 evidence](../../_Benchmarks/Baselines/client-native-lifetime-assurance-r1-2026-09-29.md) and [pre-P5 wrapper hardening](../../_Benchmarks/Baselines/client-native-lifetime-pre-p5-hardening-2026-09-29.md).\
+**Immediate checkpoint:** P1–P6 are **CLOSED**; [P6's Inventory viewer evidence](../../_Benchmarks/Baselines/framework-p6-inventory-viewer-profiles-2026-09-29.md) records D2/List semantic parity, native derived-portrait ownership and canonical Release/export acceptance. P7 is **ACTIVE, not closed**: the [headless operator foundation](../../_Benchmarks/Baselines/framework-p7-operator-foundation-2026-09-29.md) supplies one Control Plane Save/backup/shutdown route, but recovery/restart and the optional Godot GUI server remain open. P8–P11 and Gate 1 remain **PLANNED**, and PF6 remains **PLANNED / NOT READY / NOT STARTED**. The previously reproduced warm Official-content Finalizer failure remains closed by [native-lifetime R1 evidence](../../_Benchmarks/Baselines/client-native-lifetime-assurance-r1-2026-09-29.md) and [pre-P5 wrapper hardening](../../_Benchmarks/Baselines/client-native-lifetime-pre-p5-hardening-2026-09-29.md).\
 **End state of this document:** UltraSim is ready to move from individual/trusted dogfooding and closed validation into a many-player live test where human feedback is primarily about the intended game rather than known development-harness limitations.
 
 ---
@@ -1899,6 +1899,13 @@ Make the intended D2-ish Inventory presentation real and human-testable.
 
 ## P7 — Server Operator Product: command authority, console, GUI, save/backup/recovery
 
+**Status: ACTIVE.** The first headless slice has typed capability-gated actions, bounded audit,
+Save Now, host-owned autosave, bounded complete-generation backups, exact participant/session
+correlation for Kick, and a console. Restart-with-save is deliberately disabled: an exit code
+without a verified supervisor and durable authority/session rehydration would be a false restart.
+Restore/recovery, full live-session Kick acceptance, richer logs, the Godot server GUI, and any
+authorized in-game Admin route remain P7 work. No P8 work has begun.
+
 ### Goal
 
 Make exported servers operationally credible without debugger/source-only workflows. Reassemble the strong V3 backend into a real operator product rather than treating startup CLI switches as administration.
@@ -3059,7 +3066,7 @@ This compact board is intended to sit near the top of active implementation note
 [x] P4      Engine Contracts + typed definition facets — CLOSED
 [x] P5      User/Admin/Developer control surfaces — representative contract CLOSED
 [x] P6      Inventory D2/List viewer profiles — CLOSED for supported product shapes
-[ ] P7      Server Operator Product + console + Godot GUI + save/backup/recovery — NEXT
+[ ] P7      Server Operator Product + console + Godot GUI + save/backup/recovery — ACTIVE
 [ ] P8      Audio Kernel + Sound Engine
 [ ] P9      Representative Cabin visual/content pass
 [ ] P10     UI/failure/product polish
