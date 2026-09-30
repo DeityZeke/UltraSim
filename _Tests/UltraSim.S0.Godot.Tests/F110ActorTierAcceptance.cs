@@ -17,7 +17,8 @@ public partial class F110ActorTierAcceptance : Node3D
     {
         try
         {
-            GodotLifetimeOwnershipTests.Run();
+            GodotLifetimeOwnershipTests.Run(this);
+            await GodotLifetimeOwnershipTests.AudioGenerationReplacement(this);
             await Assurance();
             foreach (int count in Native ? new[] { 16, 64, 128, 256 } : new[] { 16 })
                 for (int repetition = 0; repetition < (Native ? 3 : 1); repetition++)

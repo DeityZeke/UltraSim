@@ -2427,6 +2427,7 @@ string[] testProjects =
     "_Tests/UltraSim.Game.World.Tests/UltraSim.Game.World.Tests.csproj",
     "_Tests/UltraSim.Client.Tests/UltraSim.Client.Tests.csproj",
     "_Tests/UltraSim.Client.Content.Tests/UltraSim.Client.Content.Tests.csproj",
+    "_Tests/UltraSim.Audio.Tests/UltraSim.Audio.Tests.csproj",
     "_Tests/UltraSim.Client.BuiltInTestWorlds.Tests/UltraSim.Client.BuiltInTestWorlds.Tests.csproj",
     "_Tests/UltraSim.Game.Persistence.Tests/UltraSim.Game.Persistence.Tests.csproj",
     "_Tests/UltraSim.Game.Admission.Tests/UltraSim.Game.Admission.Tests.csproj",
@@ -2540,6 +2541,11 @@ foreach (string configuration in configurations)
         ]);
         Run(root, godot,
         [
+            "--headless", "--path", "Client/Godot",
+            "--", "--p8-audio-smoke", "--expect-edition=SinglePlayer",
+        ]);
+        Run(root, godot,
+        [
             "--headless",
             "--path", "Client/Godot",
             "--", "--p5-management-smoke", "--expect-edition=SinglePlayer",
@@ -2620,6 +2626,11 @@ foreach (string configuration in configurations)
             "--path", "Client/Godot",
             "--", "--shell-ui-smoke", "--expect-edition=Online",
         ]);
+        Run(root, godot,
+        [
+            "--headless", "--path", "Client/Godot",
+            "--", "--p8-audio-smoke", "--expect-edition=Online",
+        ]);
         if (!contentlessOnlineVerified)
         {
             ContentlessOnlineExport product = VerifyContentlessOnlineExport(root, godot);
@@ -2664,6 +2675,11 @@ foreach (string configuration in configurations)
             "--headless",
             "--path", "Client/Godot",
             "--", "--composition-smoke", "--expect-edition=Complete",
+        ]);
+        Run(root, godot,
+        [
+            "--headless", "--path", "Client/Godot",
+            "--", "--p8-audio-smoke", "--expect-edition=Complete",
         ]);
         Run(root, godot,
         [
@@ -2913,7 +2929,7 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
         new(
             "SinglePlayer",
             ["UltraSim.Client.Application.Godot", "UltraSim.Client.BuiltInTestWorlds",
-                "UltraSim.Client.Content", "UltraSim.Client.Local",
+                "UltraSim.Client.Content", "UltraSim.Client.Sound", "UltraSim.Audio", "UltraSim.Client.Local",
                 "UltraSim.Client.StandardUi", "UltraSim.Client.ControlPlane",
                 "UltraSim.Framework.ControlPlane",
                 "UltraSim.Framework.Persistence",
@@ -2926,7 +2942,7 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
                 "UltraSim.Server.ConceptDemo", "UltraSim.Server.ConceptDemo.LocalHost"]),
         new(
             "Online",
-            ["UltraSim.Client.Application.Godot", "UltraSim.Client.Content", "UltraSim.Client.Network",
+            ["UltraSim.Client.Application.Godot", "UltraSim.Client.Content", "UltraSim.Client.Sound", "UltraSim.Audio", "UltraSim.Client.Network",
                 "UltraSim.Client.StandardUi", "UltraSim.Client.ControlPlane", "UltraSim.Framework.ControlPlane",
                 "UltraSim.Framework.Definitions", "UltraSim.Game.Presentation.Contracts",
                 "UltraSim.Game.Protocol", "UltraSim.Network"],
@@ -2943,7 +2959,8 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
         new(
             "Complete",
             ["UltraSim.Client.Application.Godot", "UltraSim.Client.BuiltInTestWorlds",
-                "UltraSim.Client.Local", "UltraSim.Client.StandardUi", "UltraSim.Client.ControlPlane",
+                "UltraSim.Client.Local", "UltraSim.Client.Sound", "UltraSim.Audio",
+                "UltraSim.Client.StandardUi", "UltraSim.Client.ControlPlane",
                 "UltraSim.Client.Network", "UltraSim.Game.Composition", "UltraSim.Game.Protocol",
                 "UltraSim.Framework.ControlPlane",
                 "UltraSim.Framework.Persistence",
@@ -5944,6 +5961,7 @@ static void VerifyArchitecture(string root)
         ["Kernels/Network.Testing/UltraSim.Network.Testing.csproj"] =
             ["Kernels/Network/UltraSim.Network.csproj"],
         ["Kernels/Spatial/UltraSim.Spatial.csproj"] = [],
+        ["Kernels/Audio/UltraSim.Audio.csproj"] = [],
         ["Kernels/UI/UltraSim.UI.csproj"] = [],
         ["Server/Persistence/UltraSim.Server.Persistence.csproj"] =
             ["Framework/Persistence/UltraSim.Framework.Persistence.csproj", "Kernels/ECS/UltraSim.ECS.csproj"],
@@ -6017,6 +6035,8 @@ static void VerifyArchitecture(string root)
             "Game/World/UltraSim.Game.World.csproj",
             "Kernels/UI/UltraSim.UI.csproj",
         ],
+        ["Client/Sound/UltraSim.Client.Sound.csproj"] =
+            ["Kernels/Audio/UltraSim.Audio.csproj"],
         ["Client/StandardUi/UltraSim.Client.StandardUi.csproj"] =
             ["Kernels/UI/UltraSim.UI.csproj", "Framework/Definitions/UltraSim.Framework.Definitions.csproj"],
         ["Client/BuiltInTestWorlds/UltraSim.Client.BuiltInTestWorlds.csproj"] =
@@ -6052,6 +6072,7 @@ static void VerifyArchitecture(string root)
         [
             "Client/BuiltInTestWorlds/UltraSim.Client.BuiltInTestWorlds.csproj",
             "Client/Content/UltraSim.Client.Content.csproj",
+            "Client/Sound/UltraSim.Client.Sound.csproj",
             "Client/ControlPlane/UltraSim.Client.ControlPlane.csproj",
             "Client/Core/UltraSim.Client.Core.csproj",
             "Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj",
@@ -6063,6 +6084,7 @@ static void VerifyArchitecture(string root)
             "Game/UI/UltraSim.Game.UI.csproj",
             "Game/World/UltraSim.Game.World.csproj",
             "Kernels/Spatial/UltraSim.Spatial.csproj",
+            "Kernels/Audio/UltraSim.Audio.csproj",
             "Server/ConceptDemo.LocalHost/UltraSim.Server.ConceptDemo.LocalHost.csproj",
         ],
         ["Game/Accounting/UltraSim.Game.Accounting.csproj"] =

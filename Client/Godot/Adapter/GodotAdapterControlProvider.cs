@@ -6,7 +6,8 @@ namespace UltraSim.Client.Godot;
 internal readonly record struct GodotAdapterStatus(
     string Edition, GodotApplicationPhase Phase, bool SessionActive,
     int WorldRootChildren, int UiLayerCount,
-    int OpenGumps = 0, int InternalRenderWidth = 0, int InternalRenderHeight = 0);
+    int OpenGumps = 0, int InternalRenderWidth = 0, int InternalRenderHeight = 0,
+    GodotClientAudioSnapshot Audio = default);
 
 /// <summary>
 /// Reports the fixed Godot implementation selection and its owned lifecycle. Selection is not
@@ -47,6 +48,18 @@ internal sealed class GodotAdapterControlProvider : IControlProvider
                 Diagnostic("open-gumps", ControlValueKind.Int64),
                 Diagnostic("internal-render-width", ControlValueKind.Int64),
                 Diagnostic("internal-render-height", ControlValueKind.Int64),
+                Diagnostic("audio-source-budget", ControlValueKind.Int64),
+                Diagnostic("audio-active-sources", ControlValueKind.Int64),
+                Diagnostic("audio-peak-sources", ControlValueKind.Int64),
+                Diagnostic("audio-active-loops", ControlValueKind.Int64),
+                Diagnostic("audio-dropped-requests", ControlValueKind.Int64),
+                Diagnostic("audio-native-failures", ControlValueKind.Int64),
+                Diagnostic("audio-loaded-cues", ControlValueKind.Int64),
+                Diagnostic("audio-master-volume", ControlValueKind.Float64),
+                Diagnostic("audio-sfx-volume", ControlValueKind.Float64),
+                Diagnostic("audio-ambient-volume", ControlValueKind.Float64),
+                Diagnostic("audio-ui-volume", ControlValueKind.Float64),
+                Diagnostic("audio-muted", ControlValueKind.Bool),
             ]);
     }
 
@@ -72,7 +85,9 @@ internal sealed class GodotAdapterControlProvider : IControlProvider
         GodotAdapterStatus state = _capture();
         if (string.IsNullOrWhiteSpace(state.Edition) || state.Edition.Length > 128 ||
             !Enum.IsDefined(state.Phase) || state.WorldRootChildren < 0 || state.UiLayerCount < 0 ||
-            state.OpenGumps < 0 || state.InternalRenderWidth < 0 || state.InternalRenderHeight < 0)
+            state.OpenGumps < 0 || state.InternalRenderWidth < 0 || state.InternalRenderHeight < 0 ||
+            state.Audio.ActiveSources < 0 || state.Audio.ActiveSources > state.Audio.SourceBudget ||
+            state.Audio.ActiveLoops < 0 || state.Audio.ActiveLoops > state.Audio.ActiveSources)
             throw new InvalidOperationException("Invalid Godot adapter status.");
         if (!_hasPrevious || state != _previous)
         {
@@ -85,11 +100,11 @@ internal sealed class GodotAdapterControlProvider : IControlProvider
 
     public ControlState Capture(ControlId id)
     {
-        _ = Refresh();
+        GodotAdapterStatus state = Refresh();
         ControlOptionId selected = id.Value switch
         {
             "presentation-implementation" or "input-implementation" or "runtime-implementation" => Godot,
-            "audio-implementation" => None,
+            "audio-implementation" => state.Audio.SourceBudget > 0 ? Godot : None,
             _ => throw new ArgumentException("Unknown adapter selection.", nameof(id)),
         };
         ControlValue value = ControlValue.Option(selected);
@@ -110,6 +125,18 @@ internal sealed class GodotAdapterControlProvider : IControlProvider
             "open-gumps" => ControlValue.Int64(state.OpenGumps),
             "internal-render-width" => ControlValue.Int64(state.InternalRenderWidth),
             "internal-render-height" => ControlValue.Int64(state.InternalRenderHeight),
+            "audio-source-budget" => ControlValue.Int64(state.Audio.SourceBudget),
+            "audio-active-sources" => ControlValue.Int64(state.Audio.ActiveSources),
+            "audio-peak-sources" => ControlValue.Int64(state.Audio.PeakSources),
+            "audio-active-loops" => ControlValue.Int64(state.Audio.ActiveLoops),
+            "audio-dropped-requests" => ControlValue.Int64((long)Math.Min(state.Audio.DroppedRequests, long.MaxValue)),
+            "audio-native-failures" => ControlValue.Int64((long)Math.Min(state.Audio.NativeFailures, long.MaxValue)),
+            "audio-loaded-cues" => ControlValue.Int64(state.Audio.LoadedCues),
+            "audio-master-volume" => ControlValue.Float64(state.Audio.MasterVolume),
+            "audio-sfx-volume" => ControlValue.Float64(state.Audio.SfxVolume),
+            "audio-ambient-volume" => ControlValue.Float64(state.Audio.AmbientVolume),
+            "audio-ui-volume" => ControlValue.Float64(state.Audio.UiVolume),
+            "audio-muted" => ControlValue.Bool(state.Audio.Muted),
             _ => throw new ArgumentException("Unknown adapter diagnostic.", nameof(id)),
         };
     }

@@ -5,6 +5,7 @@ using UltraSim.Client.Content;
 using UltraSim.Client.Core;
 using UltraSim.Client.Network;
 using UltraSim.Client.StandardUi;
+using UltraSim.Client.Sound;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Input;
@@ -149,6 +150,27 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private WorldPosition _smokeStart;
     private ulong _lastOwnerState;
     private ulong _lastPrimaryCommandSequence;
+    private GodotClientAudioAdapter? _audio;
+    private readonly ClientFootstepCadence _footsteps = new();
+    private readonly Dictionary<WorldPublicEntityId, ClientFootstepCadence> _remoteFootsteps =
+        new(128);
+    private WorldPublicEntityId _audioDoorId;
+    private WorldYaw _audioDoorYaw;
+    private ulong _audioDoorVersion;
+    private bool _audioDoorObserved;
+    private WorldPublicEntityId _audioSwordId;
+    private SpatialChunkKey _audioSwordChunk;
+    private ulong _audioSwordVersion;
+    private bool _audioSwordPresent;
+    private bool _audioSwordObserved;
+    private ulong _audioGeneration;
+    private ulong _audioAppliedDeltas;
+    private ulong _audioAppliedSnapshots;
+    private ulong _audioInterestRetirements;
+    private uint _audioMainHandPrefab;
+    private bool _audioMainHandObserved;
+    private bool _audioGroundedObserved;
+    private bool _audioWasGrounded;
     private ulong _lastChatApplied;
     private RemotePlayableOneShotRequests _oneShotRequests;
     private bool _primaryDown;
@@ -204,7 +226,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         bool smoke,
         NetworkTelemetryLevel telemetryLevel = NetworkTelemetryLevel.Off,
         bool pf3SustainedInput = false,
-        string? officialContentRoot = null)
+        string? officialContentRoot = null,
+        GodotClientAudioAdapter? audio = null)
     {
         ArgumentNullException.ThrowIfNull(peer);
         ArgumentOutOfRangeException.ThrowIfZero(applicationSessionEpoch);
@@ -215,6 +238,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             throw new InvalidOperationException("Remote composition must be configured before entering the tree.");
 
         _sessionUi = sessionUi;
+        _audio = audio;
         try
         {
             if (!ContentCache.TryOpen(
@@ -241,6 +265,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             sessionUi.HudHost.AddChild(_ownedHud);
             _uiHost = sessionUi.Gumps.Host;
             _uiRenderer = new GodotUiRenderer(sessionUi.Gumps, portraitWorld: () => _worldAssets);
+            _uiRenderer.NativeActionSubmitted += OnNativeUiAction;
             _uiRenderer.SetInventoryViewerProfile(settings.InventoryViewer);
             _session = new RemotePlayableSession(
                 peer,
@@ -393,7 +418,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
 
             bool gameplayInputAdmitted = ObserveGameplayInputAdmission(gameplayInputAllowed);
 
-            SynchronizePresentation(snapshot.Playable);
+            SynchronizePresentation(snapshot.Playable, snapshot.World);
             UpdateTemporalPresentation(snapshot.Playable);
             UpdateCamera();
             if (!_smoke)
@@ -801,7 +826,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             throw new InvalidOperationException(
                 $"The initial remote render window was rejected: {windowError}/{rendererError}.");
         DrainRenderer();
-        SynchronizeActors(in playable);
+        RemoteChunkWorldStateClientSnapshot initialWorld = _session.GetSnapshot().World;
+        SynchronizeActors(in playable, in initialWorld);
         _terrainTriangles = CountTerrainTriangles();
         _smokeStart = _player;
         _lastOwnerState = playable.StateSequence;
@@ -844,15 +870,27 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         }
     }
 
-    private void SynchronizePresentation(in RemotePlayableClientSnapshot playable)
+    private void SynchronizePresentation(in RemotePlayableClientSnapshot playable,
+        in RemoteChunkWorldStateClientSnapshot world)
     {
         long presentationStarted = _nativeTelemetry.BeginPresentation();
-        try { SynchronizePresentationCore(in playable); }
+        try { SynchronizePresentationCore(in playable, in world); }
         finally { _nativeTelemetry.EndPresentation(presentationStarted); }
     }
 
-    private void SynchronizePresentationCore(in RemotePlayableClientSnapshot playable)
+    private void SynchronizePresentationCore(in RemotePlayableClientSnapshot playable,
+        in RemoteChunkWorldStateClientSnapshot world)
     {
+        if (_audioGeneration != playable.ServerGenerationId)
+        {
+            _audioGeneration = playable.ServerGenerationId;
+            _audioDoorObserved = false;
+            _audioSwordObserved = false;
+            _audioMainHandObserved = false;
+            _audioGroundedObserved = false;
+            _footsteps.Reset();
+            _remoteFootsteps.Clear();
+        }
         _controlledMotion.ObserveOwner(
                 playable.ApplicationSessionEpoch, playable.ControlSession,
                 playable.ServerGenerationId, playable.PublicActor, playable.StateSequence,
@@ -887,7 +925,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         }
         _renderer!.ProcessFrame(GodotWorldFrameBudget.Default);
         _ = packs.TryRetireOutsidePresentation(presentationCenter);
-        SynchronizeActors(in playable);
+        SynchronizeActors(in playable, in world);
         _lastOwnerState = playable.StateSequence;
         UpdateHud(
             $"Remote world active — {_renderer.GetSnapshot().ActiveRenderChunks} chunks — " +
@@ -1476,7 +1514,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         _actorPresenter?.UpdateOriginAndLifetimes(_player, Time.GetTicksMsec());
     }
 
-    private void SynchronizeActors(in RemotePlayableClientSnapshot playable)
+    private void SynchronizeActors(in RemotePlayableClientSnapshot playable,
+        in RemoteChunkWorldStateClientSnapshot world)
     {
         if (_window is null || _actorState is null || _actorPresenter is null) return;
         if (!_window.TryCopyBindings(_presentationBindings, out int count, out _))
@@ -1502,7 +1541,10 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             ref readonly ClientActorPresentationChange change = ref _actorChanges[index];
             if (change.Id == playable.PublicActor) continue;
             if (change.Kind == ClientActorPresentationChangeKind.Removed)
+            {
                 _remoteMotion.Remove(change.Id);
+                _remoteFootsteps.Remove(change.Id);
+            }
             else
                 _ = _remoteMotion.Observe(playable.ServerGenerationId, change.Id,
                     change.Current.PublicVersion,
@@ -1518,10 +1560,24 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         {
             _lastPrimaryCommandSequence = playable.LastProcessedCommandSequence;
             if (playable.Primary == RemotePlayableActionStatus.Accepted)
+            {
+                PlayAudio(ClientSoundEvent.PrimaryAction);
                 _ = _actorPresenter.TryPresentPrimaryAction(
                     playable.PublicActor,
                     playable.LastProcessedCommandSequence,
                     Time.GetTicksMsec());
+            }
+            if (playable.Jump == RemotePlayableActionStatus.Accepted)
+                PlayAudio(ClientSoundEvent.Jump);
+        }
+        if (!_audioSwordObserved || world.AppliedDeltas != _audioAppliedDeltas ||
+            world.AppliedSnapshots != _audioAppliedSnapshots ||
+            world.InterestRetirementsProcessed != _audioInterestRetirements)
+        {
+            _audioAppliedDeltas = world.AppliedDeltas;
+            _audioAppliedSnapshots = world.AppliedSnapshots;
+            _audioInterestRetirements = world.InterestRetirementsProcessed;
+            ObservePublicWorldAudio();
         }
     }
 
@@ -1743,16 +1799,106 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         ulong nowMilliseconds = Time.GetTicksMsec();
         _actorPresenter.SetControlledActorPose(
             playable.PublicActor, controlledPosition, _presentedPlayer.Orientation, nowMilliseconds);
+        _audio?.SetListener(new UltraSim.Audio.AudioListenerFrame(
+            controlledPosition.GlobalXMillimeters, controlledPosition.YMillimeters,
+            controlledPosition.GlobalZMillimeters));
+        bool grounded = _actorState.TryGet(playable.PublicActor,
+            out ClientActorPresentationRecord controlledActor) &&
+            controlledActor.VerticalPhase == ClientPublicActorVerticalPhase.Grounded;
+        if (_audioGroundedObserved && !_audioWasGrounded && grounded)
+            PlayAudio(ClientSoundEvent.Land);
+        _audioGroundedObserved = true;
+        _audioWasGrounded = grounded;
+        if (_audioMainHandObserved && controlledActor.MainHandPrefabId != _audioMainHandPrefab)
+            PlayAudio(ClientSoundEvent.Equip);
+        _audioMainHandObserved = true;
+        _audioMainHandPrefab = controlledActor.MainHandPrefabId;
+        if (_footsteps.Observe(controlledPosition.GlobalXMillimeters,
+                controlledPosition.GlobalZMillimeters, checked((long)nowMilliseconds),
+                moving: true, grounded))
+            PlayAudio(ClientSoundEvent.Footstep);
         int count = _actorState.CopyCurrent(_actorMotionRows);
         for (int index = 0; index < count; index++)
         {
             WorldPublicEntityId id = _actorMotionRows[index].Id;
             if (id == playable.PublicActor) continue;
             if (_remoteMotion.TrySampleTemporal(id, now, out ClientActorTemporalPresentation temporal))
+            {
                 _ = _actorPresenter.SetPresentedPose(id, temporal.Resolved.Pose);
+                if (_audio is not null && temporal.Resolved.Pose.TryGetWorldPosition(
+                        out WorldPosition presented))
+                {
+                    if (!_remoteFootsteps.TryGetValue(id, out ClientFootstepCadence? cadence) &&
+                        _remoteFootsteps.Count < 128)
+                    {
+                        cadence = new ClientFootstepCadence();
+                        _remoteFootsteps.Add(id, cadence);
+                    }
+                    if (cadence is not null && cadence.Observe(
+                            presented.GlobalXMillimeters, presented.GlobalZMillimeters,
+                            checked((long)nowMilliseconds), moving: true,
+                            _actorMotionRows[index].VerticalPhase ==
+                            ClientPublicActorVerticalPhase.Grounded))
+                        _ = _audio.TryPlay(ClientSoundEvent.Footstep,
+                            presented.GlobalXMillimeters, presented.YMillimeters,
+                            presented.GlobalZMillimeters);
+                }
+            }
         }
         _actorPresenter.UpdateOriginAndLifetimes(_player, nowMilliseconds);
     }
+
+    private void ObservePublicWorldAudio()
+    {
+        if (_audio is null || _session is null || _window is null ||
+            !_window.TryCopyBindings(_presentationBindings, out int count, out _)) return;
+        bool swordPresent = false;
+        for (int index = 0; index < count; index++)
+        {
+            if (!_session.WorldCache.TryGetResidentView(
+                    _presentationBindings[index].SemanticHandle, out ClientSemanticChunkView view)) continue;
+            foreach (ref readonly WorldPublicRecord record in view.PublicRecords)
+            {
+                if (record.PrefabId == GameWorldPublicPrefabIds.CabinDoor)
+                {
+                    if (_audioDoorObserved && record.Id == _audioDoorId &&
+                        record.EntityPublicVersion > _audioDoorVersion && record.Orientation != _audioDoorYaw)
+                        _ = _audio.TryPlay(record.Orientation == WorldYaw.QuarterTurn
+                                ? ClientSoundEvent.DoorOpen : ClientSoundEvent.DoorClose,
+                            record.Position.GlobalXMillimeters, record.Position.YMillimeters,
+                            record.Position.GlobalZMillimeters);
+                    _audioDoorObserved = true;
+                    _audioDoorId = record.Id;
+                    _audioDoorYaw = record.Orientation;
+                    _audioDoorVersion = record.EntityPublicVersion;
+                }
+                else if (record.PrefabId == GameWorldPublicPrefabIds.IronSword)
+                {
+                    swordPresent = true;
+                    if (_audioSwordObserved && !_audioSwordPresent &&
+                        record.Id == _audioSwordId &&
+                        record.EntityPublicVersion > _audioSwordVersion)
+                        _ = _audio.TryPlay(ClientSoundEvent.Drop,
+                            record.Position.GlobalXMillimeters, record.Position.YMillimeters,
+                            record.Position.GlobalZMillimeters);
+                    _audioSwordId = record.Id;
+                    _audioSwordChunk = record.Position.ToChunkKey(_session.WorldCache.StructuralSpace);
+                    _audioSwordVersion = record.EntityPublicVersion;
+                }
+            }
+        }
+        if (_audioSwordObserved && _audioSwordPresent && !swordPresent &&
+            _session.WorldCache.TryGetResidentHandle(_audioSwordChunk, out _))
+            PlayAudio(ClientSoundEvent.Pickup);
+        _audioSwordPresent = swordPresent;
+        _audioSwordObserved = true;
+    }
+
+    private void PlayAudio(ClientSoundEvent semanticEvent) =>
+        _ = _audio?.TryPlay(semanticEvent, _player.GlobalXMillimeters,
+            _player.YMillimeters, _player.GlobalZMillimeters);
+
+    private void OnNativeUiAction() => _ = _audio?.TryPlay(ClientSoundEvent.UiClick);
 
     private void Fault(string detail)
     {

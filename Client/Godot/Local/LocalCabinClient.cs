@@ -7,6 +7,7 @@ using UltraSim.Client.Core;
 using UltraSim.Client.Godot;
 using UltraSim.Client.Local;
 using UltraSim.Client.StandardUi;
+using UltraSim.Client.Sound;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Input;
@@ -272,6 +273,17 @@ public partial class LocalCabinClient : Node3D
     private bool _gameplayInputAdmittedLastFrame;
     private bool _gameplayStopPending;
     private bool _shutdown;
+    private GodotClientAudioAdapter? _audio;
+    private readonly ClientFootstepCadence _footsteps = new();
+    private uint _previousMainHandPrefab;
+    private bool _mainHandObserved;
+    private bool _wasGrounded;
+    private bool _groundedObserved;
+    private WorldPublicEntityId _audioSwordId;
+    private SpatialChunkKey _audioSwordChunk;
+    private ulong _audioSwordVersion;
+    private bool _audioSwordPresent;
+    private bool _audioSwordObserved;
     private string? _initializationError;
 
     public void Configure(
@@ -286,7 +298,8 @@ public partial class LocalCabinClient : Node3D
         ILocalPlayableServerExtensionFactory? serverExtensionFactory = null,
         bool primitiveOnlyPresentation = false,
         string? presentationCacheRoot = null,
-        string? officialContentRoot = null)
+        string? officialContentRoot = null,
+        GodotClientAudioAdapter? audio = null)
     {
         ArgumentNullException.ThrowIfNull(contentOracle);
         ArgumentNullException.ThrowIfNull(resolvedContent);
@@ -311,6 +324,7 @@ public partial class LocalCabinClient : Node3D
         _primitiveOnlyPresentation = primitiveOnlyPresentation;
         _presentationCacheRoot = presentationCacheRoot;
         _officialContentRoot = officialContentRoot;
+        _audio = audio;
         _serverExtensionFactory = serverExtensionFactory;
         _settings = settings ?? ClientSettingsResolver.Resolve(ClientSettingsDocument.Empty);
         _vegetationForSession = _settings.ExperimentalVegetation || OS.GetCmdlineUserArgs().Contains("--f1-11-vegetation");
@@ -1671,6 +1685,7 @@ public partial class LocalCabinClient : Node3D
         _uiRenderer = _sessionUi is not null
             ? new GodotUiRenderer(_sessionUi.Gumps, portraitWorld: () => _assetResolver)
             : new GodotUiRenderer(_inventoryHost, portraitWorld: () => _assetResolver);
+        _uiRenderer.NativeActionSubmitted += OnNativeUiAction;
         _uiRenderer.SetInventoryViewerProfile(_settings!.InventoryViewer);
         _uiClient = new UiClientRuntime(_uiRenderer, new UiClientLimits(8, 8));
         _uiBridge = _localSession.AttachUiClient(
@@ -2252,6 +2267,10 @@ public partial class LocalCabinClient : Node3D
             throw new InvalidOperationException("The local authority view was unavailable.");
         if (view.GenerationId != _residentGenerationId)
         {
+            _audioSwordObserved = false;
+            _mainHandObserved = false;
+            _groundedObserved = false;
+            _footsteps.Reset();
             RebuildClientProjection(view);
             _selection = SelectionKind.None;
             _lastOutcome = $"Entered authoritative generation {view.GenerationId}";
@@ -2259,9 +2278,12 @@ public partial class LocalCabinClient : Node3D
         }
 
         CaptureSemanticHashes();
-        _ = _localSession.PumpWorld(_cache);
+        int appliedPublications = _localSession.PumpWorld(_cache);
         QueueChangedPublicChunks();
         _player = view.PlayerPosition;
+        if (appliedPublications != 0 || !_audioSwordObserved)
+            ObservePublicItemAudio();
+        ObserveAudioMotion(in view);
         ObserveAuthorityOutcomes(view);
         SynchronizeColdPublicPresentationMetadata();
         TrackPresentation(reset: false);
@@ -2315,6 +2337,12 @@ public partial class LocalCabinClient : Node3D
             }
             else if (view.LastCommandResult.Interaction != GameWorldActionStatus.NotRequested)
             {
+                if (view.LastCommandResult.Interaction == GameWorldActionStatus.Accepted)
+                {
+                    if (view.LastSelection == LocalPlayableSelection.CabinDoor)
+                        PlayAudio(view.LastCommandResult.DoorIsOpen
+                            ? ClientSoundEvent.DoorOpen : ClientSoundEvent.DoorClose);
+                }
                 _lastOutcome = view.LastCommandResult.Interaction == GameWorldActionStatus.Accepted
                     ? view.LastSelection switch
                     {
@@ -2331,6 +2359,8 @@ public partial class LocalCabinClient : Node3D
             }
             else if (view.LastCommandResult.Jump != GameWorldActionStatus.NotRequested)
             {
+                if (view.LastCommandResult.Jump == GameWorldActionStatus.Accepted)
+                    PlayAudio(ClientSoundEvent.Jump);
                 _lastOutcome = view.LastCommandResult.Jump == GameWorldActionStatus.Accepted
                     ? "Jumped"
                     : $"Jump: {view.LastCommandResult.Jump}";
@@ -2341,8 +2371,11 @@ public partial class LocalCabinClient : Node3D
                     ? "Swung equipped weapon"
                     : "Primary requires an equipped weapon";
                 if (view.LastCommandResult.Primary == GameWorldActionStatus.Accepted)
+                {
+                    PlayAudio(ClientSoundEvent.PrimaryAction);
                     _ = _actorPresenter?.TryPresentPrimaryAction(
                         view.PublicActor, view.LastCommandSequence, Time.GetTicksMsec());
+                }
             }
         }
         if (view.LastAdministrativeSequence != 0 &&
@@ -2353,6 +2386,52 @@ public partial class LocalCabinClient : Node3D
                 $"{view.LastAdministrativeKind}: {(view.LastAdministrativeSucceeded ? "accepted" : "rejected")}";
         }
     }
+
+    private void ObserveAudioMotion(in LocalPlayableAuthorityView view)
+    {
+        _audio?.SetListener(new UltraSim.Audio.AudioListenerFrame(
+            view.PlayerPosition.GlobalXMillimeters, view.PlayerPosition.YMillimeters,
+            view.PlayerPosition.GlobalZMillimeters));
+        bool grounded = view.VerticalMotion.Kind == GameVerticalMotionKind.Grounded;
+        if (_groundedObserved && !_wasGrounded && grounded)
+            PlayAudio(ClientSoundEvent.Land);
+        _groundedObserved = true;
+        _wasGrounded = grounded;
+        long now = checked((long)Time.GetTicksMsec());
+        if (_footsteps.Observe(view.PlayerPosition.GlobalXMillimeters,
+                view.PlayerPosition.GlobalZMillimeters, now, moving: true, grounded))
+            PlayAudio(ClientSoundEvent.Footstep);
+        if (_mainHandObserved && _previousMainHandPrefab != view.MainHandPrefabId)
+            PlayAudio(ClientSoundEvent.Equip);
+        _previousMainHandPrefab = view.MainHandPrefabId;
+        _mainHandObserved = true;
+    }
+
+    private void ObservePublicItemAudio()
+    {
+        bool present = TryFindPublicRecord(GameWorldPublicPrefabIds.IronSword,
+            out WorldPublicRecord sword);
+        if (_audioSwordObserved && _audioSwordPresent && !present &&
+            _cache?.TryGetResidentHandle(_audioSwordChunk, out _) == true)
+            PlayAudio(ClientSoundEvent.Pickup);
+        if (_audioSwordObserved && !_audioSwordPresent && present &&
+            sword.Id == _audioSwordId && sword.EntityPublicVersion > _audioSwordVersion)
+            PlayAudio(ClientSoundEvent.Drop);
+        if (present)
+        {
+            _audioSwordId = sword.Id;
+            _audioSwordChunk = sword.Position.ToChunkKey(_cache!.StructuralSpace);
+            _audioSwordVersion = sword.EntityPublicVersion;
+        }
+        _audioSwordPresent = present;
+        _audioSwordObserved = true;
+    }
+
+    private void PlayAudio(ClientSoundEvent semanticEvent) =>
+        _ = _audio?.TryPlay(semanticEvent, _player.GlobalXMillimeters,
+            _player.YMillimeters, _player.GlobalZMillimeters);
+
+    private void OnNativeUiAction() => _ = _audio?.TryPlay(ClientSoundEvent.UiClick);
 
     private void TrackPresentation(bool reset)
     {

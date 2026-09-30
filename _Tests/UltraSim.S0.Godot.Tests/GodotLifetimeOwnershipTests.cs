@@ -5,10 +5,13 @@ using UltraSim.Client.StandardUi;
 using UltraSim.Framework.ControlPlane;
 using UltraSim.Framework.Definitions;
 using UltraSim.UI;
+using UltraSim.Audio;
+using UltraSim.Client.Sound;
+using UltraSim.Client.Content;
 
 internal static class GodotLifetimeOwnershipTests
 {
-    internal static void Run()
+    internal static void Run(Node nativeParent)
     {
         var resources = new GodotOwnedResources();
         var node = (MeshInstance3D)GodotPrimitiveSubstrate.CreateActor(ClientActorVisualKind.HumanX, resources);
@@ -62,6 +65,90 @@ internal static class GodotLifetimeOwnershipTests
         AdapterControlPublication();
         VisualRoleRealization();
         GenericControlWidgets();
+        AudioOwnership(nativeParent);
+    }
+
+    private static void AudioOwnership(Node parent)
+    {
+        var adapter = new GodotClientAudioAdapter(parent);
+        AudioStreamWav retained = adapter.GetOwnedStreamForNativeTest(SoundCueId.FootstepGrass) ??
+            throw new InvalidOperationException("The native audio clip was not realized.");
+        Expect(retained.NativeInstance != IntPtr.Zero, "A generated PCM stream has no native wrapper.");
+        GodotClientAudioSnapshot cold = adapter.GetSnapshot();
+        Expect(cold.LoadedCues == 14 && cold.SourceBudget == 16 &&
+            cold.ActiveSources == 0, "Native audio did not cold-load its finite cue/source set.");
+        adapter.SetMasterVolume(.5f);
+        adapter.BeginSession();
+        adapter.SetListener(new AudioListenerFrame(0, 0, 0));
+        Expect(adapter.TryPlay(ClientSoundEvent.UiClick) &&
+            adapter.TryPlay(ClientSoundEvent.Footstep, 500, 0, 0),
+            "UI and spatial SFX did not reach native players.");
+        Expect(adapter.GetCueRequestsForNativeTest(SoundCueId.UiClick) == 1 &&
+            adapter.GetCueRequestsForNativeTest(SoundCueId.FootstepGrass) == 1,
+            "Native semantic cue requests were not distinguished by category.");
+        GodotClientAudioSnapshot playing = adapter.GetSnapshot();
+        Expect(playing.ActiveSources >= 3 && playing.ActiveLoops == 1 &&
+            playing.MasterVolume == .5f, "Native categories or ambience were not realized.");
+        adapter.SetCategoryVolume(AudioCategory.Ambient, 0);
+        Expect(adapter.GetSnapshot().ActiveLoops == 0 &&
+            adapter.GetSnapshot().AmbientVolume == 0,
+            "Muting the Ambient category retained its native loop.");
+        adapter.SetCategoryVolume(AudioCategory.Ambient, .6f);
+        Expect(adapter.GetSnapshot().ActiveLoops == 1,
+            "Restoring Ambient category gain did not resume the session loop.");
+        adapter.SetMasterVolume(0);
+        Expect(adapter.GetSnapshot().Muted && adapter.GetSnapshot().ActiveSources == 0 &&
+            !adapter.TryPlay(ClientSoundEvent.UiClick) &&
+            adapter.GetCueRequestsForNativeTest(SoundCueId.UiClick) == 2,
+            "Master mute retained native playback or admitted a muted cue.");
+        adapter.SetMasterVolume(.8f);
+        Expect(adapter.TryPlay(ClientSoundEvent.UiOpen),
+            "Unmuting did not permit future native playback.");
+        adapter.EndSession();
+        Expect(adapter.GetSnapshot().ActiveSources == 0 &&
+            adapter.GetSnapshot().ActiveLoops == 0,
+            "Session retirement retained native audio source ownership.");
+        adapter.Dispose();
+        adapter.Dispose();
+        Expect(retained.NativeInstance == IntPtr.Zero,
+            "An AudioStreamWav wrapper survived its explicit Godot owner retirement.");
+    }
+
+    internal static async Task AudioGenerationReplacement(Node parent)
+    {
+        var adapter = new GodotClientAudioAdapter(parent);
+        AudioStreamWav old = adapter.GetOwnedStreamForNativeTest(SoundCueId.UiClick) ??
+            throw new InvalidOperationException("The old native clip is missing.");
+        Expect(GodotAudioContentBank.TryOpenOwnedClip(SoundCueId.UiClick,
+            out ResolvedContentAudioClip selected),
+            "The scope-authorized audio clip could not be reopened.");
+        Expect(!adapter.TryReplaceClip(SoundCueId.UiOpen, selected),
+            "A clip from another semantic cue was accepted.");
+        adapter.BeginSession();
+        Expect(adapter.TryPlay(ClientSoundEvent.UiClick), "The old clip could not play.");
+        Expect(adapter.TryReplaceClip(SoundCueId.UiClick, selected),
+            "The new catalog generation could not replace a live clip.");
+        Expect(!adapter.TryReplaceClip(SoundCueId.UiClick, selected),
+            "Replacement escaped the bounded native retirement quarantine.");
+        AudioStreamWav current = adapter.GetOwnedStreamForNativeTest(SoundCueId.UiClick) ??
+            throw new InvalidOperationException("The new native clip is missing.");
+        Expect(!ReferenceEquals(old, current) && old.NativeInstance != IntPtr.Zero &&
+            current.NativeInstance != IntPtr.Zero,
+            "A live old stream was disposed before its consumer retirement boundary.");
+        // Godot emits ProcessFrame before incrementing its public frame counter.
+        // Four signal boundaries cover two completed frames after replacement.
+        for (int i = 0; i < 4; i++)
+        {
+            await parent.ToSignal(parent.GetTree(), SceneTree.SignalName.ProcessFrame);
+            adapter.ProcessFrame();
+        }
+        Expect(old.NativeInstance == IntPtr.Zero && current.NativeInstance != IntPtr.Zero &&
+            adapter.TryPlay(ClientSoundEvent.UiClick),
+            "The old stream failed to retire or the new stream failed to play.");
+        adapter.EndSession();
+        adapter.Dispose();
+        Expect(current.NativeInstance == IntPtr.Zero,
+            "The replacement stream survived its explicit owner retirement.");
     }
 
     private static void VisualRoleRealization()
@@ -240,7 +327,13 @@ internal static class GodotLifetimeOwnershipTests
         Expect(registry.Read(reader, GodotAdapterControlProvider.Id, generation,
                 new ControlId("audio-implementation"), out var audio) == ControlResultCode.Accepted &&
             audio?.Effective.AsOption().Value == "none",
-            "The unimplemented Audio adapter was falsely published as active.");
+            "A composition without Audio was falsely published as active.");
+        current = current with { Audio = new GodotClientAudioSnapshot(
+            16, 1, 1, 0, 0, 14, .8f, false, true, 0, 0, true) };
+        Expect(registry.Read(reader, GodotAdapterControlProvider.Id, generation,
+                new ControlId("audio-implementation"), out audio) == ControlResultCode.Accepted &&
+            audio?.Effective.AsOption().Value == "godot",
+            "A composition with owned Godot Audio was not published as active.");
         var attempt = registry.Set(new SetControlRequest(
             new(new("p3-adapter-selection"), reader), GodotAdapterControlProvider.Id,
             new("presentation-implementation"), generation, ControlValue.Option(new("godot"))));

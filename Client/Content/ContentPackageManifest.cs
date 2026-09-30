@@ -183,6 +183,7 @@ public sealed class ContentPackageManifest
                         file.Kind == ContentFileKind.WorldStructuralManifest,
                     ContentDefinitionKind.ActorPresentation =>
                         file.Kind == ContentFileKind.ActorGltfBinary,
+                    ContentDefinitionKind.AudioClip => file.Kind == ContentFileKind.PcmWav,
                     _ => false,
                 };
                 if (!kindMatches)
@@ -311,6 +312,7 @@ public static class ContentPackageValidator
         ContentFileKind.UiDefinition => ValidateUiDefinition(descriptor.Path, bytes),
         ContentFileKind.ActorGltfBinary =>
             ActorPresentationArtifact.TryInspect(bytes, out _, out _),
+        ContentFileKind.PcmWav => ContentAudioArtifact.TryInspect(bytes, out _),
         _ => false,
     };
 

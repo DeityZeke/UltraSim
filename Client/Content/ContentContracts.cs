@@ -68,6 +68,8 @@ public enum ContentFileKind : byte
     ActorGltfBinary = 5,
     /// <summary>Canonical WorldStructuralManifest/v1 bytes; World performs final identity validation.</summary>
     WorldStructuralManifest = 6,
+    /// <summary>Bounded canonical mono PCM16 WAV, validated before native decode.</summary>
+    PcmWav = 7,
 }
 
 public enum ContentDefinitionKind : byte
@@ -79,6 +81,7 @@ public enum ContentDefinitionKind : byte
     /// <summary>Passive actor model, skeleton, and finite animation presentation.</summary>
     ActorPresentation = 5,
     WorldStructuralManifest = 6,
+    AudioClip = 7,
 }
 
 public enum ContentDefinitionOperation : byte
@@ -121,8 +124,9 @@ public readonly record struct ContentFileDescriptor(
     long SizeBytes,
     ContentHash Sha256)
 {
-    public bool IsValid => Path.IsValid && Kind is >= ContentFileKind.PngTexture and <= ContentFileKind.WorldStructuralManifest &&
-        SizeBytes >= 0 && Sha256.IsValid && ExtensionMatches(Path, Kind);
+    public bool IsValid => Path.IsValid && Kind is >= ContentFileKind.PngTexture and <= ContentFileKind.PcmWav &&
+        SizeBytes >= 0 && (Kind != ContentFileKind.PcmWav || SizeBytes <= ContentAudioArtifact.MaximumBytes) &&
+        Sha256.IsValid && ExtensionMatches(Path, Kind);
 
     public static bool TryCreate(
         ContentFilePath path,
@@ -148,6 +152,7 @@ public readonly record struct ContentFileDescriptor(
         ContentFileKind.ActorGltfBinary => path.Value!.EndsWith(".glb", StringComparison.Ordinal),
         ContentFileKind.WorldStructuralManifest =>
             path.Value!.EndsWith(".usworldmanifest", StringComparison.Ordinal),
+        ContentFileKind.PcmWav => path.Value!.EndsWith(".wav", StringComparison.Ordinal),
         _ => false,
     };
 }
@@ -216,7 +221,7 @@ public sealed class ContentDefinitionDescriptor
         definition = null;
         if (!id.IsValid || kind is not (ContentDefinitionKind.Texture or ContentDefinitionKind.Icon or
                 ContentDefinitionKind.WorldPack or ContentDefinitionKind.ActorPresentation or
-                ContentDefinitionKind.WorldStructuralManifest) ||
+                ContentDefinitionKind.WorldStructuralManifest or ContentDefinitionKind.AudioClip) ||
             operation is not (ContentDefinitionOperation.Add or ContentDefinitionOperation.Replace) ||
             !primaryFile.IsValid) return false;
         definition = new ContentDefinitionDescriptor(id, kind, operation, primaryFile, default);

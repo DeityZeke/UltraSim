@@ -55,8 +55,9 @@ public sealed class ClientSettingsControlProvider : IControlProvider
             new(ControlValueKind.Option, options: [new("d2-grid"), new("list")])];
         Definition = new(new("client.settings"), Fields.Select((f, i) =>
             new ControlDescriptor(new(f), new(f is "pointer-sensitivity" or "invert-y" or "grammar" ? "Client/Input" :
-                    f == "display-mode" ? "Client/Display" : f.StartsWith("camera-", StringComparison.Ordinal) ? "Client/Camera" : "Client/Presentation"),
-                f, f == "volume" ? "Persisted preference; no Audio consumer is implemented." :
+                    f == "display-mode" ? "Client/Display" : f == "volume" ? "Client/Audio" :
+                    f.StartsWith("camera-", StringComparison.Ordinal) ? "Client/Camera" : "Client/Presentation"),
+                f, f == "volume" ? "User-owned Master Volume; applied live by the selected audio adapter." :
                 f == "vegetation" ? "Device-owned, default Off, applies on next world entry." :
                 f == "inventory-viewer" ? "Client-owned viewer preference; non-Grid containers use List without changing Inventory." :
                 "Existing user-owned settings resolver.",

@@ -1,5 +1,6 @@
 using Godot;
 using UltraSim.Client.Core;
+using UltraSim.Client.Sound;
 
 namespace UltraSim.Client.Godot;
 
@@ -81,6 +82,11 @@ public abstract partial class ClientRoot : Control
     private Control? _menuHost;
     private Label? _hudStatus;
     private GodotClientUiComposition? _uiComposition;
+    private GodotClientAudioAdapter? _audioAdapter;
+    private ClientShellScreen _lastSoundScreen;
+    private bool _soundScreenObserved;
+
+    protected GodotClientAudioAdapter? AudioAdapter => _audioAdapter;
 
     protected abstract ClientCompositionManifest Composition { get; }
 
@@ -256,6 +262,7 @@ public abstract partial class ClientRoot : Control
     {
         if (!CanStartApplicationWork) throw new InvalidOperationException("Application is stopping.");
         _shell.EnterSession(status);
+        _audioAdapter?.BeginSession();
         RenderCurrentSurface();
     }
 
@@ -270,6 +277,7 @@ public abstract partial class ClientRoot : Control
     {
         if (!CanStartApplicationWork) return;
         _shell.ReturnToMainMenu(status);
+        _audioAdapter?.EndSession();
         RenderCurrentSurface();
     }
 
@@ -294,6 +302,11 @@ public abstract partial class ClientRoot : Control
                 Callable.From(RunShellUiSmoke).CallDeferred();
                 return;
             }
+            if (OS.GetCmdlineUserArgs().Contains("--p8-audio-smoke", StringComparer.Ordinal))
+            {
+                Callable.From(RunP8AudioSmoke).CallDeferred();
+                return;
+            }
             if (OS.GetCmdlineUserArgs().Contains("--p5-management-smoke", StringComparer.Ordinal))
             {
                 Callable.From(() => { _ = RunP5ManagementSmokeAsync(); }).CallDeferred();
@@ -312,6 +325,49 @@ public abstract partial class ClientRoot : Control
         catch (Exception exception)
         {
             GD.PushError($"Client shell initialization failed: {exception}");
+            RequestApplicationExit(1);
+        }
+    }
+
+    private void RunP8AudioSmoke()
+    {
+        try
+        {
+            GodotClientAudioAdapter audio = _audioAdapter ??
+                throw new InvalidOperationException("The compiled client has no audio adapter.");
+            if (!audio.GetSnapshot().CatalogBacked)
+                throw new InvalidOperationException("The product did not resolve owned audio through world.local CAS.");
+            audio.SetMasterVolume(.75f);
+            audio.BeginSession();
+            audio.SetListener(default);
+            if (!audio.TryPlay(ClientSoundEvent.UiClick) ||
+                !audio.TryPlay(ClientSoundEvent.DoorOpen, 500, 0, 0) ||
+                audio.GetSnapshot().ActiveLoops != 1)
+                throw new InvalidOperationException("Representative native audio categories did not realize.");
+            audio.SetMasterVolume(0);
+            if (!audio.GetSnapshot().Muted || audio.GetSnapshot().ActiveSources != 0 ||
+                audio.TryPlay(ClientSoundEvent.UiClick))
+                throw new InvalidOperationException("Live Master Volume mute did not silence native audio.");
+            audio.SetMasterVolume(.75f);
+            if (!audio.TryPlay(ClientSoundEvent.UiOpen))
+                throw new InvalidOperationException("Unmuting did not restore future cue realization.");
+            var principal = new UltraSim.Framework.ControlPlane.ControlPrincipal("p8-native",
+                UltraSim.Framework.ControlPlane.ControlPrincipalKind.TestAutomation,
+                [GodotAdapterControlProvider.Read]);
+            if (_adapterControlPlane.Read(principal, GodotAdapterControlProvider.Id,
+                    _adapterControlGeneration, new UltraSim.Framework.ControlPlane.ControlId(
+                        "audio-implementation"), out var selected) !=
+                    UltraSim.Framework.ControlPlane.ControlResultCode.Accepted ||
+                selected?.Effective.AsOption().Value != "godot")
+                throw new InvalidOperationException("Control Plane did not publish the native audio adapter.");
+            audio.EndSession();
+            GD.Print("P8 PRODUCT AUDIO SMOKE PASS catalog=world.local " +
+                "categories=SFX,Ambient,UI master=live mute=silent sources=retired");
+            RequestApplicationExit(0);
+        }
+        catch (Exception error)
+        {
+            GD.PushError($"P8 product audio smoke failed: {error}");
             RequestApplicationExit(1);
         }
     }
@@ -419,7 +475,8 @@ public abstract partial class ClientRoot : Control
     /// Gives an active capability newly resolved client-owned settings without granting it
     /// ownership of persistence or profile resolution.
     /// </summary>
-    protected virtual void OnEffectiveSettingsChanged(ResolvedClientSettings settings) { }
+    protected virtual void OnEffectiveSettingsChanged(ResolvedClientSettings settings) =>
+        _audioAdapter?.SetMasterVolume(settings.MasterVolume);
 
     private void LoadSettings()
     {
@@ -447,6 +504,7 @@ public abstract partial class ClientRoot : Control
         _contentCatalogRoot = NamedNode("ContentCatalogs");
         _display = ClientDisplayResolver.Resolve(_settings.Display);
         _uiComposition = new GodotClientUiComposition(this, _display);
+        _uiComposition.Gumps.WindowChanged += OnGumpWindowChanged;
         ApplyNativeWindow(_display);
         _worldRoot = NamedNode("World");
         AddChild(_controllerRoot);
@@ -461,6 +519,16 @@ public abstract partial class ClientRoot : Control
         _worldRoot.AddChild(NamedNode("DynamicEntities"));
         _worldRoot.AddChild(NamedNode("Effects"));
         _worldRoot.AddChild(NamedNode("CameraRig"));
+        try
+        {
+            _audioAdapter = new GodotClientAudioAdapter(_worldRoot);
+            _audioAdapter.SetMasterVolume(_resolved.MasterVolume);
+        }
+        catch (Exception error)
+        {
+            _audioAdapter = null;
+            GD.PushWarning($"Optional native audio is unavailable: {error}");
+        }
 
         _workspaceLayer = GetNode<CanvasLayer>("UILayers/Workspace");
         _worldUiLayer = _uiComposition.WorldLayer;
@@ -528,8 +596,18 @@ public abstract partial class ClientRoot : Control
     protected void RenderCurrentSurface()
     {
         if (_menuHost is null) return;
-        ClearChildren(_menuHost);
         ClientShellSnapshot snapshot = _shell.Snapshot();
+        if (_soundScreenObserved && snapshot.SessionActive &&
+            snapshot.Screen != _lastSoundScreen)
+        {
+            if (_lastSoundScreen == ClientShellScreen.InSession)
+                _ = _audioAdapter?.TryPlay(ClientSoundEvent.UiOpen);
+            else if (snapshot.Screen == ClientShellScreen.InSession)
+                _ = _audioAdapter?.TryPlay(ClientSoundEvent.UiClose);
+        }
+        _lastSoundScreen = snapshot.Screen;
+        _soundScreenObserved = true;
+        ClearChildren(_menuHost);
         if (snapshot.Screen == ClientShellScreen.MainMenu && !snapshot.SessionActive)
             UiComposition.ResetDebug();
         _menuHost.Visible = snapshot.Screen != ClientShellScreen.InSession;
@@ -574,6 +652,12 @@ public abstract partial class ClientRoot : Control
             default:
                 throw new InvalidOperationException($"Unsupported client shell screen {snapshot.Screen}.");
         }
+    }
+
+    private void OnGumpWindowChanged(bool opened)
+    {
+        if (CanStartApplicationWork && _audioAdapter is not null)
+            _ = _audioAdapter.TryPlay(opened ? ClientSoundEvent.UiOpen : ClientSoundEvent.UiClose);
     }
 
     public override void _ExitTree() => RetireOnTreeExit();
@@ -1287,7 +1371,12 @@ public abstract partial class ClientRoot : Control
     {
         Error result = button.Connect(
             BaseButton.SignalName.Pressed,
-            Callable.From(() => { if (CanStartApplicationWork) pressed(); }),
+            Callable.From(() =>
+            {
+                if (!CanStartApplicationWork) return;
+                _ = _audioAdapter?.TryPlay(ClientSoundEvent.UiClick);
+                pressed();
+            }),
             (uint)GodotObject.ConnectFlags.Deferred);
         if (result != Error.Ok)
             throw new InvalidOperationException(

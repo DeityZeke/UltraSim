@@ -37,7 +37,8 @@ public abstract partial class ClientRoot
             (_contextLayer is null ? 0 : 1) + (_workspaceLayer is null ? 0 : 1),
             _uiComposition?.GetSnapshot().Gumps.OpenWindows ?? 0,
             _display.InternalRenderResolution.Width,
-            _display.InternalRenderResolution.Height));
+            _display.InternalRenderResolution.Height,
+            _audioAdapter?.GetSnapshot() ?? default));
         if (!_adapterControlPlane.TryRegister(provider, out _adapterControlGeneration, out string reason))
             throw new InvalidOperationException($"Godot adapter Control Plane publication failed: {reason}.");
         _adapterControlProvider = provider;

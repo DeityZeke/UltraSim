@@ -45,6 +45,8 @@ public sealed class GodotUiRenderer : IUiRenderer, IDisposable
     private Texture2D? _missingIcon;
     private Texture2D? _inventoryPrimitiveIcon;
     private bool _disposed;
+    /// <summary>A native non-text action was submitted; this is UI feedback, not Game acceptance.</summary>
+    public event Action? NativeActionSubmitted;
 
     internal Texture2D DiagnosticMissingIcon
     {
@@ -157,7 +159,7 @@ public sealed class GodotUiRenderer : IUiRenderer, IDisposable
         EnsureOwner();
         ObjectDisposedException.ThrowIf(_disposed, this);
         GodotUiDefinitionAdmission.Validate(definition);
-        var handle = new GodotUiRenderHandle(instance, definition, model, submitAction,
+        var handle = new GodotUiRenderHandle(instance, definition, model, WrapNativeAction(submitAction),
             _assets, _visuals, _semanticImages, () => DiagnosticMissingIcon, _inventoryViewer,
             _inventoryPortraits, () => DiagnosticInventoryPrimitiveIcon);
         if (_windows is not null)
@@ -183,7 +185,7 @@ public sealed class GodotUiRenderer : IUiRenderer, IDisposable
     {
         if (handle is not GodotUiRenderHandle godotHandle)
             throw new ArgumentException("The render handle was not created by GodotUiRenderer.", nameof(handle));
-        godotHandle.Apply(current, delta, submitAction);
+        godotHandle.Apply(current, delta, WrapNativeAction(submitAction));
     }
 
     public void Close(IUiRenderHandle handle)
@@ -196,6 +198,12 @@ public sealed class GodotUiRenderer : IUiRenderer, IDisposable
         if (!_openHandles.Exists(static open => open.IsInventory))
             _inventoryPortraits?.SuspendStaging();
     }
+
+    private Action<UiActionRequest> WrapNativeAction(Action<UiActionRequest> submit) => request =>
+    {
+        if (request.Input.Kind != UiValueKind.Text) NativeActionSubmitted?.Invoke();
+        submit(request);
+    };
 
     /// <summary>
     /// Resolves gameplay input against the topmost open compiled UI without consuming native

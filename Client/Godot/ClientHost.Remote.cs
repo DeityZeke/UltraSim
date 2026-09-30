@@ -696,7 +696,8 @@ public partial class ClientHost
             RemoteTelemetryLevel(),
             OS.GetCmdlineUserArgs().Contains(
                 "--pf3-native-sustained-input", StringComparer.Ordinal),
-            ResolveOfficialContentRoot());
+            ResolveOfficialContentRoot(),
+            AudioAdapter);
         WorldRoot.AddChild(playable);
         _remotePlayable = playable;
     }

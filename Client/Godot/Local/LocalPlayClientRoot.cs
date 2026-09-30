@@ -620,6 +620,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
 
     public override void _Process(double delta)
     {
+        base._Process(delta);
         if (_cabin is null) return;
         ClientShellSnapshot shell = ShellSnapshot();
         _cabin.SetGameplayInputAllowed(shell.Focus.GameplayInputAllowed);
@@ -701,8 +702,11 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         }
     }
 
-    protected override void OnEffectiveSettingsChanged(ResolvedClientSettings settings) =>
+    protected override void OnEffectiveSettingsChanged(ResolvedClientSettings settings)
+    {
+        base.OnEffectiveSettingsChanged(settings);
         _cabin?.ApplySettings(settings);
+    }
 
     protected LocalCabinPresentationSnapshot StartF07LocalSession(
         string displayName,
@@ -793,7 +797,8 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             extensionFactory,
             primitiveOnlyPresentation || ReadLocalArgument("--f1-12-art=") == "primitive",
             PresentationCacheRoot(),
-            OfficialContentRoot());
+            OfficialContentRoot(),
+            AudioAdapter);
         _cabin = cabin;
         WorldRoot.AddChild(cabin);
         LocalCabinPresentationSnapshot snapshot = cabin.GetPresentationSnapshot();

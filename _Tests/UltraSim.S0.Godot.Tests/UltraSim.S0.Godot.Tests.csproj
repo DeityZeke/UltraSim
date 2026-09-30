@@ -15,6 +15,8 @@
     <ProjectReference Include="../../Client/StandardUi/UltraSim.Client.StandardUi.csproj" />
     <ProjectReference Include="../../Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj" />
     <ProjectReference Include="../../Client/Content/UltraSim.Client.Content.csproj" />
+    <ProjectReference Include="../../Client/Sound/UltraSim.Client.Sound.csproj" />
+    <ProjectReference Include="../../Kernels/Audio/UltraSim.Audio.csproj" />
     <ProjectReference Include="../../Client/BuiltInTestWorlds/UltraSim.Client.BuiltInTestWorlds.csproj" />
     <ProjectReference Include="../../Client/Network/UltraSim.Client.Network.csproj" />
     <ProjectReference Include="../../Game/Admission/UltraSim.Game.Admission.csproj" />

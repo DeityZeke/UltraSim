@@ -27,6 +27,8 @@ public sealed class GodotGumpWindowManager : IDisposable
     internal int WindowCount => _entries.Count;
 
     public Control Host => _host;
+    /// <summary>Native UI ownership transition; never an authoritative Game event.</summary>
+    public event Action<bool>? WindowChanged;
 
     internal GodotUiRenderHandle HandleAt(int index) => _entries[index].Handle;
 
@@ -73,6 +75,7 @@ public sealed class GodotGumpWindowManager : IDisposable
 
         var entry = new Entry(handle, wrapper, header);
         _entries.Add(entry);
+        WindowChanged?.Invoke(true);
         handle.NativeWindowRoot = wrapper;
         HookBringToFront(handle.Root, entry);
         header.GuiInput += input => HandleHeaderInput(entry, input);
@@ -91,6 +94,7 @@ public sealed class GodotGumpWindowManager : IDisposable
         Entry entry = _entries[index];
         if (ReferenceEquals(_dragging, entry)) _dragging = null;
         _entries.RemoveAt(index);
+        WindowChanged?.Invoke(false);
         handle.CloseNative();
     }
 

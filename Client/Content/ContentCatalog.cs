@@ -131,7 +131,7 @@ public sealed class ContentBaseCatalog
             ContentHash[] references;
             if (source.Definition.Kind is ContentDefinitionKind.Texture or ContentDefinitionKind.Icon or
                 ContentDefinitionKind.WorldPack or ContentDefinitionKind.ActorPresentation or
-                ContentDefinitionKind.WorldStructuralManifest)
+                ContentDefinitionKind.WorldStructuralManifest or ContentDefinitionKind.AudioClip)
             {
                 if (source.ResolvedReferences is not null)
                 {

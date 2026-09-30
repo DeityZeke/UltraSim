@@ -7,10 +7,19 @@ public abstract partial class ClientRoot
     private readonly GodotApplicationLifetime _lifetime = new();
     private Task? _shutdownTask;
     private bool _applicationCleanupStarted;
+    private GodotClientAudioAdapter? _retiredAudioAdapter;
 
     public GodotApplicationPhase ApplicationPhase => _lifetime.Phase;
     public Task ShutdownCompletion => _lifetime.ShutdownCompletion;
     protected bool CanStartApplicationWork => _lifetime.CanStartWork;
+
+    public override void _Process(double delta)
+    {
+        if (!CanStartApplicationWork || _audioAdapter is null) return;
+        if (!_shell.Snapshot().SessionActive && _audioAdapter.GetSnapshot().SessionActive)
+            _audioAdapter.EndSession();
+        _audioAdapter.ProcessFrame();
+    }
 
     protected void BeginApplicationStartup()
     {
@@ -40,6 +49,27 @@ public abstract partial class ClientRoot
             // This acknowledges Godot's queue; it does not wait for or promise a GC/finalizer drain.
             await ToSignal(tree, SceneTree.SignalName.ProcessFrame);
             if (_lifetime.Phase != GodotApplicationPhase.Stopping) return;
+            await ToSignal(tree, SceneTree.SignalName.ProcessFrame);
+            if (_lifetime.Phase != GodotApplicationPhase.Stopping) return;
+            if (_retiredAudioAdapter is not null)
+            {
+                // AudioServer stops playbacks asynchronously: its mix thread fades them,
+                // then main-thread cleanup releases its RefCounted references. Observe
+                // actual native reference retirement, not a fixed shutdown sleep.
+                int audioFrames = 0;
+                while (!_retiredAudioAdapter.PlaybackOwnershipRetired && audioFrames++ < 240)
+                {
+                    await ToSignal(tree, SceneTree.SignalName.ProcessFrame);
+                    if (_lifetime.Phase != GodotApplicationPhase.Stopping) return;
+                }
+                if (!_retiredAudioAdapter.PlaybackOwnershipRetired)
+                    throw new InvalidOperationException(
+                        "AudioServer retained stopped playback beyond the bounded shutdown window.");
+            }
+            _retiredAudioAdapter?.CompleteRetirement();
+            _retiredAudioAdapter = null;
+            // Audio playback retirement is native-server work, distinct from the scene
+            // deletion queue. Give its final resource release a frame boundary as well.
             await ToSignal(tree, SceneTree.SignalName.ProcessFrame);
             if (_lifetime.Phase != GodotApplicationPhase.Stopping) return;
             _lifetime.CompleteStop();
@@ -75,13 +105,25 @@ public abstract partial class ClientRoot
     }
 
     /// <summary>Known product services retire after presentation and before persistent shell UI.</summary>
-    protected virtual void RetireApplicationServices() { }
+    protected virtual void RetireApplicationServices()
+    {
+        if (_uiComposition is not null)
+            _uiComposition.Gumps.WindowChanged -= OnGumpWindowChanged;
+        _audioAdapter?.BeginRetirement();
+        _retiredAudioAdapter = _audioAdapter;
+        _audioAdapter = null;
+    }
 
     protected void RetireOnTreeExit()
     {
         if (_lifetime.Phase == GodotApplicationPhase.Stopped) return;
         // Fallback for external tree destruction. Normal window/menu/test exits use the owned task.
-        try { RetireApplication(); }
+        try
+        {
+            RetireApplication();
+            _retiredAudioAdapter?.CompleteRetirement();
+            _retiredAudioAdapter = null;
+        }
         catch (Exception error) { _lifetime.FailStop(error); throw; }
         _lifetime.FailStop(new InvalidOperationException(
             "Godot exited the tree before application retirement completed."));
