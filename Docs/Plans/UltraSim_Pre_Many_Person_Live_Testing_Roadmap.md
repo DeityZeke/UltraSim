@@ -1903,7 +1903,7 @@ Make the intended D2-ish Inventory presentation real and human-testable.
 Save Now, host-owned autosave, bounded complete-generation backups, exact participant/session
 correlation for Kick, and a console. Restart-with-save is deliberately disabled: an exit code
 without a verified supervisor and durable authority/session rehydration would be a false restart.
-Restore/recovery, full live-session Kick acceptance, richer logs, the Godot server GUI, and any
+Restore/recovery, richer logs, the Godot server GUI, and any
 authorized in-game Admin route remain P7 work. No P8 work has begun.
 
 ### Goal
