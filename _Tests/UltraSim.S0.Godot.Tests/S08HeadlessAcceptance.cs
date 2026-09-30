@@ -666,7 +666,7 @@ public partial class S08HeadlessAcceptance : Control
         Expect(opened.Succeeded, "Native Inventory did not open.");
         UiViewInstanceId inventoryView = opened.View;
         Control inventoryRoot = GetNode<Control>($"UiView_{inventoryView.Value}");
-        PanelContainer inventorySurface = Find<PanelContainer>(inventoryRoot, "InventoryPresentation");
+        Panel inventorySurface = Find<Panel>(inventoryRoot, "Element_background");
         Expect(renderer.ResolveGameplayInput(new InputEventMouseButton
             {
                 Position = inventorySurface.GetGlobalRect().GetCenter(),

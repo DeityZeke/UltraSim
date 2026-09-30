@@ -40,9 +40,9 @@ internal sealed partial class GodotInventoryViewer
         _derivedPortraits = derivedPortraits;
         _fallbackIcon = fallbackIcon;
         _bindings = new(instance, definition);
-        Root = new PanelContainer
+        Root = new Panel
         {
-            Name = "InventoryPresentation",
+            Name = "Element_background",
             Size = new Vector2(768, 568),
             Position = new Vector2(16, 16),
             ThemeTypeVariation = "inventory.surface",
@@ -51,7 +51,7 @@ internal sealed partial class GodotInventoryViewer
         Render();
     }
 
-    internal PanelContainer Root { get; }
+    internal Panel Root { get; }
     internal ClientInventoryViewerProfile Effective { get; private set; }
     internal int RenderedItemCount { get; private set; }
     internal int RenderedFootprintCount { get; private set; }
@@ -96,6 +96,7 @@ internal sealed partial class GodotInventoryViewer
             child.QueueFree();
         }
         var outer = new MarginContainer { Name = "InventoryMargins" };
+        outer.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
         outer.AddThemeConstantOverride("margin_left", 12);
         outer.AddThemeConstantOverride("margin_top", 10);
         outer.AddThemeConstantOverride("margin_right", 12);
