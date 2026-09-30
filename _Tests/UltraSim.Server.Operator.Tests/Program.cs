@@ -12,6 +12,7 @@ var tests = new (string Name, Action Body)[]
     ("SaveBackupAndDisabledRestart", SaveBackupAndDisabledRestart),
     ("AutosaveCadenceAndConsole", AutosaveCadenceAndConsole),
     ("BackupRetentionAndIntegrity", BackupRetentionAndIntegrity),
+    ("ShutdownWaitsForBackupThenSaves", ShutdownWaitsForBackupThenSaves),
 };
 foreach ((string name, Action body) in tests)
 {
@@ -144,6 +145,23 @@ static void BackupRetentionAndIntegrity()
     catch (Exception failure) when (failure is InvalidDataException or System.Text.Json.JsonException)
     { rejected = true; }
     Check(rejected, "Corrupted backup appeared complete.");
+}
+
+static void ShutdownWaitsForBackupThenSaves()
+{
+    using var fixture = new Fixture(new ServerOperatorPolicy(false, 300, 2, true));
+    Check(fixture.Invoke(fixture.Principal, ServerOperatorProvider.SaveNow).Outcome.Status ==
+        ControlResultStatus.Accepted, "Initial save was rejected.");
+    fixture.PumpUntil(() => !fixture.Service.Capture().SaveInProgress);
+    Check(fixture.Invoke(fixture.Principal, ServerOperatorProvider.BackupNow).Outcome.Status ==
+        ControlResultStatus.Accepted, "Backup was rejected.");
+    Check(fixture.Invoke(fixture.Principal, ServerOperatorProvider.Shutdown).Outcome.Status ==
+        ControlResultStatus.Accepted, "Shutdown did not coalesce behind backup.");
+    fixture.PumpUntil(() => fixture.Service.Capture().ExitDisposition ==
+        OperatorExitDisposition.Shutdown);
+    Check(fixture.Service.Capture().LastBackupSequence == 1 &&
+        fixture.Service.Capture().LastSavedSequence == 2 && fixture.AdmissionClosed,
+        "Shutdown did not wait for backup, publish final save and close admission.");
 }
 
 static void Check(bool condition, string message)

@@ -127,6 +127,17 @@ public sealed class ServerOperatorService : IDisposable
             else _lastFailure = Bounded(result.Diagnostic);
             _revision++;
         }
+        if (_exit == OperatorExitDisposition.None && _shutdownAfterSave &&
+            _save is null && _backup is null)
+        {
+            ControlOwnerResult started = TryStartSave();
+            if (started.Status != ControlResultStatus.Accepted)
+            {
+                _shutdownAfterSave = false;
+                _lastFailure = Bounded(started.Diagnostic);
+                _revision++;
+            }
+        }
         if (!_policy.AutosaveEnabled || _exit != OperatorExitDisposition.None ||
             _shutdownAfterSave) return;
         long now = _time.GetTimestamp();
@@ -173,7 +184,7 @@ public sealed class ServerOperatorService : IDisposable
             return ControlOwnerResult.Reject(ControlResultCode.Disabled, "Exit is already requested.");
         if (_policy.SaveOnShutdown)
         {
-            if (_save is not null) _shutdownAfterSave = true;
+            if (_save is not null || _backup is not null) _shutdownAfterSave = true;
             else
             {
                 ControlOwnerResult saved = TryStartSave();
