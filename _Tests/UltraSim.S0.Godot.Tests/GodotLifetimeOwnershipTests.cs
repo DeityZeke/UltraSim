@@ -135,16 +135,18 @@ internal static class GodotLifetimeOwnershipTests
         Expect(!ReferenceEquals(old, current) && old.NativeInstance != IntPtr.Zero &&
             current.NativeInstance != IntPtr.Zero,
             "A live old stream was disposed before its consumer retirement boundary.");
-        // Godot emits ProcessFrame before incrementing its public frame counter.
-        // Four signal boundaries cover two completed frames after replacement.
-        for (int i = 0; i < 4; i++)
+        // AudioServer releases stopped playback after its mix and main-thread cleanup,
+        // not after a fixed number of render frames. Wait for the owned native wrapper's
+        // actual retirement, with the same finite 240-frame bound as product shutdown.
+        int frames = 0;
+        while (old.NativeInstance != IntPtr.Zero && frames++ < 240)
         {
             await parent.ToSignal(parent.GetTree(), SceneTree.SignalName.ProcessFrame);
             adapter.ProcessFrame();
         }
         Expect(old.NativeInstance == IntPtr.Zero && current.NativeInstance != IntPtr.Zero &&
             adapter.TryPlay(ClientSoundEvent.UiClick),
-            "The old stream failed to retire or the new stream failed to play.");
+            $"The old stream failed to retire or the new stream failed to play after {frames} frames.");
         adapter.EndSession();
         adapter.Dispose();
         Expect(current.NativeInstance == IntPtr.Zero,

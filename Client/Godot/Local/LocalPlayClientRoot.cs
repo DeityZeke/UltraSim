@@ -4,6 +4,7 @@ using UltraSim.Client.BuiltInTestWorlds;
 using UltraSim.Client.Content;
 using UltraSim.Client.Core;
 using UltraSim.Client.Local;
+using UltraSim.Client.Sound;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
 #if ULTRASIM_COMPLETE
@@ -251,6 +252,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
                 else
                 {
                     _cabin!.RunD00Acceptance();
+                    if (conceptDemoSmoke) AssertP8ConceptDemoAudio();
                     evidence = residencySmoke
                         ? _cabin.RunD01Acceptance()
                         : _cabin.GetPresentationSnapshot();
@@ -283,6 +285,11 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             LocalCabinPresentationSnapshot first = _cabin!.GetPresentationSnapshot();
             ValidateEffectiveSettings(first);
             _cabin.RunF02Acceptance();
+            if (AudioAdapter is not GodotClientAudioAdapter audio ||
+                audio.GetCueRequestsForNativeTest(SoundCueId.DoorWoodOpen) == 0 ||
+                audio.GetCueRequestsForNativeTest(SoundCueId.Jump) == 0)
+                throw new InvalidOperationException(
+                    "Accepted Cabin door and jump transitions did not reach the Sound Engine.");
 
             RetireCurrentSession();
             ReturnToMainMenu("First local session retired.");
@@ -317,6 +324,17 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             FailSession(exception.Message);
             RequestApplicationExit(1);
         }
+    }
+
+    private void AssertP8ConceptDemoAudio()
+    {
+        if (AudioAdapter is not GodotClientAudioAdapter audio ||
+            audio.GetCueRequestsForNativeTest(SoundCueId.Pickup) == 0 ||
+            audio.GetCueRequestsForNativeTest(SoundCueId.Equip) == 0 ||
+            audio.GetCueRequestsForNativeTest(SoundCueId.Jump) == 0 ||
+            audio.GetCueRequestsForNativeTest(SoundCueId.FootstepGrass) == 0)
+            throw new InvalidOperationException(
+                "Accepted pickup/equip/jump or presented locomotion missed native sound cues.");
     }
 
     private async void RunF19DisplaySmokeAfterNativeFrames()
