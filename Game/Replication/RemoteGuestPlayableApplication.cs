@@ -310,7 +310,8 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
 /// </summary>
 public sealed class RemoteGuestPlayableApplication :
     IHostedUdpSessionApplication,
-    IHostedUdpSessionApplicationLifetime
+    IHostedUdpSessionApplicationLifetime,
+    IHostedUdpOperatorSessionIdentity
 {
     private const int MaximumPublicationRecords = 64;
     private const int MaximumSubscriptions = 1_024;
@@ -524,6 +525,8 @@ public sealed class RemoteGuestPlayableApplication :
     private bool _lastCommandWasRateLimited;
 
     internal ParticipantId Participant => _participant;
+
+    public ulong OperatorParticipantId => _participant.Value;
 
     internal int GetSanitizedRoundTripMilliseconds()
     {

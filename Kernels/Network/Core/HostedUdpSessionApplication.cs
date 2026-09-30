@@ -24,6 +24,15 @@ public interface IHostedUdpSessionApplicationLifetime
 }
 
 /// <summary>
+/// Optional immutable operator correlation supplied by a trusted application factory after
+/// transport authentication. This is diagnostic/session identity, never a client claim.
+/// </summary>
+public interface IHostedUdpOperatorSessionIdentity
+{
+    ulong OperatorParticipantId { get; }
+}
+
+/// <summary>
 /// Cold factory invoked on the selected connection-owner thread after the secure
 /// peer exists and before terminal handshake success is published.
 /// </summary>

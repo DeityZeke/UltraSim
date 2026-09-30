@@ -12,6 +12,8 @@ using UltraSim.Server.ConceptDemo;
 using UltraSim.Game.Composition;
 using UltraSim.Game.World;
 using UltraSim.Server.Authoring;
+using UltraSim.Server.Operator;
+using UltraSim.Framework.ControlPlane;
 
 DirectConnectOptions options;
 try
@@ -93,6 +95,21 @@ authority.ConfigureTelemetry(options.TelemetryLevel == NetworkTelemetryLevel.Off
     : options.TelemetryLevel == NetworkTelemetryLevel.Detailed
         ? GameTelemetryLevel.Detailed
         : GameTelemetryLevel.Basic);
+ServerOperatorConfiguration operatorConfiguration =
+    ServerOperatorConfiguration.LoadOrCreate(options.IdentityDirectory);
+using var operatorService = new ServerOperatorService(
+    authority, host, authority.Runtime.Game, authority.Composition,
+    operatorConfiguration.SaveRoot, operatorConfiguration.BackupRoot,
+    operatorConfiguration.Policy);
+var operatorAudit = new OperatorAuditRing();
+var operatorRegistry = new ControlPlaneRegistry(operatorAudit);
+var operatorProvider = new ServerOperatorProvider(operatorService, operatorAudit);
+using var operatorPublication = new ServerOperatorPublication(operatorRegistry, operatorProvider);
+var consolePrincipal = new ControlPrincipal("local-console", ControlPrincipalKind.LocalOperator,
+    [ServerOperatorProvider.Read, ServerOperatorProvider.Save, ServerOperatorProvider.Backup,
+     ServerOperatorProvider.Lifecycle, ServerOperatorProvider.Sessions], "direct-connect/console");
+var operatorConsole = new OperatorConsole(operatorRegistry, consolePrincipal);
+var operatorInput = new BoundedOperatorConsoleInput(Console.In);
 string fingerprint = Fingerprint(identity.PublicKey);
 Console.WriteLine("UltraSim Direct Connect Concept Demo server ready.");
 Console.WriteLine($"Endpoint: {host.LocalEndPoint}");
@@ -136,6 +153,9 @@ Console.WriteLine(
     $"This shared endpoint admits up to {options.MaximumParticipants} independent guests " +
     "into one Concept Demo authority.");
 Console.WriteLine("Press Ctrl+C to stop.");
+Console.WriteLine($"Operator policy: autosave={operatorConfiguration.Policy.AutosaveEnabled} " +
+    $"cadence={operatorConfiguration.Policy.AutosaveSeconds}s " +
+    $"backup-retention={operatorConfiguration.Policy.BackupRetention}. Type help for commands.");
 WriteReady(options.ReadyFile, new DirectConnectReady(
     host.LocalEndPoint.ToString(), realm.ToString(), fingerprint,
     content.Snapshot.ArchiveUri.ToString(), content.Snapshot.ArchiveBytes,
@@ -167,17 +187,38 @@ using var stopping = new CancellationTokenSource();
 DirectConnectWireAccounting? wireAccounting = null;
 bool wireAccountingWritten = false;
 bool nativeGateRelocated = false;
+bool signalShutdownIssued = false;
 Console.CancelKeyPress += (_, eventArgs) =>
 {
     eventArgs.Cancel = true;
     stopping.Cancel();
 };
-while (!stopping.IsCancellationRequested)
+OperatorExitDisposition requestedExit = OperatorExitDisposition.None;
+while (true)
 {
     if (options.StopFile is not null && File.Exists(options.StopFile))
         break;
+    if (stopping.IsCancellationRequested && !signalShutdownIssued)
+    {
+        string response = operatorConsole.Execute("shutdown confirm");
+        Console.WriteLine("Ctrl+C: " + response);
+        signalShutdownIssued = response.StartsWith("Accepted:", StringComparison.Ordinal);
+    }
+    for (int command = 0; command < 8 && operatorInput.TryDequeue(out string? line); command++)
+        if (!string.IsNullOrWhiteSpace(line))
+            Console.WriteLine("Operator: " + operatorConsole.Execute(line));
     host.Pump();
     _ = authority.TickDue();
+    operatorService.Pump();
+    ServerOperatorSnapshot operatorState = operatorService.Capture();
+    requestedExit = operatorState.ExitDisposition;
+    if (requestedExit != OperatorExitDisposition.None) break;
+    if (signalShutdownIssued && !operatorState.SaveInProgress &&
+        operatorState.LastFailure.Length != 0)
+    {
+        Console.Error.WriteLine("Operator shutdown save failed: " + operatorState.LastFailure);
+        break;
+    }
     if (!nativeGateRelocated && options.NativeGateTriggerFile is not null &&
         File.Exists(options.NativeGateTriggerFile))
     {
@@ -261,7 +302,9 @@ Console.WriteLine(
     $"UltraSim Direct Connect stopped generation={finalAuthority.GenerationId} " +
     $"participants={finalAuthority.ParticipantCount} sessions={finalHost.EstablishedSessions} " +
     $"joins={finalAuthority.Joins} leaves={finalAuthority.Leaves} clean={cleanRetirement}.");
-return cleanRetirement ? 0 : 3;
+if (!cleanRetirement) return 3;
+if (signalShutdownIssued && requestedExit == OperatorExitDisposition.None) return 4;
+return 0;
 
 static HostedUdpAdmissionHost CreateHost(
     IPEndPoint endpoint,

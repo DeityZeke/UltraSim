@@ -2410,6 +2410,7 @@ string[] testProjects =
     "_Tests/UltraSim.Framework.Definitions.Tests/UltraSim.Framework.Definitions.Tests.csproj",
     "_Tests/UltraSim.Framework.Persistence.Tests/UltraSim.Framework.Persistence.Tests.csproj",
     "_Tests/UltraSim.Server.Authoring.Tests/UltraSim.Server.Authoring.Tests.csproj",
+    "_Tests/UltraSim.Server.Operator.Tests/UltraSim.Server.Operator.Tests.csproj",
     "_Tests/UltraSim.ECS.Tests/UltraSim.ECS.Tests.csproj",
     "_Tests/UltraSim.ECS.Generator.Tests/UltraSim.ECS.Generator.Tests.csproj",
     "_Tests/UltraSim.ECS.Comparison.Tests/UltraSim.ECS.Comparison.Tests.csproj",
@@ -5958,12 +5959,22 @@ static void VerifyArchitecture(string root)
         ],
         ["Server/DirectConnect/UltraSim.Server.DirectConnect.csproj"] =
         [
+            "Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj",
             "Game/Protocol/UltraSim.Game.Protocol.csproj",
             "Game/Replication.Remote/UltraSim.Game.Replication.Remote.csproj",
             "Game/UI/UltraSim.Game.UI.csproj",
             "Kernels/Network/UltraSim.Network.csproj",
             "Server/ConceptDemo/UltraSim.Server.ConceptDemo.csproj",
             "Server/Authoring/UltraSim.Server.Authoring.csproj",
+            "Server/Operator/UltraSim.Server.Operator.csproj",
+        ],
+        ["Server/Operator/UltraSim.Server.Operator.csproj"] =
+        [
+            "Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj",
+            "Framework/Persistence/UltraSim.Framework.Persistence.csproj",
+            "Game/Persistence/UltraSim.Game.Persistence.csproj",
+            "Game/Replication.Remote/UltraSim.Game.Replication.Remote.csproj",
+            "Kernels/Network/UltraSim.Network.csproj",
         ],
         ["Server/ConceptDemo/UltraSim.Server.ConceptDemo.csproj"] =
         [

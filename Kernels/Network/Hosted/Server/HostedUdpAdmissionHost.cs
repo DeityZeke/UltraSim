@@ -164,6 +164,7 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
     private readonly HostedUdpAdmissionLimits _admissionLimits;
     private readonly NetworkProtocolLimits _protocolLimits;
     private readonly bool _promotionEnabled;
+    private bool _stoppingAdmissions;
     private readonly NetworkProtocolManifest _manifest;
     private readonly INetworkMonotonicClock _clock;
     private readonly SharedUdpServerListener _listener;
@@ -503,6 +504,21 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
     public int SessionCount
     {
         get { EnsureOperational(); return _sessionCount; }
+    }
+    public bool AdmissionClosed { get { EnsureOperational(); return _stoppingAdmissions; } }
+
+    /// <summary>Closes admission and starts ordinary session draining; subsequent pumps still
+    /// service established sessions so their normal retirement protocol can finish.</summary>
+    public void BeginShutdown()
+    {
+        EnsureOperational();
+        if (_stoppingAdmissions) return;
+        _stoppingAdmissions = true;
+        ulong now = GetMonotonicMilliseconds();
+        for (int index = 0; index < _sessions.Length; index++)
+            if (_sessions[index] is HostedUdpProtocolSession session &&
+                session.RawState == UdpProtocolSessionState.Established)
+                BeginDrainCore(session, now);
     }
 
     /// <summary>Returns H0.5 owner-thread evidence when this host is sharded.</summary>
@@ -865,6 +881,7 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
             throw new InvalidOperationException("The hosted admission listener route is invalid.");
         _unknownDatagrams = SaturatingIncrement(_unknownDatagrams);
         _unknownBytes = SaturatingAdd(_unknownBytes, checked((ulong)datagram.Length));
+        if (_stoppingAdmissions) return;
         ulong now = GetMonotonicMilliseconds();
         if (_promotionEnabled && TryHandlePathControl(
                 listener, datagram, remoteAddress, now)) return;
@@ -2173,6 +2190,7 @@ public sealed class HostedUdpProtocolSession : IDisposable
         PathKey = pathKey;
         OwnedTransport = ownedTransport;
         Application = application;
+        OperatorParticipantId = (application as IHostedUdpOperatorSessionIdentity)?.OperatorParticipantId ?? 0;
         PathGeneration = new(1);
         ListenerPathGeneration = new(1);
         LastIssuedPathGeneration = 1;
@@ -2243,6 +2261,8 @@ public sealed class HostedUdpProtocolSession : IDisposable
     }
 
     public ConnectionId Connection { get; }
+    /// <summary>Trusted factory-published correlation; zero means this application has none.</summary>
+    public ulong OperatorParticipantId { get; }
     public HostedCandidateId Candidate { get; }
     public NetworkProtocolPeer Server { get; }
     public IPEndPoint RemoteEndPoint
