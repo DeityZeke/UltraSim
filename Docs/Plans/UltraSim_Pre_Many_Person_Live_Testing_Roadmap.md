@@ -2035,7 +2035,7 @@ Make the vertical slice audibly representative and prove new Framework/adapter/c
 
 ## P9 — Representative Cabin visual pass
 
-**Status: ACTIVE, not closed.** An optional `world.local` art package now supplies representative Cabin, pine, rock, ground and prop geometry/materials without changing the accepted A0.1 Cabin oracle or Game identities. The current Classic Cabin authority is one room. Room B, its interior doorway, and the required two-room lighting comparison cannot be claimed from the existing world. A separately versioned authored WorldPack or an explicit scope change is needed before P9 closure; presentation must not silently invent an apparently walkable second room.
+**Status: ACTIVE, not closed.** The [P9 staged evidence](../../_Benchmarks/Baselines/framework-p9-cabin-visual-content-2026-09-30.stage.md) records an optional `world.local` art package supplying representative Cabin, pine, rock, ground and prop geometry/materials without changing the accepted A0.1 Cabin oracle or Game identities. The current Classic Cabin authority is one room. Room B, its interior doorway, and the required two-room lighting comparison cannot be claimed from the existing world. A separately versioned authored WorldPack or an explicit scope change is needed before P9 closure; presentation must not silently invent an apparently walkable second room.
 
 ### Goal
 

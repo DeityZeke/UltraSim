@@ -1,0 +1,78 @@
+{
+  "schema": "ultrasim-p9-cabin-visual-stage/v1",
+  "status": "ACTIVE_NOT_CLOSED",
+  "startingHead": "00ad7073688b2d8c379da5636fa14013c70a1e85",
+  "implementationCommit": "c067c30d2b25a981db484a07995cbc28d1ebf30f",
+  "captureSourceHead": "c067c30d2b25a981db484a07995cbc28d1ebf30f",
+  "environment": {
+    "os": "Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D",
+    "gpu": "NVIDIA GeForce RTX 4070 Ti SUPER",
+    "godot": "4.7.1 Mono OpenGL Compatibility X11",
+    "dotnetSdk": "8.0.131",
+    "runtime": "8.0.31 local .NET/ASP.NET"
+  },
+  "package": {
+    "scope": "world.local",
+    "identity": "official.world-local.cabin-p9",
+    "archiveSha256": "8b9ac85c948d1005c1b030721d063ac4d061c0d81b46a3610e4a09f59fbdab95",
+    "archiveBytes": 12071802,
+    "manifestSha256": "8f1a92abaf6628a254321b0c95465beeba7d540f944d33636760d8bf5c0c6951",
+    "activationPlanSha256": "ffe83afa4bcfb0d592b8c2a014ec4ab7a887fc8d9d478449a247cfc93e729c51",
+    "meshCount": 11,
+    "textureCount": 5,
+    "materialCount": 6
+  },
+  "controls": {
+    "contentTestsPassed": 39,
+    "architectureOnly": "PASS",
+    "mixedLifecycleFocused": "PASS",
+    "canonicalRelease": "PASS_UNINTERRUPTED",
+    "nativeStrongReferenceRetirement": "PASS",
+    "coldCaptureCount": 17,
+    "warmCaptureCount": 17,
+    "vegetationOnCaptureCount": 17,
+    "captureMode": "physical SinglePlayer export / F1.12 native preview / P9 extended",
+    "primitiveSameSession": true,
+    "gameSourceChanged": false,
+    "worldSourceChanged": false,
+    "networkSourceChanged": false
+  },
+  "baselineParity": {
+    "baseWorldFingerprintSameAsF112": true,
+    "worldSemanticHashSameAsF112": true,
+    "renderedInstances": 84,
+    "multiMeshGroups": 59
+  },
+  "coldWarm": {
+    "coldTextureBuilds": 7,
+    "coldTextureBuildMilliseconds": 96.506885,
+    "warmTextureBuilds": 0,
+    "warmDiskTextureHits": 7,
+    "warmTextureLoadMilliseconds": 19.48811,
+    "warmDerivedBytesRead": 31451168,
+    "persistentBlobCount": 21,
+    "persistentBlobBytes": 16792396,
+    "liveBlobPinsDuringSession": 30,
+    "liveBlobPinsAfterRetirement": 0,
+    "liveCatalogPinsAfterRetirement": 0
+  },
+  "nativeResolver": {
+    "optionalWorldMeshes": 11,
+    "ownedMeshes": 32,
+    "ownedPrimitiveMaterials": 24,
+    "leasedDerivedMaterials": 8,
+    "heldPineRoofGroundWrappersDisposed": true
+  },
+  "vegetationDefault": "Off",
+  "evidenceDirectory": "_Benchmarks/Baselines/framework-p9-cabin-visual-content-2026-09-30.stage",
+  "missingForClosure": [
+    "authoritative two-room benchmark",
+    "interior doorway",
+    "Room A no-window and Room B one-window topology",
+    "Room B blocker and lighting-path comparison",
+    "designed interior floor"
+  ],
+  "qualityReviewDeferred": ["visual style", "lighting feel", "audio/visual coexistence"],
+  "laterCheckpointsStarted": false
+}

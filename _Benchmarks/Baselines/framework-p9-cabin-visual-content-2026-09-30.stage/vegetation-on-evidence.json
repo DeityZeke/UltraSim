@@ -1,0 +1,2069 @@
+{
+  "Schema": "client-p9-cabin-preview/v1",
+  "SourceHead": "c067c30d2b25a981db484a07995cbc28d1ebf30f",
+  "Art": "installed",
+  "DisplayBackend": "X11",
+  "before": {
+    "IsInitialized": true,
+    "ContentVariant": "Default",
+    "ContentFingerprint": {
+      "Part0": 7151413948490015860,
+      "Part1": 16446101782907433149,
+      "Part2": 9294213470705642888,
+      "Part3": 5127544507921839363,
+      "IsValid": true
+    },
+    "ContentGeneration": {
+      "Value": 2,
+      "IsValid": true
+    },
+    "WallTextureHash": {
+      "Part0": 9317155971330460299,
+      "Part1": 3525127430395081433,
+      "Part2": 8638282292597116799,
+      "Part3": 783810624263426543,
+      "IsValid": true
+    },
+    "HumanBody": "XBot",
+    "DisplayName": "Human Female",
+    "HumanMeshInstances": 6,
+    "CameraPivotMeters": 1.6,
+    "NameplateHeightMeters": 2,
+    "EffectsHeightMeters": 0.9,
+    "AddedPresentationRealized": false,
+    "ApplicationSessionEpoch": 2,
+    "ControlSessionEpoch": 1,
+    "AuthorityTicks": 113,
+    "PlayerPosition": {
+      "Chunk": {
+        "X": 0,
+        "Z": 0
+      },
+      "Local": {
+        "XMillimeters": 15500,
+        "ZMillimeters": 7000,
+        "YMillimeters": 1000
+      },
+      "GlobalXMillimeters": 15500,
+      "GlobalZMillimeters": 7000,
+      "YMillimeters": 1000
+    },
+    "DoorIsOpen": true,
+    "BreadIsInBackpack": false,
+    "OpenUiViews": 0,
+    "ControlGrammar": "OrbitCommand",
+    "CameraProfile": "Orbit",
+    "CameraDistance": 14,
+    "CameraFovDegrees": 70,
+    "RenderDistanceChunks": 2,
+    "AuthoredChunks": 25,
+    "SemanticResidentChunks": 25,
+    "PeakSemanticResidentChunks": 25,
+    "RenderedChunks": 25,
+    "PeakRenderedChunks": 25,
+    "InitializationError": null,
+    "SemanticWorld": {
+      "BaseWorldFingerprint": {
+        "Part0": 8448141108031527767,
+        "Part1": 5179399993111843847,
+        "Part2": 8563284334578433335,
+        "Part3": 9285565184842399032,
+        "IsValid": true
+      },
+      "OverlayRevision": {
+        "Value": 0,
+        "IsValid": false
+      },
+      "PublicationEpoch": {
+        "Value": 1,
+        "IsValid": true
+      },
+      "RequestedChunks": 0,
+      "StagedChunks": 0,
+      "ResidentChunks": 25,
+      "RetiringChunks": 0,
+      "KnownPublicIdentities": 4,
+      "PublishedChunks": 25,
+      "AppliedSnapshots": 25,
+      "AppliedDeltas": 5,
+      "RetiredChunks": 0,
+      "ChunkKeyLookups": 11704,
+      "ChunkKeyProbes": 11761,
+      "WorldSemanticHash": {
+        "Low": 4884640456701042578,
+        "High": 13764519638206834015,
+        "IsValid": true
+      },
+      "ReservedBytes": 686165,
+      "StructuralManifestFingerprint": {
+        "IsValid": false
+      },
+      "CompositionRevision": {
+        "Value": 0,
+        "IsValid": false
+      },
+      "HasCanonicalComposition": false
+    },
+    "Residency": {
+      "ConfiguredRenderRadiusChunks": 2,
+      "StructuralFringeChunks": 1,
+      "AuthoredChunks": 25,
+      "DesiredResidentChunks": 25,
+      "PeakDesiredResidentChunks": 25,
+      "SemanticResidentChunks": 25,
+      "PeakSemanticResidentChunks": 25,
+      "PlanPending": false,
+      "Transitions": 1,
+      "SemanticEnters": 25,
+      "SemanticExits": 0,
+      "ResetTransitions": 1,
+      "ReservedBytes": 12768
+    },
+    "Renderer": {
+      "ActiveRenderChunks": 25,
+      "FreeRenderSlots": 5,
+      "VisibleRenderChunks": 25,
+      "PendingBuilds": 0,
+      "PendingRetirements": 0,
+      "ActiveNodes": 185,
+      "ActiveResources": 112,
+      "ActiveTerrainSurfaceMeshes": 25,
+      "ActiveStaticBatchGroups": 57,
+      "ActivePublicBatchGroups": 2,
+      "ActiveFallbackGroups": 0,
+      "CompletedBuilds": 25,
+      "CompletedRetirements": 0,
+      "Rebuilds": 0,
+      "PublicRefreshes": 7,
+      "RenderCapacityRejections": 0,
+      "GroupCapacityRejections": 0,
+      "Rebases": 3,
+      "WindowMoves": 50,
+      "CancelledBuilds": 0,
+      "CancelledRetirements": 0,
+      "ChunkRootTransformWrites": 75,
+      "GroupValidationCalls": 64,
+      "VerticalRebases": 0,
+      "LastMeshBuildTicks": 37350,
+      "MaximumMeshBuildTicks": 23199465,
+      "LastResourceCommitTicks": 27930,
+      "MaximumResourceCommitTicks": 923092,
+      "LastFrameTicks": 100,
+      "MaximumFrameTicks": 91900259,
+      "InstanceBackend": "NodeMultiMesh",
+      "InstanceUpload": "PerRow",
+      "NodeBackedGroups": 59,
+      "DirectRidGroups": 0,
+      "ActiveMultiMeshes": 59,
+      "ActiveVisualInstanceRids": 59,
+      "ActiveInstances": 84,
+      "BulkUploads": 0,
+      "TargetedInstanceUpdates": 90,
+      "UploadedInstanceRows": 90,
+      "BulkUploadBytes": 0,
+      "GroupPreparationTicks": 1557355,
+      "GroupingTicks": 3213611,
+      "UploadScratchBytes": 0,
+      "ActivePublicNodes": 27,
+      "LastMeshBuildMicroseconds": 37.35,
+      "MaximumMeshBuildMicroseconds": 23199.465,
+      "LastResourceCommitMicroseconds": 27.93,
+      "MaximumResourceCommitMicroseconds": 923.092,
+      "LastFrameMicroseconds": 0.1,
+      "MaximumFrameMicroseconds": 91900.259
+    },
+    "Actors": {
+      "ActiveActors": 2,
+      "PrimitiveFallbackActors": 1,
+      "AnimatedActors": 1,
+      "EquippedMainHands": 0,
+      "VisibleNameplates": 1,
+      "VisibleOverheadLabels": 1,
+      "VisiblePrimaryCues": 0,
+      "VisibleInteractCues": 1,
+      "RevealHeld": false,
+      "Added": 2,
+      "Updated": 3,
+      "Removed": 0,
+      "PrimaryCuesPresented": 0,
+      "InteractCuesPresented": 1,
+      "LandingCuesPresented": 0,
+      "VisualReplacements": 0,
+      "DetailedActors": 2,
+      "BatchedPrimitiveActors": 0,
+      "CheapBatchGroups": 0,
+      "CheapBatchRows": 0,
+      "NativeBodyNodes": 25,
+      "NativePresentationNodes": 30,
+      "TierPromotions": 0,
+      "TierDemotions": 0,
+      "CheapTransformWrites": 0,
+      "CheapBoundsWrites": 0,
+      "CheapOwnedResources": 0,
+      "CheapReservedPayloadBytes": 512,
+      "RepresentationReservedPayloadBytes": 4160
+    },
+    "Ui": {
+      "WorldUiHostChildren": 1,
+      "HudHostChildren": 3,
+      "InventoryHostChildren": 0,
+      "OpenSemanticViews": 0,
+      "ChatFocused": false,
+      "GameplayInputAllowed": true,
+      "HudOwnedBySharedHud": true,
+      "WorldOwnedBySharedWorld": true,
+      "GumpsOwnedBySharedManager": true,
+      "BannerOwnedByHud": true,
+      "TooltipOwnedByContext": true
+    },
+    "OfficialPresentation": {
+      "Status": "Reopened",
+      "CacheError": "None",
+      "SourceError": "None",
+      "Acquisition": {
+        "Status": "None",
+        "CacheError": "None",
+        "SourceError": "None",
+        "PackagesRequired": 0,
+        "PackagesReused": 0,
+        "PackagesFetched": 0,
+        "FilesReused": 0,
+        "FilesFetched": 0,
+        "BytesFetched": 0,
+        "SourceAttempts": 0,
+        "SourcesRejected": 0,
+        "OptionalPackagesDeferred": 0,
+        "PeakConcurrentFileFetches": 0,
+        "SelectedSource": {
+          "Kind": 0,
+          "Locator": null,
+          "IsValid": false
+        },
+        "Applied": false
+      },
+      "Available": true
+    },
+    "PresentationCache": {
+      "BlobCount": 21,
+      "BlobBytes": 16792396,
+      "ScopeCount": 1,
+      "LocalManifestCount": 3,
+      "RealmManifestCount": 0,
+      "LocalActivationCount": 4,
+      "RealmActivationCount": 0,
+      "InstalledResourcePackCount": 0,
+      "EnabledResourcePackCount": 0,
+      "LiveBlobPins": 30,
+      "LiveCatalogPins": 2,
+      "LiveResourcePackLeases": 0,
+      "ResourcePackSelectionValid": true,
+      "ResourcePackSelectionRevision": 1,
+      "QuotaBytes": 8589934592,
+      "HighWaterBytes": 7516192768,
+      "Installs": 1,
+      "ReusedBlobs": 3,
+      "CorruptionsDetected": 0,
+      "BlobsRepaired": 0,
+      "ManifestsRepaired": 0,
+      "BlobsEvicted": 0,
+      "BytesEvicted": 0,
+      "ManifestCount": 3,
+      "ActivationCount": 4
+    },
+    "PresentationGeneration": {
+      "Generation": {
+        "Value": 1,
+        "IsValid": true
+      },
+      "StableFingerprint": {
+        "Part0": 4144668168664258548,
+        "Part1": 17035552169324498861,
+        "Part2": 499089345477502014,
+        "Part3": 9127757405099557964,
+        "IsValid": true
+      },
+      "UserLayerPresent": false,
+      "RealmLayerPresent": false,
+      "LocalLayerPresent": true,
+      "EnabledUserPacks": 0,
+      "UserSelections": 0,
+      "RealmSelections": 0,
+      "LocalSelections": 2,
+      "PrimitiveSelections": 0,
+      "ActorSelections": 2,
+      "TextureSelections": 7,
+      "MaterialSelections": 8,
+      "UserResourceSelections": 0,
+      "RealmResourceSelections": 0,
+      "LocalResourceSelections": 15,
+      "RealmResourceLayerPresent": false,
+      "LocalResourceLayerPresent": true,
+      "WorldMeshSelections": 11,
+      "EffectiveUserLayerPresent": false
+    },
+    "ActorResources": {
+      "RealizedResources": 1,
+      "RealizationAttempts": 1,
+      "RealizationFailures": 0,
+      "InstancesCreated": 1,
+      "RetainedArtifactBytes": 2213380,
+      "LastFailure": "None"
+    },
+    "DerivedResources": {
+      "LiveTextures": 7,
+      "LiveMaterials": 8,
+      "MemoryTextureHits": 0,
+      "DiskTextureHits": 7,
+      "TextureMisses": 0,
+      "TextureBuilds": 0,
+      "CorruptArtifacts": 0,
+      "MaterialBuilds": 8,
+      "DerivedBytesWritten": 0,
+      "DerivedBytesRead": 31451168,
+      "TextureBuildTicks": 0,
+      "TextureLoadTicks": 20056325,
+      "TextureBuildMilliseconds": 0,
+      "TextureLoadMilliseconds": 20.056325
+    },
+    "WallTextureSource": "Local",
+    "WallDerivedKey": {
+      "Value": {
+        "Part0": 16799833595724464232,
+        "Part1": 9717882322428458471,
+        "Part2": 1743007013822577175,
+        "Part3": 2151125481389129122,
+        "IsValid": true
+      },
+      "IsValid": true
+    },
+    "Camera": {
+      "Rig": {
+        "Projection": "Perspective",
+        "Target": "ControlledActor",
+        "Follow": "Immediate",
+        "YawMode": "Free",
+        "PitchMode": "Free",
+        "Zoom": "Stepped",
+        "PivotHeightMillimeters": 1600,
+        "MinimumDistanceMillimeters": 3000,
+        "DefaultDistanceMillimeters": 14000,
+        "MaximumDistanceMillimeters": 55000,
+        "DefaultYawTenths": -401,
+        "DefaultPitchTenths": 450,
+        "MinimumPitchTenths": 115,
+        "MaximumPitchTenths": 773,
+        "LookMillidegreesPerPixel": 344,
+        "ZoomStepMillimeters": 2000,
+        "CanonicalFovTenths": 700,
+        "CanonicalOrthographicSizeMillimeters": 20000,
+        "IsValid": true
+      },
+      "YawRadians": -0.699877,
+      "PitchRadians": 0.7853982,
+      "DistanceMeters": 14,
+      "PivotMeters": 1.6,
+      "TargetFrameProjection": {
+        "Projection": "Perspective",
+        "CanonicalVerticalExtent": 0.7002075382097097,
+        "CanonicalHorizontalExtent": 1.244813401261706,
+        "TargetVerticalExtent": 0.7002075382097097,
+        "TargetHorizontalExtent": 1.244813401261706,
+        "TargetFrameAspect": 1.7777777777777777,
+        "TargetVerticalFovDegrees": 70
+      },
+      "NativeOutputVerticalFovDegrees": 70,
+      "NativeOutputOrthographicSizeMeters": 0
+    },
+    "WorldAssets": {
+      "OwnedMeshes": 32,
+      "OwnedPrimitiveMaterials": 24,
+      "LeasedDerivedMaterials": 8,
+      "WallTextureHash": {
+        "Part0": 9317155971330460299,
+        "Part1": 3525127430395081433,
+        "Part2": 8638282292597116799,
+        "Part3": 783810624263426543,
+        "IsValid": true
+      },
+      "WallTextureSource": "Local",
+      "OptionalWorldMeshes": 11
+    }
+  },
+  "after": {
+    "IsInitialized": true,
+    "ContentVariant": "Default",
+    "ContentFingerprint": {
+      "Part0": 7151413948490015860,
+      "Part1": 16446101782907433149,
+      "Part2": 9294213470705642888,
+      "Part3": 5127544507921839363,
+      "IsValid": true
+    },
+    "ContentGeneration": {
+      "Value": 2,
+      "IsValid": true
+    },
+    "WallTextureHash": {
+      "Part0": 0,
+      "Part1": 0,
+      "Part2": 0,
+      "Part3": 0,
+      "IsValid": false
+    },
+    "HumanBody": "XBot",
+    "DisplayName": "Human Female",
+    "HumanMeshInstances": 5,
+    "CameraPivotMeters": 1.6,
+    "NameplateHeightMeters": 2,
+    "EffectsHeightMeters": 0.9,
+    "AddedPresentationRealized": false,
+    "ApplicationSessionEpoch": 2,
+    "ControlSessionEpoch": 1,
+    "AuthorityTicks": 439,
+    "PlayerPosition": {
+      "Chunk": {
+        "X": 0,
+        "Z": 0
+      },
+      "Local": {
+        "XMillimeters": 15500,
+        "ZMillimeters": 7000,
+        "YMillimeters": 1000
+      },
+      "GlobalXMillimeters": 15500,
+      "GlobalZMillimeters": 7000,
+      "YMillimeters": 1000
+    },
+    "DoorIsOpen": true,
+    "BreadIsInBackpack": false,
+    "OpenUiViews": 0,
+    "ControlGrammar": "OrbitCommand",
+    "CameraProfile": "Orbit",
+    "CameraDistance": 14,
+    "CameraFovDegrees": 70,
+    "RenderDistanceChunks": 2,
+    "AuthoredChunks": 25,
+    "SemanticResidentChunks": 25,
+    "PeakSemanticResidentChunks": 25,
+    "RenderedChunks": 25,
+    "PeakRenderedChunks": 25,
+    "InitializationError": null,
+    "SemanticWorld": {
+      "BaseWorldFingerprint": {
+        "Part0": 8448141108031527767,
+        "Part1": 5179399993111843847,
+        "Part2": 8563284334578433335,
+        "Part3": 9285565184842399032,
+        "IsValid": true
+      },
+      "OverlayRevision": {
+        "Value": 0,
+        "IsValid": false
+      },
+      "PublicationEpoch": {
+        "Value": 1,
+        "IsValid": true
+      },
+      "RequestedChunks": 0,
+      "StagedChunks": 0,
+      "ResidentChunks": 25,
+      "RetiringChunks": 0,
+      "KnownPublicIdentities": 4,
+      "PublishedChunks": 25,
+      "AppliedSnapshots": 25,
+      "AppliedDeltas": 5,
+      "RetiredChunks": 0,
+      "ChunkKeyLookups": 11754,
+      "ChunkKeyProbes": 11811,
+      "WorldSemanticHash": {
+        "Low": 4884640456701042578,
+        "High": 13764519638206834015,
+        "IsValid": true
+      },
+      "ReservedBytes": 686165,
+      "StructuralManifestFingerprint": {
+        "IsValid": false
+      },
+      "CompositionRevision": {
+        "Value": 0,
+        "IsValid": false
+      },
+      "HasCanonicalComposition": false
+    },
+    "Residency": {
+      "ConfiguredRenderRadiusChunks": 2,
+      "StructuralFringeChunks": 1,
+      "AuthoredChunks": 25,
+      "DesiredResidentChunks": 25,
+      "PeakDesiredResidentChunks": 25,
+      "SemanticResidentChunks": 25,
+      "PeakSemanticResidentChunks": 25,
+      "PlanPending": false,
+      "Transitions": 1,
+      "SemanticEnters": 0,
+      "SemanticExits": 0,
+      "ResetTransitions": 1,
+      "ReservedBytes": 12768
+    },
+    "Renderer": {
+      "ActiveRenderChunks": 25,
+      "FreeRenderSlots": 5,
+      "VisibleRenderChunks": 25,
+      "PendingBuilds": 0,
+      "PendingRetirements": 0,
+      "ActiveNodes": 185,
+      "ActiveResources": 112,
+      "ActiveTerrainSurfaceMeshes": 25,
+      "ActiveStaticBatchGroups": 57,
+      "ActivePublicBatchGroups": 2,
+      "ActiveFallbackGroups": 59,
+      "CompletedBuilds": 25,
+      "CompletedRetirements": 0,
+      "Rebuilds": 0,
+      "PublicRefreshes": 0,
+      "RenderCapacityRejections": 0,
+      "GroupCapacityRejections": 0,
+      "Rebases": 1,
+      "WindowMoves": 0,
+      "CancelledBuilds": 0,
+      "CancelledRetirements": 0,
+      "ChunkRootTransformWrites": 25,
+      "GroupValidationCalls": 50,
+      "VerticalRebases": 0,
+      "LastMeshBuildTicks": 4337810,
+      "MaximumMeshBuildTicks": 4337810,
+      "LastResourceCommitTicks": 4970,
+      "MaximumResourceCommitTicks": 9110,
+      "LastFrameTicks": 36105536,
+      "MaximumFrameTicks": 62594061,
+      "InstanceBackend": "NodeMultiMesh",
+      "InstanceUpload": "PerRow",
+      "NodeBackedGroups": 59,
+      "DirectRidGroups": 0,
+      "ActiveMultiMeshes": 59,
+      "ActiveVisualInstanceRids": 59,
+      "ActiveInstances": 84,
+      "BulkUploads": 0,
+      "TargetedInstanceUpdates": 84,
+      "UploadedInstanceRows": 84,
+      "BulkUploadBytes": 0,
+      "GroupPreparationTicks": 362179,
+      "GroupingTicks": 146978,
+      "UploadScratchBytes": 0,
+      "ActivePublicNodes": 27,
+      "LastMeshBuildMicroseconds": 4337.81,
+      "MaximumMeshBuildMicroseconds": 4337.81,
+      "LastResourceCommitMicroseconds": 4.97,
+      "MaximumResourceCommitMicroseconds": 9.11,
+      "LastFrameMicroseconds": 36105.536,
+      "MaximumFrameMicroseconds": 62594.061
+    },
+    "Actors": {
+      "ActiveActors": 2,
+      "PrimitiveFallbackActors": 2,
+      "AnimatedActors": 0,
+      "EquippedMainHands": 0,
+      "VisibleNameplates": 0,
+      "VisibleOverheadLabels": 0,
+      "VisiblePrimaryCues": 0,
+      "VisibleInteractCues": 0,
+      "RevealHeld": false,
+      "Added": 2,
+      "Updated": 3,
+      "Removed": 0,
+      "PrimaryCuesPresented": 0,
+      "InteractCuesPresented": 1,
+      "LandingCuesPresented": 0,
+      "VisualReplacements": 1,
+      "DetailedActors": 2,
+      "BatchedPrimitiveActors": 0,
+      "CheapBatchGroups": 0,
+      "CheapBatchRows": 0,
+      "NativeBodyNodes": 20,
+      "NativePresentationNodes": 25,
+      "TierPromotions": 0,
+      "TierDemotions": 0,
+      "CheapTransformWrites": 0,
+      "CheapBoundsWrites": 0,
+      "CheapOwnedResources": 0,
+      "CheapReservedPayloadBytes": 512,
+      "RepresentationReservedPayloadBytes": 4160
+    },
+    "Ui": {
+      "WorldUiHostChildren": 1,
+      "HudHostChildren": 3,
+      "InventoryHostChildren": 0,
+      "OpenSemanticViews": 0,
+      "ChatFocused": false,
+      "GameplayInputAllowed": true,
+      "HudOwnedBySharedHud": true,
+      "WorldOwnedBySharedWorld": true,
+      "GumpsOwnedBySharedManager": true,
+      "BannerOwnedByHud": true,
+      "TooltipOwnedByContext": true
+    },
+    "OfficialPresentation": {
+      "Status": "Reopened",
+      "CacheError": "None",
+      "SourceError": "None",
+      "Acquisition": {
+        "Status": "None",
+        "CacheError": "None",
+        "SourceError": "None",
+        "PackagesRequired": 0,
+        "PackagesReused": 0,
+        "PackagesFetched": 0,
+        "FilesReused": 0,
+        "FilesFetched": 0,
+        "BytesFetched": 0,
+        "SourceAttempts": 0,
+        "SourcesRejected": 0,
+        "OptionalPackagesDeferred": 0,
+        "PeakConcurrentFileFetches": 0,
+        "SelectedSource": {
+          "Kind": 0,
+          "Locator": null,
+          "IsValid": false
+        },
+        "Applied": false
+      },
+      "Available": true
+    },
+    "PresentationCache": {
+      "BlobCount": 21,
+      "BlobBytes": 16792396,
+      "ScopeCount": 1,
+      "LocalManifestCount": 3,
+      "RealmManifestCount": 0,
+      "LocalActivationCount": 4,
+      "RealmActivationCount": 0,
+      "InstalledResourcePackCount": 0,
+      "EnabledResourcePackCount": 0,
+      "LiveBlobPins": 0,
+      "LiveCatalogPins": 0,
+      "LiveResourcePackLeases": 0,
+      "ResourcePackSelectionValid": true,
+      "ResourcePackSelectionRevision": 1,
+      "QuotaBytes": 8589934592,
+      "HighWaterBytes": 7516192768,
+      "Installs": 1,
+      "ReusedBlobs": 3,
+      "CorruptionsDetected": 0,
+      "BlobsRepaired": 0,
+      "ManifestsRepaired": 0,
+      "BlobsEvicted": 0,
+      "BytesEvicted": 0,
+      "ManifestCount": 3,
+      "ActivationCount": 4
+    },
+    "PresentationGeneration": {
+      "Generation": {
+        "Value": 2,
+        "IsValid": true
+      },
+      "StableFingerprint": {
+        "Part0": 1384532793251392881,
+        "Part1": 8134308367357699499,
+        "Part2": 14852425622850712055,
+        "Part3": 13490232590991005410,
+        "IsValid": true
+      },
+      "UserLayerPresent": false,
+      "RealmLayerPresent": false,
+      "LocalLayerPresent": false,
+      "EnabledUserPacks": 0,
+      "UserSelections": 0,
+      "RealmSelections": 0,
+      "LocalSelections": 0,
+      "PrimitiveSelections": 2,
+      "ActorSelections": 2,
+      "TextureSelections": 0,
+      "MaterialSelections": 0,
+      "UserResourceSelections": 0,
+      "RealmResourceSelections": 0,
+      "LocalResourceSelections": 0,
+      "RealmResourceLayerPresent": false,
+      "LocalResourceLayerPresent": false,
+      "WorldMeshSelections": 0,
+      "EffectiveUserLayerPresent": false
+    },
+    "ActorResources": {
+      "RealizedResources": 0,
+      "RealizationAttempts": 2,
+      "RealizationFailures": 1,
+      "InstancesCreated": 1,
+      "RetainedArtifactBytes": 0,
+      "LastFailure": "ContentUnavailable"
+    },
+    "DerivedResources": {
+      "LiveTextures": 0,
+      "LiveMaterials": 0,
+      "MemoryTextureHits": 0,
+      "DiskTextureHits": 7,
+      "TextureMisses": 0,
+      "TextureBuilds": 0,
+      "CorruptArtifacts": 0,
+      "MaterialBuilds": 8,
+      "DerivedBytesWritten": 0,
+      "DerivedBytesRead": 31451168,
+      "TextureBuildTicks": 0,
+      "TextureLoadTicks": 20056325,
+      "TextureBuildMilliseconds": 0,
+      "TextureLoadMilliseconds": 20.056325
+    },
+    "WallTextureSource": "Primitive",
+    "WallDerivedKey": {
+      "Value": {
+        "Part0": 0,
+        "Part1": 0,
+        "Part2": 0,
+        "Part3": 0,
+        "IsValid": false
+      },
+      "IsValid": false
+    },
+    "Camera": {
+      "Rig": {
+        "Projection": "Perspective",
+        "Target": "ControlledActor",
+        "Follow": "Immediate",
+        "YawMode": "Free",
+        "PitchMode": "Free",
+        "Zoom": "Stepped",
+        "PivotHeightMillimeters": 1600,
+        "MinimumDistanceMillimeters": 3000,
+        "DefaultDistanceMillimeters": 14000,
+        "MaximumDistanceMillimeters": 55000,
+        "DefaultYawTenths": -401,
+        "DefaultPitchTenths": 450,
+        "MinimumPitchTenths": 115,
+        "MaximumPitchTenths": 773,
+        "LookMillidegreesPerPixel": 344,
+        "ZoomStepMillimeters": 2000,
+        "CanonicalFovTenths": 700,
+        "CanonicalOrthographicSizeMillimeters": 20000,
+        "IsValid": true
+      },
+      "YawRadians": -0.699877,
+      "PitchRadians": 0.7853982,
+      "DistanceMeters": 14,
+      "PivotMeters": 1.6,
+      "TargetFrameProjection": {
+        "Projection": "Perspective",
+        "CanonicalVerticalExtent": 0.7002075382097097,
+        "CanonicalHorizontalExtent": 1.244813401261706,
+        "TargetVerticalExtent": 0.7002075382097097,
+        "TargetHorizontalExtent": 1.244813401261706,
+        "TargetFrameAspect": 1.7777777777777777,
+        "TargetVerticalFovDegrees": 70
+      },
+      "NativeOutputVerticalFovDegrees": 70,
+      "NativeOutputOrthographicSizeMeters": 0
+    },
+    "WorldAssets": {
+      "OwnedMeshes": 0,
+      "OwnedPrimitiveMaterials": 0,
+      "LeasedDerivedMaterials": 0,
+      "WallTextureHash": {
+        "Part0": 0,
+        "Part1": 0,
+        "Part2": 0,
+        "Part3": 0,
+        "IsValid": false
+      },
+      "WallTextureSource": "Primitive",
+      "OptionalWorldMeshes": 0
+    }
+  },
+  "captures": [
+    {
+      "art": "installed",
+      "view": "Exterior",
+      "time": "Noon",
+      "atmosphere": "Temperate",
+      "mood": "Balanced",
+      "name": "installed-Exterior-Noon-Temperate.png",
+      "image": {
+        "Width": 1920,
+        "Height": 1080,
+        "minimum": 0,
+        "maximum": 255,
+        "pre": 1,
+        "post": 1,
+        "PixelHash": "4336641F1E74B4E2685676E93F8D1043680053A9F75242D17B953DCC87ACA079",
+        "PngHash": "267EF80F64F4CE188F2525351ADA49FDE43FF92D89AB1B93AC87D6853035477E"
+      },
+      "truth": {
+        "ApplicationEpoch": 2,
+        "ControlEpoch": 1,
+        "GenerationId": 1,
+        "Manifest": null,
+        "BaseWorldFingerprint": "80DCF456AD43FD3876D6E5BB6936FD3747E0ECDA23179407753DD393DC981B57",
+        "Catalog": "633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503",
+        "Presentation": {
+          "Generation": {
+            "Value": 1,
+            "IsValid": true
+          },
+          "StableFingerprint": {
+            "Part0": 4144668168664258548,
+            "Part1": 17035552169324498861,
+            "Part2": 499089345477502014,
+            "Part3": 9127757405099557964,
+            "IsValid": true
+          },
+          "UserLayerPresent": false,
+          "RealmLayerPresent": false,
+          "LocalLayerPresent": true,
+          "EnabledUserPacks": 0,
+          "UserSelections": 0,
+          "RealmSelections": 0,
+          "LocalSelections": 2,
+          "PrimitiveSelections": 0,
+          "ActorSelections": 2,
+          "TextureSelections": 7,
+          "MaterialSelections": 8,
+          "UserResourceSelections": 0,
+          "RealmResourceSelections": 0,
+          "LocalResourceSelections": 15,
+          "RealmResourceLayerPresent": false,
+          "LocalResourceLayerPresent": true,
+          "WorldMeshSelections": 11,
+          "EffectiveUserLayerPresent": false
+        },
+        "SemanticHash": {
+          "Low": 4884640456701042578,
+          "High": 13764519638206834015,
+          "IsValid": true
+        },
+        "Camera": "(8, 6, 1)",
+        "Target": "(16, 1, 12)"
+      },
+      "Environment": {
+        "SunRotation": "(-54.999996, -34.999996, 0)",
+        "SunEnergy": 1.15,
+        "Shadows": true,
+        "Background": "738f94ff",
+        "Ambient": "a6b8adff",
+        "AmbientEnergy": 0.55,
+        "Mood": "Balanced"
+      }
+    },
+    {
+      "art": "installed",
+      "view": "Doorway",
+      "time": "Noon",
+      "atmosphere": "Temperate",
+      "mood": "Balanced",
+      "name": "installed-Doorway-Noon-Temperate.png",
+      "image": {
+        "Width": 1920,
+        "Height": 1080,
+        "minimum": 0,
+        "maximum": 255,
+        "pre": 1,
+        "post": 1,
+        "PixelHash": "AE103ABC4745CA24C260512E67BE64B739C47A67397F05F1DB1840EE391FE230",
+        "PngHash": "C3F33EC934A12319ACDB286356D8BE36F43B719567FCD631713BA061CB1685DC"
+      },
+      "truth": {
+        "ApplicationEpoch": 2,
+        "ControlEpoch": 1,
+        "GenerationId": 1,
+        "Manifest": null,
+        "BaseWorldFingerprint": "80DCF456AD43FD3876D6E5BB6936FD3747E0ECDA23179407753DD393DC981B57",
+        "Catalog": "633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503",
+        "Presentation": {
+          "Generation": {
+            "Value": 1,
+            "IsValid": true
+          },
+          "StableFingerprint": {
+            "Part0": 4144668168664258548,
+            "Part1": 17035552169324498861,
+            "Part2": 499089345477502014,
+            "Part3": 9127757405099557964,
+            "IsValid": true
+          },
+          "UserLayerPresent": false,
+          "RealmLayerPresent": false,
+          "LocalLayerPresent": true,
+          "EnabledUserPacks": 0,
+          "UserSelections": 0,
+          "RealmSelections": 0,
+          "LocalSelections": 2,
+          "PrimitiveSelections": 0,
+          "ActorSelections": 2,
+          "TextureSelections": 7,
+          "MaterialSelections": 8,
+          "UserResourceSelections": 0,
+          "RealmResourceSelections": 0,
+          "LocalResourceSelections": 15,
+          "RealmResourceLayerPresent": false,
+          "LocalResourceLayerPresent": true,
+          "WorldMeshSelections": 11,
+          "EffectiveUserLayerPresent": false
+        },
+        "SemanticHash": {
+          "Low": 4884640456701042578,
+          "High": 13764519638206834015,
+          "IsValid": true
+        },
+        "Camera": "(16, 1.6, 6)",
+        "Target": "(16, 1.4, 12)"
+      },
+      "Environment": {
+        "SunRotation": "(-54.999996, -34.999996, 0)",
+        "SunEnergy": 1.15,
+        "Shadows": true,
+        "Background": "738f94ff",
+        "Ambient": "a6b8adff",
+        "AmbientEnergy": 0.55,
+        "Mood": "Balanced"
+      }
+    },
+    {
+      "art": "installed",
+      "view": "Interior",
+      "time": "Noon",
+      "atmosphere": "Temperate",
+      "mood": "Balanced",
+      "name": "installed-Interior-Noon-Temperate.png",
+      "image": {
+        "Width": 1920,
+        "Height": 1080,
+        "minimum": 0,
+        "maximum": 101,
+        "pre": 1,
+        "post": 1,
+        "PixelHash": "590C6FF04A1D4EF303F30E4F1434F363AA081D45010A8E6A9A5BA9EF3449D7DB",
+        "PngHash": "8D6173FF86C399D6946D82B34E4B58E6B9672358FB1C3F193B82A68593646AFA"
+      },
+      "truth": {
+        "ApplicationEpoch": 2,
+        "ControlEpoch": 1,
+        "GenerationId": 1,
+        "Manifest": null,
+        "BaseWorldFingerprint": "80DCF456AD43FD3876D6E5BB6936FD3747E0ECDA23179407753DD393DC981B57",
+        "Catalog": "633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503",
+        "Presentation": {
+          "Generation": {
+            "Value": 1,
+            "IsValid": true
+          },
+          "StableFingerprint": {
+            "Part0": 4144668168664258548,
+            "Part1": 17035552169324498861,
+            "Part2": 499089345477502014,
+            "Part3": 9127757405099557964,
+            "IsValid": true
+          },
+          "UserLayerPresent": false,
+          "RealmLayerPresent": false,
+          "LocalLayerPresent": true,
+          "EnabledUserPacks": 0,
+          "UserSelections": 0,
+          "RealmSelections": 0,
+          "LocalSelections": 2,
+          "PrimitiveSelections": 0,
+          "ActorSelections": 2,
+          "TextureSelections": 7,
+          "MaterialSelections": 8,
+          "UserResourceSelections": 0,
+          "RealmResourceSelections": 0,
+          "LocalResourceSelections": 15,
+          "RealmResourceLayerPresent": false,
+          "LocalResourceLayerPresent": true,
+          "WorldMeshSelections": 11,
+          "EffectiveUserLayerPresent": false
+        },
+        "SemanticHash": {
+          "Low": 4884640456701042578,
+          "High": 13764519638206834015,
+          "IsValid": true
+        },
+        "Camera": "(16, 1.6, 10)",
+        "Target": "(16, 1.4, 14)"
+      },
+      "Environment": {
+        "SunRotation": "(-54.999996, -34.999996, 0)",
+        "SunEnergy": 1.15,
+        "Shadows": true,
+        "Background": "738f94ff",
+        "Ambient": "a6b8adff",
+        "AmbientEnergy": 0.55,
+        "Mood": "Balanced"
+      }
+    },
+    {
+      "art": "installed",
+      "view": "Shelf",
+      "time": "Noon",
+      "atmosphere": "Temperate",
+      "mood": "Balanced",
+      "name": "installed-Shelf-Noon-Temperate.png",
+      "image": {
+        "Width": 1920,
+        "Height": 1080,
+        "minimum": 0,
+        "maximum": 148,
+        "pre": 1,
+        "post": 1,
+        "PixelHash": "2E970516BFBC14F6B06C4A91BDA55947A0CEB9884AD36BCADF58D25ABE25A094",
+        "PngHash": "CBEB0CC81DE4BEAA9446AC1B3914C7F81D95F2B8AD85054B23D37F083CEC42BB"
+      },
+      "truth": {
+        "ApplicationEpoch": 2,
+        "ControlEpoch": 1,
+        "GenerationId": 1,
+        "Manifest": null,
+        "BaseWorldFingerprint": "80DCF456AD43FD3876D6E5BB6936FD3747E0ECDA23179407753DD393DC981B57",
+        "Catalog": "633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503",
+        "Presentation": {
+          "Generation": {
+            "Value": 1,
+            "IsValid": true
+          },
+          "StableFingerprint": {
+            "Part0": 4144668168664258548,
+            "Part1": 17035552169324498861,
+            "Part2": 499089345477502014,
+            "Part3": 9127757405099557964,
+            "IsValid": true
+          },
+          "UserLayerPresent": false,
+          "RealmLayerPresent": false,
+          "LocalLayerPresent": true,
+          "EnabledUserPacks": 0,
+          "UserSelections": 0,
+          "RealmSelections": 0,
+          "LocalSelections": 2,
+          "PrimitiveSelections": 0,
+          "ActorSelections": 2,
+          "TextureSelections": 7,
+          "MaterialSelections": 8,
+          "UserResourceSelections": 0,
+          "RealmResourceSelections": 0,
+          "LocalResourceSelections": 15,
+          "RealmResourceLayerPresent": false,
+          "LocalResourceLayerPresent": true,
+          "WorldMeshSelections": 11,
+          "EffectiveUserLayerPresent": false
+        },
+        "SemanticHash": {
+          "Low": 4884640456701042578,
+          "High": 13764519638206834015,
+          "IsValid": true
+        },
+        "Camera": "(16.5, 1.6, 12.5)",
+        "Target": "(18.5, 1.2, 14)"
+      },
+      "Environment": {
+        "SunRotation": "(-54.999996, -34.999996, 0)",
+        "SunEnergy": 1.15,
+        "Shadows": true,
+        "Background": "738f94ff",
+        "Ambient": "a6b8adff",
+        "AmbientEnergy": 0.55,
+        "Mood": "Balanced"
+      }
+    },
+    {
+      "art": "installed",
+      "view": "Exterior",
+      "time": "Dawn",
+      "atmosphere": "Temperate",
+      "mood": "Balanced",
+      "name": "installed-Exterior-Dawn-Temperate.png",
+      "image": {
+        "Width": 1920,
+        "Height": 1080,
+        "minimum": 0,
+        "maximum": 255,
+        "pre": 1,
+        "post": 1,
+        "PixelHash": "76DD04EC688609851D803AF09FDE330C348524E65FCBE21BABECADE1F6F1B66C",
+        "PngHash": "DFE18E44E3A64D49358A2A20DC21110710AC24CE3FF3F1FE9C578C9A125433D3"
+      },
+      "truth": {
+        "ApplicationEpoch": 2,
+        "ControlEpoch": 1,
+        "GenerationId": 1,
+        "Manifest": null,
+        "BaseWorldFingerprint": "80DCF456AD43FD3876D6E5BB6936FD3747E0ECDA23179407753DD393DC981B57",
+        "Catalog": "633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503",
+        "Presentation": {
+          "Generation": {
+            "Value": 1,
+            "IsValid": true
+          },
+          "StableFingerprint": {
+            "Part0": 4144668168664258548,
+            "Part1": 17035552169324498861,
+            "Part2": 499089345477502014,
+            "Part3": 9127757405099557964,
+            "IsValid": true
+          },
+          "UserLayerPresent": false,
+          "RealmLayerPresent": false,
+          "LocalLayerPresent": true,
+          "EnabledUserPacks": 0,
+          "UserSelections": 0,
+          "RealmSelections": 0,
+          "LocalSelections": 2,
+          "PrimitiveSelections": 0,
+          "ActorSelections": 2,
+          "TextureSelections": 7,
+          "MaterialSelections": 8,
+          "UserResourceSelections": 0,
+          "RealmResourceSelections": 0,
+          "LocalResourceSelections": 15,
+          "RealmResourceLayerPresent": false,
+          "LocalResourceLayerPresent": true,
+          "WorldMeshSelections": 11,
+          "EffectiveUserLayerPresent": false
+        },
+        "SemanticHash": {
+          "Low": 4884640456701042578,
+          "High": 13764519638206834015,
+          "IsValid": true
+        },
+        "Camera": "(8, 6, 1)",
+        "Target": "(16, 1, 12)"
+      },
+      "Environment": {
+        "SunRotation": "(-12, -34.999996, 0)",
+        "SunEnergy": 0.55,
+        "Shadows": true,
+        "Background": "5c525eff",
+        "Ambient": "a6b8adff",
+        "AmbientEnergy": 0.55,
+        "Mood": "Balanced"
+      }
+    },
+    {
+      "art": "installed",
+      "view": "Exterior",
+      "time": "Dusk",
+      "atmosphere": "Temperate",
+      "mood": "Balanced",
+      "name": "installed-Exterior-Dusk-Temperate.png",
+      "image": {
+        "Width": 1920,
+        "Height": 1080,
+        "minimum": 0,
+        "maximum": 255,
+        "pre": 1,
+        "post": 1,
+        "PixelHash": "A582ED0C797AA33E8E9A68A67FBBA1A024BA165D0C4DB46113E896FEA3BDD91C",
+        "PngHash": "2D65F24979A8DBDAA96EB17366B89B2D82BBD6DA188FDBF0CC97FDFD9BD1EAEE"
+      },
+      "truth": {
+        "ApplicationEpoch": 2,
+        "ControlEpoch": 1,
+        "GenerationId": 1,
+        "Manifest": null,
+        "BaseWorldFingerprint": "80DCF456AD43FD3876D6E5BB6936FD3747E0ECDA23179407753DD393DC981B57",
+        "Catalog": "633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503",
+        "Presentation": {
+          "Generation": {
+            "Value": 1,
+            "IsValid": true
+          },
+          "StableFingerprint": {
+            "Part0": 4144668168664258548,
+            "Part1": 17035552169324498861,
+            "Part2": 499089345477502014,
+            "Part3": 9127757405099557964,
+            "IsValid": true
+          },
+          "UserLayerPresent": false,
+          "RealmLayerPresent": false,
+          "LocalLayerPresent": true,
+          "EnabledUserPacks": 0,
+          "UserSelections": 0,
+          "RealmSelections": 0,
+          "LocalSelections": 2,
+          "PrimitiveSelections": 0,
+          "ActorSelections": 2,
+          "TextureSelections": 7,
+          "MaterialSelections": 8,
+          "UserResourceSelections": 0,
+          "RealmResourceSelections": 0,
+          "LocalResourceSelections": 15,
+          "RealmResourceLayerPresent": false,
+          "LocalResourceLayerPresent": true,
+          "WorldMeshSelections": 11,
+          "EffectiveUserLayerPresent": false
+        },
+        "SemanticHash": {
+          "Low": 4884640456701042578,
+          "High": 13764519638206834015,
+          "IsValid": true
+        },
+        "Camera": "(8, 6, 1)",
+        "Target": "(16, 1, 12)"
+      },
+      "Environment": {
+        "SunRotation": "(-7.9999995, -34.999996, 0)",
+        "SunEnergy": 0.55,
+        "Shadows": true,
+        "Background": "4c455cff",
+        "Ambient": "a6b8adff",
+        "AmbientEnergy": 0.55,
+        "Mood": "Balanced"
+      }
+    },
+    {
+      "art": "installed",
+      "view": "Exterior",
+      "time": "Night",
+      "atmosphere": "Temperate",
+      "mood": "Balanced",
+      "name": "installed-Exterior-Night-Temperate.png",
+      "image": {
+        "Width": 1920,
+        "Height": 1080,
+        "minimum": 0,
+        "maximum": 255,
+        "pre": 1,
+        "post": 1,
+        "PixelHash": "EF0579575848A59E1859D4945FB1419A6D879D46D6A476715E454079AC95033A",
+        "PngHash": "03C7FE3669D3EB9A073A6745C09F74D45466A6AD072110DC1E278447EA40D3E6"
+      },
+      "truth": {
+        "ApplicationEpoch": 2,
+        "ControlEpoch": 1,
+        "GenerationId": 1,
+        "Manifest": null,
+        "BaseWorldFingerprint": "80DCF456AD43FD3876D6E5BB6936FD3747E0ECDA23179407753DD393DC981B57",
+        "Catalog": "633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503",
+        "Presentation": {
+          "Generation": {
+            "Value": 1,
+            "IsValid": true
+          },
+          "StableFingerprint": {
+            "Part0": 4144668168664258548,
+            "Part1": 17035552169324498861,
+            "Part2": 499089345477502014,
+            "Part3": 9127757405099557964,
+            "IsValid": true
+          },
+          "UserLayerPresent": false,
+          "RealmLayerPresent": false,
+          "LocalLayerPresent": true,
+          "EnabledUserPacks": 0,
+          "UserSelections": 0,
+          "RealmSelections": 0,
+          "LocalSelections": 2,
+          "PrimitiveSelections": 0,
+          "ActorSelections": 2,
+          "TextureSelections": 7,
+          "MaterialSelections": 8,
+          "UserResourceSelections": 0,
+          "RealmResourceSelections": 0,
+          "LocalResourceSelections": 15,
+          "RealmResourceLayerPresent": false,
+          "LocalResourceLayerPresent": true,
+          "WorldMeshSelections": 11,
+          "EffectiveUserLayerPresent": false
+        },
+        "SemanticHash": {
+          "Low": 4884640456701042578,
+          "High": 13764519638206834015,
+          "IsValid": true
+        },
+        "Camera": "(8, 6, 1)",
+        "Target": "(16, 1, 12)"
+      },
+      "Environment": {
+        "SunRotation": "(19.999998, -34.999996, 0)",
+        "SunEnergy": 0,
+        "Shadows": true,
+        "Background": "05070bff",
+        "Ambient": "a6b8adff",
+        "AmbientEnergy": 0.12,
+        "Mood": "Balanced"
+      }
+    },
+    {
+      "art": "installed",
+      "view": "Exterior",
+      "time": "Noon",
+      "atmosphere": "Cold",
+      "mood": "Balanced",
+      "name": "installed-Exterior-Noon-Cold.png",
+      "image": {
+        "Width": 1920,
+        "Height": 1080,
+        "minimum": 0,
+        "maximum": 255,
+        "pre": 1,
+        "post": 1,
+        "PixelHash": "99563A431F91A0107BEC293316A47A59F89A8E5C3A916B61ED8EE7B89034BB01",
+        "PngHash": "7CE3413640CCB01A092B9B2414D87332ACC8644E530E4E2FF9D1CB40784E2A49"
+      },
+      "truth": {
+        "ApplicationEpoch": 2,
+        "ControlEpoch": 1,
+        "GenerationId": 1,
+        "Manifest": null,
+        "BaseWorldFingerprint": "80DCF456AD43FD3876D6E5BB6936FD3747E0ECDA23179407753DD393DC981B57",
+        "Catalog": "633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503",
+        "Presentation": {
+          "Generation": {
+            "Value": 1,
+            "IsValid": true
+          },
+          "StableFingerprint": {
+            "Part0": 4144668168664258548,
+            "Part1": 17035552169324498861,
+            "Part2": 499089345477502014,
+            "Part3": 9127757405099557964,
+            "IsValid": true
+          },
+          "UserLayerPresent": false,
+          "RealmLayerPresent": false,
+          "LocalLayerPresent": true,
+          "EnabledUserPacks": 0,
+          "UserSelections": 0,
+          "RealmSelections": 0,
+          "LocalSelections": 2,
+          "PrimitiveSelections": 0,
+          "ActorSelections": 2,
+          "TextureSelections": 7,
+          "MaterialSelections": 8,
+          "UserResourceSelections": 0,
+          "RealmResourceSelections": 0,
+          "LocalResourceSelections": 15,
+          "RealmResourceLayerPresent": false,
+          "LocalResourceLayerPresent": true,
+          "WorldMeshSelections": 11,
+          "EffectiveUserLayerPresent": false
+        },
+        "SemanticHash": {
+          "Low": 4884640456701042578,
+          "High": 13764519638206834015,
+          "IsValid": true
+        },
+        "Camera": "(8, 6, 1)",
+        "Target": "(16, 1, 12)"
+      },
+      "Environment": {
+        "SunRotation": "(-54.999996, -34.999996, 0)",
+        "SunEnergy": 1.15,
+        "Shadows": true,
+        "Background": "738f94ff",
+        "Ambient": "85a6c7ff",
+        "AmbientEnergy": 0.55,
+        "Mood": "Balanced"
+      }
+    },
+    {
+      "art": "installed",
+      "view": "ExteriorHigh",
+      "time": "Noon",
+      "atmosphere": "Temperate",
+      "mood": "Balanced",
+      "name": "installed-ExteriorHigh-Noon-Temperate.png",
+      "image": {
+        "Width": 1920,
+        "Height": 1080,
+        "minimum": 0,
+        "maximum": 255,
+        "pre": 1,
+        "post": 1,
+        "PixelHash": "3A87A081162EF408B6335C814134A9FA041ECFFD3BA40902D2AAD2F614E44C9C",
+        "PngHash": "21F75653B4B425DCAFC50E3C3A82DB7BE48C9623BD128E10574E22AC7A79A0F9"
+      },
+      "truth": {
+        "ApplicationEpoch": 2,
+        "ControlEpoch": 1,
+        "GenerationId": 1,
+        "Manifest": null,
+        "BaseWorldFingerprint": "80DCF456AD43FD3876D6E5BB6936FD3747E0ECDA23179407753DD393DC981B57",
+        "Catalog": "633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503",
+        "Presentation": {
+          "Generation": {
+            "Value": 1,
+            "IsValid": true
+          },
+          "StableFingerprint": {
+            "Part0": 4144668168664258548,
+            "Part1": 17035552169324498861,
+            "Part2": 499089345477502014,
+            "Part3": 9127757405099557964,
+            "IsValid": true
+          },
+          "UserLayerPresent": false,
+          "RealmLayerPresent": false,
+          "LocalLayerPresent": true,
+          "EnabledUserPacks": 0,
+          "UserSelections": 0,
+          "RealmSelections": 0,
+          "LocalSelections": 2,
+          "PrimitiveSelections": 0,
+          "ActorSelections": 2,
+          "TextureSelections": 7,
+          "MaterialSelections": 8,
+          "UserResourceSelections": 0,
+          "RealmResourceSelections": 0,
+          "LocalResourceSelections": 15,
+          "RealmResourceLayerPresent": false,
+          "LocalResourceLayerPresent": true,
+          "WorldMeshSelections": 11,
+          "EffectiveUserLayerPresent": false
+        },
+        "SemanticHash": {
+          "Low": 4884640456701042578,
+          "High": 13764519638206834015,
+          "IsValid": true
+        },
+        "Camera": "(6, 9, 2)",
+        "Target": "(16, 1, 12)"
+      },
+      "Environment": {
+        "SunRotation": "(-54.999996, -34.999996, 0)",
+        "SunEnergy": 1.15,
+        "Shadows": true,
+        "Background": "738f94ff",
+        "Ambient": "a6b8adff",
+        "AmbientEnergy": 0.55,
+        "Mood": "Balanced"
+      }
+    },
+    {
+      "art": "installed",
+      "view": "ExteriorLow",
+      "time": "Noon",
+      "atmosphere": "Temperate",
+      "mood": "Balanced",
+      "name": "installed-ExteriorLow-Noon-Temperate.png",
+      "image": {
+        "Width": 1920,
+        "Height": 1080,
+        "minimum": 0,
+        "maximum": 255,
+        "pre": 1,
+        "post": 1,
+        "PixelHash": "7F12D33A14A1E91B3BF65796FD1EE2EED942BCA48C9D935E6268DF701BDBFFE0",
+        "PngHash": "D5F715A59006C4830FB7B53F19210FF496C442153CBC6AF17D28F83108B4FA91"
+      },
+      "truth": {
+        "ApplicationEpoch": 2,
+        "ControlEpoch": 1,
+        "GenerationId": 1,
+        "Manifest": null,
+        "BaseWorldFingerprint": "80DCF456AD43FD3876D6E5BB6936FD3747E0ECDA23179407753DD393DC981B57",
+        "Catalog": "633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503",
+        "Presentation": {
+          "Generation": {
+            "Value": 1,
+            "IsValid": true
+          },
+          "StableFingerprint": {
+            "Part0": 4144668168664258548,
+            "Part1": 17035552169324498861,
+            "Part2": 499089345477502014,
+            "Part3": 9127757405099557964,
+            "IsValid": true
+          },
+          "UserLayerPresent": false,
+          "RealmLayerPresent": false,
+          "LocalLayerPresent": true,
+          "EnabledUserPacks": 0,
+          "UserSelections": 0,
+          "RealmSelections": 0,
+          "LocalSelections": 2,
+          "PrimitiveSelections": 0,
+          "ActorSelections": 2,
+          "TextureSelections": 7,
+          "MaterialSelections": 8,
+          "UserResourceSelections": 0,
+          "RealmResourceSelections": 0,
+          "LocalResourceSelections": 15,
+          "RealmResourceLayerPresent": false,
+          "LocalResourceLayerPresent": true,
+          "WorldMeshSelections": 11,
+          "EffectiveUserLayerPresent": false
+        },
+        "SemanticHash": {
+          "Low": 4884640456701042578,
+          "High": 13764519638206834015,
+          "IsValid": true
+        },
+        "Camera": "(10, 2.4, 6)",
+        "Target": "(16, 1.5, 12)"
+      },
+      "Environment": {
+        "SunRotation": "(-54.999996, -34.999996, 0)",
+        "SunEnergy": 1.15,
+        "Shadows": true,
+        "Background": "738f94ff",
+        "Ambient": "a6b8adff",
+        "AmbientEnergy": 0.55,
+        "Mood": "Balanced"
+      }
+    },
+    {
+      "art": "installed",
+      "view": "WindowSide",
+      "time": "Noon",
+      "atmosphere": "Temperate",
+      "mood": "Balanced",
+      "name": "installed-WindowSide-Noon-Temperate.png",
+      "image": {
+        "Width": 1920,
+        "Height": 1080,
+        "minimum": 0,
+        "maximum": 255,
+        "pre": 1,
+        "post": 1,
+        "PixelHash": "14F852DE97997686F465B6FC5E4485C3F6008AD966B02745FDD0096D984224F1",
+        "PngHash": "019F77EC18D9860DA80C9B94305589C7FA6CD945E08DB8CBFDFC1D14004C00E9"
+      },
+      "truth": {
+        "ApplicationEpoch": 2,
+        "ControlEpoch": 1,
+        "GenerationId": 1,
+        "Manifest": null,
+        "BaseWorldFingerprint": "80DCF456AD43FD3876D6E5BB6936FD3747E0ECDA23179407753DD393DC981B57",
+        "Catalog": "633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503",
+        "Presentation": {
+          "Generation": {
+            "Value": 1,
+            "IsValid": true
+          },
+          "StableFingerprint": {
+            "Part0": 4144668168664258548,
+            "Part1": 17035552169324498861,
+            "Part2": 499089345477502014,
+            "Part3": 9127757405099557964,
+            "IsValid": true
+          },
+          "UserLayerPresent": false,
+          "RealmLayerPresent": false,
+          "LocalLayerPresent": true,
+          "EnabledUserPacks": 0,
+          "UserSelections": 0,
+          "RealmSelections": 0,
+          "LocalSelections": 2,
+          "PrimitiveSelections": 0,
+          "ActorSelections": 2,
+          "TextureSelections": 7,
+          "MaterialSelections": 8,
+          "UserResourceSelections": 0,
+          "RealmResourceSelections": 0,
+          "LocalResourceSelections": 15,
+          "RealmResourceLayerPresent": false,
+          "LocalResourceLayerPresent": true,
+          "WorldMeshSelections": 11,
+          "EffectiveUserLayerPresent": false
+        },
+        "SemanticHash": {
+          "Low": 4884640456701042578,
+          "High": 13764519638206834015,
+          "IsValid": true
+        },
+        "Camera": "(24, 3, 12)",
+        "Target": "(19, 1.2, 12)"
+      },
+      "Environment": {
+        "SunRotation": "(-54.999996, -34.999996, 0)",
+        "SunEnergy": 1.15,
+        "Shadows": true,
+        "Background": "738f94ff",
+        "Ambient": "a6b8adff",
+        "AmbientEnergy": 0.55,
+        "Mood": "Balanced"
+      }
+    },
+    {
+      "art": "installed",
+      "view": "ExteriorHigh",
+      "time": "Noon",
+      "atmosphere": "Temperate",
+      "mood": "BrightClear",
+      "name": "installed-ExteriorHigh-Noon-Temperate-BrightClear.png",
+      "image": {
+        "Width": 1920,
+        "Height": 1080,
+        "minimum": 0,
+        "maximum": 255,
+        "pre": 1,
+        "post": 1,
+        "PixelHash": "4EB345D96F53F35F1C96626AD9C8BF3ACD005E3DD80558D1B58FFCF08C6691D8",
+        "PngHash": "CB4B7A7079299E4FB9C1EA1D091B0DAE9F899709667B04C37D9AB8CF0DD957C7"
+      },
+      "truth": {
+        "ApplicationEpoch": 2,
+        "ControlEpoch": 1,
+        "GenerationId": 1,
+        "Manifest": null,
+        "BaseWorldFingerprint": "80DCF456AD43FD3876D6E5BB6936FD3747E0ECDA23179407753DD393DC981B57",
+        "Catalog": "633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503",
+        "Presentation": {
+          "Generation": {
+            "Value": 1,
+            "IsValid": true
+          },
+          "StableFingerprint": {
+            "Part0": 4144668168664258548,
+            "Part1": 17035552169324498861,
+            "Part2": 499089345477502014,
+            "Part3": 9127757405099557964,
+            "IsValid": true
+          },
+          "UserLayerPresent": false,
+          "RealmLayerPresent": false,
+          "LocalLayerPresent": true,
+          "EnabledUserPacks": 0,
+          "UserSelections": 0,
+          "RealmSelections": 0,
+          "LocalSelections": 2,
+          "PrimitiveSelections": 0,
+          "ActorSelections": 2,
+          "TextureSelections": 7,
+          "MaterialSelections": 8,
+          "UserResourceSelections": 0,
+          "RealmResourceSelections": 0,
+          "LocalResourceSelections": 15,
+          "RealmResourceLayerPresent": false,
+          "LocalResourceLayerPresent": true,
+          "WorldMeshSelections": 11,
+          "EffectiveUserLayerPresent": false
+        },
+        "SemanticHash": {
+          "Low": 4884640456701042578,
+          "High": 13764519638206834015,
+          "IsValid": true
+        },
+        "Camera": "(6, 9, 2)",
+        "Target": "(16, 1, 12)"
+      },
+      "Environment": {
+        "SunRotation": "(-54.999996, -34.999996, 0)",
+        "SunEnergy": 1.3225,
+        "Shadows": true,
+        "Background": "738f94ff",
+        "Ambient": "a6b8adff",
+        "AmbientEnergy": 0.6325,
+        "Mood": "BrightClear"
+      }
+    },
+    {
+      "art": "installed",
+      "view": "Interior",
+      "time": "Noon",
+      "atmosphere": "Temperate",
+      "mood": "DarkOppressive",
+      "name": "installed-Interior-Noon-Temperate-DarkOppressive.png",
+      "image": {
+        "Width": 1920,
+        "Height": 1080,
+        "minimum": 0,
+        "maximum": 84,
+        "pre": 1,
+        "post": 1,
+        "PixelHash": "DA399CE9567094B3FD99299AFEE0E3462550198856272D3076D99AD451EC482F",
+        "PngHash": "68A7571173E0C0FD11A62521D98554E2C2081E1E37FD9F66556975493496DBC3"
+      },
+      "truth": {
+        "ApplicationEpoch": 2,
+        "ControlEpoch": 1,
+        "GenerationId": 1,
+        "Manifest": null,
+        "BaseWorldFingerprint": "80DCF456AD43FD3876D6E5BB6936FD3747E0ECDA23179407753DD393DC981B57",
+        "Catalog": "633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503",
+        "Presentation": {
+          "Generation": {
+            "Value": 1,
+            "IsValid": true
+          },
+          "StableFingerprint": {
+            "Part0": 4144668168664258548,
+            "Part1": 17035552169324498861,
+            "Part2": 499089345477502014,
+            "Part3": 9127757405099557964,
+            "IsValid": true
+          },
+          "UserLayerPresent": false,
+          "RealmLayerPresent": false,
+          "LocalLayerPresent": true,
+          "EnabledUserPacks": 0,
+          "UserSelections": 0,
+          "RealmSelections": 0,
+          "LocalSelections": 2,
+          "PrimitiveSelections": 0,
+          "ActorSelections": 2,
+          "TextureSelections": 7,
+          "MaterialSelections": 8,
+          "UserResourceSelections": 0,
+          "RealmResourceSelections": 0,
+          "LocalResourceSelections": 15,
+          "RealmResourceLayerPresent": false,
+          "LocalResourceLayerPresent": true,
+          "WorldMeshSelections": 11,
+          "EffectiveUserLayerPresent": false
+        },
+        "SemanticHash": {
+          "Low": 4884640456701042578,
+          "High": 13764519638206834015,
+          "IsValid": true
+        },
+        "Camera": "(16, 1.6, 10)",
+        "Target": "(16, 1.4, 14)"
+      },
+      "Environment": {
+        "SunRotation": "(-54.999996, -34.999996, 0)",
+        "SunEnergy": 0.782,
+        "Shadows": true,
+        "Background": "738f94ff",
+        "Ambient": "a6b8adff",
+        "AmbientEnergy": 0.374,
+        "Mood": "DarkOppressive"
+      }
+    },
+    {
+      "art": "primitive-same-session",
+      "view": "Exterior",
+      "time": "Noon",
+      "atmosphere": "Temperate",
+      "mood": "Balanced",
+      "name": "primitive-same-session-Exterior-Noon-Temperate.png",
+      "image": {
+        "Width": 1920,
+        "Height": 1080,
+        "minimum": 2,
+        "maximum": 240,
+        "pre": 1,
+        "post": 1,
+        "PixelHash": "A258CEF04F3C21C8C3A9DBA7815DF0F7E7594E90519C42ABEC2F4B6A825029DC",
+        "PngHash": "819B85BB71D3A23316A9210368C4A43C4C71EED4F6B3149874F4B1284FAE6325"
+      },
+      "truth": {
+        "ApplicationEpoch": 2,
+        "ControlEpoch": 1,
+        "GenerationId": 1,
+        "Manifest": null,
+        "BaseWorldFingerprint": "80DCF456AD43FD3876D6E5BB6936FD3747E0ECDA23179407753DD393DC981B57",
+        "Catalog": "633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503",
+        "Presentation": {
+          "Generation": {
+            "Value": 2,
+            "IsValid": true
+          },
+          "StableFingerprint": {
+            "Part0": 1384532793251392881,
+            "Part1": 8134308367357699499,
+            "Part2": 14852425622850712055,
+            "Part3": 13490232590991005410,
+            "IsValid": true
+          },
+          "UserLayerPresent": false,
+          "RealmLayerPresent": false,
+          "LocalLayerPresent": false,
+          "EnabledUserPacks": 0,
+          "UserSelections": 0,
+          "RealmSelections": 0,
+          "LocalSelections": 0,
+          "PrimitiveSelections": 2,
+          "ActorSelections": 2,
+          "TextureSelections": 0,
+          "MaterialSelections": 0,
+          "UserResourceSelections": 0,
+          "RealmResourceSelections": 0,
+          "LocalResourceSelections": 0,
+          "RealmResourceLayerPresent": false,
+          "LocalResourceLayerPresent": false,
+          "WorldMeshSelections": 0,
+          "EffectiveUserLayerPresent": false
+        },
+        "SemanticHash": {
+          "Low": 4884640456701042578,
+          "High": 13764519638206834015,
+          "IsValid": true
+        },
+        "Camera": "(8, 6, 1)",
+        "Target": "(16, 1, 12)"
+      },
+      "Environment": {
+        "SunRotation": "(-54.999996, -34.999996, 0)",
+        "SunEnergy": 1.15,
+        "Shadows": true,
+        "Background": "738f94ff",
+        "Ambient": "a6b8adff",
+        "AmbientEnergy": 0.55,
+        "Mood": "Balanced"
+      }
+    },
+    {
+      "art": "primitive-same-session",
+      "view": "Doorway",
+      "time": "Noon",
+      "atmosphere": "Temperate",
+      "mood": "Balanced",
+      "name": "primitive-same-session-Doorway-Noon-Temperate.png",
+      "image": {
+        "Width": 1920,
+        "Height": 1080,
+        "minimum": 2,
+        "maximum": 231,
+        "pre": 1,
+        "post": 1,
+        "PixelHash": "C6B0534A3B28B12A9CE14399F91AC206F538D568024CA272D81EDF7BFE8E53A5",
+        "PngHash": "91AABFBDA7C0B58C4AAF615338BDB293C8D2869239D5FB2F19F0CD4957619AA6"
+      },
+      "truth": {
+        "ApplicationEpoch": 2,
+        "ControlEpoch": 1,
+        "GenerationId": 1,
+        "Manifest": null,
+        "BaseWorldFingerprint": "80DCF456AD43FD3876D6E5BB6936FD3747E0ECDA23179407753DD393DC981B57",
+        "Catalog": "633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503",
+        "Presentation": {
+          "Generation": {
+            "Value": 2,
+            "IsValid": true
+          },
+          "StableFingerprint": {
+            "Part0": 1384532793251392881,
+            "Part1": 8134308367357699499,
+            "Part2": 14852425622850712055,
+            "Part3": 13490232590991005410,
+            "IsValid": true
+          },
+          "UserLayerPresent": false,
+          "RealmLayerPresent": false,
+          "LocalLayerPresent": false,
+          "EnabledUserPacks": 0,
+          "UserSelections": 0,
+          "RealmSelections": 0,
+          "LocalSelections": 0,
+          "PrimitiveSelections": 2,
+          "ActorSelections": 2,
+          "TextureSelections": 0,
+          "MaterialSelections": 0,
+          "UserResourceSelections": 0,
+          "RealmResourceSelections": 0,
+          "LocalResourceSelections": 0,
+          "RealmResourceLayerPresent": false,
+          "LocalResourceLayerPresent": false,
+          "WorldMeshSelections": 0,
+          "EffectiveUserLayerPresent": false
+        },
+        "SemanticHash": {
+          "Low": 4884640456701042578,
+          "High": 13764519638206834015,
+          "IsValid": true
+        },
+        "Camera": "(16, 1.6, 6)",
+        "Target": "(16, 1.4, 12)"
+      },
+      "Environment": {
+        "SunRotation": "(-54.999996, -34.999996, 0)",
+        "SunEnergy": 1.15,
+        "Shadows": true,
+        "Background": "738f94ff",
+        "Ambient": "a6b8adff",
+        "AmbientEnergy": 0.55,
+        "Mood": "Balanced"
+      }
+    },
+    {
+      "art": "primitive-same-session",
+      "view": "Interior",
+      "time": "Noon",
+      "atmosphere": "Temperate",
+      "mood": "Balanced",
+      "name": "primitive-same-session-Interior-Noon-Temperate.png",
+      "image": {
+        "Width": 1920,
+        "Height": 1080,
+        "minimum": 2,
+        "maximum": 73,
+        "pre": 1,
+        "post": 1,
+        "PixelHash": "CB2E25FC30027B20AEE81B655091CC7CC7123048033B125267797F037810DEC3",
+        "PngHash": "31C30B1A754E51994FFCC1D58C25072BDC86C07D869FBA2A859C3D5F0F387F22"
+      },
+      "truth": {
+        "ApplicationEpoch": 2,
+        "ControlEpoch": 1,
+        "GenerationId": 1,
+        "Manifest": null,
+        "BaseWorldFingerprint": "80DCF456AD43FD3876D6E5BB6936FD3747E0ECDA23179407753DD393DC981B57",
+        "Catalog": "633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503",
+        "Presentation": {
+          "Generation": {
+            "Value": 2,
+            "IsValid": true
+          },
+          "StableFingerprint": {
+            "Part0": 1384532793251392881,
+            "Part1": 8134308367357699499,
+            "Part2": 14852425622850712055,
+            "Part3": 13490232590991005410,
+            "IsValid": true
+          },
+          "UserLayerPresent": false,
+          "RealmLayerPresent": false,
+          "LocalLayerPresent": false,
+          "EnabledUserPacks": 0,
+          "UserSelections": 0,
+          "RealmSelections": 0,
+          "LocalSelections": 0,
+          "PrimitiveSelections": 2,
+          "ActorSelections": 2,
+          "TextureSelections": 0,
+          "MaterialSelections": 0,
+          "UserResourceSelections": 0,
+          "RealmResourceSelections": 0,
+          "LocalResourceSelections": 0,
+          "RealmResourceLayerPresent": false,
+          "LocalResourceLayerPresent": false,
+          "WorldMeshSelections": 0,
+          "EffectiveUserLayerPresent": false
+        },
+        "SemanticHash": {
+          "Low": 4884640456701042578,
+          "High": 13764519638206834015,
+          "IsValid": true
+        },
+        "Camera": "(16, 1.6, 10)",
+        "Target": "(16, 1.4, 14)"
+      },
+      "Environment": {
+        "SunRotation": "(-54.999996, -34.999996, 0)",
+        "SunEnergy": 1.15,
+        "Shadows": true,
+        "Background": "738f94ff",
+        "Ambient": "a6b8adff",
+        "AmbientEnergy": 0.55,
+        "Mood": "Balanced"
+      }
+    },
+    {
+      "art": "primitive-same-session",
+      "view": "Shelf",
+      "time": "Noon",
+      "atmosphere": "Temperate",
+      "mood": "Balanced",
+      "name": "primitive-same-session-Shelf-Noon-Temperate.png",
+      "image": {
+        "Width": 1920,
+        "Height": 1080,
+        "minimum": 57,
+        "maximum": 73,
+        "pre": 1,
+        "post": 1,
+        "PixelHash": "71ADA6771F192D0552A9FAB06C3B420FB834436369793A63196EFF8BAA98E79A",
+        "PngHash": "F6977F3017257E74EF8B27C28D9D42CC6A0B079F0519F18C5AA0A9F347C6E480"
+      },
+      "truth": {
+        "ApplicationEpoch": 2,
+        "ControlEpoch": 1,
+        "GenerationId": 1,
+        "Manifest": null,
+        "BaseWorldFingerprint": "80DCF456AD43FD3876D6E5BB6936FD3747E0ECDA23179407753DD393DC981B57",
+        "Catalog": "633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503",
+        "Presentation": {
+          "Generation": {
+            "Value": 2,
+            "IsValid": true
+          },
+          "StableFingerprint": {
+            "Part0": 1384532793251392881,
+            "Part1": 8134308367357699499,
+            "Part2": 14852425622850712055,
+            "Part3": 13490232590991005410,
+            "IsValid": true
+          },
+          "UserLayerPresent": false,
+          "RealmLayerPresent": false,
+          "LocalLayerPresent": false,
+          "EnabledUserPacks": 0,
+          "UserSelections": 0,
+          "RealmSelections": 0,
+          "LocalSelections": 0,
+          "PrimitiveSelections": 2,
+          "ActorSelections": 2,
+          "TextureSelections": 0,
+          "MaterialSelections": 0,
+          "UserResourceSelections": 0,
+          "RealmResourceSelections": 0,
+          "LocalResourceSelections": 0,
+          "RealmResourceLayerPresent": false,
+          "LocalResourceLayerPresent": false,
+          "WorldMeshSelections": 0,
+          "EffectiveUserLayerPresent": false
+        },
+        "SemanticHash": {
+          "Low": 4884640456701042578,
+          "High": 13764519638206834015,
+          "IsValid": true
+        },
+        "Camera": "(16.5, 1.6, 12.5)",
+        "Target": "(18.5, 1.2, 14)"
+      },
+      "Environment": {
+        "SunRotation": "(-54.999996, -34.999996, 0)",
+        "SunEnergy": 1.15,
+        "Shadows": true,
+        "Background": "738f94ff",
+        "Ambient": "a6b8adff",
+        "AmbientEnergy": 0.55,
+        "Mood": "Balanced"
+      }
+    }
+  ],
+  "P9PackageManifest": "8f1a92abaf6628a254321b0c95465beeba7d540f944d33636760d8bf5c0c6951",
+  "MissingAuthoredGeometry": [
+    "Secondary room",
+    "Interior doorway"
+  ],
+  "FinalBoundary": {
+    "ControllerChildren": 0,
+    "ContentCatalogChildren": 0,
+    "WorldChildren": 5,
+    "WorldUiChildren": 1,
+    "HudChildren": 1,
+    "MenuChildren": 2,
+    "DebugChildren": 1,
+    "MenuHostChildren": 2,
+    "WorldHostChildren": 0,
+    "HudHostChildren": 1,
+    "GameplayGumpHostChildren": 0,
+    "ShellMenuHostChildren": 2,
+    "ContextChildren": 0,
+    "ContextHostChildren": 1,
+    "OpenGumpWindows": 0,
+    "GumpPointerCaptured": false,
+    "DebugPage": "Off",
+    "FocusedControlType": "Button",
+    "ServerProfileActive": false,
+    "ControlGrammar": "OrbitCommand",
+    "CameraProfile": "Orbit",
+    "CameraDistance": 14,
+    "CameraFovDegrees": 70,
+    "PhysicalBindingSignature": "1:1:4:F4;2:1:0:ESCAPE;3:1:0:F8;4:1:0:F10;5:1:0:A;6:1:0:D;7:1:0:W;8:1:0:S;9:2:0:LEFT;10:2:0:LEFT_DOUBLE;11:2:0:RIGHT;12:2:0:MIDDLE;13:1:0:E;14:1:0:I;15:1:0:ENTER;16:1:0:SPACE;17:1:0:F4;18:1:0:F11;19:2:0:MIDDLE_DRAG;20:2:0:WHEELUP;21:2:0:WHEELDOWN",
+    "RenderDistanceChunks": 3,
+    "Shell": {
+      "Screen": "MainMenu",
+      "SessionActive": false,
+      "TransitionSequence": 3,
+      "Status": "F1.12 Cabin preview retired.",
+      "Error": null,
+      "Focus": {
+        "Owner": "ModalMenu",
+        "GameplayInputAllowed": false,
+        "WorldInteractionAllowed": false,
+        "TextInputActive": false,
+        "DebugInputActive": false,
+        "ReservedClientControlsAvailable": true
+      }
+    }
+  },
+  "HumanFeelRated": false
+}
