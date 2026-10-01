@@ -1,0 +1,72 @@
+  Determining projects to restore...
+/mnt/data/mega/Godot Projects/UltraSim/Client/Godot/UltraSim.Client.Application.Godot.csproj : warning NU1505: Duplicate 'PackageDownload' items found. Remove the duplicate items or use the Update functionality to ensure a consistent restore behavior. The duplicate 'PackageDownload' items are: Microsoft.AspNetCore.App.Runtime.linux-x64 [8.0.31], Microsoft.AspNetCore.App.Runtime.linux-x64 [8.0.25].
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Framework/Persistence/UltraSim.Framework.Persistence.csproj (in 165 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Kernels/Network/UltraSim.Network.csproj (in 165 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Framework/ControlPlane/UltraSim.Framework.ControlPlane.csproj (in 165 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Skills.Contracts/UltraSim.Game.Skills.Contracts.csproj (in 165 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/World/UltraSim.Game.World.csproj (in 165 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Presentation.Contracts/UltraSim.Game.Presentation.Contracts.csproj (in 165 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/UI/UltraSim.Game.UI.csproj (in 165 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Replication/UltraSim.Game.Replication.csproj (in 165 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Replication.Remote/UltraSim.Game.Replication.Remote.csproj (in 165 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Chat/UltraSim.Game.Chat.csproj (in 165 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Server/ConceptDemo.LocalHost/UltraSim.Server.ConceptDemo.LocalHost.csproj (in 165 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Server/ConceptDemo/UltraSim.Server.ConceptDemo.csproj (in 165 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Persistence/UltraSim.Game.Persistence.csproj (in 165 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Combat.Contracts/UltraSim.Game.Combat.Contracts.csproj (in 165 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Client/Sound/UltraSim.Client.Sound.csproj (in 165 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Kernels/Audio/UltraSim.Audio.csproj (in 2 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Kernels/ECS/UltraSim.ECS.csproj (in 2 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Framework/Http/Endpoint/UltraSim.Framework.Http.Endpoint.csproj (in 2 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Bridges/Http.Kestrel/UltraSim.Bridges.Http.Kestrel.csproj (in 2 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Server/Persistence/UltraSim.Server.Persistence.csproj (in 2 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Contracts/UltraSim.Game.Contracts.csproj (in 2 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Admission/UltraSim.Game.Admission.csproj (in 3 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Client/BuiltInTestWorlds/UltraSim.Client.BuiltInTestWorlds.csproj (in 3 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Accounting/UltraSim.Game.Accounting.csproj (in 2 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Client/Network/UltraSim.Client.Network.csproj (in 4 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Kernels/UI/UltraSim.UI.csproj (in 1 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Client/StandardUi/UltraSim.Client.StandardUi.csproj (in 2 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Server/Hosting/UltraSim.Server.Hosting.csproj (in 3 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Framework/Definitions/UltraSim.Framework.Definitions.csproj (in 1 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Protocol/UltraSim.Game.Protocol.csproj (in 3 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Items.Contracts/UltraSim.Game.Items.Contracts.csproj (in 2 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Kernels/Spatial/UltraSim.Spatial.csproj (in 1 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Server/Runtime/UltraSim.Server.Runtime.csproj (in 1 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Inventory/UltraSim.Game.Inventory.csproj (in 2 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Physics/UltraSim.Game.Physics.csproj (in 2 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Client/Content/UltraSim.Client.Content.csproj (in 3 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Client/ControlPlane/UltraSim.Client.ControlPlane.csproj (in 3 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Game/Composition/UltraSim.Game.Composition.csproj (in 3 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Client/Local/UltraSim.Client.Local.csproj (in 7 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Client/Core/UltraSim.Client.Core.csproj (in 3 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Kernels/Network.Generators/UltraSim.Network.Generators.csproj (in 195 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Kernels/ECS.Generators/UltraSim.ECS.Generators.csproj (in 15 ms).
+  Restored /mnt/data/mega/Godot Projects/UltraSim/Client/Godot/UltraSim.Client.Application.Godot.csproj (in 9 ms).
+Godot Engine v4.7.1.stable.mono.official.a13da4feb - https://godotengine.org
+
+[   0% ] [90m[1mfirst_scan_filesystem[22m | Started Project initialization (5 steps)[39m[0m
+[   0% ] [90m[1mfirst_scan_filesystem[22m | Scanning file structure...[39m[0m
+[  16% ] [90m[1mfirst_scan_filesystem[22m | Loading global class names...[39m[0m
+[  33% ] [90m[1mfirst_scan_filesystem[22m | Verifying GDExtensions...[39m[0m
+[  50% ] [90m[1mfirst_scan_filesystem[22m | Creating autoload scripts...[39m[0m
+[  66% ] [90m[1mfirst_scan_filesystem[22m | Initializing plugins...[39m[0m
+[  83% ] [90m[1mfirst_scan_filesystem[22m | Starting file scan...[39m[0m
+[92m[ DONE ][39m [1mfirst_scan_filesystem[22m
+[0m
+[   0% ] [90m[1mdotnet_publish_project[22m | Started Publishing .NET project... (1 steps)[39m[0m
+[   0% ] [90m[1mdotnet_publish_project[22m | Running dotnet publish[39m[0m
+[92m[ DONE ][39m [1mdotnet_publish_project[22m
+[0m
+[   0% ] [90m[1msavepack[22m | Started Packing (102 steps)[39m[0m
+[   1% ] [90m[1msavepack[22m | Storing File: res://.godot/exported/133200997/export-dfb35b960ad52f07f1587880278069ea-Bootstrap.scn[39m[0m
+[  33% ] [90m[1msavepack[22m | Storing File: res://ClientHost.cs[39m[0m
+[  66% ] [90m[1msavepack[22m | Storing File: res://ClientHost.Remote.cs[39m[0m
+[  66% ] [90m[1msavepack[22m | Storing File: res://Bootstrap.tscn.remap[39m[0m
+[  66% ] [90m[1msavepack[22m | Storing File: res://.godot/global_script_class_cache.cfg[39m[0m
+[  66% ] [90m[1msavepack[22m | Storing File: res://.godot/uid_cache.bin[39m[0m
+[  66% ] [90m[1msavepack[22m | Storing File: res://project.binary[39m[0m
+[92m[ DONE ][39m [1msavepack[22m
+[0m
+OFFICIAL CONTENT PASS package=official.world-local.actor-presentations manifest=e4b767436784db6c42447d4fbbcf58e0c653bd168e81582fa6f1d1962821aaad plan=e6fd8000f009acf952e5f024b28e3a130fd72085e042b97a70ef36bd02b5192a archive=03f77dd361bdf7c9edf564fc92c95ced31aa71378a5d14555cc670b1cda6c554 bytes=4723829 output=/tmp/ultrasim-p9-exported-complete.T3OIWx/Content/Official/ultrasim-official-actors-v1.uspkg
+OFFICIAL CABIN PASS package=official.world-local.cabin-p9 manifest=8f1a92abaf6628a254321b0c95465beeba7d540f944d33636760d8bf5c0c6951 plan=ffe83afa4bcfb0d592b8c2a014ec4ab7a887fc8d9d478449a247cfc93e729c51 archive=8b9ac85c948d1005c1b030721d063ac4d061c0d81b46a3610e4a09f59fbdab95 bytes=12071802 output=/tmp/ultrasim-p9-exported-complete.T3OIWx/Content/Official/ultrasim-official-cabin-p9-v1.uspkg

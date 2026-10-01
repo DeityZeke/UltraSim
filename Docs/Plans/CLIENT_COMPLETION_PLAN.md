@@ -1333,7 +1333,7 @@ The Cabin in the Woods is selected as the first real look-and-feel consumer for 
 
 The benchmark should use ordinary world.local/Official presentation rather than renderer-baked art and should exercise, incrementally:
 
-The separate `benchmark-world:cabin-visual/v1` source now authors its own 25-chunk
+The [two-room benchmark evidence](../../_Benchmarks/Baselines/framework-p9-two-room-cabin-visual-benchmark-2026-09-30.md) records the exact authored topology, exported Complete captures, Classic-fingerprint guard and canonical Release pass. The separate `benchmark-world:cabin-visual/v1` source now authors its own 25-chunk
 WorldPack. It preserves Classic Cabin's frozen fingerprint and uses the normal Local
 authority and WorldPack binding. Room A has an exterior door and no window; Room B
 has a physically open east window; the dividing wall has a two-metre open doorway.

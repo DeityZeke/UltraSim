@@ -1,0 +1,61 @@
+{
+  "schema": "framework-p9-two-room-cabin-visual-benchmark/v1",
+  "status": "benchmark-implemented-p9-active",
+  "startingHead": "080a72ae63ec4101021c4290dec670315e69e278",
+  "testedImplementationHead": "d434a5b34a0917ca5dcc4bfc339b5f55f102f6c8",
+  "world": {
+    "definition": "benchmark-world:cabin-visual/v1",
+    "fingerprint": "B0CE72EEE73C3E014733499A9816A608280DFEF6757BD40FB599DB0318E81BDC",
+    "classicCabinFingerprintUnchanged": "80DCF456AD43FD3876D6E5BB6936FD3747E0ECDA23179407753DD393DC981B57",
+    "chunks": 25,
+    "multiInstances": 1,
+    "multiPieces": 19,
+    "frozenStatics": 5,
+    "rooms": 2,
+    "roomAWindows": 0,
+    "roomBWindows": 1,
+    "interiorDoorwayWidthMillimeters": 2000,
+    "floorWidthMillimeters": 8000,
+    "floorDepthMillimeters": 12000,
+    "floorThicknessMillimeters": 100,
+    "interactiveInteriorDoorAdded": false
+  },
+  "presentation": {
+    "officialPackage": "official.world-local.cabin-p9",
+    "manifest": "8f1a92abaf6628a254321b0c95465beeba7d540f944d33636760d8bf5c0c6951",
+    "sameSemanticWorldHash": {"low": "11998795687333834974", "high": "14004041867362825532"},
+    "installedWorldMeshes": 11,
+    "primitiveWorldMeshes": 0,
+    "installedStaticInstances": 22,
+    "primitiveStaticInstances": 25,
+    "renderedChunks": 25,
+    "primitiveWindowReplacesSkinWithFourStructurePieces": true
+  },
+  "environment": {
+    "os": "Linux 7.2.6-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 7 7800X3D",
+    "gpu": "NVIDIA GeForce RTX 4070 Ti SUPER",
+    "gpuDriver": "615.71.09",
+    "godot": "4.7.1 stable Mono OpenGL",
+    "dotnetSdk": "8.0.125",
+    "dotnetRuntime": "8.0.25"
+  },
+  "verification": {
+    "architecture": "pass",
+    "integratedAcceptance": {"passed": 40, "total": 40},
+    "canonicalRelease": "uninterrupted-pass",
+    "completeExport": "pass",
+    "exportedColdVegetationOn": {"captures": 20, "retirement": "clean", "floorVegetationPierces": 0},
+    "exportedWarm": {"captures": 20, "retirement": "clean", "actorSourceBytesFetched": 0}
+  },
+  "raw": {
+    "canonicalReleaseLog": "framework-p9-two-room-cabin-visual-benchmark-2026-09-30/raw/canonical-release.log",
+    "integratedAcceptance": "framework-p9-two-room-cabin-visual-benchmark-2026-09-30/raw/integrated-acceptance.json",
+    "coldCapture": "framework-p9-two-room-cabin-visual-benchmark-2026-09-30/raw/exported-complete-cold-vegetation-on.json",
+    "warmCapture": "framework-p9-two-room-cabin-visual-benchmark-2026-09-30/raw/exported-complete-warm.json",
+    "captureCount": 20
+  },
+  "humanFeelRated": false,
+  "p10OrLaterStarted": false,
+  "pf6Started": false
+}
