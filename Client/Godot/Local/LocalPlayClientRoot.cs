@@ -63,6 +63,14 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             RunF112ProductDogfood();
             return;
         }
+        if (arguments.Contains("--p9-two-room-benchmark", StringComparer.Ordinal))
+        {
+            // Capture mode is handled above. Bare opt-in launch remains interactive and never
+            // retargets Classic Cabin's normal menu entry or persistent save identity.
+            StartLocalCabin(CabinContentVariant.Default, CabinHumanBody.XBot,
+                useConceptDemoWorld: false, useCabinVisualBenchmark: true);
+            return;
+        }
         bool conceptDemoSmoke = arguments.Contains("--d0-0-smoke", StringComparer.Ordinal);
         bool residencySmoke = arguments.Contains("--d0-1-smoke", StringComparer.Ordinal);
         bool farIslandSmoke = arguments.Contains("--d0-2-smoke", StringComparer.Ordinal);
@@ -773,10 +781,13 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         bool useConceptDemoWorld,
         string? guestDisplayName = null,
         ILocalPlayableServerExtensionFactory? serverExtensionFactory = null,
-        bool primitiveOnlyPresentation = false)
+        bool primitiveOnlyPresentation = false,
+        bool useCabinVisualBenchmark = false)
     {
         if (_cabin is not null)
             throw new InvalidOperationException("A local Cabin session is already active.");
+        if (useCabinVisualBenchmark && useConceptDemoWorld)
+            throw new ArgumentException("The visual benchmark and Concept Demo are distinct world roots.");
         BeginSessionLoading("Starting local Cabin authority…");
         CabinContentOracle oracle = CabinContentOracle.Create();
         CabinResolvedContent resolved = variant switch
@@ -804,9 +815,11 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         cabin.Configure(
             oracle,
             resolved,
-            ReadLocalArgument("--f1-12-save-root=") ?? ProjectSettings.GlobalizePath(useConceptDemoWorld
-                ? "user://single-player/concept-demo-d0-0-saves"
-                : "user://single-player/cabin-saves"),
+            ReadLocalArgument("--f1-12-save-root=") ?? ProjectSettings.GlobalizePath(useCabinVisualBenchmark
+                ? "user://single-player/cabin-visual-benchmark-v1-saves"
+                : useConceptDemoWorld
+                    ? "user://single-player/concept-demo-d0-0-saves"
+                    : "user://single-player/cabin-saves"),
             sessionUi,
             human,
             EffectiveSettings,
@@ -816,16 +829,19 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             primitiveOnlyPresentation || ReadLocalArgument("--f1-12-art=") == "primitive",
             PresentationCacheRoot(),
             OfficialContentRoot(),
-            AudioAdapter);
+            AudioAdapter,
+            useCabinVisualBenchmark);
         _cabin = cabin;
         WorldRoot.AddChild(cabin);
         LocalCabinPresentationSnapshot snapshot = cabin.GetPresentationSnapshot();
         if (!snapshot.IsInitialized)
             throw new InvalidOperationException(snapshot.InitializationError ??
                 "The local Cabin consumer did not initialize.");
-        CommitSession(useConceptDemoWorld
-            ? $"Concept Demo — {snapshot.DisplayName} — {human}"
-            : $"Cabin — {variant} — {human}");
+        CommitSession(useCabinVisualBenchmark
+            ? $"Cabin Visual Benchmark v1 — {snapshot.DisplayName} — {human}"
+            : useConceptDemoWorld
+                ? $"Concept Demo — {snapshot.DisplayName} — {human}"
+                : $"Cabin — {variant} — {human}");
     }
 
     private void SubmitGuestAdmission(string name, GameGuestBody body)

@@ -19,7 +19,9 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
     private readonly Mesh _wallEight;
     private readonly Mesh _wallSix;
     private readonly Mesh _wallThree;
+    private Mesh? _windowSix;
     private readonly Mesh _roof;
+    private Mesh? _floor;
     private readonly Mesh _shelf;
     private readonly Mesh _book;
     private readonly Mesh _fallbackStructure;
@@ -117,7 +119,8 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
     public int OptionalWorldMeshCount => _worldMeshes.Count;
     internal StandardMaterial3D? DiagnosticRoofMaterial => _roofMaterial;
     public GodotCatalogWorldAssetResolverSnapshot GetSnapshot() => _disposed ? default :
-        new(21 + _worldMeshes.Count, 18 + (HasOptionalWorldMeshes ? 6 : 0),
+        new(21 + (_floor is null ? 0 : 1) + (_windowSix is null ? 0 : 1) + _worldMeshes.Count,
+            18 + (HasOptionalWorldMeshes ? 6 : 0),
             _materialLeases.Count, WallTextureHash, WallTextureSource, _worldMeshes.Count);
 
     /// <summary>Commit changed materials onto retained meshes. Unchanged groups/instances are untouched.</summary>
@@ -133,6 +136,7 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
             {
                 foreach (Mesh mesh in new[] { _wallEight, _wallSix, _wallThree, _fallbackStructure })
                     ((ArrayMesh)mesh).SurfaceSetMaterial(0, wall.Material);
+                if (_windowSix is ArrayMesh window) window.SurfaceSetMaterial(0, wall.Material);
                 Release(_currentWall); _currentWall = wall; wall = null;
             }
             if (wood.Key != _currentWood!.Key)
@@ -144,6 +148,7 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
                 if (previousRoof is not null) _owned.Release(previousRoof);
                 foreach (Mesh mesh in new[] { _shelf, _book, _door, _chest })
                     ((ArrayMesh)mesh).SurfaceSetMaterial(0, wood.Material);
+                if (_floor is ArrayMesh floor) floor.SurfaceSetMaterial(0, wood.Material);
                 Release(_currentWood); _currentWood = wood; wood = null;
             }
             WallTextureHash = hash; WallTextureSource = source; WallDerivedKey = _currentWall.Key;
@@ -238,9 +243,14 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
             GameWorldStaticVariants.CabinWallEightMeters => WorldMesh("wall-8m", _wallEight),
             GameWorldStaticVariants.CabinWallSixMeters => WorldMesh("wall-6m", _wallSix),
             GameWorldStaticVariants.CabinWallThreeMeters => WorldMesh("wall-3m", _wallThree),
+            GameWorldStaticVariants.CabinWindowSixMeters =>
+                _worldMeshes.TryGetValue(OfficialCabinPresentation.Mesh("wall-6m"), out Mesh? window)
+                    ? window : WindowWallMesh(),
             _ => _fallbackStructure,
         },
-        var id when id.Value == GameWorldStaticDefinitionIds.CabinRoof => WorldMesh("roof", _roof),
+        var id when id.Value == GameWorldStaticDefinitionIds.CabinRoof =>
+            key.Variant == GameWorldStaticVariants.CabinFloorEightByTwelveMeters
+                ? FloorMesh() : WorldMesh("roof", _roof),
         var id when id.Value == GameWorldStaticDefinitionIds.Shelf => WorldMesh("shelf", _shelf),
         var id when id.Value == GameWorldStaticDefinitionIds.Book => WorldMesh("book", _book),
         _ => _fallbackStructure,
@@ -307,6 +317,14 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
     private Mesh WorldMesh(string stem, Mesh fallback) =>
         _worldMeshes.TryGetValue(OfficialCabinPresentation.Mesh(stem), out Mesh? mesh)
             ? mesh : fallback;
+
+    // The floor is a structural benchmark piece; its wood is resolved from the same P9
+    // world.local material. Classic Cabin never creates this additional native resource.
+    private Mesh FloorMesh() => _floor ??= GroundedBox(
+        new Vector3(8f, 0.10f, 12f), _currentWood!.Material);
+
+    private Mesh WindowWallMesh() => _windowSix ??= _owned.Own(
+        GodotMeshGeometry.CreateGroundedWindowWall(_currentWall!.Material));
 
     private void PrepareOptionalWorldMeshes(
         IWorldPresentationGenerationSource generation, GodotDerivedResourceStore derived)

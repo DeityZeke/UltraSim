@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Godot;
 using UltraSim.Client.Core;
+using UltraSim.Game.Composition;
 using UltraSim.Game.World;
 using UltraSim.Spatial;
 
@@ -1066,11 +1067,11 @@ public sealed class GodotWorldRenderer : IDisposable
             foreach (WorldFrozenStaticRecord record in semantic.FrozenStatics)
                 AddStatic(staticGroups, semantic.Info.Key, record.RenderKey, record.Position,
                     record.Orientation, record.Flags, record.Bounds, false,
-                    yAnchor, ref firstStaticY);
+                    yAnchor, _assets is null, ref firstStaticY);
             foreach (WorldMultiFragmentRecord record in semantic.MultiFragments)
                 AddStatic(staticGroups, semantic.Info.Key, record.RenderKey, record.Position,
                     record.Orientation, record.Flags, record.Bounds, true,
-                    yAnchor, ref firstStaticY);
+                    yAnchor, _assets is null, ref firstStaticY);
             _groupingTicks += Stopwatch.GetTimestamp() - groupingStart;
             foreach ((WorldStaticRenderKey key, RenderTransforms transforms) in staticGroups)
             {
@@ -1400,9 +1401,20 @@ public sealed class GodotWorldRenderer : IDisposable
     private static void AddStatic(SortedDictionary<WorldStaticRenderKey, RenderTransforms> groups,
         SpatialChunkKey key, WorldStaticRenderKey renderKey, WorldPosition position,
         WorldYaw orientation, WorldStaticFlags flags, WorldStaticBounds bounds,
-        bool multiFragment, int yAnchor, ref float firstY)
+        bool multiFragment, int yAnchor, bool primitiveFallback, ref float firstY)
     {
-        if ((flags & WorldStaticFlags.Renderable) == 0) return;
+        bool benchmarkWindow = renderKey.DefinitionId.Value == GameWorldStaticDefinitionIds.CabinWall;
+        bool windowSkin = benchmarkWindow &&
+            renderKey.Variant == GameWorldStaticVariants.CabinWindowSixMeters;
+        bool windowStructure = benchmarkWindow && renderKey.Variant is
+            GameWorldStaticVariants.CabinWindowJamb or
+            GameWorldStaticVariants.CabinWindowSill or
+            GameWorldStaticVariants.CabinWindowLintel;
+        // Exact structural bounds provide Primitive's aperture when no catalog resolver is
+        // present. Installed art uses the single painted skin and keeps collider pieces hidden.
+        if (primitiveFallback && windowSkin ||
+            (flags & WorldStaticFlags.Renderable) == 0 && !(primitiveFallback && windowStructure))
+            return;
         if (!groups.TryGetValue(renderKey, out RenderTransforms? transforms))
             groups.Add(renderKey, transforms = new RenderTransforms());
         Transform3D transform = ToLocalTransform(key, position, orientation, yAnchor);

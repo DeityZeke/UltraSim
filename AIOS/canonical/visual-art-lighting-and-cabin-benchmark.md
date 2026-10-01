@@ -1,7 +1,10 @@
 # Visual Art, Lighting, and Cabin Benchmark
 
 **Status:** CANONICAL visual/presentation direction and selected benchmark milestone  
-**Implementation status:** P9 NEXT. P1–P8 provide the client/content/control/audio foundations; this document defines the P9 visual target and test seam, not a claim that the complete lighting system or final art already exists.
+**Implementation status:** P9 ACTIVE. The separate `benchmark-world:cabin-visual/v1`
+WorldPack now supplies the two-room structural laboratory without changing Classic Cabin;
+the optional P9 world.local package supplies its existing art. Native captures and physics
+guards are implementation evidence, not a claim that lighting quality or final art is accepted.
 
 Primary references:
 - [Client Presentation Architecture](../../Docs/Plans/CLIENT_PRESENTATION_ARCHITECTURE.md)

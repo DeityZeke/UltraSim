@@ -79,24 +79,45 @@ public static class GodotMeshGeometry
         using var surface = new SurfaceTool();
         surface.Begin(Mesh.PrimitiveType.Triangles);
         surface.SetMaterial(material);
+        AppendBox(surface, new Vector3(0, size.Y * 0.5f, 0), size);
+        return surface.Commit();
+    }
+
+    /// <summary>Primitive realization of the P9 Room-B structural window opening.</summary>
+    public static ArrayMesh CreateGroundedWindowWall(Material material)
+    {
+        ArgumentNullException.ThrowIfNull(material);
+        using var surface = new SurfaceTool();
+        surface.Begin(Mesh.PrimitiveType.Triangles);
+        surface.SetMaterial(material);
+        // Local X is the six-metre wall run. The four boxes match the v1 WorldPack's
+        // jamb/sill/lintel aperture; the semantic colliders remain authored there.
+        AppendBox(surface, new Vector3(-2.125f, 1.25f, 0), new Vector3(1.75f, 2.5f, .3f));
+        AppendBox(surface, new Vector3(2.125f, 1.25f, 0), new Vector3(1.75f, 2.5f, .3f));
+        AppendBox(surface, new Vector3(0, .55f, 0), new Vector3(2.5f, 1.1f, .3f));
+        AppendBox(surface, new Vector3(0, 2.2f, 0), new Vector3(2.5f, .6f, .3f));
+        return surface.Commit();
+    }
+
+    private static void AppendBox(SurfaceTool surface, Vector3 center, Vector3 size)
+    {
         float x = size.X * 0.5f;
+        float y = size.Y * 0.5f;
         float z = size.Z * 0.5f;
-        Vector3 nbl = new(-x, 0f, -z);
-        Vector3 nbr = new(x, 0f, -z);
-        Vector3 nfl = new(-x, 0f, z);
-        Vector3 nfr = new(x, 0f, z);
-        Vector3 tbl = new(-x, size.Y, -z);
-        Vector3 tbr = new(x, size.Y, -z);
-        Vector3 tfl = new(-x, size.Y, z);
-        Vector3 tfr = new(x, size.Y, z);
+        Vector3 nbl = center + new Vector3(-x, -y, -z);
+        Vector3 nbr = center + new Vector3(x, -y, -z);
+        Vector3 nfl = center + new Vector3(-x, -y, z);
+        Vector3 nfr = center + new Vector3(x, -y, z);
+        Vector3 tbl = center + new Vector3(-x, y, -z);
+        Vector3 tbr = center + new Vector3(x, y, -z);
+        Vector3 tfl = center + new Vector3(-x, y, z);
+        Vector3 tfr = center + new Vector3(x, y, z);
         AddGodotQuad(nbl, nbr, nfr, nfl);
         AddGodotQuad(tbl, tfl, tfr, tbr);
         AddGodotQuad(nbl, tbl, tbr, nbr);
         AddGodotQuad(nbr, tbr, tfr, nfr);
         AddGodotQuad(nfr, tfr, tfl, nfl);
         AddGodotQuad(nfl, tfl, tbl, nbl);
-        return surface.Commit();
-
         void AddGodotQuad(Vector3 a, Vector3 b, Vector3 c, Vector3 d) =>
             AppendCanonicalQuad(surface, a, b, c, d);
     }

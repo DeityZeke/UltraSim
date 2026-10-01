@@ -179,6 +179,7 @@ public partial class LocalCabinClient : Node3D
     // F0.2 acceptance retains the historical Cabin fixture in the maintained application;
     // normal Single Player composition selects the Concept Demo explicitly.
     private bool _useConceptDemoWorld;
+    private bool _useCabinVisualBenchmark;
     private bool _primitiveOnlyPresentation;
     private string? _presentationCacheRoot;
     private string? _officialContentRoot;
@@ -300,7 +301,8 @@ public partial class LocalCabinClient : Node3D
         bool primitiveOnlyPresentation = false,
         string? presentationCacheRoot = null,
         string? officialContentRoot = null,
-        GodotClientAudioAdapter? audio = null)
+        GodotClientAudioAdapter? audio = null,
+        bool useCabinVisualBenchmark = false)
     {
         ArgumentNullException.ThrowIfNull(contentOracle);
         ArgumentNullException.ThrowIfNull(resolvedContent);
@@ -322,6 +324,7 @@ public partial class LocalCabinClient : Node3D
                 ? "Human Female"
                 : "Human Male"));
         _useConceptDemoWorld = useConceptDemoWorld;
+        _useCabinVisualBenchmark = useCabinVisualBenchmark;
         _primitiveOnlyPresentation = primitiveOnlyPresentation;
         _presentationCacheRoot = presentationCacheRoot;
         _officialContentRoot = officialContentRoot;
@@ -1057,10 +1060,12 @@ public partial class LocalCabinClient : Node3D
     {
         if (_saveRoot is null || _resolvedContent is null || _contentOracle is null)
             throw new InvalidOperationException("Cabin composition was not configured.");
-        _localSession = _useConceptDemoWorld
-            ? LocalPlayableSession.CreateConceptDemo(
-                _saveRoot, _guestAdmission, serverExtensionFactory: _serverExtensionFactory)
-            : LocalPlayableSession.CreateCabin(_saveRoot, _guestAdmission);
+        _localSession = _useCabinVisualBenchmark
+            ? LocalPlayableSession.CreateCabinVisualBenchmark(_saveRoot, _guestAdmission)
+            : _useConceptDemoWorld
+                ? LocalPlayableSession.CreateConceptDemo(
+                    _saveRoot, _guestAdmission, serverExtensionFactory: _serverExtensionFactory)
+                : LocalPlayableSession.CreateCabin(_saveRoot, _guestAdmission);
         _localSession.WaitUntilReady(TimeSpan.FromSeconds(10));
         // Command sequencing belongs to the application/control-session lineage. Presentation
         // rebuilds (render-distance changes and Game-generation replacement) must not reset it.

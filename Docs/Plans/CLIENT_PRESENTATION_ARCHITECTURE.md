@@ -496,6 +496,13 @@ The near-term lighting target is direct sun/important lights plus credible shado
 
 The existing deterministic A0.1 Cabin content oracle remains separate evidence. Real-art iteration must not casually rewrite frozen content-oracle fingerprints.
 
+P9's opt-in `benchmark-world:cabin-visual/v1` is a distinct authored WorldPack, not a
+replacement for Classic Cabin. It carries the two-room walls, continuous support floor,
+exterior/interior door apertures, a real Room-B window aperture and a bookshelf blocker.
+The existing removable `official.world-local.cabin-p9` package realizes compatible art;
+Primitive uses the same structural truth. Native capture supports Room A/Room B time-of-day
+controls, but does not yet certify perceived light spill or final visual quality.
+
 ---
 
 

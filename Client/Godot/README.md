@@ -140,6 +140,13 @@ changing the persisted user setting; `--f1-11-vegetation` provides the On contro
 Complete, not a PCK resource. Classic Cabin remains one authoritative room, so these captures
 cannot serve as a two-room Room B/doorway acceptance result.
 
+The separate P9 two-room benchmark is selected with `--p9-two-room-benchmark`. On its own,
+the flag starts an interactive Local session with an isolated benchmark save root; with
+`--f1-12-cabin-preview --f1-12-cabin-evidence=<absolute-directory>`, it captures Room A,
+the interior doorway, Room B, the blocker/window, time-of-day comparisons and same-session
+Primitive. The WorldPack is distinct from Classic Cabin; the existing optional P9 art package
+is reused. `--p9-no-vegetation` is the deterministic floor/lighting control.
+
 Settings → **Show Advanced** exposes **Experimental Vegetation / grass (next world entry)**
 directly beneath the Advanced checkbox (rather than below the long display-dimension section).
 It is device-owned, persisted and default Off. `--f1-11-vegetation` force-enables it for diagnostics;

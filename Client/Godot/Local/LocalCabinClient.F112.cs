@@ -23,6 +23,39 @@ public partial class LocalCabinClient
             throw new InvalidOperationException("Cabin capture presentation mode was not realized.");
     }
 
+    public void PrepareP9CabinVisualBenchmarkCapture()
+    {
+        // The P9 pack deliberately has a raised, collidable floor. F1.12's Classic-only
+        // diagnostic relocation to Y=0 inside the shell is not a valid benchmark action.
+        // Keep this visual path on its own authored world, without changing that older smoke.
+        PrepareF112CentralControl();
+        var snapshot = GetPresentationSnapshot();
+        if (snapshot.Actors.ActiveActors == 0 || snapshot.Renderer.ActiveRenderChunks == 0)
+            throw new InvalidOperationException("The two-room benchmark was not realized.");
+        if (_renderer is null || _cache is null)
+            throw new InvalidOperationException("The benchmark native world owner is unavailable.");
+        int grassPatches = 0;
+        for (int z = -2; z <= 2; z++)
+        for (int x = -2; x <= 2; x++)
+        {
+            var key = new UltraSim.Spatial.SpatialChunkKey(GameWorldState.DefaultSpace, x, z);
+            if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle) ||
+                !_renderer.TryGetVegetation(handle, out GodotVegetationChunk? batch)) continue;
+            grassPatches += batch!.Count;
+            for (int index = 0; index < batch.Count; index++)
+            {
+                Vector3 local = batch.MultiMesh.GetInstanceTransform(index).Origin;
+                float globalX = x * 16f + local.X;
+                float globalZ = z * 16f + local.Z;
+                if (globalX is >= 12f and < 20f && globalZ is >= 9f and < 21f)
+                    throw new InvalidOperationException(
+                        "Vegetation crossed a chunk seam and pierced the authored Cabin floor.");
+            }
+        }
+        if (OS.GetCmdlineUserArgs().Contains("--f1-11-vegetation") && grassPatches == 0)
+            throw new InvalidOperationException("The opt-in vegetation control was not exercised.");
+    }
+
     public void UseF112PrimitivePreview()
     {
         if (_presentationGeneration is null || _assetResolver is null || _actorVisuals is null ||
@@ -51,10 +84,16 @@ public partial class LocalCabinClient
             "Exterior" => (new Vector3(8, 6, 1), new Vector3(16, 1, 12)),
             "ExteriorHigh" => (new Vector3(6, 9, 2), new Vector3(16, 1, 12)),
             "ExteriorLow" => (new Vector3(10, 2.4f, 6), new Vector3(16, 1.5f, 12)),
+            "WindowSide" when _useCabinVisualBenchmark =>
+                (new Vector3(24, 3, 18), new Vector3(20, 2.5f, 18)),
             "WindowSide" => (new Vector3(24, 3, 12), new Vector3(19, 1.2f, 12)),
             "Doorway" => (new Vector3(16, 1.6f, 6), new Vector3(16, 1.4f, 12)),
             "Interior" => (new Vector3(16, 1.6f, 10), new Vector3(16, 1.4f, 14)),
             "Shelf" => (new Vector3(16.5f, 1.6f, 12.5f), new Vector3(18.5f, 1.2f, 14)),
+            "RoomA" => (new Vector3(16, 1.65f, 11), new Vector3(16, 1.4f, 15)),
+            "InteriorDoorway" => (new Vector3(16, 1.65f, 13), new Vector3(16, 1.4f, 18)),
+            "RoomB" => (new Vector3(16, 1.65f, 17), new Vector3(19.5f, 1.7f, 18)),
+            "Blocker" => (new Vector3(15, 1.65f, 18), new Vector3(18.5f, 1.6f, 18)),
             _ => throw new ArgumentOutOfRangeException(nameof(view)),
         };
         Vector3 origin = new(_player.GlobalXMillimeters * .001f, _player.YMillimeters * .001f,

@@ -30,6 +30,8 @@ Run("W5CanonicalTwoPackAuthorityAndPersistence", W5CanonicalTwoPackAuthorityAndP
 Run("ConceptDemoLegacySaveFailsClosedUnderCanonicalAuthority",
     ConceptDemoLegacySaveFailsClosedUnderCanonicalAuthority, results);
 Run("PlayableCabinHasCanonicalRectangularShell", PlayableCabinHasCanonicalRectangularShell, results);
+Run("P9CabinVisualBenchmarkIsSeparateAndStructurallyTwoRoom",
+    P9CabinVisualBenchmarkIsSeparateAndStructurallyTwoRoom, results);
 Run("PlayableAuthorityBlocksCabinDoorWallsAndChest", PlayableAuthorityBlocksCabinDoorWallsAndChest, results);
 Run("ConceptDemoWorldCombinesFloatingBaseCaveAndSkyShells",
     ConceptDemoWorldCombinesFloatingBaseCaveAndSkyShells, results);
@@ -762,6 +764,146 @@ static TestMetrics PlayableCabinHasCanonicalRectangularShell()
 
     WorldMultiFragmentRecord Piece(uint id) => fragments.Single(
         row => row.PieceId == new MultiPieceId(id));
+}
+
+static TestMetrics P9CabinVisualBenchmarkIsSeparateAndStructurallyTwoRoom()
+{
+    const string classicFingerprint =
+        "80DCF456AD43FD3876D6E5BB6936FD3747E0ECDA23179407753DD393DC981B57";
+    const string benchmarkV1Fingerprint =
+        "B0CE72EEE73C3E014733499A9816A608280DFEF6757BD40FB599DB0318E81BDC";
+    WorldPack classic = GamePlayableWorld.CreateWorldPack();
+    WorldPack benchmark = GameCabinVisualBenchmarkWorldPack.Create();
+    Expect(classic.Fingerprint.ToString() == classicFingerprint,
+        "The accepted Classic Cabin pack changed while adding the visual benchmark.");
+    Expect(benchmark.Fingerprint != classic.Fingerprint && benchmark.ChunkCount == 25,
+        "The versioned benchmark must be a distinct, bounded authored WorldPack.");
+    Expect(benchmark.Fingerprint.ToString() == benchmarkV1Fingerprint,
+        "The versioned v1 benchmark bytes changed without a new authored identity.");
+    WorldPack repeated = GameCabinVisualBenchmarkWorldPack.Create();
+    Expect(repeated.Fingerprint == benchmark.Fingerprint,
+        "The benchmark WorldPack is not deterministic.");
+    byte[] bytes = new byte[benchmark.Length];
+    benchmark.CopyTo(bytes);
+    Expect(WorldPack.TryOpen(bytes, WorldPackLimits.Default, GameContent.WorldFingerprint,
+        out WorldPack? reopened, out _) && reopened!.Fingerprint == benchmark.Fingerprint,
+        "The benchmark WorldPack cannot be reopened from its exact bytes.");
+
+    var pieces = new Dictionary<uint, WorldMultiFragmentRecord>();
+    for (int z = -2; z <= 2; z++)
+    for (int x = -2; x <= 2; x++)
+    {
+        if (!benchmark.TryGetMultiFragments(
+                new SpatialChunkKey(GameWorldState.DefaultSpace, x, z),
+                out WorldMultiFragmentChunkView fragments)) continue;
+        for (int index = 0; index < fragments.Count; index++)
+        {
+            WorldMultiFragmentRecord piece = fragments.GetRecord(index);
+            Expect(piece.MultiId == new MultiInstanceId(1) &&
+                pieces.TryAdd(piece.PieceId.Value, piece),
+                "The benchmark has a duplicate or unowned structural fragment.");
+        }
+    }
+    Expect(pieces.Count == 19 && benchmark.MultiInstanceCount == 1,
+        "The authored two-room shell is incomplete.");
+    WorldMultiFragmentRecord westDoor = pieces[1], eastDoor = pieces[2];
+    WorldMultiFragmentRecord westDivider = pieces[7], eastDivider = pieces[8];
+    Expect(westDoor.Bounds.MaximumXExclusiveMillimeters == 15_001 &&
+        eastDoor.Bounds.MinimumXMillimeters == 17_000 &&
+        westDivider.Bounds.MaximumXExclusiveMillimeters == 15_001 &&
+        eastDivider.Bounds.MinimumXMillimeters == 17_000,
+        "The exterior or interior doorway does not have a real two-metre opening.");
+    Expect(pieces[3].Variant == GameWorldStaticVariants.CabinWallThreeMeters &&
+        pieces[4].Variant == GameWorldStaticVariants.CabinWallThreeMeters &&
+        pieces[5].Variant == GameWorldStaticVariants.CabinWallThreeMeters &&
+        pieces[6].Variant == GameWorldStaticVariants.CabinWallThreeMeters,
+        "Room A unexpectedly has a windowed side wall.");
+    Expect(pieces[12].Variant == GameWorldStaticVariants.CabinWindowSixMeters &&
+        pieces[12].Flags == WorldStaticFlags.Renderable &&
+        pieces.Values.Count(piece => piece.DefinitionId.Value == GameWorldStaticDefinitionIds.CabinWall &&
+            piece.Variant == GameWorldStaticVariants.CabinWindowSixMeters &&
+            (piece.Flags & WorldStaticFlags.Renderable) != 0) == 1,
+        $"Room B must have exactly one visual window without a fake solid collider: " +
+        $"variant={pieces[12].Variant} flags={pieces[12].Flags} " +
+        $"visuals={pieces.Values.Count(piece => piece.DefinitionId.Value == GameWorldStaticDefinitionIds.CabinWall && piece.Variant == GameWorldStaticVariants.CabinWindowSixMeters && (piece.Flags & WorldStaticFlags.Renderable) != 0)}.");
+    bool InWindow(WorldMultiFragmentRecord piece, long x, long y, long z) =>
+        (piece.Flags & WorldStaticFlags.Collidable) != 0 &&
+        piece.Bounds.MinimumXMillimeters <= x && x < piece.Bounds.MaximumXExclusiveMillimeters &&
+        piece.Bounds.MinimumYMillimeters <= y && y < piece.Bounds.MaximumYExclusiveMillimeters &&
+        piece.Bounds.MinimumZMillimeters <= z && z < piece.Bounds.MaximumZExclusiveMillimeters;
+    Expect(!pieces.Values.Any(piece => InWindow(piece, 20_000, 2_500, 18_000)) &&
+        pieces.Values.Any(piece => InWindow(piece, 20_000, 1_500, 18_000)) &&
+        pieces.Values.Any(piece => InWindow(piece, 20_000, 3_100, 18_000)),
+        "The Room B window aperture is not physically open between sill and lintel.");
+    Expect(pieces[17].Variant == GameWorldStaticVariants.CabinFloorEightByTwelveMeters &&
+        WorldStaticPhysicalSemantics.SupportsTop(pieces[17].Flags) &&
+        pieces[17].Bounds.MinimumZMillimeters == 9_000 &&
+        pieces[17].Bounds.MaximumZExclusiveMillimeters == 21_001 &&
+        pieces[17].Bounds.MaximumYExclusiveMillimeters == 1_100,
+        "Both rooms require one continuous real, walkable authored floor.");
+    Expect(benchmark.FrozenStaticCount == 5,
+        "The bookshelf blocker and exterior pine/rock controls are incomplete.");
+    var composition = new UltraSimGameComposition(new InventoryLimits(32, 128, 32),
+        baseWorldPack: benchmark);
+    using var host = new InternalHost(composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_10B9))));
+    host.Start();
+    ServerRuntime runtime = host.RuntimeForTesting;
+    using var admission = new AdmissionService(runtime.Game, composition);
+    AdmissionResult entered = admission.JoinAccountless(new ParticipantId(0x10B9));
+    GamePlayableWorldEntities actor = default;
+    Expect(entered.IsEntered &&
+        runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+            (world, _, game) => GamePlayableWorld.Populate(world, game, entered.Entity),
+            out actor),
+        "The normal Local authority could not compose the benchmark Pack.");
+    host.Tick();
+    GameWorldActionStatus roomA = Relocate(16_000, 12_000);
+    GameWorldActionStatus doorway = Relocate(16_000, 15_000);
+    GameWorldActionStatus roomB = Relocate(16_000, 18_000);
+    Expect(roomA == GameWorldActionStatus.Accepted &&
+        doorway == GameWorldActionStatus.Accepted &&
+        roomB == GameWorldActionStatus.Accepted,
+        $"The authored floor/interior doorway does not admit the actor: " +
+        $"RoomA={roomA}, doorway={doorway}, RoomB={roomB}.");
+    Expect(Relocate(16_000, 12_000) == GameWorldActionStatus.Accepted,
+        "The actor could not start an ordinary walk from Room A.");
+    var sequencer = new ClientWorldInputSequencer();
+    var direct = new PlayableOfflineDirectLink(runtime.Game, actor.PlayerId,
+        sequencer.ControlSession);
+    Expect(sequencer.TryCreateSemanticCommand(new ClientWorldCommandIntent(
+            GameLocomotionUpdate.CreateDirect(0, GamePlayerCommand.MaximumAxisMagnitude),
+            GamePlayerActions.None, true), out GamePlayerCommand walk) &&
+        direct.ApplyCommand(walk).WasAdmitted,
+        "The benchmark could not admit an ordinary Local movement command.");
+    for (int step = 0; step < 50; step++) host.Tick();
+    WorldPosition walked = direct.ReadPosition();
+    Expect(walked.GlobalZMillimeters > 15_500 && walked.YMillimeters == 1_100,
+        $"The actor could not walk across the open interior doorway on the floor: {walked}.");
+    Expect(sequencer.TryCreateSemanticCommand(new ClientWorldCommandIntent(
+            GameLocomotionUpdate.Stop, GamePlayerActions.None, true),
+            out GamePlayerCommand stop) && direct.ApplyCommand(stop).WasAdmitted,
+        "The benchmark could not stop ordinary Local movement.");
+    Expect(Relocate(20_000, 12_000) == GameWorldActionStatus.Blocked &&
+        Relocate(18_500, 18_000) == GameWorldActionStatus.Blocked,
+        "The windowless wall or bookshelf blocker is not authoritative collision.");
+    return new TestMetrics(benchmark.Fingerprint.ToString(), 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "Separate v1 WorldPack; two rooms; no Room-A window; one physical Room-B window; " +
+        "open interior doorway and actual walk; authored floor; bookshelf blocker; exact Classic fingerprint retained.",
+        WorldPackBytes: benchmark.Length);
+
+    GameWorldActionStatus Relocate(long x, long z)
+    {
+        Expect(WorldPosition.TryFromGlobalMillimeters(x, 1_100, z,
+            out WorldPosition position), "The benchmark probe position was invalid.");
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider,
+            GameWorldActionStatus>((world, _, game) => game.WorldActions.RelocateActor(
+                world, game.WorldState, ResolveInWorld(world, actor.PlayerId),
+                position, out WorldPosition _), out GameWorldActionStatus status),
+            "The benchmark authority was unavailable.");
+        return status;
+    }
 }
 
 static TestMetrics PlayableAuthorityBlocksCabinDoorWallsAndChest()

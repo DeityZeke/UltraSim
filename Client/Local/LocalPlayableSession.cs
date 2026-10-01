@@ -83,6 +83,14 @@ public sealed class LocalPlayableSession : IDisposable
         return Create(pack, saveRoot, guestAdmission, limits, conceptDemo: false);
     }
 
+    /// <summary>Opt-in P9 visual laboratory using the normal packet-free Local authority.</summary>
+    public static LocalPlayableSession CreateCabinVisualBenchmark(
+        string saveRoot,
+        in GameGuestAdmissionRequest guestAdmission,
+        LocalPlayableSessionLimits limits = default) =>
+        Create(GameCabinVisualBenchmarkWorldPack.Create(), saveRoot, guestAdmission,
+            limits, conceptDemo: false);
+
     /// <summary>Creates the permanent local application path over the sparse Concept Demo world.</summary>
     public static LocalPlayableSession CreateConceptDemo(
         string saveRoot,

@@ -30,7 +30,14 @@ public static class GameWorldStaticVariants
     public const ushort CabinWallEightMeters = 1;
     public const ushort CabinWallSixMeters = 2;
     public const ushort CabinWallThreeMeters = 3;
+    public const ushort CabinWindowSixMeters = 4;
+    public const ushort CabinWindowJamb = 5;
+    public const ushort CabinWindowSill = 6;
+    public const ushort CabinWindowLintel = 7;
     public const ushort CabinRoofEightBySixMeters = 1;
+    // The P9 benchmark's structural, walkable slab uses the existing horizontal shell
+    // definition without changing the Classic Cabin content profile or its pack bytes.
+    public const ushort CabinFloorEightByTwelveMeters = 2;
     public const ushort MountainWallEightMeters = 100;
     public const ushort MountainWallTenMeters = 101;
     public const ushort FallbackLabPedestal = 200;

@@ -2,6 +2,7 @@ using Godot;
 using UltraSim.Client.Core;
 using UltraSim.Game.Composition;
 using UltraSim.Game.World;
+using UltraSim.Spatial;
 
 namespace UltraSim.Client.Godot;
 
@@ -19,6 +20,7 @@ public sealed class GodotVegetation : IDisposable
     private readonly ShaderMaterial _material;
     private readonly ArrayMesh _mesh;
     private readonly ClientVegetationPatch[] _scratch = new ClientVegetationPatch[ClientVegetationScatter.MaximumPatchesPerChunk];
+    private readonly bool[] _coveredByRoof = new bool[ClientVegetationScatter.MaximumPatchesPerChunk];
 
     public GodotVegetation()
     {
@@ -61,29 +63,46 @@ public sealed class GodotVegetation : IDisposable
         ClientSemanticChunkHandle handle, in ClientSemanticChunkView semantic, int yAnchor)
     {
         int count = ClientVegetationScatter.Prepare(cache, handle, WorldSeed, _scratch);
+        Array.Clear(_coveredByRoof, 0, count);
+        // Multi fragments have one home chunk even when their exact bounds cover neighboring
+        // terrain chunks. Check the finite 3x3 halo, not just this chunk's fragment list;
+        // otherwise grass appears through a floor/roof on the other side of a chunk seam.
+        SpatialChunkKey home = semantic.Info.Key;
+        for (int dz = -1; dz <= 1; dz++)
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            long nx = (long)home.Coord.X + dx, nz = (long)home.Coord.Z + dz;
+            if (nx is < int.MinValue or > int.MaxValue ||
+                nz is < int.MinValue or > int.MaxValue) continue;
+            var neighbor = new SpatialChunkKey(home.Space, (int)nx, (int)nz);
+            bool found = cache.PreparedComposition is { } composition
+                ? composition.TryGetMultiFragments(neighbor, out WorldMultiFragmentChunkView fragments)
+                : cache.PreparedWorld.TryGetMultiFragments(neighbor, out fragments);
+            if (!found) continue;
+            for (int pieceIndex = 0; pieceIndex < fragments.Count; pieceIndex++)
+            {
+                WorldMultiFragmentRecord piece = fragments.GetRecord(pieceIndex);
+                if (piece.DefinitionId.Value != GameWorldStaticDefinitionIds.CabinRoof) continue;
+                WorldStaticBounds bounds = piece.Bounds;
+                for (int patchIndex = 0; patchIndex < count; patchIndex++)
+                {
+                    ClientVegetationPatch patch = _scratch[patchIndex];
+                    long globalX = (long)home.Coord.X * GameWorldSpatialProfile.WorldChunkEdgeUnits +
+                        patch.LocalXMillimeters;
+                    long globalZ = (long)home.Coord.Z * GameWorldSpatialProfile.WorldChunkEdgeUnits +
+                        patch.LocalZMillimeters;
+                    if (globalX >= bounds.MinimumXMillimeters &&
+                        globalX < bounds.MaximumXExclusiveMillimeters &&
+                        globalZ >= bounds.MinimumZMillimeters &&
+                        globalZ < bounds.MaximumZExclusiveMillimeters)
+                        _coveredByRoof[patchIndex] = true;
+                }
+            }
+        }
         int visible = 0;
         for (int index = 0; index < count; index++)
         {
-            ClientVegetationPatch patch = _scratch[index];
-            long globalX = (long)semantic.Info.Key.Coord.X *
-                GameWorldSpatialProfile.WorldChunkEdgeUnits + patch.LocalXMillimeters;
-            long globalZ = (long)semantic.Info.Key.Coord.Z *
-                GameWorldSpatialProfile.WorldChunkEdgeUnits + patch.LocalZMillimeters;
-            bool underCabin = false;
-            foreach (WorldMultiFragmentRecord piece in semantic.MultiFragments)
-            {
-                if (piece.DefinitionId.Value != GameWorldStaticDefinitionIds.CabinRoof) continue;
-                WorldStaticBounds bounds = piece.Bounds;
-                if (globalX >= bounds.MinimumXMillimeters &&
-                    globalX < bounds.MaximumXExclusiveMillimeters &&
-                    globalZ >= bounds.MinimumZMillimeters &&
-                    globalZ < bounds.MaximumZExclusiveMillimeters)
-                {
-                    underCabin = true;
-                    break;
-                }
-            }
-            if (!underCabin) _scratch[visible++] = patch;
+            if (!_coveredByRoof[index]) _scratch[visible++] = _scratch[index];
         }
         count = visible;
         if (count == 0) return null;

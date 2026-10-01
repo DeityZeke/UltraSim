@@ -5,6 +5,7 @@ using Godot;
 using UltraSim.Client.BuiltInTestWorlds;
 using UltraSim.Client.Content;
 using UltraSim.Client.Core;
+using UltraSim.Game.Composition;
 
 namespace UltraSim.Client.Godot;
 
@@ -126,15 +127,18 @@ public abstract partial class LocalPlayClientRoot
             if (DisplayServer.GetName() == "headless")
                 throw new InvalidOperationException("Cabin image evidence requires a real native renderer.");
             bool passiveReadyControl = OS.GetCmdlineUserArgs().Contains("--f1-12-passive-ready-control");
+            bool p9Benchmark = OS.GetCmdlineUserArgs().Contains("--p9-two-room-benchmark");
             if (!passiveReadyControl)
             {
                 await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
                 Stage("initial-process-frame");
             }
-            StartLocalCabin(CabinContentVariant.Default, CabinHumanBody.XBot, useConceptDemoWorld: false);
+            StartLocalCabin(CabinContentVariant.Default, CabinHumanBody.XBot,
+                useConceptDemoWorld: false, useCabinVisualBenchmark: p9Benchmark);
             Stage("session-entered");
             LocalCabinClient cabin = _cabin!;
             if (passiveReadyControl) cabin.RunF02Acceptance(); // reproduce the original Ready-time ordering
+            else if (p9Benchmark) cabin.PrepareP9CabinVisualBenchmarkCapture();
             else cabin.PrepareF112CabinCapture();
             Stage("acceptance-complete");
             if (passiveReadyControl)
@@ -157,17 +161,22 @@ public abstract partial class LocalPlayClientRoot
             Stage("physics-frame");
             LocalCabinPresentationSnapshot before = cabin.GetPresentationSnapshot();
             string art = ReadLocalArgument("--f1-12-art=") ?? "installed";
-            bool p9Extended = OS.GetCmdlineUserArgs().Contains("--p9-cabin-extended-capture");
+            bool switchedToPrimitive = art == "installed";
+            bool p9Extended = p9Benchmark ||
+                OS.GetCmdlineUserArgs().Contains("--p9-cabin-extended-capture");
             if (p9Extended && before.PresentationGeneration.WorldMeshSelections != 11)
                 throw new InvalidOperationException("P9 capture requires all eleven optional world meshes.");
             var captures = new List<object>(p9Extended ? 18 : 12);
-            foreach (string view in new[] { "Exterior", "Doorway", "Interior", "Shelf" })
+            foreach (string view in p9Benchmark
+                ? new[] { "Exterior", "Doorway", "RoomA", "InteriorDoorway", "RoomB", "Blocker", "WindowSide" }
+                : new[] { "Exterior", "Doorway", "Interior", "Shelf" })
                 await Capture(view, GodotDiagnosticTimeOfDay.Noon, GodotDiagnosticAtmosphere.Temperate);
             foreach (GodotDiagnosticTimeOfDay time in new[]
                 { GodotDiagnosticTimeOfDay.Dawn, GodotDiagnosticTimeOfDay.Dusk, GodotDiagnosticTimeOfDay.Night })
-                await Capture("Exterior", time, GodotDiagnosticAtmosphere.Temperate);
+                foreach (string view in p9Benchmark ? new[] { "RoomA", "RoomB" } : new[] { "Exterior" })
+                    await Capture(view, time, GodotDiagnosticAtmosphere.Temperate);
             await Capture("Exterior", GodotDiagnosticTimeOfDay.Noon, GodotDiagnosticAtmosphere.Cold);
-            if (p9Extended)
+            if (p9Extended && !p9Benchmark)
             {
                 await Capture("ExteriorHigh", GodotDiagnosticTimeOfDay.Noon,
                     GodotDiagnosticAtmosphere.Temperate);
@@ -184,7 +193,9 @@ public abstract partial class LocalPlayClientRoot
             {
                 cabin.UseF112PrimitivePreview();
                 art = "primitive-same-session";
-                foreach (string view in new[] { "Exterior", "Doorway", "Interior", "Shelf" })
+                foreach (string view in p9Benchmark
+                    ? new[] { "Exterior", "RoomA", "InteriorDoorway", "RoomB", "Blocker", "WindowSide" }
+                    : new[] { "Exterior", "Doorway", "Interior", "Shelf" })
                     await Capture(view, GodotDiagnosticTimeOfDay.Noon, GodotDiagnosticAtmosphere.Temperate);
             }
             LocalCabinPresentationSnapshot after = cabin.GetPresentationSnapshot();
@@ -192,20 +203,29 @@ public abstract partial class LocalPlayClientRoot
                 before.ControlSessionEpoch != after.ControlSessionEpoch ||
                 before.SemanticWorld.WorldSemanticHash != after.SemanticWorld.WorldSemanticHash)
                 throw new InvalidOperationException("Environment preview replaced the authoritative session.");
+            if (p9Benchmark && switchedToPrimitive &&
+                (before.PresentationGeneration.WorldMeshSelections != 11 ||
+                 after.PresentationGeneration.WorldMeshSelections != 0 ||
+                 after.Renderer.ActiveInstances != before.Renderer.ActiveInstances + 3))
+                throw new InvalidOperationException(
+                    "Primitive did not replace the single painted window skin with four structural aperture pieces.");
             RetireCurrentSession();
             ReturnToMainMenu("F1.12 Cabin preview retired.");
             await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
             RequireCleanSessionBoundary(in baseline, "F1.12 Cabin preview");
             Stage("retirement-clean");
             System.IO.File.WriteAllText(System.IO.Path.Combine(directory, "evidence.json"),
-                JsonSerializer.Serialize(new { Schema = p9Extended
-                        ? "client-p9-cabin-preview/v1" : "client-f1.12-cabin-preview/v2",
+                JsonSerializer.Serialize(new { Schema = p9Benchmark
+                        ? "client-p9-two-room-benchmark/v1" : p9Extended
+                            ? "client-p9-cabin-preview/v1" : "client-f1.12-cabin-preview/v2",
                     SourceHead = ReadLocalArgument("--f1-12-head="),
+                    BenchmarkDefinition = p9Benchmark
+                        ? GameCabinVisualBenchmarkWorldPack.DefinitionId : null,
                     Art = ReadLocalArgument("--f1-12-art=") ?? "installed", DisplayBackend = DisplayServer.GetName(),
                     before, after, captures,
                     P9PackageManifest = p9Extended
                         ? OfficialCabinPresentation.Manifest.ManifestHash.ToString() : null,
-                    MissingAuthoredGeometry = p9Extended
+                    MissingAuthoredGeometry = p9Benchmark ? Array.Empty<string>() : p9Extended
                         ? new[] { "Secondary room", "Interior doorway" }
                         : new[] { "Secondary room", "Interior doorway", "Window" },
                     FinalBoundary = CaptureSessionBoundary(), HumanFeelRated = false },

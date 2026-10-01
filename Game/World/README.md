@@ -20,6 +20,13 @@ The current Concept Demo prepares two declared Packs and one complete canonical
 Pack survives only as a pre-W7 remote structural-delivery compatibility payload;
 Cabin remains a separate one-Pack fixture.
 
+P9 also has an opt-in, separately versioned `benchmark-world:cabin-visual/v1`
+one-Pack fixture in `GameCabinVisualBenchmarkWorldPack`. It uses the same WorldPack/v1
+codec and Game content binding, but is not the Classic Cabin oracle or normal product
+world. Its two rooms, continuous collidable floor, two genuine door openings, one window
+aperture and bookshelf are authored structure. The P9 `world.local` package changes
+only presentation; the benchmark's Pack fingerprint is frozen by integrated acceptance.
+
 The canonical forward composition is specified in
 [Docs/Plans/WORLD_COMPOSITION.md](../../Docs/Plans/WORLD_COMPOSITION.md):
 
