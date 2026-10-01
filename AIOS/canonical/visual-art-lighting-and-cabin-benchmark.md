@@ -504,3 +504,30 @@ These should be settled through the Cabin benchmark and measured client evidence
 ## 18. Core rule
 
 > **The Cabin should be both a real piece of UltraSim and a permanent visual laboratory: intended art in the real content pipeline, authoritative semantics unchanged, and lighting/atmosphere sophisticated enough to prove the direction without requiring full GI.**
+
+
+## 19. P9 implementation checkpoint
+
+The current P9 implementation now has two deliberately separate artifacts:
+
+~~~text
+Classic Cabin
+    accepted one-room regression/oracle fixture
+    unchanged fingerprints and semantics
+
+Cabin Visual Benchmark v1
+    separate deterministic two-room WorldPack
+    authored floor
+    Room A exterior doorway / no window
+    open interior doorway
+    Room B structural exterior window
+    bookshelf blocker
+~~~
+
+The benchmark reuses the removable P9 world.local art package and supports same-session Primitive fallback. It is opt-in and does not replace normal Concept Demo composition.
+
+Mechanical acceptance proves structure, movement through the interior doorway, content/fallback identity, native retirement and unchanged Classic Cabin history. It does not by itself establish that daylight spill, blocker behavior, material style or overall composition meet the intended look.
+
+P9 therefore remains ACTIVE pending human review of the actual product captures/runtime.
+
+One evidence point worth scrutinizing during that review: the committed Room A Dawn, Noon and Dusk images are byte-identical, while Room B's corresponding captures differ. This may reflect the current lighting/environment realization rather than a capture failure, but the benchmark's exterior-door spill goal means it should be visually evaluated before closure rather than treated as automatically acceptable.
