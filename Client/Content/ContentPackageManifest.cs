@@ -184,6 +184,8 @@ public sealed class ContentPackageManifest
                     ContentDefinitionKind.ActorPresentation =>
                         file.Kind == ContentFileKind.ActorGltfBinary,
                     ContentDefinitionKind.AudioClip => file.Kind == ContentFileKind.PcmWav,
+                    ContentDefinitionKind.WorldPresentation =>
+                        file.Kind == ContentFileKind.WorldMeshBinary,
                     _ => false,
                 };
                 if (!kindMatches)
@@ -313,6 +315,7 @@ public static class ContentPackageValidator
         ContentFileKind.ActorGltfBinary =>
             ActorPresentationArtifact.TryInspect(bytes, out _, out _),
         ContentFileKind.PcmWav => ContentAudioArtifact.TryInspect(bytes, out _),
+        ContentFileKind.WorldMeshBinary => WorldMeshArtifact.TryInspect(bytes, out _),
         _ => false,
     };
 

@@ -19,6 +19,7 @@ var tests = new (string Name, Action Body)[]
     ("CanonicalPackageArchiveRoundTripsAndRejectsDamage", CanonicalPackageArchiveRoundTripsAndRejectsDamage),
     ("LocalPackageSourceIsRootedBoundedAndExact", LocalPackageSourceIsRootedBoundedAndExact),
     ("OfficialLocalPresentationIsExactPersistentAndScopeIsolated", OfficialLocalPresentationIsExactPersistentAndScopeIsolated),
+    ("OfficialCabinWorldMeshesArePassiveRemovableAndScopeIsolated", OfficialCabinWorldMeshesArePassiveRemovableAndScopeIsolated),
     ("ActivationIdentityPreservesAuthorityOrderNotByteSource", ActivationIdentityPreservesAuthorityOrderNotByteSource),
     ("DefaultReplaceAddResolveDeterministically", DefaultReplaceAddResolveDeterministically),
     ("ResolutionFailuresAreTransactionalAndDiagnosable", ResolutionFailuresAreTransactionalAndDiagnosable),
@@ -292,6 +293,118 @@ static void OfficialLocalPresentationIsExactPersistentAndScopeIsolated()
                     UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             Directory.Delete(readOnlySourceRoot, recursive: true);
         }
+    }
+}
+
+static void OfficialCabinWorldMeshesArePassiveRemovableAndScopeIsolated()
+{
+    string sourceRoot = Path.Combine(FindRepositoryRoot(), "Client", "OfficialContent");
+    byte[] archive = System.IO.File.ReadAllBytes(Path.Combine(
+        sourceRoot, OfficialCabinPresentation.ArchiveFileName));
+    True(ContentPackageArchive.TryDecodeCanonical(archive,
+        OfficialCabinPresentation.Manifest.PackageId,
+        OfficialCabinPresentation.Manifest.ManifestHash,
+        out FetchedContentPackage? package));
+    Equal(16, package!.Payloads.Count);
+    string root = NewCacheRoot();
+    try
+    {
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out var open), open.ToString());
+        using (cache)
+        {
+            using PresentationGeneration primitive =
+                PresentationGeneration.CreateWithResources(null, null, null, null, null);
+            LogicalContentId pineId = OfficialCabinPresentation.Mesh("pine");
+            Equal(PresentationSourceKind.Primitive, primitive.GetSource(pineId));
+            False(primitive.TryReadWorldMeshPresentation(pineId, out _, out _, out _));
+            True(OfficialCabinPresentation.TryOpenOrAcquire(cache!, sourceRoot,
+                out ContentCatalogLease? local));
+            using (local)
+            {
+                Equal(16 + 6, local!.Catalog.Entries.Count);
+                using PresentationGeneration installed = PresentationGeneration.CreateWithResources(
+                    null, null, null, null,
+                    cache!.TryOpenCatalog(ContentBaseCatalog.Empty,
+                        OfficialCabinPresentation.ActivationKey,
+                        out ContentCatalogLease? selected, out _) ? selected : null);
+                Equal(PresentationSourceKind.Local, installed.GetSource(pineId));
+                True(installed.TryReadWorldMeshPresentation(pineId,
+                    out byte[]? bytes, out ContentHash hash, out var source));
+                Equal(PresentationSourceKind.Local, source);
+                True(WorldMeshArtifact.TryInspect(bytes!, out WorldMeshArtifactInfo mesh));
+                True(mesh.Triangles >= 200);
+                Equal(ContentHash.Compute(bytes), hash);
+                byte[] truncated = bytes![..^1];
+                False(WorldMeshArtifact.TryInspect(truncated, out _));
+                byte[] invalidSlot = bytes.ToArray();
+                BinaryPrimitives.WriteInt32LittleEndian(
+                    invalidSlot.AsSpan(WorldMeshArtifact.HeaderBytes + 48),
+                    WorldMeshArtifact.MaximumMaterialSlots);
+                False(WorldMeshArtifact.TryInspect(invalidSlot, out _));
+                var realm = new ApplicationRealmId(0xC4B1A, 1);
+                False(cache.TryOpenPackage(realm,
+                    package.Manifest.PackageId, package.Manifest.ManifestHash, out _, out _));
+                ulong reused = cache.GetSnapshot().ReusedBlobs;
+                True(cache.TryInstallPackage(realm, package.Manifest, package.Payloads,
+                    out _, out var install), install.ToString());
+                Equal(reused + (ulong)package.Payloads.Count, cache.GetSnapshot().ReusedBlobs);
+
+                ContentScopeKey realmScope = ContentScopeKey.ForRealm(realm);
+                True(ContentActivationPlan.TryCreate(realmScope, new(0xC4B1A, 2),
+                    ContentBaseCatalog.Empty.Fingerprint,
+                    [new ContentActivationPackage(package.Manifest.PackageId,
+                        package.Manifest.ManifestHash, ContentRequirementPolicy.Required)],
+                    out ContentActivationPlan? realmPlan, out var planError), planError);
+                True(cache.TryPublishCatalog(ContentBaseCatalog.Empty, realmPlan!, true,
+                    out ContentCatalogLease? realmCatalog, out var publish), publish.ToString());
+                using (realmCatalog)
+                using (PresentationGeneration realmWins = PresentationGeneration.CreateWithResources(
+                    null, null, null, realmCatalog,
+                    cache.TryOpenCatalog(ContentBaseCatalog.Empty,
+                        OfficialCabinPresentation.ActivationKey,
+                        out ContentCatalogLease? lower, out _) ? lower : null))
+                {
+                    Equal(PresentationSourceKind.Realm, realmWins.GetSource(pineId));
+                    Equal(PresentationSourceKind.Realm,
+                        realmWins.GetSource(OfficialCabinPresentation.Material("wood")));
+                    var user = UserTexturePackage("userpack.p9-wood",
+                        "cabin-p9:texture/wood", "textures/wood.png", 0x47);
+                    True(cache.TryInstallUserResourcePack(user.Manifest, user.Payloads,
+                        out _, out var userInstall), userInstall.ToString());
+                    True(cache.TrySetEnabledUserResourcePacks([UserIdentity(user)], out var selectedUser),
+                        selectedUser.ToString());
+                    True(cache.TryOpenEnabledUserResourcePacks(out UserResourcePackStackLease? stack,
+                        out var stackError), stackError.ToString());
+                    using (stack)
+                    using (PresentationGeneration userWins = PresentationGeneration.CreateWithResources(
+                        stack, null, null,
+                        cache.TryOpenCatalog(ContentBaseCatalog.Empty,
+                            new ContentScopeActivationKey(realmPlan!.ScopeActivation, realmPlan.PlanHash),
+                            out ContentCatalogLease? upper, out _) ? upper : null,
+                        cache.TryOpenCatalog(ContentBaseCatalog.Empty,
+                            OfficialCabinPresentation.ActivationKey,
+                            out ContentCatalogLease? baseLease, out _) ? baseLease : null))
+                    {
+                        Equal(PresentationSourceKind.User,
+                            userWins.GetSource(Logical("cabin-p9:texture/wood")));
+                        Equal(PresentationSourceKind.Realm, userWins.GetSource(pineId));
+                    }
+                    True(cache.TrySetEnabledUserResourcePacks([], out var disabled),
+                        disabled.ToString());
+                }
+            }
+        }
+        True(ContentCache.TryOpen(root, out ContentCache? reopened,
+            out var reopen), reopen.ToString());
+        using (reopened)
+        {
+            True(OfficialCabinPresentation.TryOpenOrAcquire(reopened!, null, out var warm));
+            using (warm) Equal(16 + 6, warm!.Catalog.Entries.Count);
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
     }
 }
 

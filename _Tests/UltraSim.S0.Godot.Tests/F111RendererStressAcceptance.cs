@@ -39,6 +39,7 @@ public partial class F111RendererStressAcceptance : Node3D
                 Expect(OfficialLocalPresentation.TryOpenOrAcquire(cache, officialRoot, out var actorCatalog, out _),
                     "Stress consumer requires the removable Official actor package.");
                 actorCatalog!.Dispose();
+                P9OptionalWorldOwnership(cache, officialRoot, root);
                 foreach (int count in Native ? new[] { 1000, 5000, 10000 } : new[] { 100 })
                 {
                     var fixture = CreateFixture(count);
@@ -70,6 +71,38 @@ public partial class F111RendererStressAcceptance : Node3D
         }
         catch (Exception e) { GD.PushError($"F1.11 FAIL: {e}"); GetTree().Quit(1); }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    private void P9OptionalWorldOwnership(ContentCache cache, string officialRoot, string root)
+    {
+        Expect(OfficialCabinPresentation.TryOpenOrAcquire(cache, officialRoot, out var cabinCatalog),
+            $"P9 world art could not be acquired through world.local: root={officialRoot} " +
+            $"archive={File.Exists(Path.Combine(officialRoot, OfficialCabinPresentation.ArchiveFileName))} " +
+            $"manifest={OfficialCabinPresentation.Manifest.ManifestHash} cache={cache.GetSnapshot()}.");
+        using var generation = PresentationGeneration.CreateWithResources(
+            null, null, null, null, cabinCatalog);
+        using var derived = new GodotDerivedResourceStore(root,
+            GodotDerivedResourcePolicy.ProductionStandalone("f111-p9-world"));
+        var assets = new GodotCatalogWorldAssetResolver(generation, derived);
+        Expect(assets.OptionalWorldMeshCount == 11,
+            "A P9 authored mesh was not realized through the shared resolver.");
+        IGodotWorldAssetResolver resolver = assets;
+        Mesh pine = resolver.ResolveStaticMesh(new WorldStaticRenderKey(
+            new(GameWorldStaticDefinitionIds.Tree), 0, WorldStaticFlags.Renderable)).Mesh!;
+        Mesh roof = resolver.ResolveStaticMesh(new WorldStaticRenderKey(
+            new(GameWorldStaticDefinitionIds.CabinRoof), 0, WorldStaticFlags.Renderable)).Mesh!;
+        Material ground = resolver.ResolveTerrainMaterial(GameTerrainMaterialIds.Grass)!;
+        Expect(pine.NativeInstance != IntPtr.Zero && roof.NativeInstance != IntPtr.Zero &&
+            ground.NativeInstance != IntPtr.Zero && pine.GetSurfaceCount() > 0 &&
+            roof.GetSurfaceCount() > 0,
+            "P9 renderer-derived mesh/material wrappers were not realized.");
+        _rows.Add(new { kind = "p9-optional-world", optionalMeshes = assets.OptionalWorldMeshCount,
+            snapshot = assets.GetSnapshot(), pineSurfaceCount = pine.GetSurfaceCount(),
+            roofSurfaceCount = roof.GetSurfaceCount() });
+        assets.Dispose();
+        Expect(pine.NativeInstance == IntPtr.Zero && roof.NativeInstance == IntPtr.Zero &&
+            ground.NativeInstance == IntPtr.Zero,
+            "P9 renderer-derived wrappers survived explicit owner retirement.");
     }
 
     private void Parity(ContentCache cache, CabinLocalPresentationContent local, CabinContentOracle oracle, string root)

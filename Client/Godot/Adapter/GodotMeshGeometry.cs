@@ -1,4 +1,5 @@
 using Godot;
+using UltraSim.Client.Content;
 
 namespace UltraSim.Client.Godot;
 
@@ -8,6 +9,49 @@ namespace UltraSim.Client.Godot;
 /// </summary>
 public static class GodotMeshGeometry
 {
+    /// <summary>Realizes one admitted passive mesh; the caller owns the returned native wrapper.</summary>
+    public static ArrayMesh CreateWorldPresentationMesh(
+        ReadOnlySpan<byte> bytes, IReadOnlyList<Material> materials)
+    {
+        if (!WorldMeshArtifact.TryInspect(bytes, out WorldMeshArtifactInfo info) ||
+            materials.Count < info.MaterialSlots)
+            throw new InvalidDataException("The optional world mesh or material set is invalid.");
+        ArrayMesh? result = null;
+        try
+        {
+            for (int slot = 0; slot < info.MaterialSlots; slot++)
+            {
+                using var surface = new SurfaceTool();
+                surface.Begin(Mesh.PrimitiveType.Triangles);
+                surface.SetMaterial(materials[slot]);
+                int emitted = 0;
+                for (int index = 0; index < info.Vertices; index += 3)
+                {
+                    if (!WorldMeshArtifact.TryReadVertex(bytes, index, out WorldMeshVertex first))
+                        throw new InvalidDataException("The admitted world mesh changed during realization.");
+                    if (first.MaterialSlot != slot) continue;
+                    for (int vertex = index; vertex < index + 3; vertex++)
+                    {
+                        if (!WorldMeshArtifact.TryReadVertex(bytes, vertex, out WorldMeshVertex point))
+                            throw new InvalidDataException("The admitted world mesh changed during realization.");
+                        surface.SetNormal(new Vector3(point.NormalX, point.NormalY, point.NormalZ));
+                        surface.SetUV(new Vector2(point.U, point.V));
+                        surface.SetColor(new Color(point.Red, point.Green, point.Blue, point.Alpha));
+                        surface.AddVertex(new Vector3(point.X, point.Y, point.Z));
+                        emitted++;
+                    }
+                }
+                if (emitted != 0) result = surface.Commit(result);
+            }
+            return result ?? throw new InvalidDataException("The world mesh contains no surfaces.");
+        }
+        catch
+        {
+            result?.Dispose();
+            throw;
+        }
+    }
+
     /// <summary>
     /// Converts one canonical UltraSim triangle to Godot's native front-face order. A future
     /// engine adapter must make its own coordinate/handedness-aware decision rather than copy this.

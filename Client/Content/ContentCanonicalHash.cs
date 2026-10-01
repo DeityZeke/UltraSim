@@ -20,6 +20,7 @@ internal static class ContentCanonicalHash
             case ContentDefinitionKind.ActorPresentation:
             case ContentDefinitionKind.WorldStructuralManifest:
             case ContentDefinitionKind.AudioClip:
+            case ContentDefinitionKind.WorldPresentation:
                 AppendString(hash, definition.PrimaryFile.Value!);
                 break;
             case ContentDefinitionKind.Material:

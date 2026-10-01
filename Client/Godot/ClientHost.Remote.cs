@@ -818,6 +818,11 @@ public partial class ClientHost
         bool expectOfficialFallback = OS.GetCmdlineUserArgs().Contains(
             "--f1-4-expect-local-fallback", StringComparer.Ordinal);
         var presentation = snapshot.Session.Presentation.Generation;
+        string? officialRoot = ResolveOfficialContentRoot();
+        bool p9SourcePresent = expectOfficialFallback && officialRoot is not null &&
+            File.Exists(Path.Combine(officialRoot,
+                UltraSim.Client.Content.OfficialCabinPresentation.ArchiveFileName));
+        bool p9Selected = presentation.WorldMeshSelections == 11;
         if (!cold && !warm ||
             snapshot.Camera.Rig != EffectiveSettings.CameraRig ||
             snapshot.Camera.TargetFrameProjection.Projection !=
@@ -830,7 +835,10 @@ public partial class ClientHost
             snapshot.ActorResources.RealizationFailures != 0 ||
             !snapshot.WorldWallTextureHash.IsValid ||
             snapshot.WorldWallTextureSource != UltraSim.Client.Content.PresentationSourceKind.Realm ||
-            snapshot.WorldResources.LiveTextures != 2 || snapshot.WorldResources.LiveMaterials != 2 ||
+            snapshot.WorldResources.LiveTextures != (p9Selected ? 7 : 2) ||
+            snapshot.WorldResources.LiveMaterials != (p9Selected ? 8 : 2) ||
+            presentation.WorldMeshSelections is not (0 or 11) ||
+            p9SourcePresent && (!p9Selected || presentation.LocalResourceSelections != 11) ||
             snapshot.Actors.VisibleNameplates < 2 || snapshot.Actors.VisibleOverheadLabels < 1 ||
             snapshot.Session.PublicPresentation.Applied == 0 ||
             snapshot.Session.PublicPresentation.ProofsQueued == 0 ||

@@ -91,6 +91,7 @@ fi
 official_root="$output_dir/Content/Official"
 if [[ "$edition" == "Online" ]]; then
   rm -f -- "$official_root/ultrasim-official-actors-v1.uspkg"
+  rm -f -- "$official_root/ultrasim-official-cabin-p9-v1.uspkg"
 else
   dotnet run \
     --project "$script_dir/../../_Tools/OfficialContentBuilder/UltraSim.OfficialContentBuilder.csproj" \

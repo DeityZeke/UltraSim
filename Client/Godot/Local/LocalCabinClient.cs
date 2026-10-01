@@ -67,7 +67,8 @@ public readonly record struct LocalCabinPresentationSnapshot(
     GodotDerivedResourceStoreSnapshot DerivedResources,
     PresentationSourceKind WallTextureSource,
     GodotDerivedResourceKey WallDerivedKey,
-    GodotGameplayCameraSnapshot Camera);
+    GodotGameplayCameraSnapshot Camera,
+    GodotCatalogWorldAssetResolverSnapshot WorldAssets = default);
 
 /// <summary>
 /// Cold, engine-thread-only observation of the F1.7 category hosts owned by one local gameplay
@@ -327,7 +328,8 @@ public partial class LocalCabinClient : Node3D
         _audio = audio;
         _serverExtensionFactory = serverExtensionFactory;
         _settings = settings ?? ClientSettingsResolver.Resolve(ClientSettingsDocument.Empty);
-        _vegetationForSession = _settings.ExperimentalVegetation || OS.GetCmdlineUserArgs().Contains("--f1-11-vegetation");
+        _vegetationForSession = !OS.GetCmdlineUserArgs().Contains("--p9-no-vegetation") &&
+            (_settings.ExperimentalVegetation || OS.GetCmdlineUserArgs().Contains("--f1-11-vegetation"));
     }
 
     public void SetGameplayInputAllowed(bool allowed)
@@ -533,7 +535,8 @@ public partial class LocalCabinClient : Node3D
             _derivedResources?.GetSnapshot() ?? default,
             _assetResolver?.WallTextureSource ?? default,
             _assetResolver?.WallDerivedKey ?? default,
-            _cameraRig?.GetSnapshot() ?? default);
+            _cameraRig?.GetSnapshot() ?? default,
+            _assetResolver?.GetSnapshot() ?? default);
     }
 
     private LocalCabinUiOwnershipSnapshot GetUiOwnershipSnapshot() => new(
@@ -4410,6 +4413,29 @@ public partial class LocalCabinClient : Node3D
             throw new InvalidOperationException(
                 $"The Cabin world.local presentation could not be published: {publishError}.");
         _cabinPresentationKey = local.ActivationKey;
+        // Keep the accepted A0.1 resource definitions live as the lower layer. P9 adds
+        // world meshes/materials; it must not remove the legacy wall/wood override
+        // identities or change the deterministic oracle activation itself.
+        if (_resolvedContent.Variant == CabinContentVariant.Default &&
+            OfficialCabinPresentation.TryOpenOrAcquire(_presentationCache!,
+                _officialContentRoot, out ContentCatalogLease? paintedCatalog))
+        {
+            paintedCatalog!.Dispose();
+            if (ContentActivationPlan.TryCreate(ContentScopeKey.Local,
+                    new ContentActivationId(0x5039_4341_4249_4E2DUL, 0x414F_312D_4152_5401UL),
+                    ContentBaseCatalog.Empty.Fingerprint,
+                    local.Plan.Packages.Concat(OfficialCabinPresentation.Plan.Packages),
+                    out ContentActivationPlan? combined, out _) &&
+                _presentationCache.TryPublishCatalog(ContentBaseCatalog.Empty,
+                    combined!, persistentlyPinned: true,
+                    out ContentCatalogLease? combinedCatalog, out _))
+            {
+                resourceCatalog!.Dispose();
+                resourceCatalog = combinedCatalog;
+                _cabinPresentationKey = new ContentScopeActivationKey(
+                    combined!.ScopeActivation, combined.PlanHash);
+            }
+        }
         _derivedResources = new GodotDerivedResourceStore(
             _presentationCacheRoot,
             GodotDerivedResourcePolicy.ProductionStandalone(DerivedPlatformProfile()));
@@ -4487,7 +4513,7 @@ public partial class LocalCabinClient : Node3D
                 candidate.Dispose();
                 return;
             }
-            if (_assetResolver is { } currentResolver)
+            if (_assetResolver is { HasOptionalWorldMeshes: false } currentResolver)
                 currentResolver.Refresh(candidate, _derivedResources);
             else candidateResolver = new GodotCatalogWorldAssetResolver(candidate, _derivedResources);
             PresentationGeneration previous = _presentationGeneration;

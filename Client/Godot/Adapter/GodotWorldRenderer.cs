@@ -1034,7 +1034,7 @@ public sealed class GodotWorldRenderer : IDisposable
             if (_vegetation is not null)
             {
                 long started = Stopwatch.GetTimestamp();
-                vegetation = _vegetation.Prepare(_cache, handle, yAnchor);
+                vegetation = _vegetation.Prepare(_cache, handle, semantic, yAnchor);
                 _vegetationPreparationTicks += Stopwatch.GetTimestamp() - started;
                 if (vegetation is not null)
                 {
@@ -1223,6 +1223,7 @@ public sealed class GodotWorldRenderer : IDisposable
         triangleCount = summary.TriangleCount;
         var vertices = new Vector3[TerrainChunkFormat.HeightVertexCount];
         var normals = new Vector3[TerrainChunkFormat.HeightVertexCount];
+        var uv = new Vector2[TerrainChunkFormat.HeightVertexCount];
         for (int index = 0; index < vertices.Length; index++)
         {
             TerrainBaseMeshVertex source = _terrainVertices[index];
@@ -1231,6 +1232,11 @@ public sealed class GodotWorldRenderer : IDisposable
                 checked((long)source.AbsoluteYMillimeters - yAnchor) * MillimetersToMeters,
                 source.LocalZMillimeters * MillimetersToMeters);
             normals[index] = new Vector3(source.NormalX, source.NormalY, source.NormalZ).Normalized();
+            uv[index] = new Vector2(
+                ((long)key.Coord.X * GameWorldSpatialProfile.WorldChunkEdgeUnits +
+                    source.LocalXMillimeters) / 3000f,
+                ((long)key.Coord.Z * GameWorldSpatialProfile.WorldChunkEdgeUnits +
+                    source.LocalZMillimeters) / 3000f);
         }
         firstLocalY = vertices[0].Y;
 
@@ -1262,6 +1268,7 @@ public sealed class GodotWorldRenderer : IDisposable
                 arrays.Resize((int)Mesh.ArrayType.Max);
                 arrays[(int)Mesh.ArrayType.Vertex] = vertices;
                 arrays[(int)Mesh.ArrayType.Normal] = normals;
+                arrays[(int)Mesh.ArrayType.TexUV] = uv;
                 arrays[(int)Mesh.ArrayType.Index] = indices.ToArray();
                 mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
                 Material? resolved = _assets?.ResolveTerrainMaterial(material);
@@ -1294,6 +1301,7 @@ public sealed class GodotWorldRenderer : IDisposable
         triangleCount = summary.TriangleCount;
         var vertices = new Vector3[summary.VertexCount];
         var normals = new Vector3[summary.VertexCount];
+        var uv = new Vector2[summary.VertexCount];
         for (int index = 0; index < summary.VertexCount; index++)
         {
             TerrainBaseMeshVertex source = _additionalTerrainVertices[index];
@@ -1302,6 +1310,8 @@ public sealed class GodotWorldRenderer : IDisposable
                 checked((long)source.AbsoluteYMillimeters - yAnchor) * MillimetersToMeters,
                 source.LocalZMillimeters * MillimetersToMeters);
             normals[index] = new Vector3(source.NormalX, source.NormalY, source.NormalZ).Normalized();
+            uv[index] = new Vector2(source.LocalXMillimeters / 3000f,
+                source.LocalZMillimeters / 3000f);
         }
         firstLocalY = vertices.Length == 0 ? float.NaN : vertices[0].Y;
         var trianglesByMaterial = new SortedDictionary<ushort, List<int>>();
@@ -1325,6 +1335,7 @@ public sealed class GodotWorldRenderer : IDisposable
                 arrays.Resize((int)Mesh.ArrayType.Max);
                 arrays[(int)Mesh.ArrayType.Vertex] = vertices;
                 arrays[(int)Mesh.ArrayType.Normal] = normals;
+                arrays[(int)Mesh.ArrayType.TexUV] = uv;
                 arrays[(int)Mesh.ArrayType.Index] = indices.ToArray();
                 mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
                 Material? resolved = _assets?.ResolveTerrainMaterial(material);

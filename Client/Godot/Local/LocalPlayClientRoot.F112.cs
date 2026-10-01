@@ -157,13 +157,29 @@ public abstract partial class LocalPlayClientRoot
             Stage("physics-frame");
             LocalCabinPresentationSnapshot before = cabin.GetPresentationSnapshot();
             string art = ReadLocalArgument("--f1-12-art=") ?? "installed";
-            var captures = new List<object>(12);
+            bool p9Extended = OS.GetCmdlineUserArgs().Contains("--p9-cabin-extended-capture");
+            if (p9Extended && before.PresentationGeneration.WorldMeshSelections != 11)
+                throw new InvalidOperationException("P9 capture requires all eleven optional world meshes.");
+            var captures = new List<object>(p9Extended ? 18 : 12);
             foreach (string view in new[] { "Exterior", "Doorway", "Interior", "Shelf" })
                 await Capture(view, GodotDiagnosticTimeOfDay.Noon, GodotDiagnosticAtmosphere.Temperate);
             foreach (GodotDiagnosticTimeOfDay time in new[]
                 { GodotDiagnosticTimeOfDay.Dawn, GodotDiagnosticTimeOfDay.Dusk, GodotDiagnosticTimeOfDay.Night })
                 await Capture("Exterior", time, GodotDiagnosticAtmosphere.Temperate);
             await Capture("Exterior", GodotDiagnosticTimeOfDay.Noon, GodotDiagnosticAtmosphere.Cold);
+            if (p9Extended)
+            {
+                await Capture("ExteriorHigh", GodotDiagnosticTimeOfDay.Noon,
+                    GodotDiagnosticAtmosphere.Temperate);
+                await Capture("ExteriorLow", GodotDiagnosticTimeOfDay.Noon,
+                    GodotDiagnosticAtmosphere.Temperate);
+                await Capture("WindowSide", GodotDiagnosticTimeOfDay.Noon,
+                    GodotDiagnosticAtmosphere.Temperate);
+                await Capture("ExteriorHigh", GodotDiagnosticTimeOfDay.Noon,
+                    GodotDiagnosticAtmosphere.Temperate, GodotDiagnosticLightingMood.BrightClear);
+                await Capture("Interior", GodotDiagnosticTimeOfDay.Noon,
+                    GodotDiagnosticAtmosphere.Temperate, GodotDiagnosticLightingMood.DarkOppressive);
+            }
             if (art == "installed")
             {
                 cabin.UseF112PrimitivePreview();
@@ -182,27 +198,38 @@ public abstract partial class LocalPlayClientRoot
             RequireCleanSessionBoundary(in baseline, "F1.12 Cabin preview");
             Stage("retirement-clean");
             System.IO.File.WriteAllText(System.IO.Path.Combine(directory, "evidence.json"),
-                JsonSerializer.Serialize(new { Schema = "client-f1.12-cabin-preview/v2",
+                JsonSerializer.Serialize(new { Schema = p9Extended
+                        ? "client-p9-cabin-preview/v1" : "client-f1.12-cabin-preview/v2",
                     SourceHead = ReadLocalArgument("--f1-12-head="),
                     Art = ReadLocalArgument("--f1-12-art=") ?? "installed", DisplayBackend = DisplayServer.GetName(),
-                    before, after, captures, MissingAuthoredGeometry = new[] { "Secondary room", "Interior doorway", "Window" },
+                    before, after, captures,
+                    P9PackageManifest = p9Extended
+                        ? OfficialCabinPresentation.Manifest.ManifestHash.ToString() : null,
+                    MissingAuthoredGeometry = p9Extended
+                        ? new[] { "Secondary room", "Interior doorway" }
+                        : new[] { "Secondary room", "Interior doorway", "Window" },
                     FinalBoundary = CaptureSessionBoundary(), HumanFeelRated = false },
                     new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter() } }));
             GD.Print($"F1.12 CABIN NATIVE PREVIEW PASS captures={captures.Count} retirement=clean");
             RequestApplicationExit(0);
 
-            async Task Capture(string view, GodotDiagnosticTimeOfDay time, GodotDiagnosticAtmosphere atmosphere)
+            async Task Capture(string view, GodotDiagnosticTimeOfDay time,
+                GodotDiagnosticAtmosphere atmosphere,
+                GodotDiagnosticLightingMood mood = GodotDiagnosticLightingMood.Balanced)
             {
-                GodotPresentationEnvironmentSnapshot environment = cabin.ApplyF112EnvironmentPreview(time, atmosphere);
+                GodotPresentationEnvironmentSnapshot environment = cabin.ApplyF112EnvironmentPreview(
+                    time, atmosphere, mood);
                 object truth = cabin.SetF112CabinView(view);
                 Stage($"environment-applied view={view} time={time} atmosphere={atmosphere}");
                 await AwaitF112Boundary(GetTree(), SceneTree.SignalName.ProcessFrame);
-                string name = $"{art}-{view}-{time}-{atmosphere}.png";
+                string name = $"{art}-{view}-{time}-{atmosphere}" +
+                    (mood == GodotDiagnosticLightingMood.Balanced ? "" : $"-{mood}") + ".png";
                 object image = CaptureF112Output(System.IO.Path.Combine(directory, name), Stage);
-                captures.Add(new { art, view, time, atmosphere, name, image, truth,
+                captures.Add(new { art, view, time, atmosphere, mood, name, image, truth,
                     Environment = new { SunRotation = environment.SunRotationDegrees.ToString(), environment.SunEnergy,
                         environment.Shadows, Background = environment.BackgroundColor.ToHtml(),
-                        Ambient = environment.AmbientColor.ToHtml(), environment.AmbientEnergy } });
+                        Ambient = environment.AmbientColor.ToHtml(), environment.AmbientEnergy,
+                        environment.Mood } });
             }
             async Task OriginalDrawWait() =>
                 await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);

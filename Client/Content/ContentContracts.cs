@@ -70,6 +70,8 @@ public enum ContentFileKind : byte
     WorldStructuralManifest = 6,
     /// <summary>Bounded canonical mono PCM16 WAV, validated before native decode.</summary>
     PcmWav = 7,
+    /// <summary>Bounded passive triangle mesh for optional static-world presentation.</summary>
+    WorldMeshBinary = 8,
 }
 
 public enum ContentDefinitionKind : byte
@@ -82,6 +84,7 @@ public enum ContentDefinitionKind : byte
     ActorPresentation = 5,
     WorldStructuralManifest = 6,
     AudioClip = 7,
+    WorldPresentation = 8,
 }
 
 public enum ContentDefinitionOperation : byte
@@ -124,7 +127,7 @@ public readonly record struct ContentFileDescriptor(
     long SizeBytes,
     ContentHash Sha256)
 {
-    public bool IsValid => Path.IsValid && Kind is >= ContentFileKind.PngTexture and <= ContentFileKind.PcmWav &&
+    public bool IsValid => Path.IsValid && Kind is >= ContentFileKind.PngTexture and <= ContentFileKind.WorldMeshBinary &&
         SizeBytes >= 0 && (Kind != ContentFileKind.PcmWav || SizeBytes <= ContentAudioArtifact.MaximumBytes) &&
         Sha256.IsValid && ExtensionMatches(Path, Kind);
 
@@ -153,6 +156,7 @@ public readonly record struct ContentFileDescriptor(
         ContentFileKind.WorldStructuralManifest =>
             path.Value!.EndsWith(".usworldmanifest", StringComparison.Ordinal),
         ContentFileKind.PcmWav => path.Value!.EndsWith(".wav", StringComparison.Ordinal),
+        ContentFileKind.WorldMeshBinary => path.Value!.EndsWith(".usmesh", StringComparison.Ordinal),
         _ => false,
     };
 }
@@ -221,7 +225,8 @@ public sealed class ContentDefinitionDescriptor
         definition = null;
         if (!id.IsValid || kind is not (ContentDefinitionKind.Texture or ContentDefinitionKind.Icon or
                 ContentDefinitionKind.WorldPack or ContentDefinitionKind.ActorPresentation or
-                ContentDefinitionKind.WorldStructuralManifest or ContentDefinitionKind.AudioClip) ||
+                ContentDefinitionKind.WorldStructuralManifest or ContentDefinitionKind.AudioClip or
+                ContentDefinitionKind.WorldPresentation) ||
             operation is not (ContentDefinitionOperation.Add or ContentDefinitionOperation.Replace) ||
             !primaryFile.IsValid) return false;
         definition = new ContentDefinitionDescriptor(id, kind, operation, primaryFile, default);

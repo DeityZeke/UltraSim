@@ -21,4 +21,7 @@ public interface IWorldPresentationGenerationSource
     PresentationSourceKind GetSource(LogicalContentId id);
     bool TryResolveMaterialPresentation(LogicalContentId id,
         out ResolvedMaterialPresentation? presentation, out PresentationResourceResolutionError error);
+    /// <summary>Reads a bounded optional visual mesh through a live authorized catalog.</summary>
+    bool TryReadWorldMeshPresentation(LogicalContentId id, out byte[]? bytes,
+        out ContentHash hash, out PresentationSourceKind source);
 }

@@ -132,6 +132,14 @@ rendered Remote/mixed controls. Capture is cold diagnostic behavior, not gamepla
 a native FPS rating. Latest-frame monitors and shared Local-process CPU must not be labeled
 whole-frame percentiles or dedicated-server cost.
 
+The P9 visual slice reuses that actual-product capture path. Add
+`--p9-cabin-extended-capture` to the Cabin preview for high/low orbit, window-side, mood and
+same-session Primitive comparisons. `--p9-no-vegetation` forces the Off comparison without
+changing the persisted user setting; `--f1-11-vegetation` provides the On control. The optional
+`ultrasim-official-cabin-p9-v1.uspkg` is an external `world.local` package for SinglePlayer and
+Complete, not a PCK resource. Classic Cabin remains one authoritative room, so these captures
+cannot serve as a two-room Room B/doorway acceptance result.
+
 Settings → **Show Advanced** exposes **Experimental Vegetation / grass (next world entry)**
 directly beneath the Advanced checkbox (rather than below the long display-dimension section).
 It is device-owned, persisted and default Off. `--f1-11-vegetation` force-enables it for diagnostics;

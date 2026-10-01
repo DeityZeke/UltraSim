@@ -49,6 +49,9 @@ public partial class LocalCabinClient
         (Vector3 from, Vector3 target) = view switch
         {
             "Exterior" => (new Vector3(8, 6, 1), new Vector3(16, 1, 12)),
+            "ExteriorHigh" => (new Vector3(6, 9, 2), new Vector3(16, 1, 12)),
+            "ExteriorLow" => (new Vector3(10, 2.4f, 6), new Vector3(16, 1.5f, 12)),
+            "WindowSide" => (new Vector3(24, 3, 12), new Vector3(19, 1.2f, 12)),
             "Doorway" => (new Vector3(16, 1.6f, 6), new Vector3(16, 1.4f, 12)),
             "Interior" => (new Vector3(16, 1.6f, 10), new Vector3(16, 1.4f, 14)),
             "Shelf" => (new Vector3(16.5f, 1.6f, 12.5f), new Vector3(18.5f, 1.2f, 14)),
@@ -69,11 +72,12 @@ public partial class LocalCabinClient
             Camera = from.ToString(), Target = target.ToString() };
     }
     public GodotPresentationEnvironmentSnapshot ApplyF112EnvironmentPreview(
-        GodotDiagnosticTimeOfDay time, GodotDiagnosticAtmosphere atmosphere)
+        GodotDiagnosticTimeOfDay time, GodotDiagnosticAtmosphere atmosphere,
+        GodotDiagnosticLightingMood mood = GodotDiagnosticLightingMood.Balanced)
     {
         if (_diagnosticEnvironment is null)
             throw new InvalidOperationException("An explicit diagnostic environment preview is required.");
-        _diagnosticEnvironment.Apply(time, atmosphere, shadows: true);
+        _diagnosticEnvironment.Apply(time, atmosphere, shadows: true, mood);
         return _diagnosticEnvironment.GetSnapshot();
     }
     /// <summary>Cold, opt-in product acceptance; commands use the existing authority bridge.</summary>

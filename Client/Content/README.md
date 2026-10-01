@@ -137,6 +137,7 @@ The current passive manifest permits only:
 - canonical `.usui` compiled UI-definition artifacts retaining UI-kernel key/version/hash identity;
 - typed ActorPresentation definitions backed by the reviewed self-contained binary glTF 2.0
   humanoid profile;
+- typed WorldPresentation definitions backed by bounded passive `.usmesh` triangle data;
 - `Add` and complete `Replace` operations.
 
 Raster admission performs exact path/size/SHA verification plus a bounded passive envelope check;
@@ -149,6 +150,10 @@ the Concept Demo resolver additionally requires the exact ordered 65-bone-name p
 Idle/Walk/Jump clips before an applied-catalog blob lease can reach Godot. The fingerprint covers
 ordered bone names, not parent topology, rest transforms, or inverse-bind matrices; arbitrary
 humanoid retargeting remains unsupported.
+The P9 WorldPresentation artifact carries only finite triangle positions, normals, UVs, vertex
+colors and material slots. It cannot declare collision, support, interaction, WorldStatic identity
+or authority. The optional Cabin package is installed through `world.local`; identical file bytes
+remain usable through Realm/User precedence without turning local scope into remote authority.
 
 Generic Godot resources, scenes, scripts, shaders, executable code, arbitrary GLB/audio, partial
 Patch, dependencies/version solving, and executable extensions remain unsupported. The one actor

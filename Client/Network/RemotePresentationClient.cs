@@ -228,9 +228,22 @@ public sealed class RemotePresentationClient : IRemoteGameProtocolHandler,
         return _generation.TryResolveMaterialPresentation(id, out presentation, out error);
     }
 
-    private ContentCatalogLease? OpenLocalResources() =>
-        _cache.TryOpenCatalog(ContentBaseCatalog.Empty, ClientWorldPresentationProfile.LocalDefault,
+    public bool TryReadWorldMeshPresentation(LogicalContentId id, out byte[]? bytes,
+        out ContentHash hash, out PresentationSourceKind source)
+    {
+        EnsureOperational();
+        return _generation.TryReadWorldMeshPresentation(id, out bytes, out hash, out source);
+    }
+
+    private ContentCatalogLease? OpenLocalResources()
+    {
+        if (_cache.TryOpenCatalog(ContentBaseCatalog.Empty,
+                OfficialCabinPresentation.ActivationKey,
+                out ContentCatalogLease? painted, out _)) return painted;
+        return _cache.TryOpenCatalog(ContentBaseCatalog.Empty,
+            ClientWorldPresentationProfile.LocalDefault,
             out ContentCatalogLease? catalog, out _) ? catalog : null;
+    }
 
     private PresentationGeneration CreateInitialGeneration()
     {

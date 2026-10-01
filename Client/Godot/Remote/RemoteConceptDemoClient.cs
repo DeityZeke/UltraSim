@@ -53,6 +53,7 @@ public readonly record struct RemoteConceptDemoClientSnapshot(
     public ContentHash WorldWallTextureHash { get; init; }
     public PresentationSourceKind WorldWallTextureSource { get; init; }
     public GodotDerivedResourceStoreSnapshot WorldResources { get; init; }
+    public GodotCatalogWorldAssetResolverSnapshot WorldAssets { get; init; }
     /// <summary>Consumer wall stages; creation follows authenticated profile application.</summary>
     public double RequiredWorldReadyMilliseconds { get; init; }
     public double GuestActiveMilliseconds { get; init; }
@@ -255,6 +256,9 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 localCatalog!.Dispose();
                 localPresentationKey = OfficialLocalPresentation.ActivationKey;
             }
+            if (OfficialCabinPresentation.TryOpenOrAcquire(
+                    _cache!, officialContentRoot, out ContentCatalogLease? cabinCatalog))
+                cabinCatalog!.Dispose();
             _source = new HttpContentPackageSource(new ContentPackageSourceLimits(
                 maximumArchiveBytes: 768L * 1024 * 1024,
                 requestTimeoutMilliseconds: 30_000,
@@ -470,6 +474,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             WorldWallTextureHash = _worldAssets?.WallTextureHash ?? default,
             WorldWallTextureSource = _worldAssets?.WallTextureSource ?? PresentationSourceKind.Primitive,
             WorldResources = _worldDerived?.GetSnapshot() ?? default,
+            WorldAssets = _worldAssets?.GetSnapshot() ?? default,
             RequiredWorldReadyMilliseconds = _requiredReadyMilliseconds,
             GuestActiveMilliseconds = _guestActiveMilliseconds,
         };
@@ -755,13 +760,17 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     {
         var source = _session!.Presentation!;
         GodotCatalogWorldAssetResolver? next = null;
-        if (source.GetSource(ClientWorldPresentationProfile.WallMaterial) != PresentationSourceKind.Primitive &&
-            source.GetSource(ClientWorldPresentationProfile.WoodMaterial) != PresentationSourceKind.Primitive)
+        if (source.GetSource(OfficialCabinPresentation.Material("wood")) !=
+                PresentationSourceKind.Primitive ||
+            source.GetSource(ClientWorldPresentationProfile.WallMaterial) !=
+                PresentationSourceKind.Primitive &&
+            source.GetSource(ClientWorldPresentationProfile.WoodMaterial) !=
+                PresentationSourceKind.Primitive)
         {
             _worldDerived ??= new GodotDerivedResourceStore(_cache!.RootPath,
                 GodotDerivedResourcePolicy.ProductionStandalone(
                     $"{(OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux")}-{System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant()}"));
-            if (_worldAssets is not null)
+            if (_worldAssets is { HasOptionalWorldMeshes: false })
             {
                 try { _worldAssets.Refresh(source, _worldDerived); return; }
                 catch (InvalidDataException) { /* Fall back; do not retain stale Realm native art. */ }
@@ -803,8 +812,9 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 "Remote actor presentation requires an authenticated presentation source."));
         _lastPresentationGeneration = _session.Presentation!.CurrentPresentationGeneration;
         RefreshWorldResources();
-        _vegetationForSession = _settings?.ExperimentalVegetation == true ||
-            OS.GetCmdlineUserArgs().Contains("--f1-11-vegetation");
+        _vegetationForSession = !OS.GetCmdlineUserArgs().Contains("--p9-no-vegetation") &&
+            (_settings?.ExperimentalVegetation == true ||
+            OS.GetCmdlineUserArgs().Contains("--f1-11-vegetation"));
         _actorPresenter = new GodotActorPresenter(
             this, ClientActorDefinitionCatalog.ConceptDemo, 64, _actorVisuals);
         _actorPresenter.SetControlledActorPose(

@@ -8,7 +8,7 @@ namespace UltraSim.Client.Godot;
 /// <summary>Shared Local/Remote native world palette. Owns only renderer-derived leases.</summary>
 public readonly record struct GodotCatalogWorldAssetResolverSnapshot(int OwnedMeshes,
     int OwnedPrimitiveMaterials, int LeasedDerivedMaterials, ContentHash WallTextureHash,
-    PresentationSourceKind WallTextureSource);
+    PresentationSourceKind WallTextureSource, int OptionalWorldMeshes = 0);
 
 public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, IDisposable
 {
@@ -37,6 +37,7 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
     private readonly Mesh _fallbackLabModel = null!;
     private StandardMaterial3D? _roofMaterial;
     private readonly List<GodotDerivedMaterialLease> _materialLeases = [];
+    private readonly Dictionary<LogicalContentId, Mesh> _worldMeshes = new();
     private GodotDerivedMaterialLease? _currentWall;
     private GodotDerivedMaterialLease? _currentWood;
     private bool _disposed;
@@ -65,11 +66,18 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
             _fallbackLabPedestal = GroundedBox(new Vector3(2f, 0.4f, 2f), new Color(0.23f, 0.24f, 0.26f));
             _fallbackLabModel = _owned.Own(GodotMeshGeometry.CreateGroundedPointerWedge(
                 0.5f, 0.42f, 0.72f, 1.6f, Material(new Color(0.18f, 0.78f, 0.36f))));
+            LogicalContentId fallbackWood = OfficialCabinPresentation.Material("wood");
+            LogicalContentId wallId = generation.GetSource(
+                ClientWorldPresentationProfile.WallMaterial) == PresentationSourceKind.Primitive
+                ? fallbackWood : ClientWorldPresentationProfile.WallMaterial;
+            LogicalContentId woodId = generation.GetSource(
+                ClientWorldPresentationProfile.WoodMaterial) == PresentationSourceKind.Primitive
+                ? fallbackWood : ClientWorldPresentationProfile.WoodMaterial;
             GodotDerivedMaterialLease wallLease = AcquireMaterial(
-                generation, derived, ClientWorldPresentationProfile.WallMaterial,
+                generation, derived, wallId,
                 out ContentHash wallHash, out PresentationSourceKind wallSource);
             GodotDerivedMaterialLease woodLease = AcquireMaterial(
-                generation, derived, ClientWorldPresentationProfile.WoodMaterial, out _, out _);
+                generation, derived, woodId, out _, out _);
             StandardMaterial3D wall = wallLease.Material;
             StandardMaterial3D wood = woodLease.Material;
             _currentWall = wallLease;
@@ -87,6 +95,7 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
             _fallbackStructure = GroundedBox(new Vector3(1f, 2f, 0.35f), wall);
             _door = GroundedBox(new Vector3(1.6f, 2.1f, 0.22f), wood);
             _chest = GroundedBox(new Vector3(1.2f, 0.8f, 0.8f), wood);
+            PrepareOptionalWorldMeshes(generation, derived);
             if (generation.GetSource(ClientWorldPresentationProfile.BlueGlowMaterial) !=
                 PresentationSourceKind.Primitive)
                 AddedMaterial = AcquireMaterial(
@@ -104,9 +113,12 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
     public PresentationSourceKind WallTextureSource { get; private set; }
     public GodotDerivedResourceKey WallDerivedKey { get; private set; }
     public StandardMaterial3D? AddedMaterial { get; }
+    public bool HasOptionalWorldMeshes => _worldMeshes.Count != 0;
+    public int OptionalWorldMeshCount => _worldMeshes.Count;
     internal StandardMaterial3D? DiagnosticRoofMaterial => _roofMaterial;
     public GodotCatalogWorldAssetResolverSnapshot GetSnapshot() => _disposed ? default :
-        new(21, 18, _materialLeases.Count, WallTextureHash, WallTextureSource);
+        new(21 + _worldMeshes.Count, 18 + (HasOptionalWorldMeshes ? 6 : 0),
+            _materialLeases.Count, WallTextureHash, WallTextureSource, _worldMeshes.Count);
 
     /// <summary>Commit changed materials onto retained meshes. Unchanged groups/instances are untouched.</summary>
     public void Refresh(IWorldPresentationGenerationSource generation, GodotDerivedResourceStore derived)
@@ -208,7 +220,7 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
 
     private Mesh ResolveStaticMeshCore(WorldStaticRenderKey key) => key.DefinitionId switch
     {
-        var id when id.Value == GameWorldStaticDefinitionIds.Tree => _wood,
+        var id when id.Value == GameWorldStaticDefinitionIds.Tree => WorldMesh("pine", _wood),
         var id when id.Value == GameWorldStaticDefinitionIds.Rock => key.Variant switch
         {
             GameWorldStaticVariants.MountainWallEightMeters => _mountainWallEight,
@@ -218,18 +230,19 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
                 GameWorldStaticVariants.FallbackLabModelMissing or
                 GameWorldStaticVariants.FallbackLabTextureMissing or
                 GameWorldStaticVariants.FallbackLabModelAndTextureMissing => _fallbackLabModel,
-            _ => _stone,
+            _ => key.Variant % 2 == 0 ? WorldMesh("rock-a", _stone) :
+                WorldMesh("rock-b", _stone),
         },
         var id when id.Value == GameWorldStaticDefinitionIds.CabinWall => key.Variant switch
         {
-            GameWorldStaticVariants.CabinWallEightMeters => _wallEight,
-            GameWorldStaticVariants.CabinWallSixMeters => _wallSix,
-            GameWorldStaticVariants.CabinWallThreeMeters => _wallThree,
+            GameWorldStaticVariants.CabinWallEightMeters => WorldMesh("wall-8m", _wallEight),
+            GameWorldStaticVariants.CabinWallSixMeters => WorldMesh("wall-6m", _wallSix),
+            GameWorldStaticVariants.CabinWallThreeMeters => WorldMesh("wall-3m", _wallThree),
             _ => _fallbackStructure,
         },
-        var id when id.Value == GameWorldStaticDefinitionIds.CabinRoof => _roof,
-        var id when id.Value == GameWorldStaticDefinitionIds.Shelf => _shelf,
-        var id when id.Value == GameWorldStaticDefinitionIds.Book => _book,
+        var id when id.Value == GameWorldStaticDefinitionIds.CabinRoof => WorldMesh("roof", _roof),
+        var id when id.Value == GameWorldStaticDefinitionIds.Shelf => WorldMesh("shelf", _shelf),
+        var id when id.Value == GameWorldStaticDefinitionIds.Book => WorldMesh("book", _book),
         _ => _fallbackStructure,
     };
 
@@ -247,8 +260,8 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
     private Mesh ResolvePublicMeshCore(uint prefabId) => prefabId switch
     {
         GameWorldPublicPrefabIds.Character or GameWorldPublicPrefabIds.CharacterMale => _character,
-        GameWorldPublicPrefabIds.CabinDoor => _door,
-        GameWorldPublicPrefabIds.WorldChest => _chest,
+        GameWorldPublicPrefabIds.CabinDoor => WorldMesh("door", _door),
+        GameWorldPublicPrefabIds.WorldChest => WorldMesh("chest", _chest),
         GameWorldPublicPrefabIds.WoodlandAnimal => _animal,
         GameWorldPublicPrefabIds.SkyTelepad => _telepad,
         GameWorldPublicPrefabIds.FarGate => _farGate,
@@ -289,6 +302,46 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
         material.Transparency = BaseMaterial3D.TransparencyEnum.Alpha;
         return _owned.Own(GodotMeshGeometry.CreateGroundedPointerWedge(
             0.42f, 0.42f, 0.68f, 1.8f, material));
+    }
+
+    private Mesh WorldMesh(string stem, Mesh fallback) =>
+        _worldMeshes.TryGetValue(OfficialCabinPresentation.Mesh(stem), out Mesh? mesh)
+            ? mesh : fallback;
+
+    private void PrepareOptionalWorldMeshes(
+        IWorldPresentationGenerationSource generation, GodotDerivedResourceStore derived)
+    {
+        if (generation.GetSource(OfficialCabinPresentation.Material("wood")) ==
+            PresentationSourceKind.Primitive)
+            return;
+        string[] families = ["wood", "pine", "stone", "roof", "glass"];
+        var materials = new Material[families.Length];
+        for (int index = 0; index < families.Length; index++)
+        {
+            GodotDerivedMaterialLease lease = AcquireMaterial(generation, derived,
+                OfficialCabinPresentation.Material(families[index]), out _, out _);
+            var display = _owned.Own((StandardMaterial3D)lease.Material.Duplicate());
+            display.VertexColorUseAsAlbedo = true;
+            if (families[index] == "glass")
+            {
+                display.Transparency = BaseMaterial3D.TransparencyEnum.Alpha;
+                display.AlbedoColor = new Color(0.65f, 0.86f, 0.90f, 0.70f);
+            }
+            materials[index] = display;
+        }
+        GodotDerivedMaterialLease groundLease = AcquireMaterial(generation, derived,
+            OfficialCabinPresentation.Material("ground"), out _, out _);
+        _terrain[GameTerrainMaterialIds.Grass] =
+            _owned.Own((StandardMaterial3D)groundLease.Material.Duplicate());
+        foreach (string stem in new[] { "pine", "rock-a", "rock-b", "wall-8m", "wall-6m",
+                     "wall-3m", "roof", "door", "shelf", "book", "chest" })
+        {
+            LogicalContentId id = OfficialCabinPresentation.Mesh(stem);
+            if (!generation.TryReadWorldMeshPresentation(id, out byte[]? bytes,
+                    out _, out _) || bytes is null) continue;
+            var mesh = _owned.Own(GodotMeshGeometry.CreateWorldPresentationMesh(bytes, materials));
+            _worldMeshes.Add(id, mesh);
+        }
     }
 
 }

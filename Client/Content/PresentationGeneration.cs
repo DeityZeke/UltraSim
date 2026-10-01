@@ -43,7 +43,8 @@ public readonly record struct PresentationGenerationSnapshot(
     int RealmResourceSelections = 0,
     int LocalResourceSelections = 0,
     bool RealmResourceLayerPresent = false,
-    bool LocalResourceLayerPresent = false)
+    bool LocalResourceLayerPresent = false,
+    int WorldMeshSelections = 0)
 {
     public bool EffectiveUserLayerPresent => UserSelections != 0 || UserResourceSelections != 0;
 }
@@ -68,6 +69,7 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
     private readonly SelectedActor[] _actors = new SelectedActor[2];
     private readonly SelectedTexture[] _textures = [];
     private readonly SelectedMaterial[] _materials = [];
+    private readonly CatalogSelection[] _worldMeshes = [];
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private int _references = 1;
     private int _ownerRetired;
@@ -134,13 +136,15 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
 
             var lowerTextures = new SortedDictionary<LogicalContentId, CatalogSelection>();
             var lowerMaterials = new SortedDictionary<LogicalContentId, CatalogSelection>();
+            var lowerWorldMeshes = new SortedDictionary<LogicalContentId, CatalogSelection>();
             int userResourceSelections = 0;
             int realmResourceSelections = 0;
             int localResourceSelections = 0;
             AddCatalogResources(localResources, PresentationSourceKind.Local,
-                lowerTextures, lowerMaterials, replace: false);
+                lowerTextures, lowerMaterials, lowerWorldMeshes, replace: false);
             AddCatalogResources(realmResources, PresentationSourceKind.Realm,
-                lowerTextures, lowerMaterials, replace: true);
+                lowerTextures, lowerMaterials, lowerWorldMeshes, replace: true);
+            _worldMeshes = lowerWorldMeshes.Values.ToArray();
 
             var textures = new List<SelectedTexture>(lowerTextures.Count);
             pendingTextures = textures;
@@ -219,6 +223,15 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
                 material.StableResourceFingerprint.WriteDigest(digest);
                 hash.AppendData(digest);
             }
+            foreach (CatalogSelection worldMesh in _worldMeshes)
+            {
+                hash.AppendData([4]);
+                PresentationResourceFingerprint.AppendText(hash, worldMesh.Entry.Id.Value!);
+                worldMesh.Entry.Definition.DefinitionHash.WriteDigest(digest);
+                hash.AppendData(digest);
+                worldMesh.Entry.ReferencedFiles[0].WriteDigest(digest);
+                hash.AppendData(digest);
+            }
             StableFingerprint = ContentHash.FromDigest(hash.GetHashAndReset());
             Snapshot = new PresentationGenerationSnapshot(
                 Generation, StableFingerprint, user is { Identities.Count: > 0 },
@@ -229,7 +242,8 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
                 s_actorIds.Length - _actors.Count(static value => value.Lease is not null),
                 _actors.Length, _textures.Length, _materials.Length,
                 userResourceSelections, realmResourceSelections, localResourceSelections,
-                realmResources is not null, localResources is not null);
+                realmResources is not null, localResources is not null,
+                _worldMeshes.Length);
         }
         catch
         {
@@ -277,6 +291,8 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
             if (texture.Lease.LogicalId == id) return texture.Lease.Source;
         foreach (SelectedMaterial material in _materials)
             if (material.Id == id) return material.Source;
+        foreach (CatalogSelection worldMesh in _worldMeshes)
+            if (worldMesh.Entry.Id == id) return worldMesh.Source;
         return PresentationSourceKind.Primitive;
     }
 
@@ -348,6 +364,43 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
         return Fail(PresentationResourceResolutionError.DefinitionNotFound, out error);
     }
 
+    public bool TryReadWorldMeshPresentation(LogicalContentId id, out byte[]? bytes,
+        out ContentHash hash, out PresentationSourceKind source)
+    {
+        EnsureOwner();
+        bytes = null;
+        hash = default;
+        source = PresentationSourceKind.Primitive;
+        if (!id.IsValid || Volatile.Read(ref _ownerRetired) != 0) return false;
+        foreach (CatalogSelection selection in _worldMeshes)
+        {
+            if (selection.Entry.Id != id) continue;
+            ContentCache? cache = selection.Catalog.Owner;
+            if (cache is null || selection.Entry.ReferencedFiles.Count != 1 ||
+                !cache.TryOpenPackage(selection.Catalog.Catalog.Scope,
+                    selection.Entry.OwnerPackageId, selection.Entry.OwnerManifestHash,
+                    out VerifiedContentPackage? package, out _) ||
+                !package!.Manifest.TryGetFile(selection.Entry.Definition.PrimaryFile,
+                    out ContentFileDescriptor file) ||
+                file.Kind != ContentFileKind.WorldMeshBinary ||
+                file.Sha256 != selection.Entry.ReferencedFiles[0] ||
+                file.SizeBytes > WorldMeshArtifact.MaximumBytes ||
+                !cache.TryOpenBlob(file, out ContentBlobLease? blob, out _))
+                return false;
+            using (blob)
+            {
+                byte[] candidate = new byte[checked((int)file.SizeBytes)];
+                if (!TryReadExact(blob!.Stream, candidate) || blob.Stream.ReadByte() != -1 ||
+                    !WorldMeshArtifact.TryInspect(candidate, out _)) return false;
+                bytes = candidate;
+                hash = file.Sha256;
+                source = selection.Source;
+                return true;
+            }
+        }
+        return false;
+    }
+
     public bool TryResolveActorPresentation(
         LogicalContentId definitionId,
         ActorPresentationResolutionRequirements requirements,
@@ -416,6 +469,7 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
         PresentationSourceKind source,
         SortedDictionary<LogicalContentId, CatalogSelection> textures,
         SortedDictionary<LogicalContentId, CatalogSelection> materials,
+        SortedDictionary<LogicalContentId, CatalogSelection> worldMeshes,
         bool replace)
     {
         if (catalog is null) return;
@@ -425,6 +479,7 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
             {
                 ContentDefinitionKind.Texture => textures,
                 ContentDefinitionKind.Material => materials,
+                ContentDefinitionKind.WorldPresentation => worldMeshes,
                 _ => null,
             };
             if (target is null) continue;

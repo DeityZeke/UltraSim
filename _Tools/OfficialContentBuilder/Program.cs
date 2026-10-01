@@ -47,6 +47,32 @@ Console.WriteLine(
     $"manifest={OfficialLocalPresentation.Manifest.ManifestHash} " +
     $"plan={OfficialLocalPresentation.Plan.PlanHash} archive={Hex(SHA256.HashData(archive))} " +
     $"bytes={archive.Length} output={output}");
+ContentFilePayload[] cabinPayloads = OfficialCabinPresentation.Manifest.Files
+    .Select(file =>
+    {
+        string sourcePath = Path.Combine(assetRoot,
+            OfficialCabinPresentation.AssetPath(file.Path));
+        byte[] data = File.ReadAllBytes(sourcePath);
+        RequireExact(data, file.SizeBytes, file.Sha256.ToString(), file.Path.Value!);
+        if (file.Kind == ContentFileKind.WorldMeshBinary &&
+            !WorldMeshArtifact.TryInspect(data, out _))
+            throw new InvalidOperationException($"The Cabin mesh {file.Path} is invalid.");
+        return new ContentFilePayload(file.Path, data);
+    }).ToArray();
+if (!ContentPackageValidator.TryValidatePayloads(
+        OfficialCabinPresentation.Manifest, cabinPayloads, out _, out string? cabinError) ||
+    !ContentPackageArchive.TryEncodeCanonical(
+        OfficialCabinPresentation.Manifest, cabinPayloads, out byte[] cabinArchive))
+    throw new InvalidOperationException($"The Official Cabin package is invalid: {cabinError}");
+string cabinOutput = Path.Combine(outputRoot, OfficialCabinPresentation.ArchiveFileName);
+if (!File.Exists(cabinOutput) ||
+    !File.ReadAllBytes(cabinOutput).AsSpan().SequenceEqual(cabinArchive))
+    File.WriteAllBytes(cabinOutput, cabinArchive);
+Console.WriteLine(
+    $"OFFICIAL CABIN PASS package={OfficialCabinPresentation.Manifest.PackageId} " +
+    $"manifest={OfficialCabinPresentation.Manifest.ManifestHash} " +
+    $"plan={OfficialCabinPresentation.Plan.PlanHash} archive={Hex(SHA256.HashData(cabinArchive))} " +
+    $"bytes={cabinArchive.Length} output={cabinOutput}");
 return 0;
 
 static void RequireExact(byte[] bytes, long expectedSize, string expectedHash, string actor)

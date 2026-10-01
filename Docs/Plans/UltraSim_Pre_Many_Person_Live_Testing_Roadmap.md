@@ -2,7 +2,7 @@
 
 **Proposed status:** Candidate canonical roadmap / architecture checklist\
 **Current reference baseline:** F1.12-R3 / Gate 0 production closure — `e3a63ea21f8f5ea4fa69e3768a055c409edc8616`; documentation-only commits may advance `main` beyond that closure SHA.\
-**Immediate checkpoint:** P1–P8 are **CLOSED**. [P7's Server Operator Product evidence](../../_Benchmarks/Baselines/framework-p7-server-operator-product-2026-09-30.md) retains its trusted-grant limitation. [P8 audio evidence](../../_Benchmarks/Baselines/framework-p8-audio-kernel-sound-engine-2026-09-30.md) records the engine-neutral kernel and semantic cues, bounded Godot realization, passive `world.local` PCM admission, physical PulseAudio routing, native retirement and uninterrupted canonical Release pass. P9 is **NEXT**; P10–P11 and Gate 1 remain **PLANNED**, and PF6 remains **PLANNED / NOT READY / NOT STARTED**. The previously reproduced warm Official-content Finalizer failure remains closed by [native-lifetime R1 evidence](../../_Benchmarks/Baselines/client-native-lifetime-assurance-r1-2026-09-29.md) and [pre-P5 wrapper hardening](../../_Benchmarks/Baselines/client-native-lifetime-pre-p5-hardening-2026-09-29.md).\
+**Immediate checkpoint:** P1–P8 are **CLOSED**. [P7's Server Operator Product evidence](../../_Benchmarks/Baselines/framework-p7-server-operator-product-2026-09-30.md) retains its trusted-grant limitation. [P8 audio evidence](../../_Benchmarks/Baselines/framework-p8-audio-kernel-sound-engine-2026-09-30.md) records the engine-neutral kernel and semantic cues, bounded Godot realization, passive `world.local` PCM admission, physical PulseAudio routing, native retirement and uninterrupted canonical Release pass. P9 is **ACTIVE**: removable Cabin art and native captures exist, but the requested two-room benchmark is not yet represented by the one-room Classic Cabin authority. P10–P11 and Gate 1 remain **PLANNED**, and PF6 remains **PLANNED / NOT READY / NOT STARTED**. The previously reproduced warm Official-content Finalizer failure remains closed by [native-lifetime R1 evidence](../../_Benchmarks/Baselines/client-native-lifetime-assurance-r1-2026-09-29.md) and [pre-P5 wrapper hardening](../../_Benchmarks/Baselines/client-native-lifetime-pre-p5-hardening-2026-09-29.md).\
 **End state of this document:** UltraSim is ready to move from individual/trusted dogfooding and closed validation into a many-player live test where human feedback is primarily about the intended game rather than known development-harness limitations.
 
 ---
@@ -2034,6 +2034,8 @@ Make the vertical slice audibly representative and prove new Framework/adapter/c
 ---
 
 ## P9 — Representative Cabin visual pass
+
+**Status: ACTIVE, not closed.** An optional `world.local` art package now supplies representative Cabin, pine, rock, ground and prop geometry/materials without changing the accepted A0.1 Cabin oracle or Game identities. The current Classic Cabin authority is one room. Room B, its interior doorway, and the required two-room lighting comparison cannot be claimed from the existing world. A separately versioned authored WorldPack or an explicit scope change is needed before P9 closure; presentation must not silently invent an apparently walkable second room.
 
 ### Goal
 

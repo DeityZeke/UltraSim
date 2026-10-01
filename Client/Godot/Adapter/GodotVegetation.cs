@@ -1,5 +1,7 @@
 using Godot;
 using UltraSim.Client.Core;
+using UltraSim.Game.Composition;
+using UltraSim.Game.World;
 
 namespace UltraSim.Client.Godot;
 
@@ -55,9 +57,35 @@ public sealed class GodotVegetation : IDisposable
         _mesh.SurfaceSetMaterial(0, _material);
     }
 
-    public GodotVegetationChunk? Prepare(ClientWorldSemanticCache cache, ClientSemanticChunkHandle handle, int yAnchor)
+    public GodotVegetationChunk? Prepare(ClientWorldSemanticCache cache,
+        ClientSemanticChunkHandle handle, in ClientSemanticChunkView semantic, int yAnchor)
     {
         int count = ClientVegetationScatter.Prepare(cache, handle, WorldSeed, _scratch);
+        int visible = 0;
+        for (int index = 0; index < count; index++)
+        {
+            ClientVegetationPatch patch = _scratch[index];
+            long globalX = (long)semantic.Info.Key.Coord.X *
+                GameWorldSpatialProfile.WorldChunkEdgeUnits + patch.LocalXMillimeters;
+            long globalZ = (long)semantic.Info.Key.Coord.Z *
+                GameWorldSpatialProfile.WorldChunkEdgeUnits + patch.LocalZMillimeters;
+            bool underCabin = false;
+            foreach (WorldMultiFragmentRecord piece in semantic.MultiFragments)
+            {
+                if (piece.DefinitionId.Value != GameWorldStaticDefinitionIds.CabinRoof) continue;
+                WorldStaticBounds bounds = piece.Bounds;
+                if (globalX >= bounds.MinimumXMillimeters &&
+                    globalX < bounds.MaximumXExclusiveMillimeters &&
+                    globalZ >= bounds.MinimumZMillimeters &&
+                    globalZ < bounds.MaximumZExclusiveMillimeters)
+                {
+                    underCabin = true;
+                    break;
+                }
+            }
+            if (!underCabin) _scratch[visible++] = patch;
+        }
+        count = visible;
         if (count == 0) return null;
         var multi = new MultiMesh
         {
