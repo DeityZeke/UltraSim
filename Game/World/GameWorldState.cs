@@ -466,6 +466,35 @@ public sealed class GameWorldState : IDisposable
         return false;
     }
 
+    /// <summary>
+    /// Validates restored ECS addresses against the structural spaces admitted into a private
+    /// generation. Call before publication: persisted component bytes must not silently create
+    /// a spatial space that this composition cannot serve.
+    /// </summary>
+    public bool TryValidateAdmittedLocations(EcsWorld world,
+        out Entity invalidEntity, out SpatialSpaceId invalidSpace)
+    {
+        EnsureWorld(world);
+        for (uint index = 0; index < (uint)_entityCapacity; index++)
+        {
+            if (!world.TryGetEntity(index, out Entity entity) ||
+                !world.TryRead(entity, _positionLookup, out WorldPositionComponent component))
+                continue;
+            if (!component.TryGetLocation(out WorldLocation location) ||
+                location.Space != DefaultSpace &&
+                !TryGetPreparedSpace(location.Space, out _, out _))
+            {
+                invalidEntity = entity;
+                invalidSpace = component.SpatialSpaceValue == 0
+                    ? DefaultSpace : new SpatialSpaceId(component.SpatialSpaceValue);
+                return false;
+            }
+        }
+        invalidEntity = default;
+        invalidSpace = default;
+        return true;
+    }
+
     public bool TryReadPosition(EcsWorld world, Entity entity, out WorldPosition position)
     {
         EnsureWorld(world);

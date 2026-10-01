@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using UltraSim.ECS;
 using UltraSim.Game.Accounting;
+using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Persistence;
 using UltraSim.Game.Physics;
@@ -123,6 +124,7 @@ var tests = new (string Name, Action Body)[]
     ("WarmedCoordinateMachineAllocatesZero", WarmedCoordinateMachineAllocatesZero),
     ("PositionComponentIsPersistedCanonicalAuthority", PositionComponentIsPersistedCanonicalAuthority),
     ("DistinctSpatialSpacesIsolateMembershipAndPublications", DistinctSpatialSpacesIsolateMembershipAndPublications),
+    ("RestoredAddressCannotNameUnadmittedSpace", RestoredAddressCannotNameUnadmittedSpace),
     ("RuntimeCommitsFinalPositionAfterCompleteEcsStep", RuntimeCommitsFinalPositionAfterCompleteEcsStep),
     ("ComponentRemovalReadditionAndSlotReuseConverge", ComponentRemovalReadditionAndSlotReuseConverge),
     ("SaturatedMigrationMergesIntoExistingDestination", SaturatedMigrationMergesIntoExistingDestination),
@@ -179,6 +181,8 @@ var tests = new (string Name, Action Body)[]
         WorldViewArtifactIsCanonicalBoundedAndFailClosed),
     ("PreparedWorldSaveRestoresExactPackAndOverlayAtomically",
         PreparedWorldSaveRestoresExactPackAndOverlayAtomically),
+    ("UnadmittedRestoredSpaceLeavesCurrentGenerationUntouched",
+        UnadmittedRestoredSpaceLeavesCurrentGenerationUntouched),
 };
 
 foreach ((string name, Action body) in tests)
@@ -3841,6 +3845,64 @@ static void PreparedWorldSaveRestoresExactPackAndOverlayAtomically()
     }
 }
 
+static void UnadmittedRestoredSpaceLeavesCurrentGenerationUntouched()
+{
+    string root = Path.Combine(Path.GetTempPath(), $"ultrasim-space-restore-{Guid.NewGuid():N}");
+    var identity = new PersistenceIdentityOptions(new PersistentWorldId(0x90_0002));
+    SpatialSpaceId benchmarkSpace = new(2);
+    WorldPack classic = GamePlayableWorld.CreateWorldPack();
+    WorldPack benchmark = GameCabinVisualBenchmarkWorldPack.CreateInSpace(benchmarkSpace);
+    try
+    {
+        var sourceComposition = new UltraSimGameComposition(
+            baseWorldPack: classic, additionalSpacePacks: [benchmark]);
+        using (var source = new ServerRuntime(sourceComposition, new ServerRuntimeOptions(
+                   UltraSimGameComposition.CreateWorldOptions(64, identity), WorldClockOptions.Default)))
+        {
+            source.Initialize();
+            source.Start();
+            True(source.Game.TryUseActiveGeneration<GameGenerationState, bool>((world, _, game) =>
+            {
+                if (!sourceComposition.TryCreatePlayable(world, new ParticipantId(1), out Entity actor))
+                    return false;
+                return game.WorldState.TrySetLocation(world, actor,
+                    new WorldLocation(benchmarkSpace,
+                        GamePlayableWorld.CabinBenchmarkArrival));
+            }, out bool moved) && moved);
+            source.Tick();
+            var persistence = new GameRuntimePersistence(source.Game, sourceComposition,
+                TerrainRestoreOptions(), new SaveSetCoordinator(root));
+            GameSaveResult saved = persistence.TrySave(new SaveSetContext(1, 1_800_000_000_000),
+                static capture => capture());
+            if (!saved.Succeeded)
+                throw new InvalidOperationException("The second-space source save failed.", saved.Failure);
+        }
+
+        var targetComposition = new UltraSimGameComposition(baseWorldPack: classic);
+        using var target = new ServerRuntime(targetComposition, new ServerRuntimeOptions(
+            UltraSimGameComposition.CreateWorldOptions(64, identity), WorldClockOptions.Default));
+        target.Initialize();
+        target.Start();
+        ulong before = target.ActiveGenerationId;
+        var loader = new GameRuntimePersistence(target.Game, targetComposition,
+            TerrainRestoreOptions(), new SaveSetCoordinator(root));
+        GameLoadResult result = loader.TryLoad();
+        False(result.Succeeded);
+        True(result.Failure is PersistenceValidationException);
+        Equal(before, target.ActiveGenerationId);
+        True(target.Game.TryUseActiveGeneration<GameGenerationState, bool>((world, _, game) =>
+            !world.IsDisposed &&
+            !game.WorldState.TryGetPreparedSpace(benchmarkSpace,
+                out WorldPreparedView? ignoredWorld,
+                out PreparedWorldComposition? ignoredComposition), out bool unchanged) &&
+            unchanged);
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+}
+
 static WorldMutableOverlay CreateReplacementOverlay(
     BoundWorldPack baseWorld,
     SpatialChunkKey key,
@@ -4439,6 +4501,27 @@ static void DistinctSpatialSpacesIsolateMembershipAndPublications()
         new WorldLocation(new SpatialSpaceId(99), sameCoordinates)));
     True(fixture.State.TryReadLocation(fixture.World, classic, out WorldLocation final));
     Equal(GameWorldState.DefaultSpace, final.Space);
+}
+
+static void RestoredAddressCannotNameUnadmittedSpace()
+{
+    using RawSpatialFixture fixture = new(lifecycleCapacity: 16);
+    True(fixture.World.TryCreate(fixture.SpatialArchetype, out Entity entity));
+    SpatialSpaceId absent = new(2);
+    WorldPosition position = new(0, 0, 1_000, 1_000, 1_000);
+    // Persistence restores canonical component bytes before Game admits a staged generation.
+    // A direct ECS write models that staged state without bypassing the later Game validation.
+    True(fixture.World.TryWrite(entity, fixture.RawPositionLookup,
+        new WorldPositionComponent(new WorldLocation(absent, position))));
+    False(fixture.State.TryValidateAdmittedLocations(fixture.World,
+        out Entity offending, out SpatialSpaceId rejectedSpace));
+    Equal(entity, offending);
+    Equal(absent, rejectedSpace);
+    False(fixture.State.TrySetLocation(fixture.World, entity,
+        new WorldLocation(absent, position)));
+    True(fixture.World.TryWrite(entity, fixture.RawPositionLookup,
+        new WorldPositionComponent(new WorldLocation(GameWorldState.DefaultSpace, position))));
+    True(fixture.State.TryValidateAdmittedLocations(fixture.World, out _, out _));
 }
 
 static void RuntimeCommitsFinalPositionAfterCompleteEcsStep()

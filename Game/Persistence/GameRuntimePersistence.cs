@@ -5,6 +5,7 @@ using UltraSim.Game.World;
 using UltraSim.Server.Persistence;
 using UltraSim.Framework.Persistence;
 using UltraSim.Server.Runtime;
+using UltraSim.Spatial;
 
 namespace UltraSim.Game.Persistence;
 
@@ -190,6 +191,10 @@ public sealed class GameRuntimePersistence
                     built.WorldState, built.Content.World))
                 throw new PersistenceValidationException(
                     "The admitted spatial world views could not be installed into the private staging generation.");
+            if (!built.WorldState.TryValidateAdmittedLocations(stagedWorld,
+                    out Entity invalidEntity, out SpatialSpaceId invalidSpace))
+                throw new PersistenceValidationException(
+                    $"Restored entity {invalidEntity} names unadmitted or invalid spatial space {invalidSpace}.");
             built.Inventory.Rebuild(stagedWorld);
             stagedAccounting = accounting.TakeStore();
             candidate = new GameGenerationState(
