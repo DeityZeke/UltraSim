@@ -33,6 +33,15 @@ The primary invariant is:
 
 Crossing a WorldPack boundary is not a map transition, teleport, loading screen, session transition, SpatialSpace transition, or simulation discontinuity. It only changes which structural artifact backs the relevant global world coordinates.
 
+Game's current Local spatial-transition foundation uses a separate, bounded
+`SpatialSpaceId` for the two-room Cabin benchmark. One Game generation can keep
+participants in different spaces concurrently; `WorldLocation` changes the space and
+position together, after destination occupancy admission. The Local Concept Demo
+telepads provide a same-actor Classic ↔ benchmark journey, and save/load retains the
+current space. The [foundation evidence](../../_Benchmarks/Baselines/framework-p9-spatial-space-foundation-2026-09-30.md) records its tests and limits. This is not yet an Online/Remote protocol capability: the current
+authenticated structural manifest and owner-state stream are single-space, so a
+Remote session cannot be moved to the second space merely by changing Game state.
+
 ## 2. Fixed WorldPack spatial extent
 
 Each WorldPack owns one fixed address envelope:

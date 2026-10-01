@@ -20,12 +20,26 @@ The current Concept Demo prepares two declared Packs and one complete canonical
 Pack survives only as a pre-W7 remote structural-delivery compatibility payload;
 Cabin remains a separate one-Pack fixture.
 
-P9 also has an opt-in, separately versioned `benchmark-world:cabin-visual/v1`
-one-Pack fixture in `GameCabinVisualBenchmarkWorldPack`. It uses the same WorldPack/v1
-codec and Game content binding, but is not the Classic Cabin oracle or normal product
-world. Its two rooms, continuous collidable floor, two genuine door openings, one window
+P9 also has a separately versioned `benchmark-world:cabin-visual/v1` one-Pack fixture
+in `GameCabinVisualBenchmarkWorldPack`. Its frozen default-space artifact is not the
+Classic Cabin oracle. The Local Concept Demo now admits the same authored topology as
+a distinct Space(2) structural root and exposes a pair of authoritative telepads.
+Its two rooms, continuous collidable floor, two genuine door openings, one window
 aperture and bookshelf are authored structure. The P9 `world.local` package changes
-only presentation; the benchmark's Pack fingerprint is frozen by integrated acceptance.
+only presentation; the benchmark's original Pack fingerprint remains frozen.
+
+The per-entity `WorldLocation` couples `SpatialSpaceId` and `WorldPosition` in one
+persisted ECS component. A transition validates destination support and occupancy
+before publishing that component; the actor, participant, Inventory and Equipment
+remain the same. Spatial indexing, public publications, physics, interaction range,
+ground items and spatial Chat use the entity's current space. Save/load reconstructs
+the configured additional root before deriving physical state. The Local client
+reconciles old-space leaves before new-space introductions and replaces its native
+world/semantic projection while keeping its application session and UI. This is a
+Local/Game foundation: remote structural authorization and owner-state protocol still
+admit one space, so Online map transition is not enabled yet. The
+[P9 spatial-space foundation evidence](../../_Benchmarks/Baselines/framework-p9-spatial-space-foundation-2026-09-30.md)
+records the accepted Game/Local tests and explicit remote limitation.
 
 The canonical forward composition is specified in
 [Docs/Plans/WORLD_COMPOSITION.md](../../Docs/Plans/WORLD_COMPOSITION.md):
@@ -458,10 +472,11 @@ cell or chunk object graph.
 `WorldContentBinding` is supplied cold by Composition. A pack becomes a
 `BoundWorldPack` only after its content fingerprint, every structural material
 ID, and every frozen-static definition ID resolve. An optional bound pack is then generation-owned through
-`GameWorldState`; the current single-space game additionally rejects a bound pack
-whose `SpatialSpaceId` is not `GameWorldState.DefaultSpace` before generation
-publication. Default worlds may still run without one until the T0 vertical
-supplies authored content.
+`GameWorldState`. The default structural root remains bound to
+`GameWorldState.DefaultSpace`; a bounded set of additional, distinctly identified
+roots can be admitted by composition before generation publication. A WorldPack
+boundary inside one space remains ordinary structural streaming, not a transition.
+Default worlds may still run without a root until authored content is supplied.
 
 `GameContent.WorldFingerprint` is explicit governance for packed numeric world
 content. It must change whenever the semantic meaning of an admitted material,

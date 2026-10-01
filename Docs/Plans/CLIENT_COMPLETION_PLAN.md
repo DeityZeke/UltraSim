@@ -1343,6 +1343,24 @@ painted wall/roof/wood realization; same-session Primitive keeps the semantic pa
 and window opening. Native capture is diagnostic evidence, not a human rating of
 lighting quality or P9 closure.
 
+The [spatial-space foundation evidence](../../_Benchmarks/Baselines/framework-p9-spatial-space-foundation-2026-09-30.md) records the current, deliberately partial checkpoint. Game now admits
+bounded independent structural roots and persists an actor's space plus position as
+one address. The Local Concept Demo can use its two in-world telepads to travel
+Classic → benchmark → Classic without replacing the actor, Inventory, session or UI;
+the Local projection retires the old structural root and binds the new one. Focused
+Game, Chat, persistence, two-participant and Local session tests cover the transition,
+including a save/load while inside Space(2). This does **not** close P9 or make
+networked map travel available: current Remote structural manifest/Pack authorization
+and owner-state messages remain one-space contracts. That protocol/client migration,
+with actual two-client isolation, cold/warm content acquisition and native resource
+retirement evidence, is still required before calling the multi-map product scenario
+complete. A Pack boundary within either space is not a map change.
+The benchmark root is currently prepared at Local generation startup; the two-trip
+canary proves semantic/native unload and rebind, not cold network acquisition or
+measured warm structural-byte reuse. In normal Single Player Concept Demo play,
+select and use the new telepad near (22 m, 12 m) to enter the two-room Cabin; use
+the pad near (16 m, 7 m) there to return.
+
 - tall pine(s), rocks, grass/ground, log cabin surfaces, real doorway/door, and window art;
 - a two-room interior where the main room has the exterior door and no windows;
 - a secondary room reached through an interior doorway and containing one exterior window;
