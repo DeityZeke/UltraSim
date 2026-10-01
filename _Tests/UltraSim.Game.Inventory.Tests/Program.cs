@@ -845,7 +845,9 @@ static void MostlyEmptyContainersDoNotReserveTheoreticalChildCapacity()
     const int containers = 100_000;
     const int gameplayCapacity = 20;
     var limits = new InventoryLimits(containers, 32, gameplayCapacity);
-    var composition = new UltraSimGameComposition(limits, maximumChunksPerContentArchetype: 256);
+    // The persisted spatial address now includes a 64-bit space identity. Preserve the
+    // 100,000-container workload by explicitly budgeting for its wider ECS row.
+    var composition = new UltraSimGameComposition(limits, maximumChunksPerContentArchetype: 320);
     GameStaging staging = composition.CreateFresh(
         containers + 8,
         new PersistenceIdentityOptions(new PersistentWorldId(0x70_1000)),

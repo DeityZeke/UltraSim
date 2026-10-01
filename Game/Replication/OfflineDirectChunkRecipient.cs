@@ -503,11 +503,18 @@ public sealed class OfflineDirectChunkRecipient
             _previousInterest[index] = _subscriptions[index].Interest;
         AttributeElapsed(ref _previousInterestCopyTicks, phaseStarted);
         phaseStarted = AttributionTimestamp();
+        // Hysteresis belongs to one spatial space. A space transition has no previous
+        // same-space interest, while the retained subscriptions below still supply the
+        // explicit old-space leaves needed for recipient retirement.
+        ReadOnlySpan<ChunkInterestEntry> previousForQuery = _hasLastInterestAnchor &&
+            _lastInterestSpace != space
+                ? ReadOnlySpan<ChunkInterestEntry>.Empty
+                : _previousInterest.AsSpan(0, _subscriptionCount);
         ChunkInterestQueryStatus query = ChunkInterestQuery.TryQuery(
             space,
             anchor,
             _interestProfile,
-            _previousInterest.AsSpan(0, _subscriptionCount),
+            previousForQuery,
             _desiredInterest,
             out int desiredCount,
             out int requiredSubscriptions,

@@ -11,6 +11,7 @@ using UltraSim.Game.Replication;
 using UltraSim.Game.World;
 using UltraSim.Network;
 using UltraSim.Server.Runtime;
+using UltraSim.Spatial;
 
 var tests = new (string Name, Action Body)[]
 {
@@ -23,6 +24,7 @@ var tests = new (string Name, Action Body)[]
     ("GlobalAndSystemRouteWithoutSpatialAuthority", GlobalAndSystemRouteWithoutSpatialAuthority),
     ("NegativeCornerAndCrossChunkRoutingAreExact", NegativeCornerAndCrossChunkRoutingAreExact),
     ("CurrentAuthoritativeMovementChangesLaterAudience", CurrentAuthoritativeMovementChangesLaterAudience),
+    ("SpatialSpeechCannotCrossConcurrentSpaces", SpatialSpeechCannotCrossConcurrentSpaces),
     ("MissingAndPositionlessSpeakersReject", MissingAndPositionlessSpeakersReject),
     ("TextValidationRejectsWithoutTruncation", TextValidationRejectsWithoutTruncation),
     ("RecipientCapacityFailurePublishesNoPartialFact", RecipientCapacityFailurePublishesNoPartialFact),
@@ -759,6 +761,23 @@ static void CurrentAuthoritativeMovementChangesLaterAudience()
     Assert.SequenceEqual(new[] { speaker, east }, fixture.CopyRecipients(after.Speech.Id));
 }
 
+static void SpatialSpeechCannotCrossConcurrentSpaces()
+{
+    using var fixture = new ChatFixture(multiSpace: true);
+    ParticipantId first = fixture.Enter(1, At(16_000, 12_000));
+    ParticipantId second = fixture.Enter(2, At(16_000, 12_000));
+    fixture.MoveSpace(second, new SpatialSpaceId(2), At(16_000, 12_000, 1_100));
+    GameChatSubmissionResult classic = fixture.Chat.Submit(first, "classic", GameSpeechMode.Say);
+    GameChatSubmissionResult interior = fixture.Chat.Submit(second, "interior", GameSpeechMode.Say);
+    Assert.SequenceEqual(new[] { first }, fixture.CopyRecipients(classic.Speech.Id));
+    Assert.SequenceEqual(new[] { second }, fixture.CopyRecipients(interior.Speech.Id));
+    GameChatSubmissionResult global = fixture.Chat.Submit(first, "global", GameSpeechMode.Global);
+    Assert.SequenceEqual(new[] { first, second }, fixture.CopyRecipients(global.Speech.Id));
+    fixture.MoveSpace(first, new SpatialSpaceId(2), At(16_000, 12_000, 1_100));
+    GameChatSubmissionResult joined = fixture.Chat.Submit(second, "joined", GameSpeechMode.Say);
+    Assert.SequenceEqual(new[] { first, second }, fixture.CopyRecipients(joined.Speech.Id));
+}
+
 static void MissingAndPositionlessSpeakersReject()
 {
     using (var fixture = new ChatFixture())
@@ -1029,9 +1048,12 @@ sealed class ChatFixture : IDisposable
     private readonly Dictionary<ParticipantId, Entity> _entities = [];
     private readonly UltraSimGameComposition _composition;
 
-    internal ChatFixture(GameChatLimits? limits = null, int entityCapacity = 64)
+    internal ChatFixture(GameChatLimits? limits = null, int entityCapacity = 64,
+        bool multiSpace = false)
     {
-        _composition = new UltraSimGameComposition();
+        _composition = new UltraSimGameComposition(additionalSpacePacks: multiSpace
+            ? [GameCabinVisualBenchmarkWorldPack.CreateInSpace(new SpatialSpaceId(2))]
+            : null);
         Runtime = TestRuntime.Create(_composition, entityCapacity);
         Admission = new AdmissionService(Runtime.Game, _composition);
         Chat = new GameChatService(Runtime.Game, Admission, limits ?? GameChatLimits.Default);
@@ -1066,6 +1088,17 @@ sealed class ChatFixture : IDisposable
     internal void Move(ParticipantId participant, in WorldPosition position)
     {
         TestRuntime.SetPosition(Runtime, _entities[participant], position);
+        Runtime.Tick();
+    }
+
+    internal void MoveSpace(ParticipantId participant, SpatialSpaceId space,
+        in WorldPosition position)
+    {
+        WorldPosition target = position;
+        Assert.True(Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (world, _, game) => game.WorldState.TrySetLocation(world,
+                _entities[participant], new WorldLocation(space, target)),
+            out bool moved) && moved);
         Runtime.Tick();
     }
 

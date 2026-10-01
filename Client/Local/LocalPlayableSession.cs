@@ -461,7 +461,10 @@ public sealed class LocalPlayableSession : IDisposable
                 new InventoryLimits(32, 128, 32),
                 runtimeProfile: runtimeProfile,
                 baseWorldPack: _worldPack,
-                conceptDemoStructuralSource: _conceptDemoStructuralSource);
+                conceptDemoStructuralSource: _conceptDemoStructuralSource,
+                additionalSpacePacks: _conceptDemo && runtimeProfile == GameRuntimeProfile.Local
+                    ? [GameCabinVisualBenchmarkWorldPack.CreateInSpace(
+                        GamePlayableWorld.CabinBenchmarkSpace)] : null);
             runtime = new ServerRuntime(
                 composition,
                 new ServerRuntimeOptions(
@@ -1175,11 +1178,11 @@ public sealed class LocalPlayableSession : IDisposable
                 (world, generationId, game) =>
                 {
                     Entity player = Resolve(world, entities.PlayerId);
-                    if (!game.WorldState.TryReadPosition(world, player, out WorldPosition position))
+                    if (!game.WorldState.TryReadLocation(world, player, out WorldLocation location))
                         throw new InvalidOperationException("The local public recipient lost its anchor.");
                     DriveWorldCore(
                         game.WorldState.Publications,
-                        position,
+                        location,
                         world.TickCount,
                         recipient,
                         state,
@@ -1192,7 +1195,7 @@ public sealed class LocalPlayableSession : IDisposable
 
     private void DriveWorldCore(
         ChunkPublicationStore publications,
-        in WorldPosition anchor,
+        in WorldLocation anchor,
         ulong simulationTick,
         OfflineDirectChunkRecipient recipient,
         WorldPumpState state,
@@ -1203,8 +1206,8 @@ public sealed class LocalPlayableSession : IDisposable
         {
             OfflineDirectChunkReconcileStatus status = recipient.Reconcile(
                 publications,
-                GameWorldState.DefaultSpace,
-                anchor,
+                anchor.Space,
+                anchor.Position,
                 state.Changes,
                 out OfflineDirectChunkReconcileResult result);
             if (status != OfflineDirectChunkReconcileStatus.Reconciled)
@@ -1301,7 +1304,7 @@ public sealed class LocalPlayableSession : IDisposable
                 (world, generationId, game) =>
                 {
                     Entity player = Resolve(world, entities.PlayerId);
-                    if (!game.WorldState.TryReadPosition(world, player, out WorldPosition position) ||
+                    if (!game.WorldState.TryReadLocation(world, player, out WorldLocation location) ||
                         !game.WorldState.TryReadPublic(world, player, out WorldPublicDescriptor descriptor) ||
                         !game.WorldState.Publications.TryGetPublicEntityId(
                             player, out WorldPublicEntityId publicActor) ||
@@ -1322,8 +1325,10 @@ public sealed class LocalPlayableSession : IDisposable
                         verticalMotion.Kind == GameVerticalMotionKind.None)
                         throw new InvalidOperationException(
                             "The local actor vertical presentation state was unavailable.");
-                    WorldPreparedView? prepared = game.WorldState.PreparedWorld;
-                    PreparedWorldComposition? preparedComposition = game.WorldState.PreparedComposition;
+                    if (!game.WorldState.TryGetPreparedSpace(location.Space,
+                            out WorldPreparedView? prepared,
+                            out PreparedWorldComposition? preparedComposition))
+                        throw new InvalidOperationException("The actor occupies an unadmitted structural space.");
                     if ((prepared is null) == (preparedComposition is null))
                         throw new InvalidOperationException("The local structural root was unavailable or ambiguous.");
                     return new LocalPlayableAuthorityView(
@@ -1331,7 +1336,7 @@ public sealed class LocalPlayableSession : IDisposable
                         world.TickCount,
                         guestIdentity,
                         publicActor,
-                        position,
+                        location.Position,
                         descriptor.Orientation,
                         doorOpen,
                         inBackpack,
@@ -1347,7 +1352,8 @@ public sealed class LocalPlayableSession : IDisposable
                         mainHandPrefabId,
                         verticalMotion,
                         prepared,
-                        preparedComposition);
+                        preparedComposition,
+                        location.Space);
                 }, out LocalPlayableAuthorityView view))
             throw new InvalidOperationException("The local owner/private view could not be captured.");
         int publicPresentationCount = extension?.CopyPublicPresentationMetadata(

@@ -24,6 +24,7 @@ public readonly record struct GameWorldStateSnapshot(
 public sealed class GameWorldState : IDisposable
 {
     public static readonly SpatialSpaceId DefaultSpace = new(1);
+    public const int MaximumAdmittedSpaces = 8;
 
     private readonly WorldId _worldId;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
@@ -40,6 +41,11 @@ public sealed class GameWorldState : IDisposable
     private readonly Entity[] _stagedEntities;
     private readonly uint[] _stageStamps;
     private readonly WorldPublicChange[] _publicationChanges;
+    private readonly SpatialSpaceId[] _additionalSpaces = new SpatialSpaceId[MaximumAdmittedSpaces - 1];
+    private readonly WorldPreparedView?[] _additionalWorlds = new WorldPreparedView?[MaximumAdmittedSpaces - 1];
+    private readonly PreparedWorldComposition?[] _additionalCompositions =
+        new PreparedWorldComposition?[MaximumAdmittedSpaces - 1];
+    private int _additionalSpaceCount;
     private ChangeCursor _positionChangeCursor;
     private ChangeCursor _publicChangeCursor;
     private LifecycleCursor _lifecycleCursor;
@@ -115,6 +121,69 @@ public sealed class GameWorldState : IDisposable
     public PreparedWorldComposition? PreparedComposition { get; private set; }
     public WorldMutableOverlay? Overlay => PreparedWorld?.Overlay;
 
+    /// <summary>Admits another immutable structural space before this generation is published.</summary>
+    public bool TryAddPreparedWorld(BoundWorldPack baseWorld, WorldMutableOverlay? overlay = null)
+    {
+        EnsureOwner();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(baseWorld);
+        if (_initialized || baseWorld.Space == DefaultSpace ||
+            overlay is not null && (overlay.Space != baseWorld.Space ||
+                overlay.BaseWorldFingerprint != baseWorld.Fingerprint) ||
+            !CanAddSpace(baseWorld.Space))
+            return false;
+        int slot = _additionalSpaceCount++;
+        _additionalSpaces[slot] = baseWorld.Space;
+        _additionalWorlds[slot] = new WorldPreparedView(baseWorld, overlay);
+        return true;
+    }
+
+    public bool TryAddPreparedComposition(PreparedWorldComposition composition)
+    {
+        EnsureOwner();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(composition);
+        if (_initialized || composition.Space == DefaultSpace ||
+            !composition.TryValidatePreparedSubset(out _) || !CanAddSpace(composition.Space))
+            return false;
+        int slot = _additionalSpaceCount++;
+        _additionalSpaces[slot] = composition.Space;
+        _additionalCompositions[slot] = composition;
+        return true;
+    }
+
+    public bool TryGetPreparedSpace(SpatialSpaceId space,
+        out WorldPreparedView? world, out PreparedWorldComposition? composition)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (space == DefaultSpace)
+        {
+            world = PreparedWorld;
+            composition = PreparedComposition;
+            return world is not null || composition is not null;
+        }
+        for (int index = 0; index < _additionalSpaceCount; index++)
+            if (_additionalSpaces[index] == space)
+            {
+                world = _additionalWorlds[index];
+                composition = _additionalCompositions[index];
+                return true;
+            }
+        world = null;
+        composition = null;
+        return false;
+    }
+
+    private bool CanAddSpace(SpatialSpaceId space)
+    {
+        if (!space.IsValid || _additionalSpaceCount == _additionalSpaces.Length)
+            return false;
+        for (int index = 0; index < _additionalSpaceCount; index++)
+            if (_additionalSpaces[index] == space)
+                return false;
+        return true;
+    }
+
     /// <summary>Installs the fully resolved current-world view into an unpublished staging shell.</summary>
     public bool TryInstallPreparedWorld(BoundWorldPack? baseWorld, WorldMutableOverlay? overlay)
     {
@@ -165,16 +234,21 @@ public sealed class GameWorldState : IDisposable
     /// Samples authoritative current base terrain through the prepared base-plus-overlay view.
     /// </summary>
     public bool TrySampleBaseTerrainHeight(in WorldPosition location, out int heightMillimeters)
+        => TrySampleBaseTerrainHeight(DefaultSpace, location, out heightMillimeters);
+
+    public bool TrySampleBaseTerrainHeight(SpatialSpaceId space,
+        in WorldPosition location, out int heightMillimeters)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (PreparedComposition is not null)
-            return PreparedComposition.TrySampleBaseTerrainHeight(location, out heightMillimeters);
-        if (PreparedWorld is null)
+        TryGetPreparedSpace(space, out WorldPreparedView? prepared, out PreparedWorldComposition? composition);
+        if (composition is not null)
+            return composition.TrySampleBaseTerrainHeight(location, out heightMillimeters);
+        if (prepared is null)
         {
             heightMillimeters = 0;
             return false;
         }
-        return PreparedWorld.TrySampleBaseTerrainHeight(location, out heightMillimeters);
+        return prepared.TrySampleBaseTerrainHeight(location, out heightMillimeters);
     }
 
     /// <summary>
@@ -183,19 +257,24 @@ public sealed class GameWorldState : IDisposable
     /// both as non-resolvable endpoints.
     /// </summary>
     public BaseTerrainSurfaceSample ProbeBaseTerrainSurface(in WorldPosition location)
+        => ProbeBaseTerrainSurface(DefaultSpace, location);
+
+    public BaseTerrainSurfaceSample ProbeBaseTerrainSurface(SpatialSpaceId space, in WorldPosition location)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (PreparedComposition is not null)
-            return PreparedComposition.ProbeBaseTerrainSurface(location);
-        return PreparedWorld?.ProbeBaseTerrainSurface(location) ?? BaseTerrainSurfaceSample.Unavailable;
+        TryGetPreparedSpace(space, out WorldPreparedView? prepared, out PreparedWorldComposition? composition);
+        if (composition is not null)
+            return composition.ProbeBaseTerrainSurface(location);
+        return prepared?.ProbeBaseTerrainSurface(location) ?? BaseTerrainSurfaceSample.Unavailable;
     }
 
     /// <summary>Detailed canonical authorship/residency; unavailable for legacy one-Pack worlds.</summary>
     public bool TryProbeStructuralChunk(SpatialChunkKey key, out WorldStructuralChunkProbe probe)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (PreparedComposition is not null)
-            return PreparedComposition.TryProbeStructuralChunk(key, out probe);
+        TryGetPreparedSpace(key.Space, out _, out PreparedWorldComposition? composition);
+        if (composition is not null)
+            return composition.TryProbeStructuralChunk(key, out probe);
         probe = default;
         return false;
     }
@@ -203,10 +282,15 @@ public sealed class GameWorldState : IDisposable
     /// <summary>Detailed canonical base-cell state; unavailable for legacy one-Pack worlds.</summary>
     public bool TryProbeBaseTerrainResolution(
         in WorldPosition location, out WorldBaseTerrainResolution resolution)
+        => TryProbeBaseTerrainResolution(DefaultSpace, location, out resolution);
+
+    public bool TryProbeBaseTerrainResolution(SpatialSpaceId space,
+        in WorldPosition location, out WorldBaseTerrainResolution resolution)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (PreparedComposition is not null)
-            return PreparedComposition.TryProbeBaseTerrainResolution(location, out resolution);
+        TryGetPreparedSpace(space, out _, out PreparedWorldComposition? composition);
+        if (composition is not null)
+            return composition.TryProbeBaseTerrainResolution(location, out resolution);
         resolution = default;
         return false;
     }
@@ -215,64 +299,93 @@ public sealed class GameWorldState : IDisposable
     /// Resolves authoritative current base-terrain material through the prepared base-plus-overlay view.
     /// </summary>
     public bool TryResolveBaseTerrainMaterial(in WorldPosition location, out ushort materialId)
+        => TryResolveBaseTerrainMaterial(DefaultSpace, location, out materialId);
+
+    public bool TryResolveBaseTerrainMaterial(SpatialSpaceId space,
+        in WorldPosition location, out ushort materialId)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (PreparedComposition is not null)
-            return PreparedComposition.TryResolveBaseTerrainMaterial(location, out materialId);
-        if (PreparedWorld is null)
+        TryGetPreparedSpace(space, out WorldPreparedView? prepared, out PreparedWorldComposition? composition);
+        if (composition is not null)
+            return composition.TryResolveBaseTerrainMaterial(location, out materialId);
+        if (prepared is null)
         {
             materialId = 0;
             return false;
         }
-        return PreparedWorld.TryResolveBaseTerrainMaterial(location, out materialId);
+        return prepared.TryResolveBaseTerrainMaterial(location, out materialId);
     }
 
     /// <summary>Reads the complete authoritative vertical terrain column from one structural root.</summary>
     public WorldTerrainColumnQueryStatus TryCopyTerrainColumnSurfaces(
         in WorldPosition location, Span<WorldTerrainColumnSurface> destination,
         out int count, out int required)
+        => TryCopyTerrainColumnSurfaces(DefaultSpace, location, destination, out count, out required);
+
+    public WorldTerrainColumnQueryStatus TryCopyTerrainColumnSurfaces(
+        SpatialSpaceId space, in WorldPosition location, Span<WorldTerrainColumnSurface> destination,
+        out int count, out int required)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (PreparedComposition is not null)
-            return PreparedComposition.TryCopyTerrainColumnSurfaces(location, destination, out count, out required);
-        if (PreparedWorld is not null)
-            return PreparedWorld.TryCopyTerrainColumnSurfaces(location, destination, out count, out required);
+        TryGetPreparedSpace(space, out WorldPreparedView? prepared, out PreparedWorldComposition? composition);
+        if (composition is not null)
+            return composition.TryCopyTerrainColumnSurfaces(location, destination, out count, out required);
+        if (prepared is not null)
+            return prepared.TryCopyTerrainColumnSurfaces(location, destination, out count, out required);
         count = required = 0;
         return WorldTerrainColumnQueryStatus.Unavailable;
     }
 
     public WorldTerrainColumnQueryStatus TryFindHighestSupportAtOrBelow(
         in WorldPosition location, int maximumHeightMillimeters, out WorldTerrainColumnSurface support)
+        => TryFindHighestSupportAtOrBelow(DefaultSpace, location, maximumHeightMillimeters, out support);
+
+    public WorldTerrainColumnQueryStatus TryFindHighestSupportAtOrBelow(
+        SpatialSpaceId space, in WorldPosition location, int maximumHeightMillimeters,
+        out WorldTerrainColumnSurface support)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (PreparedComposition is not null)
-            return PreparedComposition.TryFindHighestSupportAtOrBelow(location, maximumHeightMillimeters, out support);
-        if (PreparedWorld is not null)
-            return PreparedWorld.TryFindHighestSupportAtOrBelow(location, maximumHeightMillimeters, out support);
+        TryGetPreparedSpace(space, out WorldPreparedView? prepared, out PreparedWorldComposition? composition);
+        if (composition is not null)
+            return composition.TryFindHighestSupportAtOrBelow(location, maximumHeightMillimeters, out support);
+        if (prepared is not null)
+            return prepared.TryFindHighestSupportAtOrBelow(location, maximumHeightMillimeters, out support);
         support = default;
         return WorldTerrainColumnQueryStatus.Unavailable;
     }
 
     public WorldTerrainColumnQueryStatus TryFindNearestSupport(
         in WorldPosition location, int requestedHeightMillimeters, out WorldTerrainColumnSurface support)
+        => TryFindNearestSupport(DefaultSpace, location, requestedHeightMillimeters, out support);
+
+    public WorldTerrainColumnQueryStatus TryFindNearestSupport(
+        SpatialSpaceId space, in WorldPosition location, int requestedHeightMillimeters,
+        out WorldTerrainColumnSurface support)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (PreparedComposition is not null)
-            return PreparedComposition.TryFindNearestSupport(location, requestedHeightMillimeters, out support);
-        if (PreparedWorld is not null)
-            return PreparedWorld.TryFindNearestSupport(location, requestedHeightMillimeters, out support);
+        TryGetPreparedSpace(space, out WorldPreparedView? prepared, out PreparedWorldComposition? composition);
+        if (composition is not null)
+            return composition.TryFindNearestSupport(location, requestedHeightMillimeters, out support);
+        if (prepared is not null)
+            return prepared.TryFindNearestSupport(location, requestedHeightMillimeters, out support);
         support = default;
         return WorldTerrainColumnQueryStatus.Unavailable;
     }
 
     public WorldTerrainColumnQueryStatus TryFindLowestCeilingAtOrAbove(
         in WorldPosition location, int minimumHeightMillimeters, out WorldTerrainColumnSurface ceiling)
+        => TryFindLowestCeilingAtOrAbove(DefaultSpace, location, minimumHeightMillimeters, out ceiling);
+
+    public WorldTerrainColumnQueryStatus TryFindLowestCeilingAtOrAbove(
+        SpatialSpaceId space, in WorldPosition location, int minimumHeightMillimeters,
+        out WorldTerrainColumnSurface ceiling)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (PreparedComposition is not null)
-            return PreparedComposition.TryFindLowestCeilingAtOrAbove(location, minimumHeightMillimeters, out ceiling);
-        if (PreparedWorld is not null)
-            return PreparedWorld.TryFindLowestCeilingAtOrAbove(location, minimumHeightMillimeters, out ceiling);
+        TryGetPreparedSpace(space, out WorldPreparedView? prepared, out PreparedWorldComposition? composition);
+        if (composition is not null)
+            return composition.TryFindLowestCeilingAtOrAbove(location, minimumHeightMillimeters, out ceiling);
+        if (prepared is not null)
+            return prepared.TryFindLowestCeilingAtOrAbove(location, minimumHeightMillimeters, out ceiling);
         ceiling = default;
         return WorldTerrainColumnQueryStatus.Unavailable;
     }
@@ -281,6 +394,17 @@ public sealed class GameWorldState : IDisposable
     /// Queries authoritative current-world static geometry through the prepared base-plus-overlay view.
     /// </summary>
     public bool TryQueryStaticBounds(
+        in WorldStaticBounds bounds,
+        int maximumCandidateChunks,
+        Span<WorldStaticQueryHit> destination,
+        out int count,
+        out int required,
+        out WorldStaticQueryError error)
+        => TryQueryStaticBounds(DefaultSpace, bounds, maximumCandidateChunks, destination,
+            out count, out required, out error);
+
+    public bool TryQueryStaticBounds(
+        SpatialSpaceId space,
         in WorldStaticBounds bounds,
         int maximumCandidateChunks,
         Span<WorldStaticQueryHit> destination,
@@ -297,30 +421,59 @@ public sealed class GameWorldState : IDisposable
             error = WorldStaticQueryError.InvalidBounds;
             return false;
         }
-        if (PreparedComposition is not null)
-            return PreparedComposition.TryQueryStaticBounds(bounds, maximumCandidateChunks, destination,
+        TryGetPreparedSpace(space, out WorldPreparedView? prepared, out PreparedWorldComposition? composition);
+        if (composition is not null)
+            return composition.TryQueryStaticBounds(bounds, maximumCandidateChunks, destination,
                 out count, out required, out error);
-        if (PreparedWorld is null)
+        if (prepared is null)
         {
             error = WorldStaticQueryError.None;
             return true;
         }
-        return PreparedWorld.TryQueryStaticBounds(bounds, maximumCandidateChunks, destination,
+        return prepared.TryQueryStaticBounds(bounds, maximumCandidateChunks, destination,
             out count, out required, out error);
     }
 
     public bool TrySetPosition(EcsWorld world, Entity entity, in WorldPosition position)
     {
         EnsureWorld(world);
-        return world.TryWrite(entity, _positionLookup, new WorldPositionComponent(position));
+        if (!world.TryRead(entity, _positionLookup, out WorldPositionComponent current))
+            return false;
+        SpatialSpaceId space = current.SpatialSpaceValue == 0
+            ? DefaultSpace : new SpatialSpaceId(current.SpatialSpaceValue);
+        return TrySetLocation(world, entity, new WorldLocation(space, position));
+    }
+
+    /// <summary>Changes the complete actor address in one ECS component publication.</summary>
+    public bool TrySetLocation(EcsWorld world, Entity entity, in WorldLocation location)
+    {
+        EnsureWorld(world);
+        if (!location.IsValid ||
+            location.Space != DefaultSpace &&
+                !TryGetPreparedSpace(location.Space, out _, out _) ||
+            !world.TryRead(entity, _positionLookup, out _))
+            return false;
+        return world.TryWrite(entity, _positionLookup, new WorldPositionComponent(location));
+    }
+
+    public bool TryReadLocation(EcsWorld world, Entity entity, out WorldLocation location)
+    {
+        EnsureWorld(world);
+        if (world.TryRead(entity, _positionLookup, out WorldPositionComponent component) &&
+            component.TryGetLocation(out location))
+            return true;
+        location = default;
+        return false;
     }
 
     public bool TryReadPosition(EcsWorld world, Entity entity, out WorldPosition position)
     {
         EnsureWorld(world);
-        if (world.TryRead(entity, _positionLookup, out WorldPositionComponent component) &&
-            component.TryGetValue(out position))
+        if (TryReadLocation(world, entity, out WorldLocation location))
+        {
+            position = location.Position;
             return true;
+        }
         position = default;
         return false;
     }
@@ -458,7 +611,11 @@ public sealed class GameWorldState : IDisposable
             (long)_entityScratch.Length * sizeof(uint) +
             (long)_stagedEntities.Length * Unsafe.SizeOf<Entity>() +
             (long)_publicationChanges.Length * Unsafe.SizeOf<WorldPublicChange>() +
-            (long)_stageStamps.Length * sizeof(uint));
+            (long)_stageStamps.Length * sizeof(uint) +
+            (long)_additionalSpaces.Length * Unsafe.SizeOf<SpatialSpaceId>() +
+            (long)(_additionalWorlds.Length + _additionalCompositions.Length) * IntPtr.Size);
+        for (int spaceIndex = 0; spaceIndex < _additionalSpaceCount; spaceIndex++)
+            scratch = checked(scratch + (_additionalWorlds[spaceIndex]?.Overlay.ReservedBytes ?? 0));
         WorldSpatialIndexSnapshot index = Index.GetSnapshot();
         ChunkPublicationStoreSnapshot publication = Publications.GetSnapshot();
         return new GameWorldStateSnapshot(
@@ -489,9 +646,9 @@ public sealed class GameWorldState : IDisposable
         if (world.TryGetEntity(entityIndex, out Entity entity) &&
             world.TryRead(entity, _positionLookup, out WorldPositionComponent component))
         {
-            if (!component.TryGetValue(out WorldPosition position))
+            if (!component.TryGetLocation(out WorldLocation location))
                 throw new InvalidOperationException("Authoritative WorldPositionComponent is not canonically normalized.");
-            index.Reconcile(entity, position.ToChunkKey(DefaultSpace));
+            index.Reconcile(entity, location.ChunkKey);
         }
         else
         {
@@ -505,7 +662,7 @@ public sealed class GameWorldState : IDisposable
         {
             if (world.TryRead(entity, _positionLookup, out WorldPositionComponent positionComponent))
             {
-                if (!positionComponent.TryGetValue(out WorldPosition position))
+                if (!positionComponent.TryGetLocation(out WorldLocation location))
                     throw new InvalidOperationException(
                         "Authoritative WorldPositionComponent is not canonically normalized.");
                 if (world.TryRead(entity, _publicLookup, out WorldPublicComponent publicComponent))
@@ -515,7 +672,7 @@ public sealed class GameWorldState : IDisposable
                             "Authoritative WorldPublicComponent is not canonical.");
                     if ((descriptor.Flags & WorldPublicStateFlags.Visible) == 0)
                         return WorldPublicChange.Absent(entity);
-                    return WorldPublicChange.Present(entity, position, descriptor);
+                    return WorldPublicChange.Present(entity, location.Space, location.Position, descriptor);
                 }
             }
             return WorldPublicChange.Absent(entity);

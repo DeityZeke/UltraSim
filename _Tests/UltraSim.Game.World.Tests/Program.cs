@@ -122,6 +122,7 @@ var tests = new (string Name, Action Body)[]
         BaseTerrainMeshFailuresAreTransactionalAndWarmedPathsAllocateZero),
     ("WarmedCoordinateMachineAllocatesZero", WarmedCoordinateMachineAllocatesZero),
     ("PositionComponentIsPersistedCanonicalAuthority", PositionComponentIsPersistedCanonicalAuthority),
+    ("DistinctSpatialSpacesIsolateMembershipAndPublications", DistinctSpatialSpacesIsolateMembershipAndPublications),
     ("RuntimeCommitsFinalPositionAfterCompleteEcsStep", RuntimeCommitsFinalPositionAfterCompleteEcsStep),
     ("ComponentRemovalReadditionAndSlotReuseConverge", ComponentRemovalReadditionAndSlotReuseConverge),
     ("SaturatedMigrationMergesIntoExistingDestination", SaturatedMigrationMergesIntoExistingDestination),
@@ -204,7 +205,7 @@ static void FrozenProfileAndPayloadWidths()
     Equal(32, Marshal.SizeOf<SpatialBounds>());
     Equal(8, Marshal.SizeOf<WorldLocalPosition>());
     Equal(16, Marshal.SizeOf<WorldPosition>());
-    Equal(16, Marshal.SizeOf<WorldPositionComponent>());
+    Equal(24, Marshal.SizeOf<WorldPositionComponent>());
     Equal(2, Marshal.SizeOf<TerrainCellCoord>());
     Equal(2, Marshal.SizeOf<TerrainVertexCoord>());
     Equal(4, Marshal.SizeOf<TerrainHeightPlaneBase>());
@@ -4386,6 +4387,60 @@ static void PositionComponentIsPersistedCanonicalAuthority()
     False(component.TryGetValue(out _));
 }
 
+static void DistinctSpatialSpacesIsolateMembershipAndPublications()
+{
+    SpatialSpaceId benchmark = new(2);
+    WorldPack pack = GameCabinVisualBenchmarkWorldPack.CreateInSpace(benchmark);
+    True(pack.TryBind(CreateGameWorldBinding(), out BoundWorldPack? bound, out _));
+    using RawSpatialFixture fixture = new(lifecycleCapacity: 64, additionalWorld: bound);
+    True(fixture.World.TryCreate(fixture.PublicSpatialArchetype, out Entity classic));
+    True(fixture.World.TryCreate(fixture.PublicSpatialArchetype, out Entity visitor));
+    WorldPosition sameCoordinates = new(0, 0, 1_000, 1_000, 1_000);
+    True(fixture.State.TrySetPosition(fixture.World, classic, sameCoordinates));
+    True(fixture.State.TrySetLocation(fixture.World, visitor,
+        new WorldLocation(benchmark, sameCoordinates)));
+    WorldPublicDescriptor publicState = new(9, WorldYaw.Zero, WorldPublicStateFlags.Visible);
+    True(fixture.State.TrySetPublic(fixture.World, classic, publicState));
+    True(fixture.State.TrySetPublic(fixture.World, visitor, publicState));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+
+    SpatialChunkKey classicKey = sameCoordinates.ToChunkKey(GameWorldState.DefaultSpace);
+    SpatialChunkKey benchmarkKey = sameCoordinates.ToChunkKey(benchmark);
+    Equal(1, fixture.State.Index.GetMemberCount(classicKey));
+    Equal(1, fixture.State.Index.GetMemberCount(benchmarkKey));
+    var records = new WorldPublicRecord[2];
+    Equal(ChunkPublicationReadStatus.Snapshot,
+        fixture.State.Publications.TryCopySnapshot(classicKey, records, out ChunkPublicationBatch classicBefore));
+    Equal(1, classicBefore.Count);
+    Equal(ChunkPublicationReadStatus.Snapshot,
+        fixture.State.Publications.TryCopySnapshot(benchmarkKey, records, out ChunkPublicationBatch benchmarkBefore));
+    Equal(1, benchmarkBefore.Count);
+
+    for (int visit = 0; visit < 2; visit++)
+    {
+        True(fixture.State.TrySetLocation(fixture.World, classic,
+            new WorldLocation(benchmark, sameCoordinates)));
+        fixture.State.CommitAfterEcsStep(fixture.World);
+        Equal(0, fixture.State.Index.GetMemberCount(classicKey));
+        Equal(2, fixture.State.Index.GetMemberCount(benchmarkKey));
+        Equal(ChunkPublicationReadStatus.Snapshot,
+            fixture.State.Publications.TryCopySnapshot(classicKey, records, out ChunkPublicationBatch empty));
+        Equal(0, empty.Count);
+        True(fixture.State.TryReadLocation(fixture.World, classic, out WorldLocation changed));
+        Equal(benchmark, changed.Space);
+        Equal(sameCoordinates, changed.Position);
+        True(fixture.State.TrySetLocation(fixture.World, classic,
+            new WorldLocation(GameWorldState.DefaultSpace, sameCoordinates)));
+        fixture.State.CommitAfterEcsStep(fixture.World);
+        Equal(1, fixture.State.Index.GetMemberCount(classicKey));
+        Equal(1, fixture.State.Index.GetMemberCount(benchmarkKey));
+    }
+    False(fixture.State.TrySetLocation(fixture.World, classic,
+        new WorldLocation(new SpatialSpaceId(99), sameCoordinates)));
+    True(fixture.State.TryReadLocation(fixture.World, classic, out WorldLocation final));
+    Equal(GameWorldState.DefaultSpace, final.Space);
+}
+
 static void RuntimeCommitsFinalPositionAfterCompleteEcsStep()
 {
     var composition = new UltraSimGameComposition(runtimeProfile: GameRuntimeProfile.Local);
@@ -6747,7 +6802,8 @@ sealed class RawSpatialFixture : IDisposable
         int lifecycleCapacity,
         int entityCapacity = 32,
         BoundWorldPack? baseWorld = null,
-        ChunkPublicationLimits? publicationLimits = null)
+        ChunkPublicationLimits? publicationLimits = null,
+        BoundWorldPack? additionalWorld = null)
     {
         var options = new EcsWorldOptions(
             new EntityCapacity(entityCapacity),
@@ -6757,6 +6813,8 @@ sealed class RawSpatialFixture : IDisposable
             lifecycleRecordCapacity: lifecycleCapacity);
         World = new EcsWorld(GameSchema.CreateSchema(), options);
         State = new GameWorldState(World, baseWorld, publicationLimits);
+        if (additionalWorld is not null && !State.TryAddPreparedWorld(additionalWorld))
+            throw new InvalidOperationException("Additional test space was not admitted.");
         RawPositionLookup = World.PrepareLookup<WorldPositionComponent>();
         RawPublicLookup = World.PrepareLookup<WorldPublicComponent>();
         ComponentId position = GameSchema.GetComponentId<WorldPositionComponent>();

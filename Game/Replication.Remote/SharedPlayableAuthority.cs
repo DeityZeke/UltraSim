@@ -495,6 +495,10 @@ public sealed class SharedPlayableAuthority : IDisposable
             CabinChest = Match(original.CabinChestId, GamePrefabKeys.WorldChest),
             WoodlandAnimal = Match(original.WoodlandAnimalId, GamePrefabKeys.WoodlandAnimal),
             SkyTelepad = Match(original.SkyTelepadId, GamePrefabKeys.SkyTelepad),
+            CabinBenchmarkOutbound = original.CabinBenchmarkOutboundId.IsValid
+                ? Match(original.CabinBenchmarkOutboundId, GamePrefabKeys.SkyTelepad) : Entity.Null,
+            CabinBenchmarkReturn = original.CabinBenchmarkReturnId.IsValid
+                ? Match(original.CabinBenchmarkReturnId, GamePrefabKeys.SkyTelepad) : Entity.Null,
             CentralFarGate = Match(original.CentralFarGateId, GamePrefabKeys.FarGate),
             FarReturnGate = Match(original.FarReturnGateId, GamePrefabKeys.FarGate),
             WelcomeSign = Match(original.WelcomeSignId, GamePrefabKeys.InformationalSign),

@@ -17,8 +17,14 @@ public static class GameCabinVisualBenchmarkWorldPack
     public const int WindowRoomCenterZMillimeters = 18_000;
 
     public static WorldPack Create()
+        => CreateInSpace(GameWorldState.DefaultSpace);
+
+    /// <summary>Same authored topology in a distinct spatial space; Create() retains the frozen v1 artifact.</summary>
+    public static WorldPack CreateInSpace(SpatialSpaceId space)
     {
-        var builder = new WorldPackBuilder(GameWorldState.DefaultSpace,
+        if (!space.IsValid)
+            throw new ArgumentOutOfRangeException(nameof(space));
+        var builder = new WorldPackBuilder(space,
             GameContent.WorldFingerprint,
             new WorldPackLimits(2 * 1024 * 1024, 25, 8,
                 maximumFrozenStatics: 16, maximumMultiInstances: 1,
@@ -34,7 +40,7 @@ public static class GameCabinVisualBenchmarkWorldPack
         for (int z = -2; z <= 2; z++)
         for (int x = -2; x <= 2; x++)
             if (!builder.TryAddBaseTerrain(
-                    new SpatialChunkKey(GameWorldState.DefaultSpace, x, z),
+                    new SpatialChunkKey(space, x, z),
                     materials, heightBase, offsets, out WorldPackBuildError error))
                 throw new InvalidOperationException($"Cabin benchmark terrain failed: {error}.");
 

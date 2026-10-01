@@ -32,6 +32,8 @@ Run("ConceptDemoLegacySaveFailsClosedUnderCanonicalAuthority",
 Run("PlayableCabinHasCanonicalRectangularShell", PlayableCabinHasCanonicalRectangularShell, results);
 Run("P9CabinVisualBenchmarkIsSeparateAndStructurallyTwoRoom",
     P9CabinVisualBenchmarkIsSeparateAndStructurallyTwoRoom, results);
+Run("SpatialSpacesKeepTwoPlayersAndInventoryInOneAuthority",
+    SpatialSpacesKeepTwoPlayersAndInventoryInOneAuthority, results);
 Run("PlayableAuthorityBlocksCabinDoorWallsAndChest", PlayableAuthorityBlocksCabinDoorWallsAndChest, results);
 Run("ConceptDemoWorldCombinesFloatingBaseCaveAndSkyShells",
     ConceptDemoWorldCombinesFloatingBaseCaveAndSkyShells, results);
@@ -904,6 +906,95 @@ static TestMetrics P9CabinVisualBenchmarkIsSeparateAndStructurallyTwoRoom()
             "The benchmark authority was unavailable.");
         return status;
     }
+}
+
+static TestMetrics SpatialSpacesKeepTwoPlayersAndInventoryInOneAuthority()
+{
+    SpatialSpaceId benchmarkSpace = new(2);
+    WorldPack classic = GamePlayableWorld.CreateWorldPack();
+    WorldPack benchmark = GameCabinVisualBenchmarkWorldPack.CreateInSpace(benchmarkSpace);
+    var composition = new UltraSimGameComposition(new InventoryLimits(32, 128, 32),
+        baseWorldPack: classic, additionalSpacePacks: [benchmark]);
+    using var host = new InternalHost(composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_10BA))));
+    host.Start();
+    ServerRuntime runtime = host.RuntimeForTesting;
+    using var admission = new AdmissionService(runtime.Game, composition);
+    AdmissionResult first = admission.JoinAccountless(new ParticipantId(0x10BA));
+    AdmissionResult second = admission.JoinAccountless(new ParticipantId(0x10BB));
+    Expect(first.IsEntered && second.IsEntered, "Two players could not share the Game generation.");
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+        (world, _, game) => GamePlayableWorld.Populate(world, game, first.Entity),
+        out GamePlayableWorldEntities owned), "The first player could not retain a backpack.");
+    host.Tick();
+    WorldPosition benchmarkRoom = new(1, 0, 0, 12_000, 1_100);
+
+    for (int trip = 0; trip < 2; trip++)
+    {
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (world, _, game) =>
+            {
+                Entity actor = ResolveInWorld(world, owned.PlayerId);
+                Entity other = second.Entity;
+                if (!game.WorldState.TryReadLocation(world, other, out WorldLocation otherBefore) ||
+                    otherBefore.Space != GameWorldState.DefaultSpace ||
+                    !game.WorldState.Publications.TryGetPublicEntityId(actor, out WorldPublicEntityId identity))
+                    return false;
+                GameWorldActionStatus status = game.WorldActions.TransitionActorSpace(
+                    world, game.WorldState, actor,
+                    new WorldLocation(benchmarkSpace, benchmarkRoom), out WorldLocation entered);
+                if (status != GameWorldActionStatus.Accepted || entered.Space != benchmarkSpace ||
+                    !game.WorldState.TryReadLocation(world, actor, out WorldLocation address) ||
+                    address != entered || !game.WorldState.TryReadLocation(world, other, out WorldLocation otherAfter) ||
+                    otherAfter != otherBefore ||
+                    !game.Inventory.TryReadItem(world, ResolveInWorld(world, owned.BreadId), out InventoryItem bread) ||
+                    bread.Parent != ResolveInWorld(world, owned.BackpackId) ||
+                    !game.WorldState.Publications.TryGetPublicEntityId(actor, out WorldPublicEntityId afterId) ||
+                    afterId != identity)
+                    return false;
+                return true;
+            }, out bool enteredOk) && enteredOk,
+            "Per-actor transition changed the other player, inventory, or public identity.");
+        host.Tick();
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (world, _, game) =>
+            {
+                Entity actor = ResolveInWorld(world, owned.PlayerId);
+                var roomRecords = new WorldPublicRecord[8];
+                var classicRecords = new WorldPublicRecord[16];
+                if (!game.WorldState.Publications.TryGetPublicEntityId(actor,
+                        out WorldPublicEntityId actorId)) return false;
+                if (!game.WorldState.Index.TryGetHome(actor, out SpatialChunkKey home) ||
+                    home.Space != benchmarkSpace ||
+                    !game.WorldState.Index.TryGetHome(second.Entity, out SpatialChunkKey otherHome) ||
+                    otherHome.Space != GameWorldState.DefaultSpace ||
+                    game.WorldState.Publications.TryCopySnapshot(home,
+                        roomRecords, out ChunkPublicationBatch roomBatch) !=
+                            ChunkPublicationReadStatus.Snapshot ||
+                    game.WorldState.Publications.TryCopySnapshot(otherHome,
+                        classicRecords, out ChunkPublicationBatch classicBatch) !=
+                            ChunkPublicationReadStatus.Snapshot) return false;
+                bool roomHasActor = false;
+                for (int row = 0; row < roomBatch.Count; row++)
+                    roomHasActor |= roomRecords[row].Id == actorId;
+                if (!roomHasActor) return false;
+                for (int row = 0; row < classicBatch.Count; row++)
+                    if (classicRecords[row].Id == actorId) return false;
+                return true;
+            }, out bool isolated) && isolated,
+            "Concurrent players or publications leaked across spatial spaces.");
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider,
+            GameWorldActionStatus>((world, _, game) => game.WorldActions.TransitionActorSpace(
+                world, game.WorldState, ResolveInWorld(world, owned.PlayerId),
+                new WorldLocation(GameWorldState.DefaultSpace, GamePlayableWorld.PlayerStart),
+                out WorldLocation returnedLocation), out GameWorldActionStatus returned) &&
+            returned == GameWorldActionStatus.Accepted,
+            "The same actor could not return to Classic Cabin.");
+        host.Tick();
+    }
+    return new TestMetrics(benchmark.Fingerprint.ToString(), 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "Two players occupy different spaces in one authority; same actor/public identity and Inventory survive two round trips.");
 }
 
 static TestMetrics PlayableAuthorityBlocksCabinDoorWallsAndChest()

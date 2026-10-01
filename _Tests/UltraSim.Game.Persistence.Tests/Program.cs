@@ -5,6 +5,8 @@ using UltraSim.ECS;
 using UltraSim.Game.Accounting;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Persistence;
+using UltraSim.Game.World;
+using UltraSim.Spatial;
 using UltraSim.Server.Persistence;
 using UltraSim.Framework.Persistence;
 using UltraSim.Server.Runtime;
@@ -16,6 +18,8 @@ var tests = new (string Name, Action Body)[]
     ("DuplicateDurableCharacterLinkIsRejected", DuplicateDurableCharacterLinkIsRejected),
     ("ClockArtifactUsesFrequencyIndependentTimeAndReadsExactLegacyState", ClockArtifactUsesFrequencyIndependentTimeAndReadsExactLegacyState),
     ("SimulationStateVersionOneRestoresWithDefaultVelocity", SimulationStateVersionOneRestoresWithDefaultVelocity),
+    ("SpatialPositionV1RestoresIntoDefaultSpace", SpatialPositionV1RestoresIntoDefaultSpace),
+    ("SpatialPositionV2PreservesNondefaultSpace", SpatialPositionV2PreservesNondefaultSpace),
     ("RealRuntimeSaveLoadPublishesEcsAndAccountingTogether", RealRuntimeSaveLoadPublishesEcsAndAccountingTogether),
     ("SaveRestoreRecaptureIsCanonical", SaveRestoreRecaptureIsCanonical),
     ("MissingCharacterEntityLeavesActiveGenerationUntouched", MissingCharacterEntityLeavesActiveGenerationUntouched),
@@ -83,6 +87,84 @@ static void SimulationStateVersionOneRestoresWithDefaultVelocity()
     Assert.True(restored.TryRead(restoredEntity, restoredLookup, out GameSimulationState state));
     Assert.Equal(41, state.TickMarker);
     Assert.Equal(0, state.InputVelocity);
+}
+
+static void SpatialPositionV1RestoresIntoDefaultSpace()
+{
+    const string key = "game.world.position";
+    ComponentSchema oldSchema = ComponentSchema.Create(new SchemaId(0x700603, 1),
+    [
+        ComponentRegistration.Create<WorldPositionComponent>(
+            new ComponentId(0), key, StableHash64.Compute(key), version: 1,
+            ComponentFlags.Persistent, persistenceId: 700603,
+            ComponentPersistenceMode.Value),
+    ]);
+    PersistenceCatalog oldCatalog = new PersistenceCatalogBuilder(oldSchema)
+        .Register<WorldPositionComponent>(
+            new PersistenceSchemaFingerprint(0xdfa7bae24098a4acUL, 0xbb42ffd49d0afb04UL),
+            new WorldPositionV1Codec())
+        .Build();
+    using var source = new EcsWorld(oldSchema, UltraSimGameComposition.CreateWorldOptions(
+        64, new PersistenceIdentityOptions(new PersistentWorldId(0x700603))));
+    ArchetypeHandle shape = source.RegisterArchetype([new ComponentId(0)],
+        ChunkLayoutOptions.KiB16, maximumChunks: 1);
+    ComponentLookup<WorldPositionComponent> lookup = source.PrepareLookup<WorldPositionComponent>();
+    source.Seal();
+    source.Initialize();
+    source.BeginRun();
+    Assert.True(source.TryCreate(shape, out Entity entity));
+    WorldPosition position = new(-3, 7, 4_000, 12_000, 1_234);
+    Assert.True(source.TryWrite(entity, lookup, new WorldPositionComponent(position)));
+    PersistenceSnapshotArtifact artifact = EcsPersistence.Capture(
+        source, oldCatalog, new PersistenceCaptureOptions(1), out _);
+    RestorePosition(artifact, expectedSpace: GameWorldState.DefaultSpace, position,
+        expectedMigrationCount: 1);
+}
+
+static void SpatialPositionV2PreservesNondefaultSpace()
+{
+    var composition = new UltraSimGameComposition();
+    using var source = new EcsWorld(composition.Schema, UltraSimGameComposition.CreateWorldOptions(
+        64, new PersistenceIdentityOptions(new PersistentWorldId(0x700604))));
+    ArchetypeHandle shape = source.RegisterArchetype(
+        [GameSchema.GetComponentId<WorldPositionComponent>()], ChunkLayoutOptions.KiB16,
+        maximumChunks: 1);
+    ComponentLookup<WorldPositionComponent> lookup = source.PrepareLookup<WorldPositionComponent>();
+    source.Seal();
+    source.Initialize();
+    source.BeginRun();
+    Assert.True(source.TryCreate(shape, out Entity entity));
+    SpatialSpaceId benchmark = new(2);
+    WorldPosition position = new(0, 0, 16_000 - 1, 12_000, 1_100);
+    Assert.True(source.TryWrite(entity, lookup,
+        new WorldPositionComponent(new WorldLocation(benchmark, position))));
+    PersistenceSnapshotArtifact artifact = EcsPersistence.Capture(
+        source, composition.PersistenceCatalog, new PersistenceCaptureOptions(1), out _);
+    RestorePosition(artifact, benchmark, position, expectedMigrationCount: 0);
+}
+
+static void RestorePosition(PersistenceSnapshotArtifact artifact, SpatialSpaceId expectedSpace,
+    WorldPosition position, int expectedMigrationCount)
+{
+    var composition = new UltraSimGameComposition();
+    PersistenceRestorePlan plan = EcsPersistenceRestore.Preflight(
+        artifact.Bytes, composition.PersistenceCatalog,
+        new PersistenceRestoreOptions(PersistenceLimits.ServerDefault, ChunkLayoutOptions.KiB16));
+    ComponentLookup<WorldPositionComponent> lookup = default;
+    using EcsWorld restored = plan.Restore(requirements =>
+    {
+        var world = new EcsWorld(requirements.Schema,
+            UltraSimGameComposition.CreateWorldOptions(
+                Math.Max(64, requirements.EntityCount), requirements.IdentityOptions));
+        lookup = world.PrepareLookup<WorldPositionComponent>();
+        return world;
+    }, out PersistenceRestoreReport report);
+    Assert.Equal(expectedMigrationCount, report.MigratedComponentCount);
+    Assert.True(restored.TryGetEntity(0, out Entity entity));
+    Assert.True(restored.TryRead(entity, lookup, out WorldPositionComponent component));
+    Assert.True(component.TryGetLocation(out WorldLocation location));
+    Assert.Equal(expectedSpace, location.Space);
+    Assert.Equal(position, location.Position);
 }
 
 static void AccountingArtifactIsDeterministic()
@@ -853,6 +935,25 @@ sealed class GameSimulationStateV1Codec : IPersistenceComponentCodec<GameSimulat
         value.TickMarker = BinaryPrimitives.ReadInt32LittleEndian(source);
         value.InputVelocity = 0;
     }
+}
+
+sealed class WorldPositionV1Codec : IPersistenceComponentCodec<WorldPositionComponent>
+{
+    public int EncodedSize => 16;
+
+    public void Encode(in WorldPositionComponent value, Span<byte> destination,
+        PersistenceWriteContext context)
+    {
+        BinaryPrimitives.WriteInt32LittleEndian(destination, value.ChunkX);
+        BinaryPrimitives.WriteInt32LittleEndian(destination[4..], value.ChunkZ);
+        BinaryPrimitives.WriteUInt16LittleEndian(destination[8..], value.LocalXMillimeters);
+        BinaryPrimitives.WriteUInt16LittleEndian(destination[10..], value.LocalZMillimeters);
+        BinaryPrimitives.WriteInt32LittleEndian(destination[12..], value.YMillimeters);
+    }
+
+    public void Decode(ReadOnlySpan<byte> source, ref WorldPositionComponent value,
+        PersistenceReadContext context) =>
+        throw new NotSupportedException("This codec only constructs a historical test artifact.");
 }
 
 static class Assert

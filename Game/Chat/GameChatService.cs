@@ -399,12 +399,12 @@ public sealed class GameChatService : IDisposable
             return ExecuteCommand(world, game, speaker, text);
         if (_pendingMode == GameSpeechMode.Global)
             return RouteGlobal(world, generationId, game, speaker, text);
-        if (!game.WorldState.TryReadPosition(world, speaker.Entity, out WorldPosition position))
+        if (!game.WorldState.TryReadLocation(world, speaker.Entity, out WorldLocation location))
         {
             return Reject(GameChatSubmissionStatus.MissingSpeakerPosition,
                 "The trusted speaker has no authoritative world position.");
         }
-        return RouteSpeech(world, generationId, game, speaker, position, text, _pendingMode);
+        return RouteSpeech(world, generationId, game, speaker, location, text, _pendingMode);
     }
 
     private GameSystemBroadcastResult PublishSystemInsideGeneration(
@@ -476,12 +476,14 @@ public sealed class GameChatService : IDisposable
                 reply = _commands.HelpReply;
                 break;
             case GameChatCommandKind.Where:
-                if (!game.WorldState.TryReadPosition(world, speaker.Entity, out WorldPosition position))
+                if (!game.WorldState.TryReadLocation(world, speaker.Entity, out WorldLocation location))
                 {
                     return Reject(GameChatSubmissionStatus.MissingSpeakerPosition,
                         "The trusted speaker has no authoritative world position.");
                 }
-                reply = $"Where: {position}";
+                reply = location.Space == GameWorldState.DefaultSpace
+                    ? $"Where: {location.Position}"
+                    : $"Where: {location.Space} {location.Position}";
                 break;
             default:
                 throw new InvalidOperationException("The finite command registry contains an unknown command kind.");
@@ -499,12 +501,13 @@ public sealed class GameChatService : IDisposable
         ulong generationId,
         IGameGenerationStateProvider game,
         in AdmissionResult speaker,
-        in WorldPosition speakerPosition,
+        in WorldLocation speakerLocation,
         string text,
         GameSpeechMode mode)
     {
+        WorldPosition speakerPosition = speakerLocation.Position;
         int radius = _speechProfile.GetRadius(mode);
-        SpatialChunkKey expectedHome = speakerPosition.ToChunkKey(GameWorldState.DefaultSpace);
+        SpatialChunkKey expectedHome = speakerLocation.ChunkKey;
         if (!game.WorldState.Index.TryGetHome(speaker.Entity, out SpatialChunkKey actualHome) ||
             actualHome != expectedHome)
         {
@@ -542,7 +545,7 @@ public sealed class GameChatService : IDisposable
                         return Reject(GameChatSubmissionStatus.CandidateChunkCapacityExceeded,
                             "The speech footprint exceeds candidate-chunk capacity.");
                     }
-                    var key = new SpatialChunkKey(GameWorldState.DefaultSpace, coord);
+                    var key = new SpatialChunkKey(speakerLocation.Space, coord);
                     int members = game.WorldState.Index.GetMemberCount(key);
                     if (members > _candidateScratch.Length - candidateCount)
                     {

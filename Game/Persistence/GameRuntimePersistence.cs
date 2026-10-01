@@ -186,9 +186,10 @@ public sealed class GameRuntimePersistence
             bool worldInstalled = preparedWorld.PreparedComposition is PreparedWorldComposition canonical
                 ? built.WorldState.TryInstallPreparedComposition(canonical)
                 : built.WorldState.TryInstallPreparedWorld(preparedWorld.BaseWorld, preparedWorld.Overlay);
-            if (!worldInstalled)
+            if (!worldInstalled || !_composition.TryInstallAdditionalSpaces(
+                    built.WorldState, built.Content.World))
                 throw new PersistenceValidationException(
-                    "The resolved current-world view could not be installed into the private staging generation.");
+                    "The admitted spatial world views could not be installed into the private staging generation.");
             built.Inventory.Rebuild(stagedWorld);
             stagedAccounting = accounting.TakeStore();
             candidate = new GameGenerationState(

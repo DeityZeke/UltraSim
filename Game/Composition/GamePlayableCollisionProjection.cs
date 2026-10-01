@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using UltraSim.ECS;
 using UltraSim.Game.World;
+using UltraSim.Spatial;
 
 namespace UltraSim.Game.Composition;
 
@@ -67,6 +68,7 @@ internal sealed class GamePlayableCollisionProjection
         EcsWorld world,
         GameWorldState worldState,
         Entity excludedActor,
+        SpatialSpaceId space,
         out ReadOnlySpan<WorldStaticBounds> bounds)
     {
         EnsureWorld(world, worldState);
@@ -76,11 +78,15 @@ internal sealed class GamePlayableCollisionProjection
             Entity blocker = _blockers[index];
             if (blocker == excludedActor ||
                 !world.IsAlive(blocker) ||
-                !worldState.TryReadPosition(world, blocker, out WorldPosition position) ||
+                !worldState.TryReadLocation(world, blocker, out WorldLocation location) ||
                 !worldState.TryReadPublic(world, blocker, out WorldPublicDescriptor descriptor))
             {
                 continue;
             }
+
+            if (location.Space != space)
+                continue;
+            WorldPosition position = location.Position;
 
             WorldStaticBounds projected;
             switch (descriptor.PrefabId)

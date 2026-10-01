@@ -63,6 +63,26 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             RunF112ProductDogfood();
             return;
         }
+        if (arguments.Contains("--spatial-space-smoke", StringComparer.Ordinal))
+        {
+            try
+            {
+                StartLocalCabin(CabinContentVariant.Default, CabinHumanBody.XBot,
+                    useConceptDemoWorld: true);
+                _cabin!.RunSpatialSpaceAcceptance();
+                RetireCurrentSession();
+                ReturnToMainMenu("Local spatial-space smoke passed.");
+                GD.Print("SPATIAL SPACE LOCAL PASS trips=2 actor=retained world=retired session=clean");
+                RequestApplicationExit(0);
+            }
+            catch (Exception exception)
+            {
+                GD.PushError($"Local spatial-space smoke failed: {exception}");
+                RetireCurrentSession();
+                RequestApplicationExit(1);
+            }
+            return;
+        }
         if (arguments.Contains("--p9-two-room-benchmark", StringComparer.Ordinal))
         {
             // Capture mode is handled above. Bare opt-in launch remains interactive and never

@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using UltraSim.Game.World;
+using UltraSim.Spatial;
 
 namespace UltraSim.Game.Physics;
 
@@ -34,9 +35,11 @@ public readonly record struct SimpleMotionRequest(
     WorldPosition Current,
     long TargetXMillimeters,
     long TargetZMillimeters,
-    SimplePhysicsBody Body)
+    SimplePhysicsBody Body,
+    SpatialSpaceId Space = default)
 {
     public bool IsValid => Body.IsValid;
+    public SpatialSpaceId EffectiveSpace => Space.IsValid ? Space : GameWorldState.DefaultSpace;
 }
 
 /// <summary>
@@ -45,9 +48,11 @@ public readonly record struct SimpleMotionRequest(
 /// </summary>
 public readonly record struct SimpleOccupancyRequest(
     WorldPosition Target,
-    SimplePhysicsBody Body)
+    SimplePhysicsBody Body,
+    SpatialSpaceId Space = default)
 {
     public bool IsValid => Body.IsValid;
+    public SpatialSpaceId EffectiveSpace => Space.IsValid ? Space : GameWorldState.DefaultSpace;
 }
 
 /// <summary>
@@ -59,9 +64,11 @@ public readonly record struct SimpleAirborneMotionRequest(
     long TargetXMillimeters,
     int TargetYMillimeters,
     long TargetZMillimeters,
-    SimplePhysicsBody Body)
+    SimplePhysicsBody Body,
+    SpatialSpaceId Space = default)
 {
     public bool IsValid => Body.IsValid;
+    public SpatialSpaceId EffectiveSpace => Space.IsValid ? Space : GameWorldState.DefaultSpace;
 }
 
 /// <summary>Support-aware physical endpoint legality supported through P0.1c.</summary>
@@ -233,6 +240,7 @@ public sealed class UltraSimSimplePhysics
             throw new ArgumentException("A valid Simple Physics motion request is required.", nameof(request));
 
         TerrainResolutionStatus terrain = ResolveGroundedPath(
+            request.EffectiveSpace,
             request.Current,
             request.TargetXMillimeters,
             request.TargetZMillimeters,
@@ -245,6 +253,7 @@ public sealed class UltraSimSimplePhysics
         WorldStaticBounds currentBounds = Bounds(request.Current, request.Body);
         WorldStaticBounds targetBounds = Bounds(resolved, request.Body);
         return IsSweepClear(
+            request.EffectiveSpace,
             currentBounds,
             targetBounds,
             dynamicBlockingBounds,
@@ -267,6 +276,7 @@ public sealed class UltraSimSimplePhysics
                 "A valid Simple Physics occupancy request is required.", nameof(request));
 
         TerrainResolutionStatus terrain = ResolveNearestGroundedEndpoint(
+            request.EffectiveSpace,
             request.Target,
             request.Body,
             out WorldPosition resolved,
@@ -276,6 +286,7 @@ public sealed class UltraSimSimplePhysics
 
         WorldStaticBounds bodyBounds = Bounds(resolved, request.Body);
         return IsSweepClear(
+            request.EffectiveSpace,
             bodyBounds,
             bodyBounds,
             dynamicBlockingBounds,
@@ -332,7 +343,7 @@ public sealed class UltraSimSimplePhysics
                     SimpleAirborneMotionStatus.OutsidePreparedWorld, default);
 
             TerrainResolutionStatus structural = ValidateStructuralFootprint(
-                world, samplePosition, request.Body);
+                world, request.EffectiveSpace, samplePosition, request.Body);
             if (structural == TerrainResolutionStatus.OutsidePreparedWorld)
                 return new SimpleAirborneMotionResult(
                     SimpleAirborneMotionStatus.OutsidePreparedWorld, default);
@@ -342,13 +353,15 @@ public sealed class UltraSimSimplePhysics
             if (y < previousY)
             {
                 WorldTerrainColumnQueryStatus query = world.TryFindHighestSupportAtOrBelow(
-                    samplePosition, previousY, out WorldTerrainColumnSurface terrainSupport);
+                    request.EffectiveSpace, samplePosition, previousY,
+                    out WorldTerrainColumnSurface terrainSupport);
                 if (query == WorldTerrainColumnQueryStatus.Unavailable)
                     return new SimpleAirborneMotionResult(
                         SimpleAirborneMotionStatus.OutsidePreparedWorld, default);
                 if (query != WorldTerrainColumnQueryStatus.Complete)
                     return new SimpleAirborneMotionResult(SimpleAirborneMotionStatus.Blocked, default);
                 TerrainResolutionStatus boundsStatus = TryFindBoundsSupport(
+                    request.EffectiveSpace,
                     x,
                     z,
                     y,
@@ -378,9 +391,9 @@ public sealed class UltraSimSimplePhysics
                 {
                     TerrainResolutionStatus fit = support.Kind == SimplePhysicalSupportKind.Terrain
                         ? ValidateFootprintAndClearance(
-                            world, landing, request.Body, support.TerrainSurface,
+                            world, request.EffectiveSpace, landing, request.Body, support.TerrainSurface,
                             requireBodyFootprintSupport: false)
-                        : ValidateTerrainClearance(world, landing, request.Body);
+                        : ValidateTerrainClearance(world, request.EffectiveSpace, landing, request.Body);
                     if (fit == TerrainResolutionStatus.OutsidePreparedWorld)
                         return new SimpleAirborneMotionResult(
                             SimpleAirborneMotionStatus.OutsidePreparedWorld, default);
@@ -389,6 +402,7 @@ public sealed class UltraSimSimplePhysics
                     if (fit == TerrainResolutionStatus.Grounded)
                     {
                         if (IsSweepClear(
+                                request.EffectiveSpace,
                                 Bounds(request.Current, request.Body),
                                 Bounds(landing, request.Body),
                                 dynamicBlockingBounds,
@@ -424,7 +438,8 @@ public sealed class UltraSimSimplePhysics
                         return new SimpleAirborneMotionResult(
                             SimpleAirborneMotionStatus.OutsidePreparedWorld, default);
                     WorldTerrainColumnQueryStatus query = world.TryFindLowestCeilingAtOrAbove(
-                        probe, previousTop, out WorldTerrainColumnSurface ceiling);
+                        request.EffectiveSpace, probe, previousTop,
+                        out WorldTerrainColumnSurface ceiling);
                     if (query == WorldTerrainColumnQueryStatus.Unavailable)
                         return new SimpleAirborneMotionResult(
                             SimpleAirborneMotionStatus.OutsidePreparedWorld, default);
@@ -441,6 +456,7 @@ public sealed class UltraSimSimplePhysics
                         return new SimpleAirborneMotionResult(
                             SimpleAirborneMotionStatus.OutsidePreparedWorld, default);
                     if (IsSweepClear(
+                            request.EffectiveSpace,
                             Bounds(request.Current, request.Body),
                             Bounds(stopped, request.Body),
                             dynamicBlockingBounds,
@@ -469,6 +485,7 @@ public sealed class UltraSimSimplePhysics
         WorldStaticBounds currentBounds = Bounds(request.Current, request.Body);
         WorldStaticBounds targetBounds = Bounds(target, request.Body);
         if (IsSweepClear(
+                request.EffectiveSpace,
                 currentBounds,
                 targetBounds,
                 dynamicBlockingBounds,
@@ -553,9 +570,10 @@ public sealed class UltraSimSimplePhysics
                 request.Current.YMillimeters,
                 request.TargetZMillimeters,
                 out WorldPosition horizontal) &&
-            ValidateStructuralFootprint(world, horizontal, request.Body) ==
+            ValidateStructuralFootprint(world, request.EffectiveSpace, horizontal, request.Body) ==
                 TerrainResolutionStatus.Grounded &&
             IsSweepClear(
+                request.EffectiveSpace,
                 currentBounds,
                 Bounds(horizontal, request.Body),
                 dynamicBlockingBounds,
@@ -585,6 +603,7 @@ public sealed class UltraSimSimplePhysics
             (long)request.Current.YMillimeters + 1,
             currentBounds.MaximumZExclusiveMillimeters);
         if (!_world.TryQueryStaticBounds(
+                request.EffectiveSpace,
                 edgeBand,
                 StaticCollisionCandidateChunks,
                 _staticHits,
@@ -622,9 +641,10 @@ public sealed class UltraSimSimplePhysics
                 request.Current.YMillimeters,
                 bestZ,
                 out WorldPosition escape) ||
-            ValidateStructuralFootprint(world, escape, request.Body) !=
+            ValidateStructuralFootprint(world, request.EffectiveSpace, escape, request.Body) !=
                 TerrainResolutionStatus.Grounded ||
             !IsSweepClear(
+                request.EffectiveSpace,
                 currentBounds,
                 Bounds(escape, request.Body),
                 dynamicBlockingBounds,
@@ -682,6 +702,7 @@ public sealed class UltraSimSimplePhysics
     }
 
     private TerrainResolutionStatus ResolveGroundedPath(
+        SpatialSpaceId space,
         in WorldPosition current,
         long targetXMillimeters,
         long targetZMillimeters,
@@ -692,6 +713,7 @@ public sealed class UltraSimSimplePhysics
         resolved = default;
         support = default;
         TerrainResolutionStatus currentStatus = ResolveGroundedEndpoint(
+            space,
             current.GlobalXMillimeters,
             current.GlobalZMillimeters,
             current.YMillimeters,
@@ -722,6 +744,7 @@ public sealed class UltraSimSimplePhysics
             long z = checked(current.GlobalZMillimeters +
                 (long)((Int128)deltaZ * sample / samples));
             TerrainResolutionStatus status = ResolveGroundedEndpoint(
+                space,
                 x,
                 z,
                 referenceY,
@@ -738,6 +761,7 @@ public sealed class UltraSimSimplePhysics
     }
 
     private TerrainResolutionStatus ResolveNearestGroundedEndpoint(
+        SpatialSpaceId space,
         in WorldPosition target,
         in SimplePhysicsBody body,
         out WorldPosition resolved,
@@ -747,6 +771,7 @@ public sealed class UltraSimSimplePhysics
         support = default;
         GameWorldState world = _world;
         WorldTerrainColumnQueryStatus query = world.TryFindNearestSupport(
+            space,
             target,
             target.YMillimeters,
             out WorldTerrainColumnSurface terrainSupport);
@@ -755,6 +780,7 @@ public sealed class UltraSimSimplePhysics
         if (query != WorldTerrainColumnQueryStatus.Complete)
             return TerrainResolutionStatus.Blocked;
         TerrainResolutionStatus boundsStatus = TryFindBoundsSupport(
+            space,
             target.GlobalXMillimeters,
             target.GlobalZMillimeters,
             int.MinValue,
@@ -786,12 +812,13 @@ public sealed class UltraSimSimplePhysics
             return TerrainResolutionStatus.OutsidePreparedWorld;
         return support.Kind == SimplePhysicalSupportKind.Terrain
             ? ValidateFootprintAndClearance(
-                world, resolved, body, support.TerrainSurface,
+                world, space, resolved, body, support.TerrainSurface,
                 requireBodyFootprintSupport: false)
-            : ValidateTerrainClearance(world, resolved, body);
+            : ValidateTerrainClearance(world, space, resolved, body);
     }
 
     private TerrainResolutionStatus ResolveGroundedEndpoint(
+        SpatialSpaceId space,
         long globalXMillimeters,
         long globalZMillimeters,
         int referenceYMillimeters,
@@ -814,6 +841,7 @@ public sealed class UltraSimSimplePhysics
         int maximumY = ClampAdd(referenceYMillimeters, maximumStepUpMillimeters);
         int minimumY = ClampAdd(referenceYMillimeters, -maximumStepDownMillimeters);
         WorldTerrainColumnQueryStatus query = world.TryFindHighestSupportAtOrBelow(
+            space,
             probe,
             maximumY,
             out WorldTerrainColumnSurface terrainSupport);
@@ -822,6 +850,7 @@ public sealed class UltraSimSimplePhysics
         if (query != WorldTerrainColumnQueryStatus.Complete)
             return TerrainResolutionStatus.Blocked;
         TerrainResolutionStatus boundsStatus = TryFindBoundsSupport(
+            space,
             globalXMillimeters,
             globalZMillimeters,
             minimumY,
@@ -851,13 +880,14 @@ public sealed class UltraSimSimplePhysics
             return TerrainResolutionStatus.OutsidePreparedWorld;
         return support.Kind == SimplePhysicalSupportKind.Terrain
             ? ValidateFootprintAndClearance(
-                world, resolved, body, support.TerrainSurface,
+                world, space, resolved, body, support.TerrainSurface,
                 requireBodyFootprintSupport:
                     support.HeightMillimeters != referenceYMillimeters)
-            : ValidateTerrainClearance(world, resolved, body);
+            : ValidateTerrainClearance(world, space, resolved, body);
     }
 
     private TerrainResolutionStatus TryFindBoundsSupport(
+        SpatialSpaceId space,
         long globalXMillimeters,
         long globalZMillimeters,
         int minimumYMillimeters,
@@ -900,6 +930,7 @@ public sealed class UltraSimSimplePhysics
             queryMaximumYExclusive,
             bodyMaximumZExclusive);
         if (!_world.TryQueryStaticBounds(
+                space,
                 queryBounds,
                 StaticCollisionCandidateChunks,
                 _staticHits,
@@ -972,12 +1003,14 @@ public sealed class UltraSimSimplePhysics
 
     private static TerrainResolutionStatus ValidateTerrainClearance(
         GameWorldState world,
+        SpatialSpaceId space,
         in WorldPosition standing,
         in SimplePhysicsBody body) =>
-        ValidateTerrainClearance(world, standing, body, default);
+        ValidateTerrainClearance(world, space, standing, body, default);
 
     private static TerrainResolutionStatus ValidateTerrainClearance(
         GameWorldState world,
+        SpatialSpaceId space,
         in WorldPosition standing,
         in SimplePhysicsBody body,
         in WorldTerrainColumnSurface centerSupport)
@@ -997,7 +1030,7 @@ public sealed class UltraSimSimplePhysics
                     x, standing.YMillimeters, z, out WorldPosition probe))
                 return TerrainResolutionStatus.OutsidePreparedWorld;
             WorldTerrainColumnQueryStatus query = world.TryCopyTerrainColumnSurfaces(
-                probe, surfaces, out int count, out _);
+                space, probe, surfaces, out int count, out _);
             if (query == WorldTerrainColumnQueryStatus.Unavailable)
                 return TerrainResolutionStatus.OutsidePreparedWorld;
             if (query != WorldTerrainColumnQueryStatus.Complete)
@@ -1038,6 +1071,7 @@ public sealed class UltraSimSimplePhysics
 
     private static TerrainResolutionStatus ValidateFootprintAndClearance(
         GameWorldState world,
+        SpatialSpaceId space,
         in WorldPosition standing,
         in SimplePhysicsBody body,
         in WorldTerrainColumnSurface centerSupport,
@@ -1064,7 +1098,7 @@ public sealed class UltraSimSimplePhysics
                 return TerrainResolutionStatus.OutsidePreparedWorld;
 
             WorldTerrainColumnQueryStatus query = world.TryCopyTerrainColumnSurfaces(
-                probe, surfaces, out int count, out _);
+                space, probe, surfaces, out int count, out _);
             if (query == WorldTerrainColumnQueryStatus.Unavailable)
                 return TerrainResolutionStatus.OutsidePreparedWorld;
             if (query != WorldTerrainColumnQueryStatus.Complete)
@@ -1085,11 +1119,12 @@ public sealed class UltraSimSimplePhysics
                 return TerrainResolutionStatus.Unsupported;
 
         }
-        return ValidateTerrainClearance(world, standing, body, centerSupport);
+        return ValidateTerrainClearance(world, space, standing, body, centerSupport);
     }
 
     private static TerrainResolutionStatus ValidateStructuralFootprint(
         GameWorldState world,
+        SpatialSpaceId space,
         in WorldPosition position,
         in SimplePhysicsBody body)
     {
@@ -1103,7 +1138,7 @@ public sealed class UltraSimSimplePhysics
                     x, position.YMillimeters, z, out WorldPosition probe))
                 return TerrainResolutionStatus.OutsidePreparedWorld;
             WorldTerrainColumnQueryStatus query = world.TryCopyTerrainColumnSurfaces(
-                probe, surfaces, out _, out _);
+                space, probe, surfaces, out _, out _);
             if (query == WorldTerrainColumnQueryStatus.Unavailable)
                 return TerrainResolutionStatus.OutsidePreparedWorld;
             if (query != WorldTerrainColumnQueryStatus.Complete)
@@ -1172,6 +1207,7 @@ public sealed class UltraSimSimplePhysics
     };
 
     private bool IsSweepClear(
+        SpatialSpaceId space,
         in WorldStaticBounds currentBounds,
         in WorldStaticBounds targetBounds,
         ReadOnlySpan<WorldStaticBounds> dynamicBlockingBounds,
@@ -1179,6 +1215,7 @@ public sealed class UltraSimSimplePhysics
     {
         WorldStaticBounds queryBounds = Union(currentBounds, targetBounds);
         if (!_world.TryQueryStaticBounds(
+                space,
                 queryBounds,
                 StaticCollisionCandidateChunks,
                 _staticHits,

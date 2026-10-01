@@ -57,6 +57,7 @@ public sealed class UltraSimGameComposition : IServerComposition, IGuestAdmissio
     private readonly WorldPack? _baseWorldPack;
     private readonly PreparedWorldComposition? _preparedComposition;
     private readonly ConceptDemoStructuralSource? _conceptDemoStructuralSource;
+    private readonly WorldPack[] _additionalSpacePacks;
     private readonly InventoryRuleSelection _inventoryRuleSelection;
     private readonly GameVerticalMotionOptions _verticalMotionOptions;
 
@@ -71,7 +72,8 @@ public sealed class UltraSimGameComposition : IServerComposition, IGuestAdmissio
         InventoryRuleSelection? inventoryRuleSelection = null,
         GameVerticalMotionOptions? verticalMotionOptions = null,
         PreparedWorldComposition? preparedComposition = null,
-        ConceptDemoStructuralSource? conceptDemoStructuralSource = null)
+        ConceptDemoStructuralSource? conceptDemoStructuralSource = null,
+        IReadOnlyList<WorldPack>? additionalSpacePacks = null)
     {
         _inventoryLimits = inventoryLimits ?? InventoryLimits.Default;
         _inventoryLimits.Validate();
@@ -87,6 +89,14 @@ public sealed class UltraSimGameComposition : IServerComposition, IGuestAdmissio
             throw new ArgumentException("Legacy and canonical structural roots are mutually exclusive.", nameof(preparedComposition));
         _preparedComposition = preparedComposition;
         _conceptDemoStructuralSource = conceptDemoStructuralSource;
+        if (additionalSpacePacks is { Count: > GameWorldState.MaximumAdmittedSpaces - 1 })
+            throw new ArgumentOutOfRangeException(nameof(additionalSpacePacks));
+        _additionalSpacePacks = additionalSpacePacks is null ? [] : [.. additionalSpacePacks];
+        var admitted = new HashSet<UltraSim.Spatial.SpatialSpaceId>();
+        foreach (WorldPack pack in _additionalSpacePacks)
+            if (pack is null || pack.Space == GameWorldState.DefaultSpace || !admitted.Add(pack.Space))
+                throw new ArgumentException("Additional WorldPacks require distinct nondefault spaces.",
+                    nameof(additionalSpacePacks));
         _inventoryRuleSelection = inventoryRuleSelection ?? InventoryRuleSelection.PerContainer;
         if (!_inventoryRuleSelection.IsValid)
             throw new ArgumentException("The inventory rule selection is invalid.", nameof(inventoryRuleSelection));
@@ -95,10 +105,16 @@ public sealed class UltraSimGameComposition : IServerComposition, IGuestAdmissio
             throw new ArgumentException("The vertical-motion options are invalid.", nameof(verticalMotionOptions));
         Schema = GameSchema.CreateSchema();
         PersistenceCatalog = GameSchema.CreatePersistenceCatalog(static builder =>
+        {
             builder.RegisterHistoricalReader<GameSimulationState>(
                 savedVersion: 1,
                 GameSimulationStateV1Reader.Fingerprint,
-                new GameSimulationStateV1Reader()));
+                new GameSimulationStateV1Reader());
+            builder.RegisterHistoricalReader<WorldPositionComponent>(
+                savedVersion: 1,
+                GamePositionV1Reader.Fingerprint,
+                new GamePositionV1Reader());
+        });
     }
 
     public ComponentSchema Schema { get; }
@@ -226,6 +242,9 @@ public sealed class UltraSimGameComposition : IServerComposition, IGuestAdmissio
         ArgumentNullException.ThrowIfNull(content);
         bound = null;
         if (!fingerprint.IsValid) return false;
+        foreach (WorldPack pack in _additionalSpacePacks)
+            if (pack.Fingerprint == fingerprint)
+                return pack.TryBind(content, out bound, out _);
         if (_baseWorldPack is not null)
             return _baseWorldPack.Fingerprint == fingerprint &&
                 _baseWorldPack.TryBind(content, out bound, out _);
@@ -311,7 +330,26 @@ public sealed class UltraSimGameComposition : IServerComposition, IGuestAdmissio
             if (first.View.BaseWorld.Content.Fingerprint != content.World.Fingerprint)
                 throw new InvalidOperationException("The prepared composition does not bind to compiled Game content.");
         }
-        return new GameWorldState(world, bound, preparedComposition: preparedComposition);
+        var state = new GameWorldState(world, bound, preparedComposition: preparedComposition);
+        if (!TryInstallAdditionalSpaces(state, content.World))
+            throw new InvalidOperationException("Additional spatial WorldPacks could not be admitted.");
+        return state;
+    }
+
+    /// <summary>
+    /// Rebinds configured immutable nondefault roots into an unpublished staging generation.
+    /// The worldview save records the default root; these composition-owned admitted roots
+    /// must be present before restored actor locations are physically reconciled.
+    /// </summary>
+    public bool TryInstallAdditionalSpaces(GameWorldState state, WorldContentBinding content)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(content);
+        foreach (WorldPack pack in _additionalSpacePacks)
+            if (!pack.TryBind(content, out BoundWorldPack? additional, out _) ||
+                !state.TryAddPreparedWorld(additional!))
+                return false;
+        return true;
     }
 
     private GameWorldActions CreateWorldActions(

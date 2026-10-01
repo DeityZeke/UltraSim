@@ -41,6 +41,7 @@ var tests = new (string Name, Action Body)[]
     ("ConceptDemoSignUsesAuthoritativeInformationalUi", ConceptDemoSignUsesAuthoritativeInformationalUi),
     ("SaveLoadReplacesGenerationAndRebuildsPublicLineage", SaveLoadReplacesGenerationAndRebuildsPublicLineage),
     ("ConceptDemoCanonicalFarIslandSaveLoad", ConceptDemoCanonicalFarIslandSaveLoad),
+    ("ConceptDemoSpatialPortalRetainsActorInventoryAndSavedSpace", ConceptDemoSpatialPortalRetainsActorInventoryAndSavedSpace),
     ("ConceptDemoSaveSequenceSurvivesSessionReentry", ConceptDemoSaveSequenceSurvivesSessionReentry),
     ("DistantInterestReentryInvalidatesOldPublicDebt", DistantInterestReentryInvalidatesOldPublicDebt),
 };
@@ -1100,7 +1101,7 @@ static void ConceptDemoCanonicalFarIslandSaveLoad()
     using Fixture fixture = Fixture.CreateConcept();
     True(fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView initial));
     True(initial.PreparedWorld is null && initial.PreparedComposition is not null);
-    Equal(162, initial.PreparedComposition.PreparedChunkCount);
+    Equal(162, initial.PreparedComposition!.PreparedChunkCount);
     WorldStructuralManifestFingerprint manifest = initial.PreparedComposition.ManifestFingerprint;
     WorldCompositionRevision revision = initial.PreparedComposition.Revision;
 
@@ -1122,9 +1123,137 @@ static void ConceptDemoCanonicalFarIslandSaveLoad()
     True(fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView restored));
     Equal(GamePlayableWorld.FarGateDestination, restored.PlayerPosition);
     True(restored.PreparedWorld is null && restored.PreparedComposition is not null);
-    Equal(manifest, restored.PreparedComposition.ManifestFingerprint);
+    Equal(manifest, restored.PreparedComposition!.ManifestFingerprint);
     Equal(revision, restored.PreparedComposition.Revision);
     True(restored.PreparedComposition.TryValidateComplete(out _));
+}
+
+static void ConceptDemoSpatialPortalRetainsActorInventoryAndSavedSpace()
+{
+    using Fixture fixture = Fixture.CreateConcept();
+    LocalPlayableSession session = fixture.Session;
+    True(session.TryGetLatestView(out LocalPlayableAuthorityView initial));
+    Equal(GameWorldState.DefaultSpace, initial.Space);
+    ClientWorldSemanticCache classic = CreateSpatialCache(initial);
+    WorldPublicRecord outbound = WaitForPublicAt(session, classic,
+        GamePlayableWorld.CabinBenchmarkOutboundPosition);
+    Equal(GameWorldPublicPrefabIds.SkyTelepad, outbound.PrefabId);
+    True(session.TryRequestRelocation(1, GamePlayableWorld.CabinBenchmarkOutboundPosition));
+    DriveUntil(() => session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastAdministrativeSequence == 1 && view.LastAdministrativeSucceeded);
+
+    var input = new ClientWorldInputSequencer(session.ControlSession);
+    Interact(outbound.Id);
+    True(session.TryGetLatestView(out LocalPlayableAuthorityView benchmark));
+    Equal(GamePlayableWorld.CabinBenchmarkSpace, benchmark.Space);
+    Equal(initial.PublicActor, benchmark.PublicActor);
+    Equal(initial.GuestIdentity, benchmark.GuestIdentity);
+    Equal(initial.BreadIsInBackpack, benchmark.BreadIsInBackpack);
+    True(benchmark.PreparedWorld is not null &&
+        benchmark.PreparedWorld.Space == GamePlayableWorld.CabinBenchmarkSpace);
+
+    ClientWorldSemanticCache interior = CreateSpatialCache(benchmark);
+    WorldPublicRecord returning = WaitForPublicAt(session, interior,
+        GamePlayableWorld.CabinBenchmarkReturnPosition);
+    Equal(GameWorldPublicPrefabIds.SkyTelepad, returning.PrefabId);
+    True(!ContainsPublic(interior, outbound.Id));
+    True(session.TryRequestSave(2));
+    DriveUntil(() => session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastAdministrativeSequence == 2 && view.LastAdministrativeSucceeded);
+    True(session.TryRequestRelocation(3, GamePlayableWorld.CabinBenchmarkReturnPosition));
+    DriveUntil(() => session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastAdministrativeSequence == 3 && view.LastAdministrativeSucceeded);
+    True(session.TryRequestLoad(4));
+    DriveUntil(() => session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastAdministrativeSequence == 4,
+        failure: () => session.GetSnapshot().ToString());
+    True(session.TryGetLatestView(out LocalPlayableAuthorityView restored));
+    True(restored.LastAdministrativeSucceeded, restored.LastAdministrativeMessage);
+    True(restored.GenerationId > initial.GenerationId);
+    Equal(GamePlayableWorld.CabinBenchmarkSpace, restored.Space);
+    Equal(GamePlayableWorld.CabinBenchmarkArrival, restored.PlayerPosition);
+    Equal(initial.PublicActor, restored.PublicActor);
+    Equal(initial.BreadIsInBackpack, restored.BreadIsInBackpack);
+
+    // The save/load establishes a new command lineage, but does not replace the actor.
+    input = new ClientWorldInputSequencer(session.ControlSession);
+    True(session.TryRequestRelocation(5, GamePlayableWorld.CabinBenchmarkReturnPosition));
+    DriveUntil(() => session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastAdministrativeSequence == 5 && view.LastAdministrativeSucceeded);
+    Interact(returning.Id);
+    True(session.TryGetLatestView(out LocalPlayableAuthorityView back));
+    Equal(GameWorldState.DefaultSpace, back.Space);
+    Equal(initial.PublicActor, back.PublicActor);
+    Equal(initial.BreadIsInBackpack, back.BreadIsInBackpack);
+    True(back.PreparedComposition is not null &&
+        back.PreparedComposition.Space == GameWorldState.DefaultSpace);
+
+    void Interact(WorldPublicEntityId target)
+    {
+        True(input.TryCreateSemanticCommand(new ClientWorldCommandIntent(
+            GameLocomotionUpdate.Stop, GamePlayerActions.Interact, true),
+            out GamePlayerCommand command));
+        True(session.TrySubmit(new LocalPlayableCommand(command,
+            LocalPlayableSelection.SkyTelepad, false, default, false, target)));
+        DriveUntil(() => session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastCommandSequence == command.Sequence &&
+            view.LastCommandResult.Interaction == GameWorldActionStatus.Accepted,
+            failure: () => session.GetSnapshot().ToString());
+        True(input.TryCreateSemanticCommand(new ClientWorldCommandIntent(
+            GameLocomotionUpdate.Stop, GamePlayerActions.None, true),
+            out GamePlayerCommand release));
+        True(session.TrySubmit(new LocalPlayableCommand(release,
+            LocalPlayableSelection.None, false, default, false)));
+        DriveUntil(() => session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastCommandSequence == release.Sequence);
+    }
+}
+
+static ClientWorldSemanticCache CreateSpatialCache(in LocalPlayableAuthorityView view)
+{
+    var limits = new ClientWorldSemanticCacheLimits(25, 16, 16, 16, 64);
+    var cache = view.PreparedComposition is not null
+        ? new ClientWorldSemanticCache(view.PreparedComposition, limits)
+        : new ClientWorldSemanticCache(view.PreparedWorld!, limits);
+    SpatialChunkCoord center = view.PlayerPosition.Chunk;
+    for (int z = center.Z - 2; z <= center.Z + 2; z++)
+    for (int x = center.X - 2; x <= center.X + 2; x++)
+    {
+        var key = new SpatialChunkKey(view.Space, x, z);
+        if (!(view.PreparedComposition?.TryGetBaseTerrain(key, out _) ??
+              view.PreparedWorld!.TryGetBaseTerrain(key, out _))) continue;
+        if (!cache.TryRequest(key, out ClientSemanticChunkHandle handle, out _)) continue;
+        if (!cache.TryStageFromBaseWorld(handle, [], default, out _) ||
+            !cache.TryPublish(handle, out _))
+            throw new InvalidOperationException($"Could not stage {key}.");
+    }
+    return cache;
+}
+
+static WorldPublicRecord WaitForPublicAt(
+    LocalPlayableSession session, ClientWorldSemanticCache cache, WorldPosition position)
+{
+    WorldPublicRecord found = default;
+    DriveUntil(() =>
+    {
+        session.PumpWorld(cache);
+        var chunks = new ClientSemanticChunkInfo[25];
+        if (!cache.TryCopyResidentInfo(chunks, out int count, out _)) return false;
+        for (int index = 0; index < count; index++)
+        {
+            if (!cache.TryGetResidentView(chunks[index].Handle,
+                    out ClientSemanticChunkView view)) continue;
+            foreach (ref readonly WorldPublicRecord row in view.PublicRecords)
+                if (row.Position == position &&
+                    row.PrefabId == GameWorldPublicPrefabIds.SkyTelepad)
+                {
+                    found = row;
+                    return true;
+                }
+        }
+        return false;
+    }, failure: () => session.GetSnapshot().ToString());
+    return found;
 }
 
 static void ConceptDemoSaveSequenceSurvivesSessionReentry()

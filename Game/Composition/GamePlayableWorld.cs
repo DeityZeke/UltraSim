@@ -60,6 +60,11 @@ public readonly record struct GamePlayableWorldScene(
     PersistentEntityId FallbackLabSignId,
     PersistentEntityId IronSwordSpawnerId)
 {
+    public Entity CabinBenchmarkOutbound { get; init; }
+    public PersistentEntityId CabinBenchmarkOutboundId { get; init; }
+    public Entity CabinBenchmarkReturn { get; init; }
+    public PersistentEntityId CabinBenchmarkReturnId { get; init; }
+
     public bool IsValid => CabinDoorId.IsValid && CabinChestId.IsValid &&
         WoodlandAnimalId.IsValid && SkyTelepadId.IsValid && CentralFarGateId.IsValid &&
         FarReturnGateId.IsValid && WelcomeSignId.IsValid && FallbackLabSignId.IsValid &&
@@ -355,7 +360,8 @@ public sealed class GameWorldActions
             return GameWorldActionStatus.NotGrounded;
 
         bool complete = _collisionProjection.TryCapture(
-            world, worldState, actor, out ReadOnlySpan<WorldStaticBounds> dynamicBounds);
+            world, worldState, actor, ReadActorSpace(world, worldState, actor),
+            out ReadOnlySpan<WorldStaticBounds> dynamicBounds);
         if (current.YMillimeters == int.MaxValue)
             return GameWorldActionStatus.OutsidePreparedWorld;
         SimpleAirborneMotionResult clearance = _physics.ResolveAirborneMotion(
@@ -364,7 +370,7 @@ public sealed class GameWorldActions
                 current.GlobalXMillimeters,
                 current.YMillimeters + 1,
                 current.GlobalZMillimeters,
-                s_actorBody),
+                s_actorBody, ReadActorSpace(world, worldState, actor)),
             dynamicBounds,
             complete);
         if (clearance.Status == SimpleAirborneMotionStatus.OutsidePreparedWorld)
@@ -420,12 +426,13 @@ public sealed class GameWorldActions
             return GameWorldActionStatus.InvalidCommand;
         }
         if (!world.IsAlive(actor) || !world.Has(actor, _character) ||
-            !worldState.TryReadPosition(world, actor, out WorldPosition current))
+            !worldState.TryReadLocation(world, actor, out WorldLocation currentLocation))
         {
             result = result with { Admission = GameWorldActionStatus.MissingActor };
             return GameWorldActionStatus.MissingActor;
         }
 
+        WorldPosition current = currentLocation.Position;
         int index = checked((int)actor.Index);
         if (_controlGenerations[index] != actor.Generation ||
             _controlEpochs[index] != command.ControlSession.Value)
@@ -449,7 +456,7 @@ public sealed class GameWorldActions
         CommitSequence(actor, command.Sequence);
 
         GameWorldActionStatus locomotion = ApplyLocomotionUpdate(
-            worldState, actor, current, command.Locomotion);
+            worldState, actor, currentLocation.Space, current, command.Locomotion);
 
         GameWorldActionStatus jump = GameWorldActionStatus.NotRequested;
         if ((command.PressedActions & GamePlayerActions.Jump) != 0)
@@ -477,6 +484,7 @@ public sealed class GameWorldActions
     private GameWorldActionStatus ApplyLocomotionUpdate(
         GameWorldState worldState,
         Entity actor,
+        SpatialSpaceId space,
         in WorldPosition current,
         in GameLocomotionUpdate update)
     {
@@ -497,13 +505,14 @@ public sealed class GameWorldActions
                         current.YMillimeters,
                         update.DestinationZMillimeters,
                         out WorldPosition candidate) ||
-                    worldState.PreparedWorld is null && worldState.PreparedComposition is null)
+                    !worldState.TryGetPreparedSpace(space, out _, out _))
                 {
                     return GameWorldActionStatus.OutsidePreparedWorld;
                 }
                 WorldTerrainColumnQueryStatus terrain =
                     worldState.TryFindNearestSupport(
-                        candidate, current.YMillimeters, out WorldTerrainColumnSurface support);
+                        space, candidate, current.YMillimeters,
+                        out WorldTerrainColumnSurface support);
                 if (terrain == WorldTerrainColumnQueryStatus.Unavailable)
                     return GameWorldActionStatus.OutsidePreparedWorld;
                 if (terrain != WorldTerrainColumnQueryStatus.Complete || !support.IsValid)
@@ -734,9 +743,11 @@ public sealed class GameWorldActions
         }
 
         bool complete = _collisionProjection.TryCapture(
-            world, worldState, actor, out ReadOnlySpan<WorldStaticBounds> dynamicBounds);
+            world, worldState, actor, ReadActorSpace(world, worldState, actor),
+            out ReadOnlySpan<WorldStaticBounds> dynamicBounds);
         var request = new SimpleAirborneMotionRequest(
-            current, nextX, checked((int)targetY), nextZ, s_actorBody);
+            current, nextX, checked((int)targetY), nextZ, s_actorBody,
+            ReadActorSpace(world, worldState, actor));
         SimpleAirborneMotionResult physical = _physics.ResolveAirborneMotion(
             request, dynamicBounds, complete);
         // A captured takeoff trajectory may hit a structural edge or leave prepared structure
@@ -812,8 +823,10 @@ public sealed class GameWorldActions
         long nextZ)
     {
         bool complete = _collisionProjection.TryCapture(
-            world, worldState, actor, out ReadOnlySpan<WorldStaticBounds> dynamicBounds);
-        var request = new SimpleMotionRequest(current, nextX, nextZ, s_actorBody);
+            world, worldState, actor, ReadActorSpace(world, worldState, actor),
+            out ReadOnlySpan<WorldStaticBounds> dynamicBounds);
+        var request = new SimpleMotionRequest(current, nextX, nextZ, s_actorBody,
+            ReadActorSpace(world, worldState, actor));
         return _physics.ResolveMotion(request, dynamicBounds, complete);
     }
 
@@ -847,17 +860,17 @@ public sealed class GameWorldActions
     {
         isOpen = false;
         if (!world.IsAlive(actor) || !world.Has(actor, _character) ||
-            !worldState.TryReadPosition(world, actor, out WorldPosition actorPosition))
+            !worldState.TryReadLocation(world, actor, out WorldLocation actorLocation))
             return GameWorldActionStatus.MissingActor;
         if (!world.IsAlive(door) || !world.TryRead(door, _door, out GameCabinDoorState state) ||
-            !worldState.TryReadPosition(world, door, out WorldPosition doorPosition) ||
+            !worldState.TryReadLocation(world, door, out WorldLocation doorLocation) ||
             !worldState.TryReadPublic(world, door, out WorldPublicDescriptor descriptor))
             return GameWorldActionStatus.MissingTarget;
         if (state.IsOpen is not (0 or 1) ||
             descriptor.PrefabId != GameWorldPublicPrefabIds.CabinDoor ||
             descriptor.Orientation != DoorOrientation(state.IsOpen != 0))
             return GameWorldActionStatus.InvariantViolation;
-        if (!WithinInteractionRange(actorPosition, doorPosition))
+        if (!WithinInteractionRange(actorLocation, doorLocation))
             return GameWorldActionStatus.OutOfRange;
 
         isOpen = state.IsOpen == 0;
@@ -905,14 +918,14 @@ public sealed class GameWorldActions
         Entity sign)
     {
         if (!world.IsAlive(actor) || !world.Has(actor, _character) ||
-            !worldState.TryReadPosition(world, actor, out WorldPosition actorPosition))
+            !worldState.TryReadLocation(world, actor, out WorldLocation actorLocation))
             return GameWorldActionStatus.MissingActor;
         if (!world.IsAlive(sign) ||
-            !worldState.TryReadPosition(world, sign, out WorldPosition signPosition) ||
+            !worldState.TryReadLocation(world, sign, out WorldLocation signLocation) ||
             !worldState.TryReadPublic(world, sign, out WorldPublicDescriptor descriptor) ||
             descriptor.PrefabId != GameWorldPublicPrefabIds.InformationalSign)
             return GameWorldActionStatus.MissingTarget;
-        return WithinInteractionRange(actorPosition, signPosition)
+        return WithinInteractionRange(actorLocation, signLocation)
             ? GameWorldActionStatus.Accepted
             : GameWorldActionStatus.OutOfRange;
     }
@@ -924,18 +937,31 @@ public sealed class GameWorldActions
         Entity telepad)
     {
         if (!world.IsAlive(actor) || !world.Has(actor, _character) ||
-            !worldState.TryReadPosition(world, actor, out WorldPosition actorPosition))
+            !worldState.TryReadLocation(world, actor, out WorldLocation actorLocation))
             return GameWorldActionStatus.MissingActor;
         if (!world.IsAlive(telepad) ||
-            !worldState.TryReadPosition(world, telepad, out WorldPosition telepadPosition) ||
+            !worldState.TryReadLocation(world, telepad, out WorldLocation telepadLocation) ||
             !worldState.TryReadPublic(world, telepad, out WorldPublicDescriptor descriptor) ||
             descriptor.PrefabId != GameWorldPublicPrefabIds.SkyTelepad)
             return GameWorldActionStatus.MissingTarget;
-        if (!WithinInteractionRange(actorPosition, telepadPosition))
+        if (!WithinInteractionRange(actorLocation, telepadLocation))
             return GameWorldActionStatus.OutOfRange;
 
-        // This destination is concrete authored Game content. The interaction caller nominates
-        // only the public telepad entity and never supplies relocation coordinates.
+        // The public target is only a nomination. Game owns both destination addresses.
+        if (telepadLocation.Space == GameWorldState.DefaultSpace &&
+            telepadLocation.Position == GamePlayableWorld.CabinBenchmarkOutboundPosition)
+            return TransitionActorSpace(world, worldState, actor,
+                new WorldLocation(GamePlayableWorld.CabinBenchmarkSpace,
+                    GamePlayableWorld.CabinBenchmarkArrival), out _);
+        if (telepadLocation.Space == GamePlayableWorld.CabinBenchmarkSpace &&
+            telepadLocation.Position == GamePlayableWorld.CabinBenchmarkReturnPosition)
+            return TransitionActorSpace(world, worldState, actor,
+                new WorldLocation(GameWorldState.DefaultSpace,
+                    GamePlayableWorld.CabinBenchmarkReturnArrival), out _);
+        if (telepadLocation.Space != GameWorldState.DefaultSpace ||
+            telepadLocation.Position != GamePlayableWorld.SkyTelepadPosition)
+            return GameWorldActionStatus.InvariantViolation;
+        // The existing Sky telepad remains an ordinary same-space relocation.
         return RelocateActor(
             world,
             worldState,
@@ -951,16 +977,17 @@ public sealed class GameWorldActions
         Entity gate)
     {
         if (!world.IsAlive(actor) || !world.Has(actor, _character) ||
-            !worldState.TryReadPosition(world, actor, out WorldPosition actorPosition))
+            !worldState.TryReadLocation(world, actor, out WorldLocation actorLocation))
             return GameWorldActionStatus.MissingActor;
         if (!world.IsAlive(gate) ||
-            !worldState.TryReadPosition(world, gate, out WorldPosition gatePosition) ||
+            !worldState.TryReadLocation(world, gate, out WorldLocation gateLocation) ||
             !worldState.TryReadPublic(world, gate, out WorldPublicDescriptor descriptor) ||
             descriptor.PrefabId != GameWorldPublicPrefabIds.FarGate)
             return GameWorldActionStatus.MissingTarget;
-        if (!WithinInteractionRange(actorPosition, gatePosition))
+        if (!WithinInteractionRange(actorLocation, gateLocation))
             return GameWorldActionStatus.OutOfRange;
 
+        WorldPosition gatePosition = gateLocation.Position;
         WorldPosition destination;
         if (gatePosition == GamePlayableWorld.CentralFarGatePosition)
             destination = GamePlayableWorld.FarGateDestination;
@@ -1056,13 +1083,14 @@ public sealed class GameWorldActions
         EnsureWorld(world, worldState);
         relocated = default;
         if (!world.IsAlive(actor) || !world.Has(actor, _character) ||
-            !worldState.TryReadPosition(world, actor, out _))
+            !worldState.TryReadLocation(world, actor, out WorldLocation currentLocation))
             return GameWorldActionStatus.MissingActor;
 
         bool projectionComplete = _collisionProjection.TryCapture(
-            world, worldState, actor, out ReadOnlySpan<WorldStaticBounds> dynamicBounds);
+            world, worldState, actor, currentLocation.Space,
+            out ReadOnlySpan<WorldStaticBounds> dynamicBounds);
         SimpleOccupancyResult occupancy = _physics.ProbeOccupancy(
-            new SimpleOccupancyRequest(requested, s_actorBody),
+            new SimpleOccupancyRequest(requested, s_actorBody, currentLocation.Space),
             dynamicBounds,
             projectionComplete);
         if (occupancy.Status == SimpleOccupancyStatus.OutsidePreparedWorld)
@@ -1082,6 +1110,49 @@ public sealed class GameWorldActions
         return GameWorldActionStatus.Accepted;
     }
 
+    /// <summary>
+    /// Atomically changes one actor's spatial space and position after destination occupancy is
+    /// established. Identity, inventory, equipment, participant and session are not recreated.
+    /// </summary>
+    public GameWorldActionStatus TransitionActorSpace(
+        EcsWorld world,
+        GameWorldState worldState,
+        Entity actor,
+        in WorldLocation requested,
+        out WorldLocation relocated)
+    {
+        EnsureWorld(world, worldState);
+        relocated = default;
+        if (!world.IsAlive(actor) || !world.Has(actor, _character) ||
+            !worldState.TryReadLocation(world, actor, out _))
+            return GameWorldActionStatus.MissingActor;
+        if (!requested.IsValid ||
+            !worldState.TryGetPreparedSpace(requested.Space, out _, out _))
+            return GameWorldActionStatus.OutsidePreparedWorld;
+
+        bool projectionComplete = _collisionProjection.TryCapture(
+            world, worldState, actor, requested.Space,
+            out ReadOnlySpan<WorldStaticBounds> dynamicBounds);
+        SimpleOccupancyResult occupancy = _physics.ProbeOccupancy(
+            new SimpleOccupancyRequest(requested.Position, s_actorBody, requested.Space),
+            dynamicBounds, projectionComplete);
+        if (occupancy.Status == SimpleOccupancyStatus.OutsidePreparedWorld)
+            return GameWorldActionStatus.OutsidePreparedWorld;
+        if (occupancy.Status == SimpleOccupancyStatus.Unsupported)
+            return GameWorldActionStatus.Unsupported;
+        if (!occupancy.CanOccupy)
+            return GameWorldActionStatus.Blocked;
+
+        WorldLocation candidate = new(requested.Space, occupancy.Position);
+        if (!worldState.TrySetLocation(world, actor, candidate))
+            return GameWorldActionStatus.InvariantViolation;
+        int index = checked((int)actor.Index);
+        ClearLocomotion(index);
+        SetGrounded(actor, index);
+        relocated = candidate;
+        return GameWorldActionStatus.Accepted;
+    }
+
     public GameWorldActionStatus MoveItemToNearbyContainer(
         EcsWorld world,
         GameWorldState worldState,
@@ -1098,14 +1169,14 @@ public sealed class GameWorldActions
         if (inventory.WorldId != _worldId)
             throw new ArgumentException("Inventory belongs to another ECS world.", nameof(inventory));
         if (!world.IsAlive(actor) || !world.Has(actor, _character) ||
-            !worldState.TryReadPosition(world, actor, out WorldPosition actorPosition))
+            !worldState.TryReadLocation(world, actor, out WorldLocation actorLocation))
             return GameWorldActionStatus.MissingActor;
         if (!world.IsAlive(destination) ||
             !inventory.TryGetContainerDefinition(world, source, out _) ||
             !inventory.TryGetContainerDefinition(world, destination, out _))
             return GameWorldActionStatus.MissingTarget;
-        if (!IsAuthorizedContainer(world, worldState, inventory, actor, actorPosition, source) ||
-            !IsAuthorizedContainer(world, worldState, inventory, actor, actorPosition, destination))
+        if (!IsAuthorizedContainer(world, worldState, inventory, actor, actorLocation, source) ||
+            !IsAuthorizedContainer(world, worldState, inventory, actor, actorLocation, destination))
             return GameWorldActionStatus.UnauthorizedContainer;
         mutation = inventory.Move(world, item, source, destination);
         return mutation.Accepted
@@ -1171,6 +1242,9 @@ public sealed class GameWorldActions
         Int128 maximum = InteractionRangeMillimeters;
         return dx * dx + dy * dy + dz * dz <= maximum * maximum;
     }
+
+    private static bool WithinInteractionRange(in WorldLocation first, in WorldLocation second) =>
+        first.Space == second.Space && WithinInteractionRange(first.Position, second.Position);
 
     private bool SequenceIsFresh(Entity actor, ulong sequence)
     {
@@ -1378,13 +1452,16 @@ public sealed class GameWorldActions
         _verticalGenerations[index] = actor.Generation;
         _verticalVelocityNumerators[index] = 0;
         _verticalDisplacementRemainders[index] = 0;
-        if (!_worldState.TryReadPosition(world, actor, out WorldPosition current))
+        if (!_worldState.TryReadLocation(world, actor, out WorldLocation currentLocation))
             return;
+        WorldPosition current = currentLocation.Position;
         bool complete = _collisionProjection.TryCapture(
-            world, _worldState, actor, out ReadOnlySpan<WorldStaticBounds> dynamicBounds);
+            world, _worldState, actor, currentLocation.Space,
+            out ReadOnlySpan<WorldStaticBounds> dynamicBounds);
         SimpleMotionResult grounded = _physics.ResolveMotion(
             new SimpleMotionRequest(
-                current, current.GlobalXMillimeters, current.GlobalZMillimeters, s_actorBody),
+                current, current.GlobalXMillimeters, current.GlobalZMillimeters, s_actorBody,
+                currentLocation.Space),
             dynamicBounds,
             complete);
         if (grounded.WasResolved)
@@ -1410,9 +1487,11 @@ public sealed class GameWorldActions
         int index)
     {
         bool complete = _collisionProjection.TryCapture(
-            world, worldState, actor, out ReadOnlySpan<WorldStaticBounds> dynamicBounds);
+            world, worldState, actor, ReadActorSpace(world, worldState, actor),
+            out ReadOnlySpan<WorldStaticBounds> dynamicBounds);
         SimpleOccupancyResult recovery = _physics.ProbeOccupancy(
-            new SimpleOccupancyRequest(_verticalOptions.RecoveryPosition, s_actorBody),
+            new SimpleOccupancyRequest(_verticalOptions.RecoveryPosition, s_actorBody,
+                ReadActorSpace(world, worldState, actor)),
             dynamicBounds,
             complete);
         if (!recovery.CanOccupy ||
@@ -1432,13 +1511,13 @@ public sealed class GameWorldActions
         GameWorldState worldState,
         InventoryGenerationState inventory,
         Entity actor,
-        in WorldPosition actorPosition,
+        in WorldLocation actorLocation,
         Entity container)
     {
         if (inventory.TryGetContainerOwner(world, container, out Entity owner))
             return owner == actor;
-        return worldState.TryReadPosition(world, container, out WorldPosition position) &&
-            WithinInteractionRange(actorPosition, position);
+        return worldState.TryReadLocation(world, container, out WorldLocation location) &&
+            WithinInteractionRange(actorLocation, location);
     }
 
     private void EnsureWorld(EcsWorld world, GameWorldState worldState)
@@ -1448,6 +1527,14 @@ public sealed class GameWorldActions
         if (worldState.WorldId != _worldId)
             throw new ArgumentException("World actions and current-world state belong to different generations.",
                 nameof(worldState));
+    }
+
+    private static SpatialSpaceId ReadActorSpace(
+        EcsWorld world, GameWorldState worldState, Entity actor)
+    {
+        if (!worldState.TryReadLocation(world, actor, out WorldLocation location))
+            throw new InvalidOperationException("A controlled actor has no valid spatial address.");
+        return location.Space;
     }
 
     private void EnsureWorld(EcsWorld world)
@@ -1485,6 +1572,7 @@ public sealed class GameWorldActions
 /// <summary>Deterministic authored woods/cabin content and setup for T0.10 acceptance.</summary>
 public static class GamePlayableWorld
 {
+    public static readonly SpatialSpaceId CabinBenchmarkSpace = new(2);
     public const int MinimumChunk = -2;
     public const int MaximumChunk = 2;
     public const int ChunkCount = 25;
@@ -1511,6 +1599,10 @@ public static class GamePlayableWorld
     public static WorldPosition ChestPosition => FromGlobal(18_000, 12_000);
     public static WorldPosition AnimalPosition => FromGlobal(8_000, 4_000);
     public static WorldPosition SkyTelepadPosition => FromGlobal(21_000, 6_500);
+    public static WorldPosition CabinBenchmarkOutboundPosition => FromGlobal(22_000, 12_000);
+    public static WorldPosition CabinBenchmarkArrival => AtHeight(16_000, 1_100, 12_000);
+    public static WorldPosition CabinBenchmarkReturnPosition => AtHeight(16_000, 1_000, 7_000);
+    public static WorldPosition CabinBenchmarkReturnArrival => FromGlobal(22_000, 12_000);
     public static WorldPosition SkyTelepadDestination => AtHeight(28_000, 3_500, 9_000);
     public static WorldPosition SkyJumpStart => AtHeight(22_000, 1_000, 9_000);
     public static WorldPosition CaveEntranceApproach => FromGlobal(-6_000, 2_500);
@@ -1647,6 +1739,18 @@ public static class GamePlayableWorld
         if (!world.TryInstantiate(game.Content.SkyTelepad, out Entity telepad) ||
             !game.WorldState.TrySetPosition(world, telepad, SkyTelepadPosition))
             throw new InvalidOperationException("The shared Sky Island telepad could not be created.");
+        Entity benchmarkOutbound = Entity.Null;
+        Entity benchmarkReturn = Entity.Null;
+        if (game.WorldState.TryGetPreparedSpace(CabinBenchmarkSpace, out _, out _))
+        {
+            if (!world.TryInstantiate(game.Content.SkyTelepad, out benchmarkOutbound) ||
+                !game.WorldState.TrySetPosition(world, benchmarkOutbound,
+                    CabinBenchmarkOutboundPosition) ||
+                !world.TryInstantiate(game.Content.SkyTelepad, out benchmarkReturn) ||
+                !game.WorldState.TrySetLocation(world, benchmarkReturn,
+                    new WorldLocation(CabinBenchmarkSpace, CabinBenchmarkReturnPosition)))
+                throw new InvalidOperationException("The cross-space Cabin telepad pair could not be created.");
+        }
         if (!world.TryInstantiate(game.Content.FarGate, out Entity centralGate) ||
             !game.WorldState.TrySetPosition(world, centralGate, CentralFarGatePosition) ||
             !world.TryInstantiate(game.Content.FarGate, out Entity returnGate) ||
@@ -1674,7 +1778,15 @@ public static class GamePlayableWorld
             world.GetOrAssignPersistentId(returnGate),
             world.GetOrAssignPersistentId(welcomeSign),
             world.GetOrAssignPersistentId(fallbackLabSign),
-            world.GetOrAssignPersistentId(swordSpawner));
+            world.GetOrAssignPersistentId(swordSpawner))
+        {
+            CabinBenchmarkOutbound = benchmarkOutbound,
+            CabinBenchmarkOutboundId = benchmarkOutbound.IsValid
+                ? world.GetOrAssignPersistentId(benchmarkOutbound) : default,
+            CabinBenchmarkReturn = benchmarkReturn,
+            CabinBenchmarkReturnId = benchmarkReturn.IsValid
+                ? world.GetOrAssignPersistentId(benchmarkReturn) : default,
+        };
     }
 
     /// <summary>Adds one participant-owned playable and inventory to an existing shared scene.</summary>

@@ -195,16 +195,17 @@ public sealed class GameItemGenerationState : IInventoryItemInspectionProvider
         EnsureWorld(world);
         ArgumentNullException.ThrowIfNull(worldState);
         ArgumentNullException.ThrowIfNull(inventory);
-        if (!worldState.TryReadPosition(world, actor, out WorldPosition actorPosition))
+        if (!worldState.TryReadLocation(world, actor, out WorldLocation actorLocation))
             return GameWorldActionStatus.MissingActor;
-        if (!worldState.TryReadPosition(world, item, out WorldPosition itemPosition) ||
+        if (!worldState.TryReadLocation(world, item, out WorldLocation itemLocation) ||
             !world.TryRead(item, _weapon, out GameWeaponInstance weapon) || !weapon.IsCanonical() ||
             !worldState.TryReadPublic(world, item, out WorldPublicDescriptor descriptor) ||
             descriptor.PrefabId != GameWorldPublicPrefabIds.IronSword ||
             (descriptor.Flags & (WorldPublicStateFlags.Visible | WorldPublicStateFlags.GroundItem)) !=
                 (WorldPublicStateFlags.Visible | WorldPublicStateFlags.GroundItem))
             return GameWorldActionStatus.MissingTarget;
-        if (!WithinInteractionRange(actorPosition, itemPosition))
+        if (actorLocation.Space != itemLocation.Space ||
+            !WithinInteractionRange(actorLocation.Position, itemLocation.Position))
             return GameWorldActionStatus.OutOfRange;
 
         InventoryMutationResult taken = inventory.TakeWorldItem(world, item, destination);
@@ -226,7 +227,7 @@ public sealed class GameItemGenerationState : IInventoryItemInspectionProvider
         EnsureWorld(world);
         ArgumentNullException.ThrowIfNull(worldState);
         ArgumentNullException.ThrowIfNull(inventory);
-        if (!worldState.TryReadPosition(world, actor, out WorldPosition actorPosition) ||
+        if (!worldState.TryReadLocation(world, actor, out WorldLocation actorLocation) ||
             !worldState.TryReadPublic(world, actor, out WorldPublicDescriptor actorPublic))
             return GameWorldActionStatus.MissingActor;
         if (!world.TryRead(item, _weapon, out GameWeaponInstance weapon) || !weapon.IsCanonical() ||
@@ -237,8 +238,9 @@ public sealed class GameItemGenerationState : IInventoryItemInspectionProvider
         if (!dropped.Accepted)
             return MapInventoryFailure(dropped.Status);
 
-        WorldPosition dropPosition = ResolveDropPosition(worldState, actorPosition);
-        if (!worldState.TrySetPosition(world, item, dropPosition) ||
+        WorldPosition dropPosition = ResolveDropPosition(worldState, actorLocation);
+        if (!worldState.TrySetLocation(world, item,
+                new WorldLocation(actorLocation.Space, dropPosition)) ||
             !worldState.TrySetPublic(world, item, itemPublic with
             {
                 Orientation = actorPublic.Orientation,
@@ -408,12 +410,12 @@ public sealed class GameItemGenerationState : IInventoryItemInspectionProvider
                 : equipped
                     ? WorldPublicStateFlags.Visible
                     : WorldPublicStateFlags.None;
-            if (equipped && worldState.TryReadPosition(world, location.Parent, out WorldPosition ownerPosition) &&
+            if (equipped && worldState.TryReadLocation(world, location.Parent, out WorldLocation ownerLocation) &&
                 worldState.TryReadPublic(world, location.Parent, out WorldPublicDescriptor ownerPublic))
             {
-                if ((!worldState.TryReadPosition(world, item, out WorldPosition itemPosition) ||
-                        itemPosition != ownerPosition) &&
-                    !worldState.TrySetPosition(world, item, ownerPosition))
+                if ((!worldState.TryReadLocation(world, item, out WorldLocation itemLocation) ||
+                        itemLocation != ownerLocation) &&
+                    !worldState.TrySetLocation(world, item, ownerLocation))
                     throw new InvalidOperationException("An equipped item could not follow its authoritative owner.");
                 descriptor = descriptor with { Orientation = ownerPublic.Orientation };
             }
@@ -433,7 +435,7 @@ public sealed class GameItemGenerationState : IInventoryItemInspectionProvider
         item = Entity.Null;
         if (!world.TryRead(spawner, _spawner, out GameItemSpawnerState state) ||
             state.ActiveItem.IsValid || state.NextSpawnOrdinal == uint.MaxValue ||
-            !worldState.TryReadPosition(world, spawner, out WorldPosition position) ||
+            !worldState.TryReadLocation(world, spawner, out WorldLocation spawnerLocation) ||
             !world.TryGetPersistentId(spawner, out PersistentEntityId spawnerId))
             return SpawnResult.InvariantViolation;
         if (_itemCount >= _items.Length ||
@@ -444,7 +446,7 @@ public sealed class GameItemGenerationState : IInventoryItemInspectionProvider
         GameWeaponInstance rolled = Roll(spawnerId, ordinal);
         if (!world.TryWrite(item, _weapon, rolled) ||
             !world.TryWrite(item, _origin, new GameSpawnedItem { Spawner = spawner }) ||
-            !worldState.TrySetPosition(world, item, position))
+            !worldState.TrySetLocation(world, item, spawnerLocation))
         {
             DestroyOrThrow(world, item, "rolled item initialization");
             item = Entity.Null;
@@ -503,8 +505,9 @@ public sealed class GameItemGenerationState : IInventoryItemInspectionProvider
 
     private static WorldPosition ResolveDropPosition(
         GameWorldState worldState,
-        in WorldPosition actorPosition)
+        in WorldLocation actorLocation)
     {
+        WorldPosition actorPosition = actorLocation.Position;
         if (!WorldPosition.TryFromGlobalMillimeters(
                 actorPosition.GlobalXMillimeters + 1_000,
                 actorPosition.YMillimeters,
@@ -512,7 +515,8 @@ public sealed class GameItemGenerationState : IInventoryItemInspectionProvider
                 out WorldPosition candidate))
             return actorPosition;
         WorldTerrainColumnQueryStatus query = worldState.TryFindNearestSupport(
-            candidate, actorPosition.YMillimeters, out WorldTerrainColumnSurface support);
+            actorLocation.Space, candidate, actorPosition.YMillimeters,
+            out WorldTerrainColumnSurface support);
         return query == WorldTerrainColumnQueryStatus.Complete && support.IsSupport &&
             WorldPosition.TryFromGlobalMillimeters(
                 candidate.GlobalXMillimeters,

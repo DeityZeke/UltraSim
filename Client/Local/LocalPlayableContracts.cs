@@ -74,7 +74,8 @@ public readonly record struct LocalPlayableAuthorityView(
     uint MainHandPrefabId,
     GameVerticalMotionSnapshot VerticalMotion,
     WorldPreparedView? PreparedWorld,
-    PreparedWorldComposition? PreparedComposition = null)
+    PreparedWorldComposition? PreparedComposition = null,
+    SpatialSpaceId Space = default)
 {
     public bool IsReady => GenerationId != 0 &&
         (PreparedWorld is not null) != (PreparedComposition is not null);

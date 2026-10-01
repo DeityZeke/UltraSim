@@ -155,14 +155,22 @@ public readonly record struct ChunkPublicationLimits(
 public readonly record struct WorldPublicChange(
     Entity Entity,
     bool IsPublic,
+    SpatialSpaceId Space,
     WorldPosition Position,
     WorldPublicDescriptor Descriptor)
 {
-    public static WorldPublicChange Absent(Entity entity) => new(entity, false, default, default);
+    public static WorldPublicChange Absent(Entity entity) => new(entity, false, default, default, default);
     public static WorldPublicChange Present(
         Entity entity,
         in WorldPosition position,
-        in WorldPublicDescriptor descriptor) => new(entity, true, position, descriptor);
+        in WorldPublicDescriptor descriptor) =>
+        Present(entity, GameWorldState.DefaultSpace, position, descriptor);
+
+    public static WorldPublicChange Present(
+        Entity entity,
+        SpatialSpaceId space,
+        in WorldPosition position,
+        in WorldPublicDescriptor descriptor) => new(entity, true, space, position, descriptor);
 }
 
 public readonly record struct WorldPublicRecord(
@@ -807,9 +815,9 @@ public sealed partial class ChunkPublicationStore
             ref readonly WorldPublicChange change = ref changes[index];
             if (!change.Entity.IsValid || change.Entity.Index >= (uint)_entityMap.Length ||
                 hasPrevious && change.Entity.Index <= previousIndex ||
-                change.IsPublic && !change.Descriptor.IsValid)
+                change.IsPublic && (!change.Descriptor.IsValid || !change.Space.IsValid))
             {
-                error = change.IsPublic && !change.Descriptor.IsValid
+                error = change.IsPublic && (!change.Descriptor.IsValid || !change.Space.IsValid)
                     ? ChunkPublicationCommitError.InvalidPublicState
                     : ChunkPublicationCommitError.NonCanonicalChanges;
                 return false;
@@ -843,7 +851,7 @@ public sealed partial class ChunkPublicationStore
             else
             {
                 WorldPublicRecord current = ReadSlotRecord(slot);
-                SpatialChunkKey destination = change.Position.ToChunkKey(source.Space);
+                SpatialChunkKey destination = change.Position.ToChunkKey(change.Space);
                 fields = CompareFields(current, change.Position, change.Descriptor);
                 if (source != destination)
                 {
@@ -862,7 +870,7 @@ public sealed partial class ChunkPublicationStore
 
             ref PlannedChange plan = ref _plans[planCount++];
             plan = new PlannedChange(mode, change.Entity, slot, source,
-                change.IsPublic ? change.Position.ToChunkKey(GameWorldState.DefaultSpace) : default,
+                change.IsPublic ? change.Position.ToChunkKey(change.Space) : default,
                 change.Position, change.Descriptor, fields);
             if (mode is PlannedMode.Remove or PlannedMode.Replace or PlannedMode.Move)
             {

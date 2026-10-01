@@ -1110,7 +1110,8 @@ public partial class LocalCabinClient : Node3D
             CountPresentedPrefab(GameWorldPublicPrefabIds.CabinDoor) == 1 &&
             CountPresentedPrefab(GameWorldPublicPrefabIds.WorldChest) == 1 &&
             (!_useConceptDemoWorld ||
-                CountPresentedPrefab(GameWorldPublicPrefabIds.SkyTelepad) == 1 &&
+                CountPresentedPrefab(GameWorldPublicPrefabIds.SkyTelepad) ==
+                    (_serverExtensionFactory is null ? 2 : 1) &&
                 CountPresentedPrefab(GameWorldPublicPrefabIds.FarGate) == 1 &&
                 CountPresentedPrefab(GameWorldPublicPrefabIds.InformationalSign) == 2));
         _lastOutcome = _useConceptDemoWorld
@@ -2273,7 +2274,11 @@ public partial class LocalCabinClient : Node3D
             return;
         if (!_localSession.TryGetLatestView(out LocalPlayableAuthorityView view))
             throw new InvalidOperationException("The local authority view was unavailable.");
-        if (view.GenerationId != _residentGenerationId)
+        bool structuralRootChanged =
+            !ReferenceEquals(_cache.PreparedComposition, view.PreparedComposition) ||
+            view.PreparedComposition is null &&
+                !ReferenceEquals(_cache.PreparedWorld, view.PreparedWorld);
+        if (view.GenerationId != _residentGenerationId || structuralRootChanged)
         {
             _audioSwordObserved = false;
             _mainHandObserved = false;
@@ -2281,7 +2286,15 @@ public partial class LocalCabinClient : Node3D
             _footsteps.Reset();
             RebuildClientProjection(view);
             _selection = SelectionKind.None;
-            _lastOutcome = $"Entered authoritative generation {view.GenerationId}";
+            _selectedTarget = default;
+            _pointerTarget = default;
+            _pointerTargetPrefab = 0;
+            _pointerPointValid = false;
+            _sessionUi?.ContextMenu.Close();
+            _hoverTooltip?.Hide();
+            _lastOutcome = structuralRootChanged
+                ? $"Entered {view.Space}"
+                : $"Entered authoritative generation {view.GenerationId}";
             return;
         }
 
@@ -2520,15 +2533,32 @@ public partial class LocalCabinClient : Node3D
 
     private void Select(in ClientControlWorldPoint point)
     {
-        if (_pointerTarget.IsValid && _pointerTargetPrefab == GameWorldPublicPrefabIds.IronSword)
+        if (_pointerTarget.IsValid && _pointerTargetPrefab is
+            GameWorldPublicPrefabIds.IronSword or GameWorldPublicPrefabIds.SkyTelepad or
+            GameWorldPublicPrefabIds.FarGate or GameWorldPublicPrefabIds.CabinDoor or
+            GameWorldPublicPrefabIds.WorldChest or GameWorldPublicPrefabIds.InformationalSign)
         {
-            _selection = SelectionKind.IronSword;
+            _selection = _pointerTargetPrefab switch
+            {
+                GameWorldPublicPrefabIds.IronSword => SelectionKind.IronSword,
+                GameWorldPublicPrefabIds.SkyTelepad => SelectionKind.SkyTelepad,
+                GameWorldPublicPrefabIds.FarGate => SelectionKind.FarGate,
+                GameWorldPublicPrefabIds.CabinDoor => SelectionKind.CabinDoor,
+                GameWorldPublicPrefabIds.WorldChest => SelectionKind.CabinChest,
+                _ => SelectionKind.InformationalSign,
+            };
             _selectedTarget = _pointerTarget;
-            _lastOutcome = $"Selected Iron Sword at ({point.XMillimeters / 1000d:F1}, " +
+            _lastOutcome = $"Selected {_selection} at ({point.XMillimeters / 1000d:F1}, " +
                 $"{point.ZMillimeters / 1000d:F1}) m";
             return;
         }
         _selectedTarget = default;
+        if (_cache?.StructuralSpace != GameWorldState.DefaultSpace)
+        {
+            _selection = SelectionKind.Terrain;
+            _lastOutcome = "Terrain selected";
+            return;
+        }
         bool signPresented = _useConceptDemoWorld && IsKnownPresentedPrefabNear(
             GameWorldPublicPrefabIds.InformationalSign, point, radius: 1_500);
         _selection = signPresented && Nearest(
@@ -2793,20 +2823,23 @@ public partial class LocalCabinClient : Node3D
     private BaseTerrainSurfaceSample ProbeLocalBaseTerrain(in WorldPosition location) =>
         _cache!.PreparedComposition is { } composition
             ? composition.ProbeBaseTerrainSurface(location)
-            : _boundWorld!.ProbeBaseTerrainSurface(location);
+            : _cache.PreparedWorld.ProbeBaseTerrainSurface(location);
 
     private WorldTerrainColumnQueryStatus TryCopyLocalTerrainColumnSurfaces(
         in WorldPosition location, Span<WorldTerrainColumnSurface> destination,
         out int count, out int required) =>
         _cache!.PreparedComposition is { } composition
             ? composition.TryCopyTerrainColumnSurfaces(location, destination, out count, out required)
-            : _boundWorld!.TryCopyTerrainColumnSurfaces(location, destination, out count, out required);
+            : _cache.PreparedWorld.TryCopyTerrainColumnSurfaces(location, destination, out count, out required);
 
     private ClientHorizontalCameraBasis CameraBasis() =>
         _cameraRig?.HorizontalBasis() ?? ClientHorizontalCameraBasis.WorldAxes;
 
     private WorldPublicEntityId SelectedInteractionTarget() =>
-        _selection == SelectionKind.IronSword ? _selectedTarget : default;
+        _selection is SelectionKind.IronSword or SelectionKind.SkyTelepad or
+            SelectionKind.FarGate or SelectionKind.CabinDoor or SelectionKind.CabinChest or
+            SelectionKind.InformationalSign or SelectionKind.FallbackLabSign
+                ? _selectedTarget : default;
 
     private void UpdateCamera()
     {
@@ -3142,6 +3175,93 @@ public partial class LocalCabinClient : Node3D
             _pointerTarget = savedPointerTarget;
             _pointerTargetPrefab = savedPointerTargetPrefab;
             _lastOutcome = savedOutcome;
+        }
+    }
+
+    /// <summary>Native Local map-transition canary over the actual packet-free authority and renderer.</summary>
+    public void RunSpatialSpaceAcceptance()
+    {
+        if (!_useConceptDemoWorld || _serverExtensionFactory is not null ||
+            _localSession is null || _sequencer is null || _cache is null || _renderer is null)
+            throw new InvalidOperationException("Spatial transition requires the Local Concept Demo.");
+        if (!_localSession.TryGetLatestView(out LocalPlayableAuthorityView initial))
+            throw new InvalidOperationException("The initial actor view is missing.");
+        for (int trip = 0; trip < 2; trip++)
+        {
+            Cross(GamePlayableWorld.CabinBenchmarkOutboundPosition,
+                GamePlayableWorld.CabinBenchmarkSpace);
+            Cross(GamePlayableWorld.CabinBenchmarkReturnPosition,
+                GameWorldState.DefaultSpace);
+        }
+        if (!_localSession.TryGetLatestView(out LocalPlayableAuthorityView finished) ||
+            finished.PublicActor != initial.PublicActor ||
+            finished.GuestIdentity != initial.GuestIdentity ||
+            finished.BreadIsInBackpack != initial.BreadIsInBackpack)
+            throw new InvalidOperationException("Spatial travel changed actor, guest or Inventory truth.");
+
+        void Cross(in WorldPosition padPosition, SpatialSpaceId destination)
+        {
+            WorldPosition pad = padPosition;
+            RelocateControlledActor(pad);
+            WorldPublicRecord portal = default;
+            DriveLocalUntil(() => TryFindPortal(pad, out portal));
+            _pointerTarget = portal.Id;
+            _pointerTargetPrefab = portal.PrefabId;
+            Select(new ClientControlWorldPoint(
+                pad.GlobalXMillimeters, pad.GlobalZMillimeters));
+            if (_selection != SelectionKind.SkyTelepad ||
+                SelectedInteractionTarget() != portal.Id ||
+                !_sequencer!.TryCreateSemanticCommand(new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.Stop, GamePlayerActions.Interact, true),
+                    out GamePlayerCommand use))
+                throw new InvalidOperationException("The selected map portal did not retain exact target identity.");
+            GodotWorldRenderer previousRenderer = _renderer!;
+            ApplyCommand(use, false, default, false);
+            DriveLocalUntil(() => _localSession!.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+                view.LastCommandSequence == use.Sequence &&
+                view.LastCommandResult.Interaction == GameWorldActionStatus.Accepted &&
+                view.Space == destination && _cache?.StructuralSpace == destination &&
+                _renderer?.GetSnapshot().ActiveRenderChunks > 0 &&
+                _actorPresenter?.TryGetActorRoot(view.PublicActor, out _) == true);
+            GodotWorldRendererSnapshot retiredRenderer = previousRenderer.GetSnapshot();
+            if (ReferenceEquals(previousRenderer, _renderer) ||
+                retiredRenderer.ActiveRenderChunks != 0 ||
+                retiredRenderer.ActiveNodes != 0 ||
+                retiredRenderer.ActiveResources != 0)
+                throw new InvalidOperationException(
+                    "The previous map retained native world presentation after transition.");
+            if (!_cache!.TryCopyResidentInfo(_chatChunkInfo, out int residentCount, out _) ||
+                residentCount == 0)
+                throw new InvalidOperationException("The destination world never became resident.");
+            for (int row = 0; row < residentCount; row++)
+                if (_chatChunkInfo[row].Key.Space != destination)
+                    throw new InvalidOperationException("An old-space semantic chunk survived the transition.");
+            if (!_sequencer.TryCreateSemanticCommand(new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.Stop, GamePlayerActions.None, true),
+                    out GamePlayerCommand release))
+                throw new InvalidOperationException("The portal interaction could not be released.");
+            ApplyCommand(release, false, default, false);
+            DriveLocalUntil(() => _localSession!.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+                view.LastCommandSequence == release.Sequence);
+        }
+
+        bool TryFindPortal(in WorldPosition position, out WorldPublicRecord found)
+        {
+            if (_cache is not null && _cache.TryCopyResidentInfo(_chatChunkInfo, out int count, out _))
+                for (int chunk = 0; chunk < count; chunk++)
+                {
+                    if (!_cache.TryGetResidentView(_chatChunkInfo[chunk].Handle,
+                            out ClientSemanticChunkView view)) continue;
+                    foreach (ref readonly WorldPublicRecord record in view.PublicRecords)
+                        if (record.PrefabId == GameWorldPublicPrefabIds.SkyTelepad &&
+                            record.Position == position)
+                        {
+                            found = record;
+                            return true;
+                        }
+                }
+            found = default;
+            return false;
         }
     }
 
@@ -3850,7 +3970,8 @@ public partial class LocalCabinClient : Node3D
             : 0;
         if (characters != 1 || doors != 1 || chests != 1 ||
             _useConceptDemoWorld &&
-            (telepads != 1 || gates != 1 || signs != 2))
+            (telepads != (_serverExtensionFactory is null ? 2 : 1) ||
+             gates != 1 || signs != 2))
             throw new InvalidOperationException(
                 "The initial public world does not own complete visible native mesh presentation: " +
                 $"characters={characters}, doors={doors}, chests={chests}, telepads={telepads}, " +
@@ -4360,7 +4481,7 @@ public partial class LocalCabinClient : Node3D
         _details.Text =
             $"Profile {_profile} • Selected {_selection} • Tick {view.SimulationTick}\n" +
             "Ping Local • packet-free internal authority\n" +
-            $"Player {_player.Chunk} + ({_player.Local.XMillimeters}, {_player.Local.ZMillimeters}) mm • " +
+            $"Player {view.Space} {_player.Chunk} + ({_player.Local.XMillimeters}, {_player.Local.ZMillimeters}) mm • " +
             $"door {(view.DoorIsOpen ? "open" : "closed")} • " +
             $"bread in {(view.BreadIsInBackpack ? "backpack" : "chest")}\n" +
             $"distance {residency.ConfiguredRenderRadiusChunks} chunks • " +
