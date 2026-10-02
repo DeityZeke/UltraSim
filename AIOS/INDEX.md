@@ -92,3 +92,5 @@ When a discussion creates a project-relevant idea:
 3. link to the existing canonical document when one does exist;
 4. promote settled material rather than duplicating it across multiple sources;
 5. mark superseded material instead of silently losing it.
+
+- [Vegetation scatter v2](topics/vegetation-scatter-v2.md) — clustered default-Off grass prototype, work-count evidence, visual limitations, open canonical gate, and raised-step Physics finding.

@@ -563,3 +563,30 @@ not the normal player access path.
 Production Online/Remote is not yet space-switch capable. That cross-cutting product gap is tracked
 separately from the human question of whether the P9 benchmark's art and lighting meet the intended
 visual language.
+
+
+## 21. Vegetation v2 review checkpoint
+
+The opt-in vegetation prototype now uses a deterministic space-aware density field and wider
+per-patch scatter. The accepted radius-3 fixture reduces patch instances from 50,175 to 19,350
+over the same 49 chunks, while preserving bounded chunk-local MultiMesh ownership and clean
+retirement.
+
+This is a work-count reduction, not an FPS claim.
+
+Human review shows a clear improvement in distribution: exposed painted ground now remains visible
+between vegetation clusters instead of being covered by a near-uniform spike carpet. Blade-level
+presentation remains prototype-grade, especially its upright needle-like silhouettes and repeated
+dark strokes.
+
+Vegetation therefore remains default Off.
+
+The implementation currently lacks an uninterrupted canonical Release verifier pass: separate
+unchanged-code full attempts stopped at varying W7, Online-export and PF1 swarm gates, while focused
+reruns passed. Do not treat focused green controls as a substitute for the canonical gate.
+
+A separate +100 mm raised-static grounded-step/contact Physics gap was also reproduced during this
+work. The Cabin's flush floor is valid authored content but does not close that generic Physics
+finding.
+
+See [Vegetation Scatter v2](../topics/vegetation-scatter-v2.md).

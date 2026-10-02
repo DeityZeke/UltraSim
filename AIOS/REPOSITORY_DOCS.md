@@ -195,3 +195,5 @@ These files are evidence, not architectural authority. Start with the two README
 - [_Tools/LocalAI/README.md](../_Tools/LocalAI/README.md)
 
 
+
+- [_Benchmarks/Baselines/client-vegetation-scatter-v2-2026-10-02.md](../_Benchmarks/Baselines/client-vegetation-scatter-v2-2026-10-02.md)
