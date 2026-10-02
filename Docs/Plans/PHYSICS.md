@@ -17,6 +17,15 @@ cannot accumulate behind a rejected horizontal component. General contact slidin
 rounded/capsule narrowphase, triangle time-of-impact, moving support, and actor collision remain
 unstarted.
 
+A 2026-10-02 exploratory control also exposed a **separate open raised-step gap**. On flat terrain
+with a 100 mm collidable platform beginning at X=7,500 mm, a 600 mm-wide actor walking in 50 mm
+increments is blocked at center X=7,200 mm: its collision body first contacts the platform side
+before its 300 mm-wide support core can reach the top. The existing airborne edge release does not
+resolve that grounded step-up. The P9 v2 Cabin's flush floor is a valid authored solution for that
+site, not proof of generic raised-platform traversal. Do not make short walls nonblocking or permit
+temporary occupation of solid geometry merely to turn this probe green. A dedicated step/contact
+transition design and permanent two-direction fixture remain future Physics work.
+
 Concept Demo D0.0 is the accepted first integrated consumer of this chain: it traverses beneath a
 MountainShell, jumps and lands on a detached Sky shell, filters Jump from OrbitCommand, invokes an
 authored telepad through occupancy-aware relocation, and falls into Game-owned recovery. D0.0 adds

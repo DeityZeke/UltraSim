@@ -13,8 +13,11 @@ public readonly record struct GodotVegetationSnapshot(int ActiveChunks, int Patc
 /// <summary>Opt-in Compatibility prototype, with one finite shared shader/source mesh per renderer.</summary>
 public sealed class GodotVegetation : IDisposable
 {
-    public const int BladesPerPatch = 8;
+    public const int BladesPerPatch = 12;
     public const int VerticesPerBlade = 12; // two disconnected triangle quads; no connector vertices
+    // Includes radial scatter, wind, lean and blade width. Roof/floor exclusion must use the
+    // whole envelope rather than only the patch anchor.
+    public const int PatchEnvelopeMillimeters = 450;
     public const uint WorldSeed = 0xF1112026;
     private readonly Shader _shader;
     private readonly ShaderMaterial _material;
@@ -36,14 +39,19 @@ public sealed class GodotVegetation : IDisposable
                 float top = (corner == 1 || corner == 2 || corner == 4) ? 1.0 : 0.0;
                 float t = (float(segment) + top) * 0.5;
                 float seed = INSTANCE_CUSTOM.r * 65535.0 + float(blade) * 17.0;
-                float yaw = fract(sin(seed * 12.9898) * 43758.5453) * 6.2831853;
-                float h = 0.30 + fract(sin(seed * 78.233) * 12345.6789) * 0.25;
-                float width = 0.008 + fract(sin(seed * 19.31) * 13456.781) * 0.010;
+                float angle = fract(sin((seed + 3.0) * 23.719) * 23817.271) * 6.2831853;
+                float radius = sqrt(fract(sin((seed + 7.0) * 51.157) * 48271.813)) *
+                    0.30 * INSTANCE_CUSTOM.a;
+                vec2 offset = vec2(cos(angle), sin(angle)) * radius;
+                float yaw = fract(sin((seed + 11.0) * 12.9898) * 43758.5453) * 6.2831853;
+                float h = (0.20 + fract(sin((seed + 13.0) * 78.233) * 12345.6789) * 0.20) *
+                    INSTANCE_CUSTOM.b;
+                float width = 0.013 + fract(sin((seed + 17.0) * 19.31) * 13456.781) * 0.014;
                 float sway = sin(TIME * 1.6 + seed) * 0.06 * t * t;
-                float lean = 0.02 * sin(seed) * t;
-                VERTEX = vec3(cos(yaw) * side * width * (1.0 - 0.85*t) + sway + lean,
-                    t*h, sin(yaw) * side * width * (1.0 - 0.85*t));
-                if (float(blade) < INSTANCE_CUSTOM.g * 8.0) VERTEX = vec3(0.0);
+                float lean = 0.03 * sin(seed) * t;
+                VERTEX = vec3(offset.x + cos(yaw) * side * width * (1.0 - 0.85*t) + sway + lean,
+                    t*h, offset.y + sin(yaw) * side * width * (1.0 - 0.85*t));
+                if (float(blade) < INSTANCE_CUSTOM.g * 12.0) VERTEX = vec3(0.0);
                 NORMAL = vec3(-sin(yaw), 0.2, cos(yaw));
             }
             void fragment() { ALBEDO = vec3(0.12, 0.32, 0.08); ROUGHNESS = 0.95; }
@@ -91,10 +99,10 @@ public sealed class GodotVegetation : IDisposable
                         patch.LocalXMillimeters;
                     long globalZ = (long)home.Coord.Z * GameWorldSpatialProfile.WorldChunkEdgeUnits +
                         patch.LocalZMillimeters;
-                    if (globalX >= bounds.MinimumXMillimeters &&
-                        globalX < bounds.MaximumXExclusiveMillimeters &&
-                        globalZ >= bounds.MinimumZMillimeters &&
-                        globalZ < bounds.MaximumZExclusiveMillimeters)
+                    if (globalX >= bounds.MinimumXMillimeters - PatchEnvelopeMillimeters &&
+                        globalX < bounds.MaximumXExclusiveMillimeters + PatchEnvelopeMillimeters &&
+                        globalZ >= bounds.MinimumZMillimeters - PatchEnvelopeMillimeters &&
+                        globalZ < bounds.MaximumZExclusiveMillimeters + PatchEnvelopeMillimeters)
                         _coveredByRoof[patchIndex] = true;
                 }
             }
@@ -118,11 +126,14 @@ public sealed class GodotVegetation : IDisposable
         {
             var p = _scratch[i]; float y = checked((long)p.AbsoluteYMillimeters - yAnchor) * .001f;
             multi.SetInstanceTransform(i, new(Basis.Identity, new(p.LocalXMillimeters * .001f, y, p.LocalZMillimeters * .001f)));
-            multi.SetInstanceCustomData(i, new(p.Seed / 65535f, 0, 1, 1));
+            float vigor = 0.80f + (p.Seed & 31) / 100f;
+            float spread = 0.72f + ((p.Seed >> 5) & 31) / 100f;
+            multi.SetInstanceCustomData(i, new(p.Seed / 65535f, 0, vigor, spread));
             minimum = Math.Min(minimum, y); maximum = Math.Max(maximum, y);
         }
         // Covers the full shader envelope, including wind/lean and every sampled sloped root.
-        multi.CustomAabb = new(new Vector3(-.1f, minimum - .01f, -.1f), new Vector3(16.2f, maximum - minimum + .65f, 16.2f));
+        multi.CustomAabb = new(new Vector3(-.45f, minimum - .01f, -.45f),
+            new Vector3(16.9f, maximum - minimum + .58f, 16.9f));
         return new GodotVegetationChunk(multi, count);
     }
 

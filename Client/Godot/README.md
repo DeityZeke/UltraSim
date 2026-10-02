@@ -103,10 +103,13 @@ actor presenter and Gameplay Output SubViewport, with 1,000/5,000/10,000 World o
 diagnostics; headless runs bounded lifecycle checks only. The [immutable evidence](../../_Benchmarks/Baselines/client-f1.11-renderer-stress-vegetation-2026-09-25.md)
 records exact commands, resource/lease counts, pixel/radius/churn controls and both variable runs.
 
-`--f1-11-vegetation` opts Local/Remote into one chunk-owned grass MultiMesh, one patch per eligible
-base cell, eight shared-root blades/96 finite vertices per patch. Shader TIME supplies wind;
-bounded custom-row cut is diagnostic, not Game harvesting. Finite native AABB includes the whole
-shader envelope. Grass casting and the prototype default are Off. `--f1-11-time=dawn|noon|dusk|night`,
+`--f1-11-vegetation` opts Local/Remote into one chunk-owned grass MultiMesh. Current scatter
+profile v2 uses a smooth, deterministic 2 m density field so many eligible cells remain bare;
+each selected patch carries 12 radially scattered blades/144 finite source vertices, with bounded
+height, width, yaw, spread and lean variation. Shader TIME supplies wind; bounded custom-row cut
+is diagnostic, not Game harvesting. Roof/floor exclusion and native AABB include the whole blade
+envelope rather than only patch anchors. Grass casting and the prototype default are Off.
+`--f1-11-time=dawn|noon|dusk|night`,
 `--f1-11-atmosphere=temperate|dry|cold` and `--f1-11-no-shadows` select a finite common debug
 environment when opted in; no authoritative weather/time, compute or advanced GI is claimed.
 GPU observations are not sustained FPS or server CCU. F1.12 is ACTIVE with

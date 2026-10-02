@@ -47,9 +47,13 @@ public partial class LocalCabinClient
                 Vector3 local = batch.MultiMesh.GetInstanceTransform(index).Origin;
                 float globalX = x * 16f + local.X;
                 float globalZ = z * 16f + local.Z;
-                if (globalX is >= 12f and < 20f && globalZ is >= 9f and < 21f)
+                // The shader now scatters blades away from each patch anchor. A root outside
+                // the floor can still pierce it unless the whole finite shader envelope is clear.
+                float envelope = GodotVegetation.PatchEnvelopeMillimeters * .001f;
+                if (globalX >= 12f - envelope && globalX < 20f + envelope &&
+                    globalZ >= 9f - envelope && globalZ < 21f + envelope)
                     throw new InvalidOperationException(
-                        "Vegetation crossed a chunk seam and pierced the authored Cabin floor.");
+                        "A vegetation patch envelope crossed the authored Cabin floor.");
             }
         }
         if (OS.GetCmdlineUserArgs().Contains("--f1-11-vegetation") && grassPatches == 0)

@@ -1310,6 +1310,12 @@ lower-spec/Deck evidence, advanced GI, final painted art and authoritative veget
 remain unimplemented. At F1.11 closure F1.12 was next and unstarted; it is now closed after R3 below.
 W8/W9/W10 remain unstarted.
 
+Subsequent P9 human-review feedback identified the uniform blade carpet as a presentation-quality
+problem. The opt-in prototype's scatter profile v2 now uses deterministic low-frequency density,
+fewer patch anchors and wider per-patch blade scatter; the F1.11 closure evidence above remains
+the frozen v1 baseline, not a claim that the later visual tuning was already accepted there.
+This does not change F1.11's accepted renderer architecture or close P9's human visual review.
+
 ## Goal
 
 Use concrete high-cardinality consumers to validate the renderer tiers, without making all future features PF6 blockers.

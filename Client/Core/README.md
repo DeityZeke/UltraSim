@@ -61,10 +61,12 @@ sampling API delegates once. Holds/snaps have equal endpoints; no server timesta
 remote extrapolation or GPU interpolation were introduced. Controlled prediction is unchanged.
 
 F1.11 adds `ClientVegetationScatter`, a bounded presentation-only consumer of existing resident
-BaseTerrain. It hashes fixed world seed/full spatial key/cell/profile and samples the canonical
-triangle height for one root per present Grass cell (maximum 1,024/chunk). Base intentional void
-is excluded even under an additional grass surface; additional surfaces are deliberately not
-scatter sources. It changes no semantic hash, entity identity, collision, persistence or protocol.
+BaseTerrain. Its current profile v2 hashes the fixed world seed/full spatial key/global cell and a
+continuous 2 m density field, then samples the canonical triangle height for at most one root per
+present Grass cell (capacity 1,024/chunk, typically fewer occupied). Adjacent chunks share the
+same field coordinates, including at negative chunk addresses. Base intentional void is excluded
+even under an additional grass surface; additional surfaces are deliberately not scatter sources.
+It changes no semantic hash, entity identity, collision, persistence or protocol.
 No per-blade mutable authority or native state belongs to Core. The native opt-in consumer and
 actual stress evidence are documented in [Godot](../Godot/README.md).
 

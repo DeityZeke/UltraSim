@@ -268,7 +268,23 @@ public partial class F111RendererStressAcceptance : Node3D
         cache.TryGetResidentHandle(new(Space, 4, 4), out var center);
         int patchCount = ClientVegetationScatter.Prepare(cache, center, GodotVegetation.WorldSeed, patch);
         long cutTicks = 0;
-        Expect(patchCount == 1023, "Intentional void was not excluded from scatter.");
+        Expect(patchCount is >= 200 and <= 650,
+            $"The v2 scatter did not leave substantial visible ground: patches={patchCount}.");
+        var densityRegions = new int[64];
+        for (int i = 0; i < patchCount; i++)
+        {
+            int x = patch[i].CellIndex % TerrainChunkFormat.MaterialCellEdge / 4;
+            int z = patch[i].CellIndex / TerrainChunkFormat.MaterialCellEdge / 4;
+            densityRegions[z * 8 + x]++;
+        }
+        int sparseRegions = 0, lushRegions = 0;
+        foreach (int regionCount in densityRegions)
+        {
+            if (regionCount <= 2) sparseRegions++;
+            if (regionCount >= 10) lushRegions++;
+        }
+        Expect(sparseRegions > 0 && lushRegions > 0,
+            "The low-frequency scatter has no sparse/lush region contrast.");
         for (int i = 0; i < patchCount; i++)
             Expect(patch[i].AbsoluteYMillimeters == (int)Math.Round(1000 + (64_000 + patch[i].LocalXMillimeters) * .01,
                 MidpointRounding.AwayFromZero), "Scatter root differs from independent sloped-plane height.");
@@ -283,7 +299,7 @@ public partial class F111RendererStressAcceptance : Node3D
             ClientSemanticHash before = cache.GetSnapshot().WorldSemanticHash;
             ulong builds = renderer.GetSnapshot().CompletedBuilds;
             long cutStarted = Stopwatch.GetTimestamp();
-            Expect(batch.TrySetCut(0, .75f) && batch.CollapsedBlades == 6, "Targeted cut failed.");
+            Expect(batch.TrySetCut(0, .75f) && batch.CollapsedBlades == 9, "Targeted cut failed.");
             cutTicks = Stopwatch.GetTimestamp() - cutStarted;
             Expect(cache.GetSnapshot().WorldSemanticHash == before && renderer.GetSnapshot().CompletedBuilds == builds,
                 "Debug cut mutated authority/structural state or rebuilt the world.");
