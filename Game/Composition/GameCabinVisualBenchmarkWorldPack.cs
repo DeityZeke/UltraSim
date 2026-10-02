@@ -10,17 +10,31 @@ namespace UltraSim.Game.Composition;
 /// </summary>
 public static class GameCabinVisualBenchmarkWorldPack
 {
-    public const string DefinitionId = "benchmark-world:cabin-visual/v1";
+    public const string LegacyDefinitionId = "benchmark-world:cabin-visual/v1";
+    public const string DefinitionId = "benchmark-world:cabin-visual/v2";
     public const int FloorYMillimeters = 1_000;
     public const int RoomCenterXMillimeters = 16_000;
     public const int MainRoomCenterZMillimeters = 12_000;
     public const int WindowRoomCenterZMillimeters = 18_000;
 
-    public static WorldPack Create()
-        => CreateInSpace(GameWorldState.DefaultSpace);
+    public static WorldPack Create() => CreateInSpace(GameWorldState.DefaultSpace);
 
-    /// <summary>Same authored topology in a distinct spatial space; Create() retains the frozen v1 artifact.</summary>
-    public static WorldPack CreateInSpace(SpatialSpaceId space)
+    /// <summary>Frozen v1 topology, including its raised floor. Kept for exact artifact identity.</summary>
+    public static WorldPack CreateLegacyV1() =>
+        CreateCore(GameWorldState.DefaultSpace, floorFlushWithTerrain: false);
+
+    /// <summary>Current v2 authored topology in any admitted spatial space.</summary>
+    public static WorldPack CreateInSpace(SpatialSpaceId space) =>
+        CreateCore(space, floorFlushWithTerrain: true);
+
+    /// <summary>
+    /// V2 travel topology. The authored floor still has physical and visual presence, but its
+    /// upper face meets the base terrain at the exterior opening. V1's raised edge traps a
+    /// grounded body whose footprint still overlaps the floor while stepping down outside.
+    /// </summary>
+    public static WorldPack CreateTraversableInSpace(SpatialSpaceId space) => CreateInSpace(space);
+
+    private static WorldPack CreateCore(SpatialSpaceId space, bool floorFlushWithTerrain)
     {
         if (!space.IsValid)
             throw new ArgumentOutOfRangeException(nameof(space));
@@ -87,9 +101,11 @@ public static class GameCabinVisualBenchmarkWorldPack
                 GameWorldStaticVariants.CabinWindowLintel, WorldStaticFlags.Collidable,
                 WorldYaw.Zero, verticalOffset: 1_900),
             // One continuous authored support surface avoids a footprint gap exactly at the
-            // interior doorway. Its 100 mm top is a legal short step from the clearing.
+            // interior doorway. V2 meets the clearing at the same support height so the
+            // exterior threshold is walkable in both directions, not only on entry.
             Piece(17, GameWorldStaticDefinitionIds.CabinRoof, 16_000, 15_000, 4_000, 6_000, 100,
-                GameWorldStaticVariants.CabinFloorEightByTwelveMeters, wall),
+                GameWorldStaticVariants.CabinFloorEightByTwelveMeters, wall,
+                verticalOffset: floorFlushWithTerrain ? -100 : 0),
             Piece(18, GameWorldStaticDefinitionIds.CabinRoof, 16_000, 12_000, 4_150, 3_150, 250,
                 GameWorldStaticVariants.CabinRoofEightBySixMeters, shell,
                 WorldYaw.Zero, verticalOffset: 2_500),

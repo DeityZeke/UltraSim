@@ -144,8 +144,18 @@ The separate P9 two-room benchmark is selected with `--p9-two-room-benchmark`. O
 the flag starts an interactive Local session with an isolated benchmark save root; with
 `--f1-12-cabin-preview --f1-12-cabin-evidence=<absolute-directory>`, it captures Room A,
 the interior doorway, Room B, the blocker/window, time-of-day comparisons and same-session
-Primitive. The WorldPack is distinct from Classic Cabin; the existing optional P9 art package
-is reused. `--p9-no-vegetation` is the deterministic floor/lighting control.
+Primitive. The current traversable v2 WorldPack is distinct from Classic Cabin; the frozen v1
+artifact remains available for exact historical checks. The existing optional P9 art package
+is reused. Its final painted activation has a separate identity from an earlier warm-cache
+candidate, so old metadata cannot silently force primitive art. `--p9-no-vegetation` is the
+deterministic floor/lighting control.
+
+In the exported **SinglePlayer** Concept Demo, use the second telepad near (22 m, 12 m) to
+enter Space 2. The exterior opening at the south wall is an **open doorway**, not a clickable
+door; walk south to the return pad near (16 m, 7 m), select it and press `E`. The v2 floor meets
+the clearing at the same support height so both directions are walkable. The Godot editor defaults
+to **Complete**, whose networked local host has not yet admitted Space 2: no second pad exists
+there. Export with `Client/Godot/export-client.sh SinglePlayer` for this journey.
 
 Settings → **Show Advanced** exposes **Experimental Vegetation / grass (next world entry)**
 directly beneath the Advanced checkbox (rather than below the long display-dimension section).

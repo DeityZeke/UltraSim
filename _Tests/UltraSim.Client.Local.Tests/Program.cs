@@ -1152,6 +1152,41 @@ static void ConceptDemoSpatialPortalRetainsActorInventoryAndSavedSpace()
     True(benchmark.PreparedWorld is not null &&
         benchmark.PreparedWorld.Space == GamePlayableWorld.CabinBenchmarkSpace);
 
+    // A human must be able to walk out through the authored exterior opening to reach
+    // the return pad. Administrative relocation alone cannot prove that path.
+    True(input.TryCreateSemanticCommand(new ClientWorldCommandIntent(
+        GameLocomotionUpdate.CreateDirect(0, -GamePlayerCommand.MaximumAxisMagnitude),
+        GamePlayerActions.None, true), out GamePlayerCommand leaveCabin));
+    True(session.TrySubmit(new LocalPlayableCommand(leaveCabin,
+        LocalPlayableSelection.None, false, default, false)));
+    DriveUntil(() => session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.Space == GamePlayableWorld.CabinBenchmarkSpace &&
+        view.PlayerPosition.GlobalZMillimeters < 8_000,
+        failure: () => session.TryGetLatestView(out LocalPlayableAuthorityView view)
+            ? $"Blocked outside the exterior opening at {view.PlayerPosition}."
+            : "No authority view.");
+    True(input.TryCreateSemanticCommand(new ClientWorldCommandIntent(
+        GameLocomotionUpdate.Stop, GamePlayerActions.None, true), out GamePlayerCommand stopOutside));
+    True(session.TrySubmit(new LocalPlayableCommand(stopOutside,
+        LocalPlayableSelection.None, false, default, false)));
+    True(input.TryCreateSemanticCommand(new ClientWorldCommandIntent(
+        GameLocomotionUpdate.CreateDirect(0, GamePlayerCommand.MaximumAxisMagnitude),
+        GamePlayerActions.None, true), out GamePlayerCommand reenterCabin));
+    True(session.TrySubmit(new LocalPlayableCommand(reenterCabin,
+        LocalPlayableSelection.None, false, default, false)));
+    DriveUntil(() => session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.PlayerPosition.GlobalZMillimeters > 11_000,
+        failure: () => session.TryGetLatestView(out LocalPlayableAuthorityView view)
+            ? $"Blocked reentering the exterior opening at {view.PlayerPosition}."
+            : "No authority view.");
+    True(input.TryCreateSemanticCommand(new ClientWorldCommandIntent(
+        GameLocomotionUpdate.Stop, GamePlayerActions.None, true), out GamePlayerCommand stopInside));
+    True(session.TrySubmit(new LocalPlayableCommand(stopInside,
+        LocalPlayableSelection.None, false, default, false)));
+    DriveUntil(() => session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastCommandSequence == stopInside.Sequence);
+    True(session.TryGetLatestView(out LocalPlayableAuthorityView benchmarkInside));
+
     ClientWorldSemanticCache interior = CreateSpatialCache(benchmark);
     WorldPublicRecord returning = WaitForPublicAt(session, interior,
         GamePlayableWorld.CabinBenchmarkReturnPosition);
@@ -1171,7 +1206,7 @@ static void ConceptDemoSpatialPortalRetainsActorInventoryAndSavedSpace()
     True(restored.LastAdministrativeSucceeded, restored.LastAdministrativeMessage);
     True(restored.GenerationId > initial.GenerationId);
     Equal(GamePlayableWorld.CabinBenchmarkSpace, restored.Space);
-    Equal(GamePlayableWorld.CabinBenchmarkArrival, restored.PlayerPosition);
+    Equal(benchmarkInside.PlayerPosition, restored.PlayerPosition);
     Equal(initial.PublicActor, restored.PublicActor);
     Equal(initial.BreadIsInBackpack, restored.BreadIsInBackpack);
 

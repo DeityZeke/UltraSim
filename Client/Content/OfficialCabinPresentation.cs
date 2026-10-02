@@ -111,7 +111,10 @@ public static class OfficialCabinPresentation
     private static ContentActivationPlan CreatePlan()
     {
         if (!ContentActivationPlan.TryCreate(ContentScopeKey.Local,
-                new ContentActivationId(0x5039_2D43_4142_494EUL, 0x2D41_5254_0000_0001UL),
+                // An earlier P9 art candidate used this activation identity with different
+                // immutable package hashes. Keep that persistent record untouched; the final
+                // painted package has its own authorization lineage.
+                new ContentActivationId(0x5039_2D43_4142_494EUL, 0x2D41_5254_0000_0002UL),
                 ContentBaseCatalog.Empty.Fingerprint,
                 [new ContentActivationPackage(Manifest.PackageId, Manifest.ManifestHash,
                     ContentRequirementPolicy.Required)],

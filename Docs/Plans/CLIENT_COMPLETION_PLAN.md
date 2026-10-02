@@ -1359,7 +1359,14 @@ The benchmark root is currently prepared at Local generation startup; the two-tr
 canary proves semantic/native unload and rebind, not cold network acquisition or
 measured warm structural-byte reuse. In normal Single Player Concept Demo play,
 select and use the new telepad near (22 m, 12 m) to enter the two-room Cabin; use
-the pad near (16 m, 7 m) there to return.
+the pad near (16 m, 7 m) there to return. The initial raised-floor v1 benchmark trapped an
+ordinary grounded actor at the exterior threshold; its exact WorldPack remains frozen, while
+the current v2 travel/visual benchmark floor meets the terrain and has a tested two-way walk.
+There is intentionally no interactive exterior door in Space(2), only an open south doorway;
+the Space(2) HUD now says so instead of reporting Classic Cabin's door state. The normal exported
+SinglePlayer journey also uses a new exact P9 art activation lineage to coexist with an older
+persisted warm-cache candidate; it does not erase that cache or weaken content authorization.
+The Godot editor defaults to Complete, whose local host still does not admit Space(2).
 
 - tall pine(s), rocks, grass/ground, log cabin surfaces, real doorway/door, and window art;
 - a two-room interior where the main room has the exterior door and no windows;

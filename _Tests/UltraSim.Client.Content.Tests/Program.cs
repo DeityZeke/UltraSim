@@ -20,6 +20,7 @@ var tests = new (string Name, Action Body)[]
     ("LocalPackageSourceIsRootedBoundedAndExact", LocalPackageSourceIsRootedBoundedAndExact),
     ("OfficialLocalPresentationIsExactPersistentAndScopeIsolated", OfficialLocalPresentationIsExactPersistentAndScopeIsolated),
     ("OfficialCabinWorldMeshesArePassiveRemovableAndScopeIsolated", OfficialCabinWorldMeshesArePassiveRemovableAndScopeIsolated),
+    ("FinalCabinArtCoexistsWithOlderWarmActivation", FinalCabinArtCoexistsWithOlderWarmActivation),
     ("ActivationIdentityPreservesAuthorityOrderNotByteSource", ActivationIdentityPreservesAuthorityOrderNotByteSource),
     ("DefaultReplaceAddResolveDeterministically", DefaultReplaceAddResolveDeterministically),
     ("ResolutionFailuresAreTransactionalAndDiagnosable", ResolutionFailuresAreTransactionalAndDiagnosable),
@@ -399,6 +400,56 @@ static void OfficialCabinWorldMeshesArePassiveRemovableAndScopeIsolated()
         using (reopened)
         {
             True(OfficialCabinPresentation.TryOpenOrAcquire(reopened!, null, out var warm));
+            using (warm) Equal(16 + 6, warm!.Catalog.Entries.Count);
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+}
+
+static void FinalCabinArtCoexistsWithOlderWarmActivation()
+{
+    string sourceRoot = Path.Combine(FindRepositoryRoot(), "Client", "OfficialContent");
+    string root = NewCacheRoot();
+    try
+    {
+        PackageFixture older = CreateSingleTexturePackage(
+            "official.world-local.cabin-p9", "cabin-p9", "cabin-p9:texture/old",
+            ContentDefinitionOperation.Add, "textures/old.png", 0x39);
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out var open), open.ToString());
+        using (cache)
+        {
+            True(cache!.TryInstallPackage(ContentScopeKey.Local, older.Manifest,
+                older.Payloads, out _, out var install), install.ToString());
+            True(ContentActivationPlan.TryCreate(ContentScopeKey.Local,
+                new ContentActivationId(0x5039_2D43_4142_494EUL, 0x2D41_5254_0000_0001UL),
+                ContentBaseCatalog.Empty.Fingerprint, [Required(older.Manifest)],
+                out ContentActivationPlan? oldPlan, out var planError), planError);
+            True(cache.TryPublishCatalog(ContentBaseCatalog.Empty, oldPlan!, true,
+                out ContentCatalogLease? oldLease, out var published), published.ToString());
+            oldLease!.Dispose();
+
+            True(OfficialCabinPresentation.TryOpenOrAcquire(cache, sourceRoot,
+                out ContentCatalogLease? current));
+            using (current)
+            {
+                Equal(16 + 6, current!.Catalog.Entries.Count);
+                True(current.Catalog.TryGet(OfficialCabinPresentation.Mesh("roof"), out _));
+            }
+            var oldKey = new ContentScopeActivationKey(
+                oldPlan!.ScopeActivation, oldPlan.PlanHash);
+            True(cache.TryOpenCatalog(ContentBaseCatalog.Empty, oldKey,
+                out ContentCatalogLease? oldAgain, out var oldOpen), oldOpen.ToString());
+            using (oldAgain) Equal(1, oldAgain!.Catalog.Entries.Count);
+        }
+        True(ContentCache.TryOpen(root, out ContentCache? reopened, out var warmOpen),
+            warmOpen.ToString());
+        using (reopened)
+        {
+            True(OfficialCabinPresentation.TryOpenOrAcquire(reopened!, null,
+                out ContentCatalogLease? warm));
             using (warm) Equal(16 + 6, warm!.Catalog.Entries.Count);
         }
     }

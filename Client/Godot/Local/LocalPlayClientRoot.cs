@@ -836,7 +836,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             oracle,
             resolved,
             ReadLocalArgument("--f1-12-save-root=") ?? ProjectSettings.GlobalizePath(useCabinVisualBenchmark
-                ? "user://single-player/cabin-visual-benchmark-v1-saves"
+                ? "user://single-player/cabin-visual-benchmark-v2-saves"
                 : useConceptDemoWorld
                     ? "user://single-player/concept-demo-d0-0-saves"
                     : "user://single-player/cabin-saves"),

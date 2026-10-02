@@ -1600,7 +1600,7 @@ public static class GamePlayableWorld
     public static WorldPosition AnimalPosition => FromGlobal(8_000, 4_000);
     public static WorldPosition SkyTelepadPosition => FromGlobal(21_000, 6_500);
     public static WorldPosition CabinBenchmarkOutboundPosition => FromGlobal(22_000, 12_000);
-    public static WorldPosition CabinBenchmarkArrival => AtHeight(16_000, 1_100, 12_000);
+    public static WorldPosition CabinBenchmarkArrival => AtHeight(16_000, 1_000, 12_000);
     public static WorldPosition CabinBenchmarkReturnPosition => AtHeight(16_000, 1_000, 7_000);
     public static WorldPosition CabinBenchmarkReturnArrival => FromGlobal(22_000, 12_000);
     public static WorldPosition SkyTelepadDestination => AtHeight(28_000, 3_500, 9_000);

@@ -463,7 +463,7 @@ public sealed class LocalPlayableSession : IDisposable
                 baseWorldPack: _worldPack,
                 conceptDemoStructuralSource: _conceptDemoStructuralSource,
                 additionalSpacePacks: _conceptDemo && runtimeProfile == GameRuntimeProfile.Local
-                    ? [GameCabinVisualBenchmarkWorldPack.CreateInSpace(
+                    ? [GameCabinVisualBenchmarkWorldPack.CreateTraversableInSpace(
                         GamePlayableWorld.CabinBenchmarkSpace)] : null);
             runtime = new ServerRuntime(
                 composition,

@@ -775,14 +775,14 @@ static TestMetrics P9CabinVisualBenchmarkIsSeparateAndStructurallyTwoRoom()
     const string benchmarkV1Fingerprint =
         "B0CE72EEE73C3E014733499A9816A608280DFEF6757BD40FB599DB0318E81BDC";
     WorldPack classic = GamePlayableWorld.CreateWorldPack();
-    WorldPack benchmark = GameCabinVisualBenchmarkWorldPack.Create();
+    WorldPack benchmark = GameCabinVisualBenchmarkWorldPack.CreateLegacyV1();
     Expect(classic.Fingerprint.ToString() == classicFingerprint,
         "The accepted Classic Cabin pack changed while adding the visual benchmark.");
     Expect(benchmark.Fingerprint != classic.Fingerprint && benchmark.ChunkCount == 25,
         "The versioned benchmark must be a distinct, bounded authored WorldPack.");
     Expect(benchmark.Fingerprint.ToString() == benchmarkV1Fingerprint,
         "The versioned v1 benchmark bytes changed without a new authored identity.");
-    WorldPack repeated = GameCabinVisualBenchmarkWorldPack.Create();
+    WorldPack repeated = GameCabinVisualBenchmarkWorldPack.CreateLegacyV1();
     Expect(repeated.Fingerprint == benchmark.Fingerprint,
         "The benchmark WorldPack is not deterministic.");
     byte[] bytes = new byte[benchmark.Length];
@@ -843,6 +843,25 @@ static TestMetrics P9CabinVisualBenchmarkIsSeparateAndStructurallyTwoRoom()
         pieces[17].Bounds.MaximumZExclusiveMillimeters == 21_001 &&
         pieces[17].Bounds.MaximumYExclusiveMillimeters == 1_100,
         "Both rooms require one continuous real, walkable authored floor.");
+    WorldPack travel = GameCabinVisualBenchmarkWorldPack.CreateTraversableInSpace(
+        GamePlayableWorld.CabinBenchmarkSpace);
+    bool hasFlushFloor = false;
+    for (int z = -2; z <= 2; z++)
+    for (int x = -2; x <= 2; x++)
+        if (travel.TryGetMultiFragments(new SpatialChunkKey(
+                GamePlayableWorld.CabinBenchmarkSpace, x, z),
+                out WorldMultiFragmentChunkView travelFragments))
+            for (int index = 0; index < travelFragments.Count; index++)
+            {
+                WorldMultiFragmentRecord fragment = travelFragments.GetRecord(index);
+                if (fragment.PieceId.Value != 17) continue;
+                hasFlushFloor = true;
+                Expect(fragment.Bounds.MaximumYExclusiveMillimeters ==
+                    GameCabinVisualBenchmarkWorldPack.FloorYMillimeters,
+                    "The versioned travel floor must meet exterior terrain without a step-down trap.");
+            }
+    Expect(hasFlushFloor && travel.Fingerprint != benchmark.Fingerprint,
+        "The traversable Space(2) artifact must remain distinct from frozen benchmark v1.");
     Expect(benchmark.FrozenStaticCount == 5,
         "The bookshelf blocker and exterior pine/rock controls are incomplete.");
     var composition = new UltraSimGameComposition(new InventoryLimits(32, 128, 32),
@@ -912,7 +931,7 @@ static TestMetrics SpatialSpacesKeepTwoPlayersAndInventoryInOneAuthority()
 {
     SpatialSpaceId benchmarkSpace = new(2);
     WorldPack classic = GamePlayableWorld.CreateWorldPack();
-    WorldPack benchmark = GameCabinVisualBenchmarkWorldPack.CreateInSpace(benchmarkSpace);
+    WorldPack benchmark = GameCabinVisualBenchmarkWorldPack.CreateTraversableInSpace(benchmarkSpace);
     var composition = new UltraSimGameComposition(new InventoryLimits(32, 128, 32),
         baseWorldPack: classic, additionalSpacePacks: [benchmark]);
     using var host = new InternalHost(composition,

@@ -3184,6 +3184,12 @@ public partial class LocalCabinClient : Node3D
         if (!_useConceptDemoWorld || _serverExtensionFactory is not null ||
             _localSession is null || _sequencer is null || _cache is null || _renderer is null)
             throw new InvalidOperationException("Spatial transition requires the Local Concept Demo.");
+        if (!_primitiveOnlyPresentation && _officialContentRoot is not null &&
+            File.Exists(Path.Combine(_officialContentRoot,
+                OfficialCabinPresentation.ArchiveFileName)) &&
+            _presentationGeneration?.Snapshot.WorldMeshSelections != 11)
+            throw new InvalidOperationException(
+                "Installed P9 art did not resolve in the normal Local map-transition journey.");
         if (!_localSession.TryGetLatestView(out LocalPlayableAuthorityView initial))
             throw new InvalidOperationException("The initial actor view is missing.");
         for (int trip = 0; trip < 2; trip++)
@@ -4482,7 +4488,9 @@ public partial class LocalCabinClient : Node3D
             $"Profile {_profile} • Selected {_selection} • Tick {view.SimulationTick}\n" +
             "Ping Local • packet-free internal authority\n" +
             $"Player {view.Space} {_player.Chunk} + ({_player.Local.XMillimeters}, {_player.Local.ZMillimeters}) mm • " +
-            $"door {(view.DoorIsOpen ? "open" : "closed")} • " +
+            (view.Space == GamePlayableWorld.CabinBenchmarkSpace
+                ? "open exterior doorway • "
+                : $"door {(view.DoorIsOpen ? "open" : "closed")} • ") +
             $"bread in {(view.BreadIsInBackpack ? "backpack" : "chest")}\n" +
             $"distance {residency.ConfiguredRenderRadiusChunks} chunks • " +
             $"authored/resident/rendered {residency.AuthoredChunks}/" +
@@ -4548,7 +4556,9 @@ public partial class LocalCabinClient : Node3D
         {
             paintedCatalog!.Dispose();
             if (ContentActivationPlan.TryCreate(ContentScopeKey.Local,
-                    new ContentActivationId(0x5039_4341_4249_4E2DUL, 0x414F_312D_4152_5401UL),
+                    // V2 follows the exact current P9 package activation. A warm cache may
+                    // retain the older combined A0.1/P9 candidate under the V1 identity.
+                    new ContentActivationId(0x5039_4341_4249_4E2DUL, 0x414F_312D_4152_5402UL),
                     ContentBaseCatalog.Empty.Fingerprint,
                     local.Plan.Packages.Concat(OfficialCabinPresentation.Plan.Packages),
                     out ContentActivationPlan? combined, out _) &&
