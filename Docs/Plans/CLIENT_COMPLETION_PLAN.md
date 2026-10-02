@@ -1321,6 +1321,13 @@ managed export, and PF1 swarm gates failed in different runs. Focused PF1/PF2 an
 reruns passed; the underlying variability is not thereby resolved. This does not change F1.11's
 accepted renderer architecture or close P9's human visual review.
 
+A later [blade-realization-only pass](../../_Benchmarks/Baselines/client-vegetation-blade-realization-2026-10-02.md)
+preserves those exact v2 patch/vertex counts and source identity while broadening, shortening,
+bending and tint-varying the shader leaves. Native/exported Cabin visual and lifecycle controls
+pass. Its canonical Release attempt stopped at the previously variable W7 actual gate/seam
+rejection bound (10 versus 4); the focused W7 suite passed on the same implementation. The full
+gate remains open and the visual choice remains tentative/default-Off pending human review.
+
 ## Goal
 
 Use concrete high-cardinality consumers to validate the renderer tiers, without making all future features PF6 blockers.

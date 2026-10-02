@@ -106,7 +106,10 @@ records exact commands, resource/lease counts, pixel/radius/churn controls and b
 `--f1-11-vegetation` opts Local/Remote into one chunk-owned grass MultiMesh. Current scatter
 profile v2 uses a smooth, deterministic 2 m density field so many eligible cells remain bare;
 each selected patch carries 12 radially scattered blades/144 finite source vertices, with bounded
-height, width, yaw, spread and lean variation. Shader TIME supplies wind; bounded custom-row cut
+height, width, yaw, spread and lean variation. A subsequent blade-only visual pass broadens and
+shortens the tapered strips, bends/twists their tips, and varies their green tint and light-facing
+normal without changing v2 patch placement or instance counts. Shader TIME supplies bounded wind;
+bounded custom-row cut
 is diagnostic, not Game harvesting. Roof/floor exclusion and native AABB include the whole blade
 envelope rather than only patch anchors. Grass casting and the prototype default are Off.
 `--f1-11-time=dawn|noon|dusk|night`,

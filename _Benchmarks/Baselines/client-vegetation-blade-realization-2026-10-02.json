@@ -1,0 +1,45 @@
+{
+  "checkpoint": "opt-in-vegetation-blade-realization",
+  "date": "2026-10-02",
+  "startingCommit": "dc64a95a026591bc68ac5cfb70eb1c46aadc6a2a",
+  "testedImplementationCommit": "ccf48e3ca38f19090b8fdd4f4e5c91a32bec1860",
+  "defaultEnabled": false,
+  "scatterProfileVersion": 2,
+  "patchCountsByRadius": { "1": 3745, "2": 10356, "3": 19350 },
+  "radiusThree": {
+    "activeChunks": 49,
+    "logicalBlades": 232200,
+    "submittedVertices": 2786400,
+    "reservedStagingBytes": 20480,
+    "activeRendererNodes": 301,
+    "retiredRendererNodes": 0,
+    "warmedWorldAllocatedBytes": 0
+  },
+  "maximumBladeReachMillimeters": 431,
+  "roofFloorEnvelopeMillimeters": 450,
+  "exportedCabinPreview": {
+    "edition": "Complete",
+    "result": "pass",
+    "captures": 20,
+    "retirement": "clean",
+    "exteriorNoonTemperatePixelHash": "74046BDAFBF4C04729A294F65D6BD28C3A8427E5A1C5492A27B358F7C1DFBB22",
+    "exteriorNoonTemperatePngSha256": "276167a735eaf8a9e6eb4caa0b8b7da14d07b1c211322178ca6b070ece704ae5"
+  },
+  "localPlaytestExport": {
+    "edition": "Complete",
+    "path": "Client/Godot/.output/clients/complete/UltraSimComplete.x86_64",
+    "officialActors": true,
+    "officialCabin": true,
+    "compositionSmoke": "pass"
+  },
+  "verification": {
+    "architectureOnly": "pass",
+    "headlessF111": "pass",
+    "nativeF111": "pass",
+    "focusedW7R1": "pass",
+    "canonicalRelease": "fail",
+    "canonicalFailure": "W7ActualFarGateAndSeamTraversal rejected/missing-resident attempts 10 > 4",
+    "canonicalLog": ".output/vegetation-shape-release.log"
+  },
+  "open": ["canonical Release variability", "P9 human visual review", "raised-step Physics", "Online multi-space travel"]
+}
