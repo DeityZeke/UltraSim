@@ -1314,7 +1314,12 @@ Subsequent P9 human-review feedback identified the uniform blade carpet as a pre
 problem. The opt-in prototype's scatter profile v2 now uses deterministic low-frequency density,
 fewer patch anchors and wider per-patch blade scatter; the F1.11 closure evidence above remains
 the frozen v1 baseline, not a claim that the later visual tuning was already accepted there.
-This does not change F1.11's accepted renderer architecture or close P9's human visual review.
+The [v2 focused evidence](../../_Benchmarks/Baselines/client-vegetation-scatter-v2-2026-10-02.md)
+records native/exported visual and lifecycle passes, but the unchanged implementation did not
+obtain an uninterrupted canonical Release pass in four attempts: W7 structural crossing, Online
+managed export, and PF1 swarm gates failed in different runs. Focused PF1/PF2 and Online export
+reruns passed; the underlying variability is not thereby resolved. This does not change F1.11's
+accepted renderer architecture or close P9's human visual review.
 
 ## Goal
 

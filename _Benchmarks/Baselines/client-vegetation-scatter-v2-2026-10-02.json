@@ -1,0 +1,47 @@
+{
+  "checkpoint": "opt-in-vegetation-scatter-v2",
+  "date": "2026-10-02",
+  "startingCommit": "c4b5a38055747f8c84540278ae77eaabf2269701",
+  "testedImplementationCommit": "99a1a53a8f125edf4a6e4026ac8eed59bbed81bc",
+  "configuration": "Godot 4.7.1 Mono, optimized Debug test assembly, OpenGL Compatibility; exported Complete preview",
+  "defaultEnabled": false,
+  "profileVersion": 2,
+  "maximumPatchesPerChunk": 1024,
+  "radiusThree": {
+    "activeChunks": 49,
+    "v1": { "patches": 50175, "logicalBlades": 401400, "submittedVertices": 4816800, "reservedStagingBytes": 20480 },
+    "v2": { "patches": 19350, "logicalBlades": 232200, "submittedVertices": 2786400, "reservedStagingBytes": 20480, "activeRendererNodes": 301 }
+  },
+  "v2PatchesByRadius": { "1": 3745, "2": 10356, "3": 19350 },
+  "exportedCabinPreview": {
+    "result": "pass",
+    "captures": 20,
+    "retirement": "clean",
+    "exteriorNoonTemperatePixelHash": "93D7AC57BBE22241F7513CB280E0CDCE067321925E51FE2A5C65C1A97E307177",
+    "exteriorNoonTemperatePngSha256": "10e2cbc772029b0e472202d978df7156eeb20c56966e71bc5a00fe6562429f36"
+  },
+  "localPlaytestExport": {
+    "edition": "Complete",
+    "path": "Client/Godot/.output/clients/complete/UltraSimComplete.x86_64",
+    "officialActors": true,
+    "officialCabin": true,
+    "compositionSmoke": "pass"
+  },
+  "focused": {
+    "nativeF111Headless": "pass",
+    "nativeF111OpenGlCompatibility": "pass",
+    "pf1ExportedSwarm": "pass",
+    "pf2ExportedAccounting": "pass",
+    "onlineExportIsolated": "pass"
+  },
+  "canonicalRelease": {
+    "uninterruptedPass": false,
+    "attempts": [
+      { "number": 1, "failure": "PF1 exported-client admission timeout", "log": ".output/vegetation-verify.IsjMcX/release.log" },
+      { "number": 2, "failure": "Online managed export incomplete after retry", "log": ".output/vegetation-final-verify.3QTYMR/release.log" },
+      { "number": 3, "failure": "PF1 sword workflow did not complete", "log": ".output/vegetation-third-release.log" },
+      { "number": 4, "failure": "W7 far-island structural-crossing missing-resident bound", "log": ".output/vegetation-fourth-release.log" }
+    ]
+  },
+  "open": ["canonical Release variability", "generic raised-step physics", "Online multi-space map travel", "P9 human visual review"]
+}
