@@ -531,3 +531,35 @@ Mechanical acceptance proves structure, movement through the interior doorway, c
 P9 therefore remains ACTIVE pending human review of the actual product captures/runtime.
 
 One evidence point worth scrutinizing during that review: the committed Room A Dawn, Noon and Dusk images are byte-identical, while Room B's corresponding captures differ. This may reflect the current lighting/environment realization rather than a capture failure, but the benchmark's exterior-door spill goal means it should be visually evaluated before closure rather than treated as automatically acceptable.
+
+
+## 20. Normal Single Player map-travel path
+
+The benchmark is no longer reachable only through a special P9 launch mode.
+
+The accepted Game/Local spatial-space foundation admits Classic Concept Demo content in Space 1
+and the two-room Cabin benchmark in Space 2. Normal Single Player contains an outbound telepad near
+the Classic Cabin and a return telepad in the benchmark.
+
+The player journey is therefore:
+
+~~~text
+Classic Concept Demo
+    → Game telepad
+    → two-room Cabin benchmark
+    → Game telepad
+    → Classic Concept Demo
+~~~
+
+Actor identity, session, Inventory and Equipment survive the transition. The Local semantic cache,
+structural binding and native world renderer switch to the destination space and retire the old
+space explicitly.
+
+This is the preferred hands-on visual-review route.
+
+The older `--p9-two-room-benchmark` control remains useful for bounded capture/automation but is
+not the normal player access path.
+
+Production Online/Remote is not yet space-switch capable. That cross-cutting product gap is tracked
+separately from the human question of whether the P9 benchmark's art and lighting meet the intended
+visual language.

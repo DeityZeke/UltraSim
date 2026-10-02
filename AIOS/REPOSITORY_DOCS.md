@@ -123,6 +123,7 @@ These files are evidence, not architectural authority. Start with the two README
 - [_Benchmarks/Baselines/framework-p8-audio-kernel-sound-engine-2026-09-30.md](../_Benchmarks/Baselines/framework-p8-audio-kernel-sound-engine-2026-09-30.md)
 - [_Benchmarks/Baselines/framework-p9-cabin-visual-content-2026-09-30.stage.md](../_Benchmarks/Baselines/framework-p9-cabin-visual-content-2026-09-30.stage.md)
 - [_Benchmarks/Baselines/framework-p9-two-room-cabin-visual-benchmark-2026-09-30.md](../_Benchmarks/Baselines/framework-p9-two-room-cabin-visual-benchmark-2026-09-30.md)
+- [_Benchmarks/Baselines/framework-p9-spatial-space-foundation-2026-09-30.md](../_Benchmarks/Baselines/framework-p9-spatial-space-foundation-2026-09-30.md)
 - [_Benchmarks/Baselines/client-f1.0-pre-rework-baseline-2026-09-19.md](../_Benchmarks/Baselines/client-f1.0-pre-rework-baseline-2026-09-19.md)
 - [_Benchmarks/Baselines/client-f1.1-unified-content-scopes-2026-09-19.md](../_Benchmarks/Baselines/client-f1.1-unified-content-scopes-2026-09-19.md)
 - [_Benchmarks/Baselines/concept-demo-pf4e-r1-rated-replication-scaling-reconciliation-2026-09-13.md](../_Benchmarks/Baselines/concept-demo-pf4e-r1-rated-replication-scaling-reconciliation-2026-09-13.md)

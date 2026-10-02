@@ -24,6 +24,7 @@ Start here. This file is intentionally small.
 
 - [Simulation Time / Resolution / Control Authority](canonical/simulation-time-resolution-and-control.md) — independent world time/playback, deterministic causal aggregation, Immediate/Near/Far resolution, player autonomy/direct/command/governance control, and possession/controller binding.
 - [Visual Art / Lighting / Cabin Benchmark](canonical/visual-art-lighting-and-cabin-benchmark.md) — canonical art/material direction, environment/lighting resolver seam, two-room Cabin visual benchmark, and staged direct-light/probe/opening tests.
+- [Spatial-space / multi-map transitions](topics/spatial-space-map-transitions.md) — canonical Game/Local per-actor map transition foundation, persistence and Local renderer retirement; Online/Remote remains incomplete.
 
 ## Current gameplay/content references
 
