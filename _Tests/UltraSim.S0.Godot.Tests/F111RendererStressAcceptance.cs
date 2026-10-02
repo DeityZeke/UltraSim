@@ -246,6 +246,12 @@ public partial class F111RendererStressAcceptance : Node3D
         var initialRenderer = renderer.GetSnapshot(); var initialActors = actors.GetSnapshot(); var grass = renderer.GetVegetationSnapshot();
         Expect(initialRenderer.ActiveInstances == fixture.Count, "World realization count changed across radius/output.");
         Expect(CountNodes(renderer.Root) == initialRenderer.ActiveNodes, "Native owned-node census differs.");
+        if (vegetation)
+        {
+            int expectedPatches = radius switch { 1 => 3745, 2 => 10356, 3 => 19350, _ => throw new InvalidOperationException("Unexpected vegetation radius.") };
+            Expect(grass.Patches == expectedPatches && grass.LogicalBlades == expectedPatches * GodotVegetation.BladesPerPatch,
+                "Blade realization changed the retained v2 patch distribution or logical blade count.");
+        }
         Expect(initialActors.ActiveActors == actorCount && initialActors.DetailedActors >= 1 && initialActors.BatchedPrimitiveActors > 0,
             "Actual F1.10 policy was not exercised.");
         if (!primitive) Expect(initialActors.AnimatedActors >= 1 && actorVisuals!.GetSnapshot().RealizedResources >= 1,

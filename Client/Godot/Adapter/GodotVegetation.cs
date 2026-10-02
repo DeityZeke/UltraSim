@@ -15,8 +15,8 @@ public sealed class GodotVegetation : IDisposable
 {
     public const int BladesPerPatch = 12;
     public const int VerticesPerBlade = 12; // two disconnected triangle quads; no connector vertices
-    // Includes radial scatter, wind, lean and blade width. Roof/floor exclusion must use the
-    // whole envelope rather than only the patch anchor.
+    // Radial scatter (<=258 mm) + half-width (<=38 mm) + bend (<=110 mm) + wind (<=25 mm)
+    // remain inside 450 mm. Roof/floor exclusion must use this whole envelope.
     public const int PatchEnvelopeMillimeters = 450;
     public const uint WorldSeed = 0xF1112026;
     private readonly Shader _shader;
@@ -30,6 +30,7 @@ public sealed class GodotVegetation : IDisposable
         _shader = new Shader { Code = """
             shader_type spatial;
             render_mode cull_disabled;
+            varying float blade_tint;
             void vertex() {
                 int blade = VERTEX_ID / 12;
                 int v = VERTEX_ID % 12;
@@ -41,20 +42,27 @@ public sealed class GodotVegetation : IDisposable
                 float seed = INSTANCE_CUSTOM.r * 65535.0 + float(blade) * 17.0;
                 float angle = fract(sin((seed + 3.0) * 23.719) * 23817.271) * 6.2831853;
                 float radius = sqrt(fract(sin((seed + 7.0) * 51.157) * 48271.813)) *
-                    0.30 * INSTANCE_CUSTOM.a;
+                    0.25 * INSTANCE_CUSTOM.a;
                 vec2 offset = vec2(cos(angle), sin(angle)) * radius;
                 float yaw = fract(sin((seed + 11.0) * 12.9898) * 43758.5453) * 6.2831853;
-                float h = (0.20 + fract(sin((seed + 13.0) * 78.233) * 12345.6789) * 0.20) *
+                float h = (0.16 + fract(sin((seed + 13.0) * 78.233) * 12345.6789) * 0.18) *
                     INSTANCE_CUSTOM.b;
-                float width = 0.013 + fract(sin((seed + 17.0) * 19.31) * 13456.781) * 0.014;
-                float sway = sin(TIME * 1.6 + seed) * 0.06 * t * t;
-                float lean = 0.03 * sin(seed) * t;
-                VERTEX = vec3(offset.x + cos(yaw) * side * width * (1.0 - 0.85*t) + sway + lean,
-                    t*h, offset.y + sin(yaw) * side * width * (1.0 - 0.85*t));
+                float width = 0.020 + fract(sin((seed + 17.0) * 19.31) * 13456.781) * 0.018;
+                float twist = (fract(sin((seed + 19.0) * 43.71) * 7631.13) - 0.5) * 0.5 * t;
+                vec2 edge = vec2(cos(yaw + twist), sin(yaw + twist)) *
+                    side * width * (1.0 - 0.72 * t);
+                float bend = (0.035 + fract(sin((seed + 23.0) * 31.17) * 12517.71) * 0.075) * t * t;
+                float wind = sin(TIME * 1.6 + seed) * 0.025 * t * t;
+                vec2 tip = vec2(cos(yaw + 0.45), sin(yaw + 0.45)) * (bend + wind);
+                VERTEX = vec3(offset.x + edge.x + tip.x, t*h, offset.y + edge.y + tip.y);
                 if (float(blade) < INSTANCE_CUSTOM.g * 12.0) VERTEX = vec3(0.0);
-                NORMAL = vec3(-sin(yaw), 0.2, cos(yaw));
+                NORMAL = normalize(vec3(-sin(yaw + twist), 0.55, cos(yaw + twist)));
+                blade_tint = fract(sin((seed + 29.0) * 11.73) * 34691.73);
             }
-            void fragment() { ALBEDO = vec3(0.12, 0.32, 0.08); ROUGHNESS = 0.95; }
+            void fragment() {
+                ALBEDO = mix(vec3(0.15, 0.32, 0.075), vec3(0.25, 0.43, 0.12), blade_tint);
+                ROUGHNESS = 0.95;
+            }
             """ };
         _material = new ShaderMaterial { Shader = _shader };
         _mesh = new ArrayMesh();
