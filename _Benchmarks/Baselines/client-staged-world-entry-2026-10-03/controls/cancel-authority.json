@@ -1,0 +1,43 @@
+{
+  "Format": "UltraSimClientWorldEntry/v1",
+  "Scenario": "cancel-authority",
+  "SourceHead": "d7ff79a4d7c1fb172dae659afeb7c890710516ba",
+  "TerminalWallMilliseconds": 639.59,
+  "ReadyWallMilliseconds": null,
+  "MaxEligibleFrameMilliseconds": 203.693,
+  "Samples": 71,
+  "Over50Milliseconds": 1,
+  "Over100Milliseconds": 1,
+  "TerminalScreen": "MainMenu",
+  "RetryReady": true,
+  "RepeatedReady": false,
+  "GameplayAccepted": false,
+  "Stages": [
+    {
+      "Stage": "Resolving",
+      "Detail": "Resolving selected world and settings\u2026",
+      "ElapsedMilliseconds": 20.8169,
+      "MaxFrameSoFarMilliseconds": 0.97
+    },
+    {
+      "Stage": "StartingAuthority",
+      "Detail": "Starting the local simulation\u2026",
+      "ElapsedMilliseconds": 51.7235,
+      "MaxFrameSoFarMilliseconds": 23.352
+    }
+  ],
+  "Ready": {
+    "IsInitialized": false,
+    "RenderedChunks": 0,
+    "SemanticResidentChunks": 0,
+    "Actors": 0,
+    "ApplicationSessionEpoch": 0,
+    "ControlSessionEpoch": 0
+  },
+  "Retired": {
+    "WorldChildren": 5,
+    "ContentCatalogChildren": 0,
+    "OpenGumpWindows": 0,
+    "SessionActive": false
+  }
+}

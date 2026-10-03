@@ -1,11 +1,12 @@
 # Client Performance, GC Allocation Debt, and World Entry
 
-Status: MIXED — accepted measured evidence and focused repair; residual GC/allocation debt OPEN; staged loading UX EXPLORING
+Status: MIXED — hover allocation repair and staged Local entry ACCEPTED; residual GC/allocation debt and Remote destination loading OPEN
 
 Primary references:
 - [Initial hitch characterization](../../_Benchmarks/Baselines/client-hitch-characterization-2026-10-02.md)
 - [Profiler attribution](../../_Benchmarks/Baselines/client-hitch-profiler-attribution-2026-10-03.md)
 - [Local hover census repair](../../_Benchmarks/Baselines/client-hover-census-repair-2026-10-03.md)
+- [Staged Local world-entry evidence](../../_Benchmarks/Baselines/client-staged-world-entry-2026-10-03.md)
 - [Godot client](../../Client/Godot/README.md)
 
 Related topics:
@@ -37,9 +38,9 @@ The post-repair idle controls were healthy enough that `CountMeshInstances` is c
 
 Do not infer savings directly from sampled allocation weights. Prefer matched exported before/after controls and prove the blamed stack disappears.
 
-## Cold world-entry discontinuity
+## Cold world-entry discontinuity and adopted repair
 
-A separate issue remains: synchronous Local Concept Demo entry can block presentation for roughly seconds even when the warmed world itself is healthy.
+A separate issue was synchronous Local Concept Demo entry blocking presentation for seconds even when the warmed world itself was healthy.
 
 Accepted characterization on the exported product found approximately:
 
@@ -50,13 +51,31 @@ Accepted characterization on the exported product found approximately:
 - initial native world projection: ~0.27 s;
 - initial presentation convergence: ~0.09 s.
 
-These are a separate lifecycle/loading problem from warmed-idle GC debt.
+The accepted Local repair retains a modal loading page until a real Ready boundary. Authority
+construction and immutable content preparation run as owned worker work; Godot native realization
+stays owner-thread and initial chunks are built in frame slices. A finite engine-neutral progress
+model reports truthful stages and exact units only where known. Input/physics is not admitted until
+authority, initial semantic/native working set, controlled actor, UI/Inventory and presentation
+converge. Cancel/failure retires partial ownership. The loading lifecycle remains a product feature
+even if future work makes entry shorter.
 
-## Loading / warm-up UX under exploration
+On exported Single Player controls, three Official entries were 2,281–2,509 ms start-to-Ready
+with 79.668–131.343 ms maximum eligible frames (two >100 ms frames in one run); Primitive was
+991 ms with a 50.963 ms maximum. The older
+pre-repair blocked frames were 2,339.298 ms and 1,032.374 ms respectively. These comparisons
+prove that the multi-second presentation block was removed, **not** that total entry became
+faster: the new start-to-Ready scope includes asynchronous admission and frame pacing. Actual
+loading-window evidence, post-Ready gameplay checks, cancellation at authority/mesh/world stages,
+retry, failure retirement, native ownership and focused verification are in the linked report.
+The full canonical Release verifier was not rerun for this focused checkpoint.
 
-An explicit loading page/bar is an active direction worth retaining, but it is not yet a canonical implementation contract.
+## Loading / warm-up boundary
 
-The useful product shape discussed is:
+The staged Local entry and its loading page are implemented product behavior. The progress
+type is intentionally renderer-independent so future Remote destination acquisition can use
+the same vocabulary; no Remote travel implementation is claimed.
+
+The current Local product flow is:
 
 ```text
 shell / prior world
@@ -67,7 +86,7 @@ shell / prior world
     -> enable control only after Ready
 ```
 
-During loading, the UI may surface truthful current work such as:
+During loading, the UI surfaces truthful current work such as:
 
 - loading meshes;
 - loading textures/materials;
@@ -77,14 +96,16 @@ During loading, the UI may surface truthful current work such as:
 - waiting for authority/readiness;
 - warming/converging required presentation.
 
-Exact stage names, ordering, and whether a numeric percentage can be honest remain open. Prefer a truthful stage/progress model over a fake percentage. A loading screen is allowed to make a short 1–2 second transition legible today while remaining valid if content later makes the transition longer.
+Bounded mesh/chunk preparation exposes completed/total units. Unknown-duration work remains
+indeterminate; no fake weighted percentage is used. The loading screen is deliberately retained
+for short as well as long transitions.
 
-The loading surface must not imply that Game control is live before authoritative and presentation admission are complete. Back/cancel/failure should deterministically retire partially prepared authority, leases, native resources, renderer state, and UI transition state rather than relying on finalizers.
+The loading surface does not imply Game control is live before authoritative and presentation
+admission. Cancel/failure deterministically retires partially prepared authority, leases, native
+resources, renderer state and UI transition state rather than relying on finalizers.
 
 ## Open questions
 
-- Should entry progress be stage-only, weighted stage progress, or exact work-unit progress where bounded counts are available?
-- Which preparation can safely run off the Godot owner thread, and which native realization must remain owner-thread/budgeted?
-- Should presentation resource preparation be separated from the current resolver lifetime so lookup and eager realization are not one constructor responsibility?
+- How should Local entry budgets adapt to slower hardware and much larger initial working sets?
 - At what actor/load scale does the remaining `CountMeshInstances` allocator become user-visible enough to justify its own repair?
 - How should the same loading-state model map onto future Remote multi-space travel without reconnecting or exposing a half-entered world?

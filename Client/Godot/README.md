@@ -26,6 +26,26 @@ owns any later polished management surface. Single Player, Online and Complete n
 carry only the small Framework Control Plane contract assembly for this publication,
 not the ECS/ServerRuntime proof bridges or a server operator UI.
 
+Normal Single Player Concept Demo entry now uses an explicit staged loading lifecycle.
+`ClientWorldEntryProgress` in Client Core is a finite, Godot-free, owner-thread state with
+optional exact work units; unknown work is shown as indeterminate, never as an estimated
+percentage. The shell displays a modal loading page with Cancel and hides session Help
+until admission. The Local authority factory and immutable presentation preparation use
+owned worker tasks; native materials, meshes, nodes and renderer chunks remain on the
+Godot owner thread, with initial chunks realized in bounded frame slices. Cancel/failure
+retires partial session, catalog/derived/native resources and returns to the shell.
+Ready is published only after authority/view, initial semantic residency, native chunks,
+controlled actor, UI/Inventory and initial presentation converge. Only then does gameplay
+physics/input start and the loading page yield to the world. The loading page is retained
+even if a future optimization makes entry short. Legacy synchronous acceptance fixtures
+remain available, but normal guest Join and D0.5 guest admission use staged entry.
+The [exported entry evidence](../../_Benchmarks/Baselines/client-staged-world-entry-2026-10-03.md)
+records Official/Primitive wall time and frame pacing, cancellation/failure controls and
+an actual-window loading capture. `--client-entry-study=official|primitive|cancel-authority|cancel-mesh|cancel-world|fail-content`
+with `--client-entry-evidence=<absolute-directory>` runs the focused product controls;
+the failure scenario additionally requires `--client-entry-fail-stage=PreparingContent`.
+This is Local entry only: Remote destination acquisition and map travel remain separate work.
+
 The architecture verifier rejects Godot SDK/package references in headless projects
 and direct Godot namespace imports in Game, Framework, Kernels, Server, Bridges and
 engine-neutral client projects. ServerOnly Direct Connect retains no Godot/client

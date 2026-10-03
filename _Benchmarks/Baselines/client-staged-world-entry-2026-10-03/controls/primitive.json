@@ -1,0 +1,79 @@
+{
+  "Format": "UltraSimClientWorldEntry/v1",
+  "Scenario": "primitive",
+  "SourceHead": "d7ff79a4d7c1fb172dae659afeb7c890710516ba",
+  "TerminalWallMilliseconds": 990.6096,
+  "ReadyWallMilliseconds": 990.6096,
+  "MaxEligibleFrameMilliseconds": 50.963,
+  "Samples": 123,
+  "Over50Milliseconds": 1,
+  "Over100Milliseconds": 0,
+  "TerminalScreen": "InSession",
+  "RetryReady": false,
+  "RepeatedReady": true,
+  "GameplayAccepted": true,
+  "Stages": [
+    {
+      "Stage": "Resolving",
+      "Detail": "Resolving selected world and settings\u2026",
+      "ElapsedMilliseconds": 20.144,
+      "MaxFrameSoFarMilliseconds": 0.971
+    },
+    {
+      "Stage": "StartingAuthority",
+      "Detail": "Starting the local simulation\u2026",
+      "ElapsedMilliseconds": 48.7359,
+      "MaxFrameSoFarMilliseconds": 22.656
+    },
+    {
+      "Stage": "PreparingContent",
+      "Detail": "Resolving the selected presentation generation\u2026",
+      "ElapsedMilliseconds": 551.954,
+      "MaxFrameSoFarMilliseconds": 22.656
+    },
+    {
+      "Stage": "PreparingMaterials",
+      "Detail": "Preparing renderer materials\u2026",
+      "ElapsedMilliseconds": 557.8158,
+      "MaxFrameSoFarMilliseconds": 22.656
+    },
+    {
+      "Stage": "BuildingWorld",
+      "Detail": "Binding initial structural world\u2026",
+      "ElapsedMilliseconds": 608.7023,
+      "MaxFrameSoFarMilliseconds": 22.656
+    },
+    {
+      "Stage": "WarmingPresentation",
+      "Detail": "Warming actors and public presentation\u2026",
+      "ElapsedMilliseconds": 902.8506,
+      "MaxFrameSoFarMilliseconds": 50.963
+    },
+    {
+      "Stage": "Finalizing",
+      "Detail": "Preparing Inventory and input profile\u2026",
+      "ElapsedMilliseconds": 983.0779,
+      "MaxFrameSoFarMilliseconds": 50.963
+    },
+    {
+      "Stage": "Ready",
+      "Detail": "Initial playable world ready.",
+      "ElapsedMilliseconds": 990.6074,
+      "MaxFrameSoFarMilliseconds": 50.963
+    }
+  ],
+  "Ready": {
+    "IsInitialized": true,
+    "RenderedChunks": 49,
+    "SemanticResidentChunks": 81,
+    "Actors": 2,
+    "ApplicationSessionEpoch": 2,
+    "ControlSessionEpoch": 1
+  },
+  "Retired": {
+    "WorldChildren": 5,
+    "ContentCatalogChildren": 0,
+    "OpenGumpWindows": 0,
+    "SessionActive": false
+  }
+}

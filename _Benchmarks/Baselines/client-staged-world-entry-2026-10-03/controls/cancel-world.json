@@ -1,0 +1,67 @@
+{
+  "Format": "UltraSimClientWorldEntry/v1",
+  "Scenario": "cancel-world",
+  "SourceHead": "d7ff79a4d7c1fb172dae659afeb7c890710516ba",
+  "TerminalWallMilliseconds": 2149.9961,
+  "ReadyWallMilliseconds": null,
+  "MaxEligibleFrameMilliseconds": 96.765,
+  "Samples": 213,
+  "Over50Milliseconds": 12,
+  "Over100Milliseconds": 0,
+  "TerminalScreen": "MainMenu",
+  "RetryReady": true,
+  "RepeatedReady": false,
+  "GameplayAccepted": false,
+  "Stages": [
+    {
+      "Stage": "Resolving",
+      "Detail": "Resolving selected world and settings\u2026",
+      "ElapsedMilliseconds": 20.5447,
+      "MaxFrameSoFarMilliseconds": 1.552
+    },
+    {
+      "Stage": "StartingAuthority",
+      "Detail": "Starting the local simulation\u2026",
+      "ElapsedMilliseconds": 51.1087,
+      "MaxFrameSoFarMilliseconds": 22.946
+    },
+    {
+      "Stage": "PreparingContent",
+      "Detail": "Acquiring authorized local presentation\u2026",
+      "ElapsedMilliseconds": 662.0395,
+      "MaxFrameSoFarMilliseconds": 22.946
+    },
+    {
+      "Stage": "PreparingMaterials",
+      "Detail": "Preparing renderer materials\u2026",
+      "ElapsedMilliseconds": 1337.7078,
+      "MaxFrameSoFarMilliseconds": 96.765
+    },
+    {
+      "Stage": "PreparingMeshes",
+      "Detail": "Preparing world-mesh materials\u2026",
+      "ElapsedMilliseconds": 1369.4104,
+      "MaxFrameSoFarMilliseconds": 96.765
+    },
+    {
+      "Stage": "BuildingWorld",
+      "Detail": "Binding initial structural world\u2026",
+      "ElapsedMilliseconds": 2139.6391,
+      "MaxFrameSoFarMilliseconds": 96.765
+    }
+  ],
+  "Ready": {
+    "IsInitialized": false,
+    "RenderedChunks": 0,
+    "SemanticResidentChunks": 0,
+    "Actors": 0,
+    "ApplicationSessionEpoch": 0,
+    "ControlSessionEpoch": 0
+  },
+  "Retired": {
+    "WorldChildren": 5,
+    "ContentCatalogChildren": 0,
+    "OpenGumpWindows": 0,
+    "SessionActive": false
+  }
+}

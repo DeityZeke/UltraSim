@@ -1,0 +1,85 @@
+{
+  "Format": "UltraSimClientWorldEntry/v1",
+  "Scenario": "official",
+  "SourceHead": "d7ff79a4d7c1fb172dae659afeb7c890710516ba",
+  "TerminalWallMilliseconds": 2365.9363,
+  "ReadyWallMilliseconds": 2365.9363,
+  "MaxEligibleFrameMilliseconds": 87.984,
+  "Samples": 228,
+  "Over50Milliseconds": 12,
+  "Over100Milliseconds": 0,
+  "TerminalScreen": "InSession",
+  "RetryReady": false,
+  "RepeatedReady": true,
+  "GameplayAccepted": false,
+  "Stages": [
+    {
+      "Stage": "Resolving",
+      "Detail": "Resolving selected world and settings\u2026",
+      "ElapsedMilliseconds": 22.1042,
+      "MaxFrameSoFarMilliseconds": 1.013
+    },
+    {
+      "Stage": "StartingAuthority",
+      "Detail": "Starting the local simulation\u2026",
+      "ElapsedMilliseconds": 57.2556,
+      "MaxFrameSoFarMilliseconds": 24.232
+    },
+    {
+      "Stage": "PreparingContent",
+      "Detail": "Acquiring authorized local presentation\u2026",
+      "ElapsedMilliseconds": 592.6139,
+      "MaxFrameSoFarMilliseconds": 24.232
+    },
+    {
+      "Stage": "PreparingMaterials",
+      "Detail": "Preparing renderer materials\u2026",
+      "ElapsedMilliseconds": 1232.3514,
+      "MaxFrameSoFarMilliseconds": 87.984
+    },
+    {
+      "Stage": "PreparingMeshes",
+      "Detail": "Preparing world-mesh materials\u2026",
+      "ElapsedMilliseconds": 1264.0458,
+      "MaxFrameSoFarMilliseconds": 87.984
+    },
+    {
+      "Stage": "BuildingWorld",
+      "Detail": "Binding initial structural world\u2026",
+      "ElapsedMilliseconds": 1950.1071,
+      "MaxFrameSoFarMilliseconds": 87.984
+    },
+    {
+      "Stage": "WarmingPresentation",
+      "Detail": "Warming actors and public presentation\u2026",
+      "ElapsedMilliseconds": 2252.1444,
+      "MaxFrameSoFarMilliseconds": 87.984
+    },
+    {
+      "Stage": "Finalizing",
+      "Detail": "Preparing Inventory and input profile\u2026",
+      "ElapsedMilliseconds": 2355.2174,
+      "MaxFrameSoFarMilliseconds": 87.984
+    },
+    {
+      "Stage": "Ready",
+      "Detail": "Initial playable world ready.",
+      "ElapsedMilliseconds": 2365.934,
+      "MaxFrameSoFarMilliseconds": 87.984
+    }
+  ],
+  "Ready": {
+    "IsInitialized": true,
+    "RenderedChunks": 49,
+    "SemanticResidentChunks": 81,
+    "Actors": 2,
+    "ApplicationSessionEpoch": 2,
+    "ControlSessionEpoch": 1
+  },
+  "Retired": {
+    "WorldChildren": 5,
+    "ContentCatalogChildren": 0,
+    "OpenGumpWindows": 0,
+    "SessionActive": false
+  }
+}
