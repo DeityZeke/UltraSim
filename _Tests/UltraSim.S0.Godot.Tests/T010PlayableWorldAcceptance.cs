@@ -1762,6 +1762,20 @@ public partial class T010PlayableWorldAcceptance : Node3D
         Expect(renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.CabinDoor) == 1 &&
             renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.WorldChest) == 1,
             "Re-entering the window did not restore exact prefab counts.");
+        var removedDoor = new WorldPublicDeltaRecord(
+            WorldPublicOperation.Remove, WorldPublicFieldMask.None,
+            openDoor.Id, 5, default);
+        var removalBatch = new ChunkPublicationBatch(
+            ChunkPublicationReadStatus.Delta, doorKey,
+            new ChunkPublicationCursor(epoch, doorKey, new ChunkPublicationRevision(5)),
+            new ChunkPublicationRevision(4), 1, 1);
+        Expect(cache.TryApplyDelta(doorHandle, removalBatch, [removedDoor], out _) &&
+            renderer.TryQueuePublicRefresh(doorHandle, out _),
+            "The removed public door did not queue native refresh.");
+        renderer.ProcessFrame(new GodotWorldFrameBudget(1, 0));
+        Expect(renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.CabinDoor) == 0 &&
+            renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.WorldChest) == 1,
+            "Removing one public object did not retire only its prefab count.");
 
         double peakResources = Performance.GetMonitor(Performance.Monitor.ObjectResourceCount);
         double peakBuffers = Performance.GetMonitor(Performance.Monitor.RenderBufferMemUsed);
@@ -1784,10 +1798,10 @@ public partial class T010PlayableWorldAcceptance : Node3D
             Expect(direct.TryEnterPresentation(doorHandle, true, out _),
                 "Direct-RID prefab census control could not queue the door chunk.");
             direct.ProcessFrame(new GodotWorldFrameBudget(1, 0));
-            Expect(direct.GetPresentedPrefabCount(GameWorldPublicPrefabIds.CabinDoor) == 1 &&
+            Expect(direct.GetPresentedPrefabCount(GameWorldPublicPrefabIds.CabinDoor) == 0 &&
                 direct.GetPresentedPrefabCount(GameWorldPublicPrefabIds.WorldChest) == 1 &&
                 direct.GetSnapshot().DirectRidGroups > 0,
-                "Direct-RID presentation was incorrectly treated as absent without scene nodes.");
+                "Direct-RID presentation or removed-object isolation drifted without scene nodes.");
         }
 
         GD.Print(
