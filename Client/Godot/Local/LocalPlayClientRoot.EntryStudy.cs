@@ -68,7 +68,7 @@ public abstract partial class LocalPlayClientRoot
                 await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
                 if (frame == 1799) throw new TimeoutException("Staged entry did not terminate.");
             }
-            double readyWall = elapsed.Elapsed.TotalMilliseconds;
+            double terminalWall = elapsed.Elapsed.TotalMilliseconds;
             for (int index = 0; index < 2; index++)
                 await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
             ClientFrameIntervalSummary frames = CaptureClientFrameIntervalsForDiagnostic();
@@ -163,7 +163,9 @@ public abstract partial class LocalPlayClientRoot
                     Format = "UltraSimClientWorldEntry/v1",
                     Scenario = scenario,
                     SourceHead = System.Environment.GetEnvironmentVariable("ULTRASIM_COMMIT") ?? "unrecorded",
-                    ReadyWallMilliseconds = readyWall,
+                    TerminalWallMilliseconds = terminalWall,
+                    ReadyWallMilliseconds = terminal == ClientShellScreen.InSession
+                        ? terminalWall : (double?)null,
                     MaxEligibleFrameMilliseconds = frames.MaximumMilliseconds,
                     frames.Samples,
                     frames.Over50Milliseconds,
@@ -180,7 +182,7 @@ public abstract partial class LocalPlayClientRoot
                         residue.OpenGumpWindows, residue.Shell.SessionActive },
                 }, new JsonSerializerOptions { WriteIndented = true }));
             GD.Print($"CLIENT WORLD ENTRY STUDY PASS scenario={scenario} " +
-                $"ready_ms={readyWall:0.000} max_frame_ms={frames.MaximumMilliseconds:0.000} " +
+                $"terminal_ms={terminalWall:0.000} max_frame_ms={frames.MaximumMilliseconds:0.000} " +
                 $"samples={frames.Samples} stages={observed.Count}");
             RequestApplicationExit();
         }
