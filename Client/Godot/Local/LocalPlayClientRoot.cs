@@ -88,6 +88,11 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             }
             return;
         }
+        if (ReadLocalArgument("--client-performance-layout-capture=") is { Length: > 0 } capturePath)
+        {
+            RunClientPerformanceLayoutCapture(capturePath);
+            return;
+        }
         if (arguments.Contains("--p9-two-room-benchmark", StringComparer.Ordinal))
         {
             // Capture mode is handled above. Bare opt-in launch remains interactive and never
@@ -356,6 +361,56 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             RetireCurrentSession();
             FailSession(exception.Message);
             RequestApplicationExit(1);
+        }
+    }
+
+    private async void RunClientPerformanceLayoutCapture(string path)
+    {
+        try
+        {
+            StartLocalCabin(CabinContentVariant.Default, CabinHumanBody.XBot,
+                useConceptDemoWorld: true);
+            UiComposition.CycleDebug(page => page.ToString());
+            if (UiComposition.DebugPage != GodotClientDebugPage.Performance ||
+                UiComposition.DebugHost.GetNodeOrNull<GodotClientPerformanceHud>("DebugPerformance") is null ||
+                UiComposition.DebugHost.GetNodeOrNull<Button>("DemoHelpToggle") is null)
+                throw new InvalidOperationException("The exported Local demo Help/Performance layout did not open.");
+            for (int frame = 0; frame < 90; frame++)
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            string target = Path.GetFullPath(path);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            SaveLayout(target);
+            UiComposition.DebugHost.GetNode<Button>("DemoHelpToggle")
+                .EmitSignal(Button.SignalName.Pressed);
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            PanelContainer help = UiComposition.DebugHost.GetNode<PanelContainer>("DemoHelpPanel");
+            GodotClientPerformanceHud performance = UiComposition.DebugHost
+                .GetNode<GodotClientPerformanceHud>("DebugPerformance");
+            if (!help.Visible || help.GetGlobalRect().Intersects(performance.GetGlobalRect()))
+                throw new InvalidOperationException("The exported Help and Performance panels overlap.");
+            string helpPath = Path.ChangeExtension(target, ".help.png");
+            SaveLayout(helpPath);
+            GD.Print($"CLIENT PERFORMANCE LAYOUT PASS 1920x1080 image={target} help={helpPath}");
+            RetireCurrentSession();
+            RequestApplicationExit();
+        }
+        catch (Exception error)
+        {
+            GD.PushError($"CLIENT PERFORMANCE LAYOUT FAIL: {error}");
+            RetireCurrentSession();
+            RequestApplicationExit(1);
+        }
+
+        void SaveLayout(string destination)
+        {
+            RenderingServer.ForceDraw();
+            using ViewportTexture texture = GetViewport().GetTexture();
+            using Image image = texture.GetImage();
+            if (image.GetWidth() != 1920 || image.GetHeight() != 1080)
+                throw new InvalidOperationException(
+                    $"Expected a 1920×1080 exported layout, got {image.GetWidth()}×{image.GetHeight()}.");
+            if (image.SavePng(destination) != Error.Ok)
+                throw new InvalidOperationException("The exported layout PNG could not be saved.");
         }
     }
 

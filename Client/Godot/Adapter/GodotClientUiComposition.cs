@@ -384,6 +384,7 @@ public sealed class GodotSessionUiLease : IDisposable
     private const int MaximumTransientSuppressors = 8;
     private readonly GodotClientUiComposition _owner;
     private readonly List<Action> _transientSuppressors = [];
+    private GodotClientHelpPanel? _help;
     private bool _disposed;
 
     internal GodotSessionUiLease(
@@ -407,6 +408,17 @@ public sealed class GodotSessionUiLease : IDisposable
     public Control ContextHost { get; }
     public GodotGumpWindowManager Gumps { get; }
     public GodotContextMenuPresenter ContextMenu { get; }
+    public GodotClientDebugPage DebugPage => _owner.DebugPage;
+    public GodotClientHelpPanel? Help => _help;
+
+    public GodotClientHelpPanel ConfigureDemoHelp(string title, string instructions)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_help is not null)
+            throw new InvalidOperationException("Demo Help is already configured for this session.");
+        _help = new GodotClientHelpPanel(_owner.DebugHost, title, instructions);
+        return _help;
+    }
 
     public GameplayFrameLayout GameplayFrame => _owner.Layout;
 
@@ -455,6 +467,8 @@ public sealed class GodotSessionUiLease : IDisposable
     private void DisposeCore()
     {
         _disposed = true;
+        _help?.Dispose();
+        _help = null;
         SuppressTransientContextCore();
         Gumps.RetireSession();
         Retire(WorldHost);
@@ -594,7 +608,7 @@ public sealed class GodotContextMenuPresenter
 internal sealed class GodotClientDebugPresenter : IDisposable
 {
     private readonly Control _host;
-    private PanelContainer? _panel;
+    private GodotClientDiagnosticPanel? _panel;
     private GodotClientPerformanceHud? _performance;
     private ClientFrameIntervalSampler? _sampler;
     private Func<GodotClientPerformanceContext>? _context;
@@ -634,12 +648,14 @@ internal sealed class GodotClientDebugPresenter : IDisposable
     {
         if (_performance is not null && GodotObject.IsInstanceValid(_performance))
         {
+            _performance.RetireNativeResources();
             _performance.GetParent()?.RemoveChild(_performance);
             _performance.QueueFree();
         }
         _performance = null;
         if (_panel is not null && GodotObject.IsInstanceValid(_panel))
         {
+            _panel.RetireNativeResources();
             _panel.GetParent()?.RemoveChild(_panel);
             _panel.QueueFree();
         }
@@ -653,20 +669,7 @@ internal sealed class GodotClientDebugPresenter : IDisposable
             _host.AddChild(_performance);
             return;
         }
-        _panel = new PanelContainer
-        {
-            Name = $"Debug{Page}",
-            OffsetLeft = 12,
-            OffsetTop = 48,
-            OffsetRight = 500,
-            MouseFilter = Control.MouseFilterEnum.Ignore,
-        };
-        _panel.AddChild(new Label
-        {
-            Text = content,
-            MouseFilter = Control.MouseFilterEnum.Ignore,
-            AutowrapMode = TextServer.AutowrapMode.WordSmart,
-        });
+        _panel = new GodotClientDiagnosticPanel(Page, content);
         _host.AddChild(_panel);
     }
 }

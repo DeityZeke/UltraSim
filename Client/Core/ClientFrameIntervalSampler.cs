@@ -22,6 +22,8 @@ public readonly record struct ClientFrameIntervalSummary(
 {
     public bool OnePercentLowReady => Samples >= 100;
     public bool PointOnePercentLowReady => Samples >= 1000;
+    public int OnePercentLowFrameCount => OnePercentLowReady ? (Samples + 99) / 100 : 0;
+    public int PointOnePercentLowFrameCount => PointOnePercentLowReady ? (Samples + 999) / 1000 : 0;
 }
 
 /// <summary>

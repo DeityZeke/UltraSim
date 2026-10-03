@@ -21,6 +21,7 @@ internal static class ClientFrameIntervalSamplerTests
             Assert.True(sampler.Observe(now, true));
         }
         Assert.False(sampler.Summarize().OnePercentLowReady);
+        Assert.Equal(0, sampler.Summarize().OnePercentLowFrameCount);
         now += 100_000;
         sampler.Observe(now, true);
         ClientFrameIntervalSummary hundred = sampler.Summarize();
@@ -28,6 +29,8 @@ internal static class ClientFrameIntervalSamplerTests
         Assert.Equal(10d, hundred.P99Milliseconds);
         Assert.Equal(10d, hundred.P95Milliseconds);
         Assert.Equal(10d, hundred.OnePercentLowFps);
+        Assert.Equal(1, hundred.OnePercentLowFrameCount);
+        Assert.Equal(0, hundred.PointOnePercentLowFrameCount);
         Assert.True(hundred.PointOnePercentLowFps is null);
         Assert.Equal(1090d, hundred.EligibleMilliseconds);
         AssertClose(100_000d / 1090, hundred.AverageFps!.Value);
@@ -40,6 +43,8 @@ internal static class ClientFrameIntervalSamplerTests
         Assert.True(thousand.PointOnePercentLowReady);
         Assert.Equal(10d, thousand.P999Milliseconds);
         Assert.Equal(10d, thousand.PointOnePercentLowFps);
+        Assert.Equal(10, thousand.OnePercentLowFrameCount);
+        Assert.Equal(1, thousand.PointOnePercentLowFrameCount);
         Assert.Equal(1, thousand.Over50Milliseconds);
         Assert.Equal(0, thousand.Over100Milliseconds); // strictly greater than threshold
     }

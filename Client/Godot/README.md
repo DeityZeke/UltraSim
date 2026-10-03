@@ -478,6 +478,13 @@ are omitted by re-priming the clock; real gameplay/content/map hitches remain el
 FPS is frames divided by summed eligible interval time. The 1%/0.1% lows invert the mean of the
 slowest 1%/0.1% frame durations and warm until 100/1,000 samples. P95/P99/P99.9 use exact
 nearest-rank frame duration; P99.9 likewise warms until 1,000 samples.
+Each low displays the number of eligible frames in its tail; the definitions are unchanged.
+The opaque Performance panel has a draggable title, separated statistic/census/control rows,
+and a taller graph with a 50 ms display scale. Larger peaks clip only in the graph; exact
+hitch values remain in the statistics and raw capture. Other F11 pages are also opaque and
+draggable. In Local play, a session-owned Help toggle in the Debug layer replaces the large
+always-visible instruction block. Profile buttons remain available inside Help; the small
+HUD status hides while an F11 page is open. Help and its native style retire with the session.
 
 Performance offers Reset, Capture 30s, and Save snapshot. Save writes chronological raw
 microsecond intervals, summary, edition, Godot/OS/window/output and renderer/vegetation census
@@ -485,7 +492,9 @@ to `user://diagnostics/client-performance-*.json`. A complete capture excludes u
 Save before completion exports the recent available window. To stamp a precise build revision,
 launch with `ULTRASIM_COMMIT=<sha>`; otherwise the JSON says `unrecorded`. The live HUD is present
 in Single Player, Online and Complete exports; `--client-performance-smoke` checks its bounded
-open/retirement path without entering a world. These measurements are player-visible frame
+open/retirement path without entering a world. `--client-performance-layout-capture=<absolute.png>`
+on an exported Single Player client captures the Local demo at 1920×1080 with Performance,
+then a companion `.help.png` with Help open. These measurements are player-visible frame
 intervals, not CPU/GPU decomposition or a claim about vegetation FPS. F1.8 originally retained the main 3D viewport and realized the shared
 Core camera rig through `GodotGameplayCameraRig` in both Local and Remote. The selected Gameplay
 Frame aspect crops the 16:9 canonical view; F1.9A removes the temporary lens compensation because

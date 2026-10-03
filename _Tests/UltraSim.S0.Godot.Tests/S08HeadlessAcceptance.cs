@@ -450,6 +450,17 @@ public partial class S08HeadlessAcceptance : Control
         Expect(composition.DebugHost.GetNodeOrNull<Control>(
             "DebugPerformance/PerformanceBody/FrameIntervalGraph") is not null,
             "The Performance HUD did not realize its one custom graph Control.");
+        Control graph = composition.DebugHost.GetNode<Control>(
+            "DebugPerformance/PerformanceBody/FrameIntervalGraph");
+        Expect(performance!.DiagnosticBackground.BgColor.A == 1f &&
+            graph.CustomMinimumSize.Y >= 270 &&
+            composition.DebugHost.GetNodeOrNull<Label>(
+                "DebugPerformance/PerformanceBody/PerformanceDragHandle") is not null,
+            "The Performance page lost its opaque, taller, draggable presentation surface.");
+        StyleBoxFlat retainedPerformanceBackground = performance.DiagnosticBackground;
+        performance.DragForAcceptance(new Vector2(-10_000, -10_000));
+        Expect(performance.Position.X >= 12 && performance.Position.Y >= 12,
+            "The movable Performance page escaped its viewport clamp.");
         Button captureButton = composition.DebugHost.GetNode<Button>(
             "DebugPerformance/PerformanceBody/PerformanceActions/CapturePerformance30Seconds");
         captureButton.EmitSignal(Button.SignalName.Pressed);
@@ -474,17 +485,49 @@ public partial class S08HeadlessAcceptance : Control
             .EmitSignal(Button.SignalName.Pressed);
         Expect(intervals.Count == 0, "Reset did not clear the finite Performance sample ring.");
         composition.CycleDebug(page => page.ToString());
+        Expect(retainedPerformanceBackground.NativeInstance == IntPtr.Zero,
+            "The retired Performance page left its native style wrapper to finalization.");
+        GodotClientDiagnosticPanel clientPage = composition.DebugHost
+            .GetNode<GodotClientDiagnosticPanel>("DebugClient");
+        StyleBoxFlat retainedClientBackground = clientPage.DiagnosticBackground;
+        clientPage.DragForAcceptance(new Vector2(-10_000, -10_000));
+        Expect(retainedClientBackground.BgColor.A == 1f &&
+            clientPage.Position.X >= 12 && clientPage.Position.Y >= 12,
+            "The Client diagnostics page lost its opaque, movable surface.");
         composition.CycleDebug(page => page.ToString());
+        Expect(retainedClientBackground.NativeInstance == IntPtr.Zero,
+            "The retired Client diagnostics page left its native style wrapper to finalization.");
         composition.CycleDebug(page => page.ToString());
         composition.CycleDebug(page => page.ToString());
         Expect(composition.DebugPage == GodotClientDebugPage.Off &&
             composition.GetSnapshot().DebugHostChildren == 0,
             "The finite Debug cycle retained hidden pages after Off.");
+        GodotClientHelpPanel help = session.ConfigureDemoHelp(
+            "UltraSim — Concept Demo Island", "F1 Orbit • F11 diagnostics");
+        StyleBoxFlat retainedHelpBackground = help.DiagnosticBackground;
+        bool helpActionInvoked = false;
+        help.AddAction("F1 Orbit", () => helpActionInvoked = true);
+        Expect(ReferenceEquals(help.NativeParent, composition.DebugHost) &&
+            composition.DebugHost.GetNodeOrNull<Button>("DemoHelpToggle") is not null &&
+            !help.IsOpen && help.DiagnosticBackground.BgColor.A == 1f,
+            "The hidden, opaque demo Help panel was not owned by the Debug layer.");
+        composition.DebugHost.GetNode<Button>("DemoHelpToggle")
+            .EmitSignal(Button.SignalName.Pressed);
+        Expect(help.IsOpen, "The dedicated Help button did not open its panel.");
+        Button? helpAction = composition.DebugHost.FindChild(
+            "DemoHelpAction_0", recursive: true, owned: false) as Button;
+        Expect(helpAction is not null, "The Help action button was not realized.");
+        helpAction!.EmitSignal(Button.SignalName.Pressed);
+        Expect(helpActionInvoked, "A profile action placed in Help did not remain usable.");
+        help.Toggle();
+        Expect(!help.IsOpen, "The dedicated Help button did not close its panel.");
         session.Dispose();
+        Expect(retainedHelpBackground.NativeInstance == IntPtr.Zero,
+            "The retired demo Help panel left its native style wrapper to finalization.");
         GodotClientUiCompositionSnapshot retired = composition.GetSnapshot();
         Expect(!retired.SessionActive && retired.WorldHostChildren == 0 &&
             retired.HudHostChildren == 0 && retired.ContextHostChildren == 0 &&
-            retired.Gumps.OpenWindows == 0,
+            retired.DebugHostChildren == 0 && retired.Gumps.OpenWindows == 0,
             "F1.7 session retirement did not restore the persistent category baseline.");
         composition.Dispose();
         owner.QueueFree();

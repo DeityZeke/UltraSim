@@ -226,6 +226,7 @@ public partial class LocalCabinClient : Node3D
     private GodotGameplayCameraRig? _cameraRig;
     private Label? _status;
     private Label? _details;
+    private PanelContainer? _diagnosticHudPanel;
     private RichTextLabel? _chatFeed;
     private LineEdit? _chatInput;
     private OptionButton? _chatMode;
@@ -1065,6 +1066,7 @@ public partial class LocalCabinClient : Node3D
         _sessionUi?.Dispose();
         _sessionUi = null;
         _ownedHudRoot = null;
+        _diagnosticHudPanel = null;
         _ownedWorldUiRoot = null;
         _initialized = false;
     }
@@ -4185,8 +4187,9 @@ public partial class LocalCabinClient : Node3D
             OffsetLeft = 16,
             OffsetTop = 16,
             OffsetRight = 590,
-            OffsetBottom = 220,
+            OffsetBottom = 174,
         };
+        _diagnosticHudPanel = panel;
         _ownedHudRoot.AddChild(panel);
         var stack = new VBoxContainer();
         panel.AddChild(stack);
@@ -4202,20 +4205,33 @@ public partial class LocalCabinClient : Node3D
         _details = new Label();
         stack.AddChild(_status);
         stack.AddChild(_details);
-        var profiles = new HBoxContainer();
-        stack.AddChild(profiles);
-        AddProfileButton("1/F1 Orbit", ControlProfile.OrbitCommand);
-        AddProfileButton("2/F2 Third person", ControlProfile.ThirdPersonDirect);
-        AddProfileButton("3/F3 Iso move/look", ControlProfile.IndependentMoveLook);
-        stack.AddChild(new Label
+        string instructions =
+            "F1: single-click selects • hold LMB steers • double-click ground travels\n" +
+            "RMB context • Esc stop/options • MMB drag camera • wheel zoom\n" +
+            (_useConceptDemoWorld
+                ? "E uses selected door/chest/sign/telepad/gate • I opens Inventory\n"
+                : "E uses selected door/chest • I opens Inventory\n") +
+            "Space jumps in direct profiles • F4 Server Monitor • F5 save • F9 load\n" +
+            "F11 cycles Performance / Client / Presentation / Content diagnostics";
+        GodotClientHelpPanel? help = _sessionUi?.ConfigureDemoHelp(
+            _useConceptDemoWorld ? "UltraSim — Concept Demo Island" : "UltraSim — Woods / Cabin",
+            instructions);
+        if (help is not null)
         {
-            Text = "F1: single-click selects • hold LMB steers • double-click ground travels • RMB context • Esc stop/options\n" +
-                (_useConceptDemoWorld
-                    ? "MMB drag camera • wheel zoom • E use selected door/chest/sign/telepad/gate • I inventory\n"
-                    : "MMB drag camera • wheel zoom • E use selected door/chest • I inventory\n") +
-                "Space jump (direct profiles) • 1/F1 Orbit • 2/F2 third-person • " +
-                "3/F3 fixed iso move/look • F4 Server Monitor • F5 save • F9 load",
-        });
+            help.AddAction("1/F1 Orbit", () => SetProfile(ControlProfile.OrbitCommand));
+            help.AddAction("2/F2 Third person", () => SetProfile(ControlProfile.ThirdPersonDirect));
+            help.AddAction("3/F3 Iso move/look", () => SetProfile(ControlProfile.IndependentMoveLook));
+        }
+        else
+        {
+            // Standalone native fixtures without the shared composition retain their controls.
+            var profiles = new HBoxContainer();
+            stack.AddChild(profiles);
+            AddProfileButton(profiles, "1/F1 Orbit", ControlProfile.OrbitCommand);
+            AddProfileButton(profiles, "2/F2 Third person", ControlProfile.ThirdPersonDirect);
+            AddProfileButton(profiles, "3/F3 Iso move/look", ControlProfile.IndependentMoveLook);
+            stack.AddChild(new Label { Text = instructions });
+        }
 
         var chatPanel = new PanelContainer
         {
@@ -4281,11 +4297,11 @@ public partial class LocalCabinClient : Node3D
             _ownedHudRoot.AddChild(_inventoryHost);
         }
 
-        void AddProfileButton(string text, ControlProfile profile)
+        void AddProfileButton(HBoxContainer host, string text, ControlProfile profile)
         {
             var button = new Button { Text = text };
             button.Pressed += () => SetProfile(profile);
-            profiles.AddChild(button);
+            host.AddChild(button);
         }
     }
 
@@ -4486,6 +4502,8 @@ public partial class LocalCabinClient : Node3D
     {
         if (_status is null || _details is null)
             return;
+        if (_diagnosticHudPanel is not null && _sessionUi is not null)
+            _diagnosticHudPanel.Visible = _sessionUi.DebugPage == GodotClientDebugPage.Off;
         _status.Text = _lastOutcome;
         if (!_initialized || _localSession is null || _renderer is null ||
             !_localSession.TryGetLatestView(out LocalPlayableAuthorityView view))
