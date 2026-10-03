@@ -21,9 +21,6 @@ public abstract partial class LocalPlayClientRoot
                 throw new ArgumentException("--client-entry-evidence=<directory> is required.");
             directory = Path.GetFullPath(directory);
             Directory.CreateDirectory(directory);
-            string? loadingCapture = ReadLocalArgument("--client-entry-capture=");
-            if (loadingCapture is not null) loadingCapture = Path.GetFullPath(loadingCapture);
-            bool capturedLoading = false;
             if (DisplayServer.GetName() == "headless")
                 throw new InvalidOperationException("Entry frame evidence requires native rendering.");
             for (int index = 0; index < 3; index++)
@@ -53,19 +50,6 @@ public abstract partial class LocalPlayClientRoot
                         ElapsedMilliseconds = elapsed.Elapsed.TotalMilliseconds,
                         MaxFrameSoFarMilliseconds = current.MaximumMilliseconds });
                     last = progress.Stage;
-                }
-                if (!capturedLoading && loadingCapture is not null &&
-                    progress.Stage == ClientWorldEntryStage.PreparingMeshes)
-                {
-                    // Visual-only control. ForceDraw and readback deliberately exclude this
-                    // invocation from comparative frame-pacing evidence.
-                    RenderingServer.ForceDraw();
-                    using ViewportTexture texture = GetViewport().GetTexture();
-                    using Image image = texture.GetImage();
-                    if (image.GetWidth() < 640 || image.GetHeight() < 360 ||
-                        image.SavePng(loadingCapture) != Error.Ok)
-                        throw new InvalidOperationException("The exported loading page was not captured.");
-                    capturedLoading = true;
                 }
                 ClientShellScreen screen = ShellSnapshot().Screen;
                 if (screen is ClientShellScreen.InSession or ClientShellScreen.MainMenu or
@@ -158,7 +142,6 @@ public abstract partial class LocalPlayClientRoot
                     TerminalScreen = terminal.ToString(),
                     RetryReady = retryReady,
                     GameplayAccepted = gameplayAccepted,
-                    LoadingCapturePath = capturedLoading ? loadingCapture : null,
                     Stages = observed,
                     Ready = new { session.IsInitialized, session.RenderedChunks,
                         session.SemanticResidentChunks, Actors = session.Actors.ActiveActors,
