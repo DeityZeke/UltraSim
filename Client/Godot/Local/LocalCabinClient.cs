@@ -797,6 +797,8 @@ public partial class LocalCabinClient : Node3D
 
     public override void _Ready()
     {
+        bool measureEntry = OS.GetCmdlineUserArgs().Contains("--client-hitch-study=cold");
+        long entryPhase = measureEntry ? Stopwatch.GetTimestamp() : 0;
         try
         {
             if (_contentOracle is null)
@@ -807,15 +809,21 @@ public partial class LocalCabinClient : Node3D
             }
             _settings ??= ClientSettingsResolver.Resolve(ClientSettingsDocument.Empty);
             ApplyResolvedSettings();
+            if (measureEntry) RecordEntryPhase("resolved settings");
             CreateSceneFurniture();
+            if (measureEntry) RecordEntryPhase("scene furniture");
             StartFreshWorld();
+            if (measureEntry) RecordEntryPhase("fresh world");
             CreateInventoryConsumer();
+            if (measureEntry) RecordEntryPhase("inventory UI");
             RealizeAddedContent();
+            if (measureEntry) RecordEntryPhase("added content");
             _initialized = true;
             SetPhysicsProcess(true);
             if (OS.GetCmdlineUserArgs().Contains("--smoke", StringComparer.Ordinal))
                 RunF02Acceptance();
             UpdateHud();
+            if (measureEntry) RecordEntryPhase("initial HUD");
             GodotWorldRendererSnapshot render = _renderer?.GetSnapshot() ?? default;
             GD.Print(
                 $"T0.10 PLAYABLE CLIENT READY chunks={render.ActiveRenderChunks} " +
@@ -833,6 +841,14 @@ public partial class LocalCabinClient : Node3D
             _lastOutcome = "Initialization failed — see Godot output";
             UpdateHud();
             SetPhysicsProcess(false);
+        }
+
+        void RecordEntryPhase(string name)
+        {
+            long now = Stopwatch.GetTimestamp();
+            GD.Print($"CLIENT HITCH READY PHASE {name} ms=" +
+                Stopwatch.GetElapsedTime(entryPhase, now).TotalMilliseconds.ToString("0.000"));
+            entryPhase = now;
         }
     }
 
@@ -1073,6 +1089,8 @@ public partial class LocalCabinClient : Node3D
 
     private void StartFreshWorld()
     {
+        bool measureEntry = OS.GetCmdlineUserArgs().Contains("--client-hitch-study=cold");
+        long entryPhase = measureEntry ? Stopwatch.GetTimestamp() : 0;
         if (_saveRoot is null || _resolvedContent is null || _contentOracle is null)
             throw new InvalidOperationException("Cabin composition was not configured.");
         _localSession = _useCabinVisualBenchmark
@@ -1082,6 +1100,7 @@ public partial class LocalCabinClient : Node3D
                     _saveRoot, _guestAdmission, serverExtensionFactory: _serverExtensionFactory)
                 : LocalPlayableSession.CreateCabin(_saveRoot, _guestAdmission);
         _localSession.WaitUntilReady(TimeSpan.FromSeconds(10));
+        if (measureEntry) RecordEntryPhase("authority create and ready");
         // Command sequencing belongs to the application/control-session lineage. Presentation
         // rebuilds (render-distance changes and Game-generation replacement) must not reset it.
         _sequencer = new ClientWorldInputSequencer(_localSession.ControlSession);
@@ -1111,7 +1130,9 @@ public partial class LocalCabinClient : Node3D
         SynchronizeColdPublicPresentationMetadata();
         _actorState = new ClientActorPresentationState(
             ClientActorDefinitionCatalog.ConceptDemo, 64);
+        if (measureEntry) RecordEntryPhase("semantic client setup");
         PrepareOptionalActorPresentation();
+        if (measureEntry) RecordEntryPhase("optional art preparation");
         _actorPresenter = new GodotActorPresenter(
             this,
             ClientActorDefinitionCatalog.ConceptDemo,
@@ -1120,6 +1141,7 @@ public partial class LocalCabinClient : Node3D
         _actorPresenter.SetControlledActorPose(
             view.PublicActor, view.PlayerPosition, view.PlayerOrientation, Time.GetTicksMsec());
         RebuildClientProjection(view);
+        if (measureEntry) RecordEntryPhase("native world projection");
         DriveLocalUntil(() =>
             CountPresentedCharacters() == 1 &&
             CountPresentedPrefab(GameWorldPublicPrefabIds.CabinDoor) == 1 &&
@@ -1129,9 +1151,18 @@ public partial class LocalCabinClient : Node3D
                     (_serverExtensionFactory is null ? 2 : 1) &&
                 CountPresentedPrefab(GameWorldPublicPrefabIds.FarGate) == 1 &&
                 CountPresentedPrefab(GameWorldPublicPrefabIds.InformationalSign) == 2));
+        if (measureEntry) RecordEntryPhase("initial presentation convergence");
         _lastOutcome = _useConceptDemoWorld
             ? "Fresh Concept Demo island started"
             : "Fresh woods/cabin world started";
+
+        void RecordEntryPhase(string name)
+        {
+            long now = Stopwatch.GetTimestamp();
+            GD.Print($"CLIENT HITCH WORLD PHASE {name} ms=" +
+                Stopwatch.GetElapsedTime(entryPhase, now).TotalMilliseconds.ToString("0.000"));
+            entryPhase = now;
+        }
     }
 
     /// <summary>
@@ -4548,6 +4579,8 @@ public partial class LocalCabinClient : Node3D
 
     private void PrepareOptionalActorPresentation()
     {
+        bool measureEntry = OS.GetCmdlineUserArgs().Contains("--client-hitch-study=cold");
+        long entryPhase = measureEntry ? Stopwatch.GetTimestamp() : 0;
         _officialPresentation = default;
         if (_primitiveOnlyPresentation || string.IsNullOrWhiteSpace(_presentationCacheRoot))
             return;
@@ -4559,9 +4592,11 @@ public partial class LocalCabinClient : Node3D
                 OfficialLocalPresentationStatus.CacheFailure, cacheError, default, default);
             return;
         }
+        if (measureEntry) RecordEntryPhase("cache open");
         _ = OfficialLocalPresentation.TryOpenOrAcquire(
                 _presentationCache!, _officialContentRoot,
                 out ContentCatalogLease? localCatalog, out _officialPresentation);
+        if (measureEntry) RecordEntryPhase("Official actor acquisition");
         CabinLocalPresentationContent local =
             _contentOracle!.CreateLocalPresentation(_resolvedContent!.Variant);
         foreach (CabinLocalContentPackage package in local.Packages)
@@ -4572,11 +4607,13 @@ public partial class LocalCabinClient : Node3D
                 throw new InvalidOperationException(
                     $"The Cabin world.local presentation could not be installed: {installError}.");
         }
+        if (measureEntry) RecordEntryPhase("local package install");
         if (!_presentationCache!.TryPublishCatalog(
                 ContentBaseCatalog.Empty, local.Plan, persistentlyPinned: true,
                 out ContentCatalogLease? resourceCatalog, out ContentCacheError publishError))
             throw new InvalidOperationException(
                 $"The Cabin world.local presentation could not be published: {publishError}.");
+        if (measureEntry) RecordEntryPhase("local catalog publish");
         _cabinPresentationKey = local.ActivationKey;
         // Keep the accepted A0.1 resource definitions live as the lower layer. P9 adds
         // world meshes/materials; it must not remove the legacy wall/wood override
@@ -4603,16 +4640,21 @@ public partial class LocalCabinClient : Node3D
                     combined!.ScopeActivation, combined.PlanHash);
             }
         }
+        if (measureEntry) RecordEntryPhase("Official Cabin catalog");
         _derivedResources = new GodotDerivedResourceStore(
             _presentationCacheRoot,
             GodotDerivedResourcePolicy.ProductionStandalone(DerivedPlatformProfile()));
+        if (measureEntry) RecordEntryPhase("derived store open");
         UserResourcePackStackLease? user = OpenUserResourcePacks();
+        if (measureEntry) RecordEntryPhase("user pack selection");
         try
         {
             _presentationGeneration = PresentationGeneration.CreateWithResources(
                 user, null, localCatalog, null, resourceCatalog);
+            if (measureEntry) RecordEntryPhase("presentation generation");
             _assetResolver = new GodotCatalogWorldAssetResolver(
                 _presentationGeneration, _derivedResources);
+            if (measureEntry) RecordEntryPhase("world asset resolver");
         }
         catch (InvalidDataException)
         {
@@ -4627,7 +4669,17 @@ public partial class LocalCabinClient : Node3D
         }
         _presentationSelectionRevision = _presentationCache!.UserResourcePackSelectionRevision;
         _uiRenderer?.RefreshInventoryPresentation();
+        if (measureEntry) RecordEntryPhase("inventory presentation refresh");
         _actorVisuals = new GodotContentActorVisualResolver(_presentationGeneration);
+        if (measureEntry) RecordEntryPhase("actor visual resolver");
+
+        void RecordEntryPhase(string name)
+        {
+            long now = Stopwatch.GetTimestamp();
+            GD.Print($"CLIENT HITCH ART PHASE {name} ms=" +
+                Stopwatch.GetElapsedTime(entryPhase, now).TotalMilliseconds.ToString("0.000"));
+            entryPhase = now;
+        }
     }
 
     private UserResourcePackStackLease? OpenUserResourcePacks() =>

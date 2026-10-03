@@ -93,6 +93,11 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             RunClientPerformanceLayoutCapture(capturePath);
             return;
         }
+        if (ReadLocalArgument("--client-hitch-study=") is { Length: > 0 } hitchScenario)
+        {
+            RunClientHitchStudy(hitchScenario);
+            return;
+        }
         if (arguments.Contains("--p9-two-room-benchmark", StringComparer.Ordinal))
         {
             // Capture mode is handled above. Bare opt-in launch remains interactive and never
@@ -864,12 +869,15 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         bool primitiveOnlyPresentation = false,
         bool useCabinVisualBenchmark = false)
     {
+        bool measureEntry = ReadLocalArgument("--client-hitch-study=") == "cold";
+        long entryPhase = measureEntry ? Stopwatch.GetTimestamp() : 0;
         if (_cabin is not null)
             throw new InvalidOperationException("A local Cabin session is already active.");
         if (useCabinVisualBenchmark && useConceptDemoWorld)
             throw new ArgumentException("The visual benchmark and Concept Demo are distinct world roots.");
         BeginSessionLoading("Starting local Cabin authority…");
         CabinContentOracle oracle = CabinContentOracle.Create();
+        if (measureEntry) RecordEntryPhase("shell and content oracle");
         CabinResolvedContent resolved = variant switch
         {
             CabinContentVariant.Default => oracle.Default,
@@ -911,8 +919,10 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             OfficialContentRoot(),
             AudioAdapter,
             useCabinVisualBenchmark);
+        if (measureEntry) RecordEntryPhase("configure local session");
         _cabin = cabin;
         WorldRoot.AddChild(cabin);
+        if (measureEntry) RecordEntryPhase("native child Ready");
         LocalCabinPresentationSnapshot snapshot = cabin.GetPresentationSnapshot();
         if (!snapshot.IsInitialized)
             throw new InvalidOperationException(snapshot.InitializationError ??
@@ -922,6 +932,15 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             : useConceptDemoWorld
                 ? $"Concept Demo — {snapshot.DisplayName} — {human}"
                 : $"Cabin — {variant} — {human}");
+        if (measureEntry) RecordEntryPhase("commit shell session");
+
+        void RecordEntryPhase(string name)
+        {
+            long now = Stopwatch.GetTimestamp();
+            GD.Print($"CLIENT HITCH ENTRY PHASE {name} ms=" +
+                Stopwatch.GetElapsedTime(entryPhase, now).TotalMilliseconds.ToString("0.000"));
+            entryPhase = now;
+        }
     }
 
     private void SubmitGuestAdmission(string name, GameGuestBody body)
