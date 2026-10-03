@@ -506,6 +506,12 @@ benchmark or an automatic map-travel driver. The initial characterization is rec
 `--client-hitch-hide-debug` keeps the F11 Performance page closed throughout measurement while
 retaining the same frame sampler and end-of-window capture. The diagnostic page is constructed
 only after the measured window, so visible/hidden controls can identify observer effect.
+Local sign hover's presentation-existence gate uses the World renderer's retained, committed
+per-prefab census rather than enumerating Godot children on every physics service. The nearby
+record still comes from resident semantic data and must belong to a currently presented chunk;
+the census follows visibility, public refresh, chunk retirement/rebuild, and asset refresh, including
+primitive and direct-RID realization. The matched exported-product allocation and GC control is
+recorded in the [hover census repair evidence](../../_Benchmarks/Baselines/client-hover-census-repair-2026-10-03.md).
 F1.8 originally retained the main 3D viewport and realized the shared
 Core camera rig through `GodotGameplayCameraRig` in both Local and Remote. The selected Gameplay
 Frame aspect crops the 16:9 canonical view; F1.9A removes the temporary lens compensation because

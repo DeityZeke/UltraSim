@@ -1,0 +1,77 @@
+{
+  "format": "UltraSimClientHoverCensusRepairEvidence/v1",
+  "date": "2026-10-03",
+  "startingHead": "f6dbfd7ebd24d3b6dfd4bfd451f01deb39dc336d",
+  "measuredImplementationHead": "f157f2a511ed0fc255cbb483817b053169e45972",
+  "postMeasurementTestOnlyHead": "b35872a630b015a6560927519e64a23b95b08400",
+  "product": "exported Linux Single Player, Release, Official art warm, vegetation Off",
+  "workload": {
+    "warmupSeconds": 8,
+    "eligibleSeconds": 30,
+    "performancePageVisible": false,
+    "resolution": "1920x1080",
+    "renderedChunks": 49,
+    "semanticResidentChunks": 81,
+    "rendererNodes": 293,
+    "rendererResources": 143
+  },
+  "controls": [
+    {
+      "name": "preRepairHidden",
+      "sourceHead": "b337def49435b547459cbd9f0fd34bd53ee5f514",
+      "context": "client-hitch-profiler-attribution-2026-10-03/hidden/idle.context.json",
+      "allocatedMiB": 145.91,
+      "cpuMilliseconds": 7460,
+      "gcPauseMilliseconds": 268.43,
+      "gcCollections": [5, 5, 2],
+      "p99Milliseconds": 8.36,
+      "maximumMilliseconds": 117.367,
+      "framesOver50Milliseconds": 3,
+      "framesOver100Milliseconds": 2
+    },
+    {
+      "name": "postRepair1",
+      "context": "client-hover-census-repair-2026-10-03/controls/final-visibility-1/idle.context.json",
+      "frames": "client-hover-census-repair-2026-10-03/controls/final-visibility-1/idle.frames.json",
+      "allocatedMiB": 13.351,
+      "cpuMilliseconds": 6630,
+      "gcPauseMilliseconds": 7.575,
+      "gcCollections": [1, 0, 0],
+      "p99Milliseconds": 8.254,
+      "maximumMilliseconds": 15.247,
+      "framesOver50Milliseconds": 0,
+      "framesOver100Milliseconds": 0
+    },
+    {
+      "name": "postRepair2",
+      "context": "client-hover-census-repair-2026-10-03/controls/final-visibility-2/idle.context.json",
+      "frames": "client-hover-census-repair-2026-10-03/controls/final-visibility-2/idle.frames.json",
+      "allocatedMiB": 13.352,
+      "cpuMilliseconds": 6760,
+      "gcPauseMilliseconds": 8.334,
+      "gcCollections": [1, 0, 0],
+      "p99Milliseconds": 7.976,
+      "maximumMilliseconds": 13.128,
+      "framesOver50Milliseconds": 0,
+      "framesOver100Milliseconds": 0
+    }
+  ],
+  "postRepairAllocationTrace": {
+    "path": "client-hover-census-repair-2026-10-03/controls/final-trace-idle/idle.nettrace.gz",
+    "sha256": "80f5632d881d1622615226e19f942aa7d65bc53d7cf1e28f9a0b848993a09f4d",
+    "allocationTicks": 91,
+    "sampledBytes": 10208944,
+    "missingStacks": 0,
+    "formerCountPresentedPrefabStackPresent": false,
+    "remainingCountMeshInstancesSampledBytes": 5185600
+  },
+  "verification": {
+    "nativeT010": "passed",
+    "exportedD01": "passed",
+    "exportedD03": "passed",
+    "exportedD04": "passed",
+    "clientCore": "37/37 passed",
+    "architectureOnly": "passed",
+    "canonicalRelease": "not run"
+  }
+}

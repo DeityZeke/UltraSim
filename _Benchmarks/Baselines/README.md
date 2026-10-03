@@ -26,6 +26,11 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `client-hover-census-repair-2026-10-03.json` — renderer-owned presented-prefab
+  census replaces recursive Godot child enumeration in Local hover; exact native
+  lifecycle and exported sign controls, matched hidden-HUD idle allocation/GC
+  before/after, and post-repair compressed allocation trace. Focused verification
+  passed; canonical Release was not rerun;
 - `client-hitch-profiler-attribution-2026-10-03.json` — matched exported-client
   visible/hidden Performance-page controls, raw eligible frames, GC-timeline alignment,
   two managed allocation-stack traces and a separate `perf` cold-entry control. It
