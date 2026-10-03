@@ -1,0 +1,76 @@
+{
+  "format": "UltraSimClientHitchProfilerAttribution/v1",
+  "startingHead": "c6c218b04495c7981a375b41abd1165c22f23e13",
+  "testedDiagnosticHead": "b337def49435b547459cbd9f0fd34bd53ee5f514",
+  "edition": "SinglePlayer",
+  "configuration": "Release exported Godot 4.7.1 Mono, .NET 8.0.31, Linux x64, 1920x1080, Vsync Enabled, Official art, vegetation Off, idle, 8s warmup, 30s eligible",
+  "rawControlDirectory": "client-hitch-profiler-attribution-2026-10-03/",
+  "controls": [
+    {
+      "performancePageVisible": true,
+      "frames": 4280,
+      "eligibleMilliseconds": 30003.618,
+      "allocatedBytes": 158905192,
+      "processCpuMilliseconds": 7540,
+      "gcPauseMilliseconds": 267.753,
+      "gcCollections": [5, 5, 2],
+      "p99FrameMilliseconds": 8.307,
+      "maxFrameMilliseconds": 114.907,
+      "over50Milliseconds": 3,
+      "over100Milliseconds": 2,
+      "raw": "client-hitch-profiler-attribution-2026-10-03/visible/"
+    },
+    {
+      "performancePageVisible": false,
+      "frames": 4281,
+      "eligibleMilliseconds": 30005.06,
+      "allocatedBytes": 152999568,
+      "processCpuMilliseconds": 7460,
+      "gcPauseMilliseconds": 268.427,
+      "gcCollections": [5, 5, 2],
+      "p99FrameMilliseconds": 8.36,
+      "maxFrameMilliseconds": 117.367,
+      "over50Milliseconds": 3,
+      "over100Milliseconds": 2,
+      "raw": "client-hitch-profiler-attribution-2026-10-03/hidden/"
+    }
+  ],
+  "allocationTraces": {
+    "tool": "dotnet-trace 8.0.547301 gc-verbose; TraceEvent 3.1.8",
+    "durationSecondsEach": 20,
+    "sampledWeightsAreNotExactAllocatedTotals": true,
+    "runs": [
+      { "ticks": 839, "sampledBytes": 89308144, "missingStacks": 0, "countPresentedPrefabSampledBytes": 80123776 },
+      { "ticks": 944, "sampledBytes": 105666504, "missingStacks": 0, "countPresentedPrefabSampledBytes": 96727760,
+        "wholeWindowContextValid": false, "reason": "window focus lost after trace" }
+    ],
+    "dominantSource": "LocalCabinClient._PhysicsProcess -> UpdateWorldHover -> IsKnownPresentedPrefabNear -> CountPresentedPrefab -> recursive Node.GetChildren",
+    "firstTraceTypesAtDominantSourceBytes": {
+      "weakReferenceDictionaryNodes": 24365752,
+      "godotNodeEnumerator": 16387368,
+      "weakReferences": 13194672,
+      "godotUntypedArray": 10537528,
+      "godotNodeArray": 9149680,
+      "godotStringName": 6488776
+    }
+  },
+  "perfCold": {
+    "tool": "perf 7.2.6-1 cycles:u 997Hz DWARF user stack",
+    "samples": 8259,
+    "lostSamples": 0,
+    "mainThreadSamplesRecordingSeconds3To5": 747,
+    "localAuthorityThreadSamplesRecordingSeconds3To5": 302,
+    "nativeGodotFunctionAttribution": "limited by shipped symbols",
+    "wholeWindowContextValid": false,
+    "reason": "window focus lost after cold-entry clocks completed"
+  },
+  "verification": {
+    "singlePlayerReleaseExport": "pass",
+    "clientPerformanceSmoke": "pass",
+    "clientCoreTests": "37/37 pass",
+    "architectureChecks": "4/4 pass",
+    "canonicalRelease": "not run"
+  },
+  "optimizationAdopted": false,
+  "exactOriginalScreenshotEventIdentified": false
+}

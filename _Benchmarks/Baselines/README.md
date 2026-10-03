@@ -26,6 +26,12 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `client-hitch-profiler-attribution-2026-10-03.json` — matched exported-client
+  visible/hidden Performance-page controls, raw eligible frames, GC-timeline alignment,
+  two managed allocation-stack traces and a separate `perf` cold-entry control. It
+  identifies recursive Local hover prefab counting as the dominant observed idle
+  allocation source without adopting an optimization or claiming the original
+  untimestamped screenshot's exact cause;
 - `client-hitch-characterization-2026-10-02.json` — actual exported Single Player
   idle/vegetation/real-input movement/cold-entry controls with raw frame intervals and
   GC timelines; identifies synchronous Official art/authority entry and recurring GC-linked

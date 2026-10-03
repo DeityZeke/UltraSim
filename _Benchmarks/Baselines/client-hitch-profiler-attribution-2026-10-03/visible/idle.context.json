@@ -1,0 +1,932 @@
+{
+  "Format": "UltraSimClientHitchStudy/v1",
+  "Scenario": "idle",
+  "SourceHead": "b337def49435b547459cbd9f0fd34bd53ee5f514",
+  "StartedUtc": "2026-10-03T04:22:51.52886+00:00",
+  "EndedUtc": "2026-10-03T04:23:22.536536+00:00",
+  "WallMilliseconds": 31007.6747,
+  "ColdEntryMilliseconds": 0,
+  "FrameCaptureStartedMilliseconds": 31007.6747,
+  "EligibleMilliseconds": 30003.618,
+  "Frames": 4280,
+  "PerformancePageVisibleDuringMeasurement": true,
+  "VegetationEnabled": false,
+  "ProcessCpuMilliseconds": 7540,
+  "GcPauseMilliseconds": 267.753,
+  "AllocatedBytes": 158905192,
+  "Gen0": 5,
+  "Gen1": 5,
+  "Gen2": 2,
+  "GcTimeline": [
+    {
+      "Milliseconds": 251.9568,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 500.9617,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 751.1064,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 1001.1952,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 1251.2943,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 1501.4512,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 1751.598,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 2001.6704,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 2250.8281,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 2501.0049,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 2751.1511,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 3001.2408,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 3251.3938,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 3501.55,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 3751.6994,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 4001.7261,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 4250.8724,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 4501.0356,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 4751.1923,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 5001.2652,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 5251.411,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 5501.5619,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 5751.7082,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 6000.7328,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 6250.8779,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 6501.0296,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 6751.1742,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 7001.2454,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 7251.3843,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 7501.5428,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 7751.7471,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 8000.7866,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 8250.9247,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 8501.0631,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 8751.2234,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 9001.3013,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 9251.4472,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 9501.5874,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 9751.7301,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 10000.8044,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 10250.9538,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 10501.1055,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 10751.2729,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 11001.3479,
+      "PauseMilliseconds": 40.66,
+      "Gen0": 2,
+      "Gen1": 2,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 11289.1129,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 11501.2648,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 11751.4053,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 12001.4819,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 12251.6272,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 12501.7242,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 12750.8698,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 13000.9424,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 13251.0938,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 13501.2238,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 13751.366,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 14001.4406,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 14251.5855,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 14501.7248,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 14750.869,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 15000.9457,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 15251.0961,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 15501.2299,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 15751.374,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 16001.4255,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 16251.5668,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 16501.7186,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 16750.8561,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 17000.9289,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 17251.0912,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 17501.2315,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 17751.3726,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 18001.4464,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 18251.5869,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 18501.7397,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 18750.8855,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 19000.9572,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 19251.0923,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 19501.2355,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 19751.3803,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 20001.4541,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 20251.5971,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 20501.7219,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 20750.8671,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 21000.9402,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 21251.0839,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 21501.225,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 21751.3684,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 22001.4401,
+      "PauseMilliseconds": 147.471,
+      "Gen0": 3,
+      "Gen1": 3,
+      "Gen2": 1
+    },
+    {
+      "Milliseconds": 22251.5907,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 22501.7021,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 22750.8379,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 23000.9101,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 23251.0654,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 23501.1559,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 23751.2894,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 24001.3671,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 24251.5042,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 24501.5951,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 24751.7238,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 25000.7963,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 25250.942,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 25501.0926,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 25751.2391,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 26001.3153,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 26251.4667,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 26501.6139,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 26751.7201,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 27000.792,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 27250.9349,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 27501.0824,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 27751.2249,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 28001.2958,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 28251.4419,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 28501.5872,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 28751.7214,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 29000.7917,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 29250.9355,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 29501.084,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 29751.2346,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 30001.306,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 30251.4492,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 30501.5982,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 30751.7294,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    },
+    {
+      "Milliseconds": 31000.8017,
+      "PauseMilliseconds": 267.753,
+      "Gen0": 5,
+      "Gen1": 5,
+      "Gen2": 2
+    }
+  ],
+  "Before": {
+    "AuthorityTicks": 583,
+    "PlayerPosition": {
+      "Chunk": {
+        "X": 0,
+        "Z": 0
+      },
+      "Local": {
+        "XMillimeters": 15500,
+        "ZMillimeters": 7000,
+        "YMillimeters": 1000
+      },
+      "GlobalXMillimeters": 15500,
+      "GlobalZMillimeters": 7000,
+      "YMillimeters": 1000
+    },
+    "RenderedChunks": 49,
+    "SemanticResidentChunks": 81,
+    "ActiveNodes": 293,
+    "ActiveResources": 143
+  },
+  "After": {
+    "AuthorityTicks": 2433,
+    "PlayerPosition": {
+      "Chunk": {
+        "X": 0,
+        "Z": 0
+      },
+      "Local": {
+        "XMillimeters": 15500,
+        "ZMillimeters": 7000,
+        "YMillimeters": 1000
+      },
+      "GlobalXMillimeters": 15500,
+      "GlobalZMillimeters": 7000,
+      "YMillimeters": 1000
+    },
+    "RenderedChunks": 49,
+    "SemanticResidentChunks": 81,
+    "ActiveNodes": 293,
+    "ActiveResources": 143
+  }
+}
