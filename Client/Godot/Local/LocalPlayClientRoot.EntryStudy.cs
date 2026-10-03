@@ -91,6 +91,8 @@ public abstract partial class LocalPlayClientRoot
                 OS.GetCmdlineUserArgs().Contains("--client-entry-verify-gameplay"))
             {
                 stage = "post-Ready gameplay acceptance";
+                _cabin!.RunD03Acceptance(); // presented sign hover/selection and exact UI action
+                _cabin.SetPhysicsProcess(true); // D0.3 pauses only for its native-layout canary
                 _cabin!.RunD00Acceptance();
                 gameplayAccepted = true;
             }
