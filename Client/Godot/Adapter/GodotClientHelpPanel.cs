@@ -97,6 +97,14 @@ public sealed class GodotClientHelpPanel : IDisposable
         _toggle.Text = "Help";
     }
 
+    /// <summary>A modal shell surface owns input above session-only Help.</summary>
+    internal void SetAvailable(bool available)
+    {
+        if (_disposed) return;
+        if (!available) Close();
+        _toggle.Visible = available;
+    }
+
     public void Dispose()
     {
         if (_disposed) return;

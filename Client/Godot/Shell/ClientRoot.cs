@@ -1130,7 +1130,21 @@ public abstract partial class ClientRoot : Control
         column.AddChild(CenteredLabel(snapshot.Status ?? "Preparing client session…"));
         if (_entryProgress is ClientWorldEntryProgress progress)
         {
-            column.AddChild(CenteredLabel(progress.Stage.ToString()));
+            column.AddChild(CenteredLabel(progress.Stage switch
+            {
+                ClientWorldEntryStage.Resolving => "Selecting world",
+                ClientWorldEntryStage.StartingAuthority => "Starting simulation",
+                ClientWorldEntryStage.PreparingContent => "Loading content",
+                ClientWorldEntryStage.PreparingMaterials => "Loading materials",
+                ClientWorldEntryStage.PreparingMeshes => "Preparing meshes",
+                ClientWorldEntryStage.BuildingWorld => "Building world",
+                ClientWorldEntryStage.WarmingPresentation => "Warming presentation",
+                ClientWorldEntryStage.Finalizing => "Finalizing",
+                ClientWorldEntryStage.Ready => "Ready",
+                ClientWorldEntryStage.Cancelled => "Cancelled",
+                ClientWorldEntryStage.Failed => "Unable to enter",
+                _ => "Preparing world",
+            }));
             column.AddChild(CenteredLabel(progress.Detail));
             if (progress.TotalUnits is int total)
                 column.AddChild(CenteredLabel($"{progress.CompletedUnits} / {total}"));

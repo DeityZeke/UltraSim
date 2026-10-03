@@ -205,7 +205,10 @@ public sealed class GodotClientUiComposition : IDisposable
         ShellMenuHost.Visible = visible;
         if (visible) _session?.SuppressTransientContext();
         _session?.SetContextVisible(!visible);
+        _session?.Help?.SetAvailable(!visible);
     }
+
+    internal bool ShellModalVisible => _shellModalVisible;
 
     public bool ContainsWorldPointer(Vector2 applicationPoint) =>
         _layout.ContainsApplicationPoint(new ClientPixelPoint(
@@ -417,6 +420,7 @@ public sealed class GodotSessionUiLease : IDisposable
         if (_help is not null)
             throw new InvalidOperationException("Demo Help is already configured for this session.");
         _help = new GodotClientHelpPanel(_owner.DebugHost, title, instructions);
+        _help.SetAvailable(!_owner.ShellModalVisible);
         return _help;
     }
 
