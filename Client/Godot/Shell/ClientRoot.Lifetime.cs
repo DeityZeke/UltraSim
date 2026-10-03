@@ -28,6 +28,9 @@ public abstract partial class ClientRoot
         _audioAdapter.ProcessFrame();
     }
 
+    /// <summary>Opt-in diagnostic reset without constructing a visible debug page.</summary>
+    protected void ResetClientFrameIntervalsForDiagnostic() => _frameIntervals.Reset();
+
     protected void BeginApplicationStartup()
     {
         GetTree().AutoAcceptQuit = false;

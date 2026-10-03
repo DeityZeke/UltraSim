@@ -503,6 +503,9 @@ process/GC and renderer context; `cold` preserves the first world-entry interval
 `move` requires real physical input and rejects a stationary actor. This is not a gameplay
 benchmark or an automatic map-travel driver. The initial characterization is recorded in the
 [client hitch evidence](../../_Benchmarks/Baselines/client-hitch-characterization-2026-10-02.md).
+`--client-hitch-hide-debug` keeps the F11 Performance page closed throughout measurement while
+retaining the same frame sampler and end-of-window capture. The diagnostic page is constructed
+only after the measured window, so visible/hidden controls can identify observer effect.
 F1.8 originally retained the main 3D viewport and realized the shared
 Core camera rig through `GodotGameplayCameraRig` in both Local and Remote. The selected Gameplay
 Frame aspect crops the 16:9 canonical view; F1.9A removes the temporary lens compensation because

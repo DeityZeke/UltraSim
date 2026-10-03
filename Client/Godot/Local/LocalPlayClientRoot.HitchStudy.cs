@@ -27,18 +27,23 @@ public abstract partial class LocalPlayClientRoot
             if (DisplayServer.GetName() == "headless")
                 throw new InvalidOperationException("The hitch study requires actual native rendering.");
 
+            bool showPerformancePage = !OS.GetCmdlineUserArgs().Contains(
+                "--client-hitch-hide-debug", StringComparer.Ordinal);
+
             if (scenario is "idle" or "move")
                 StartLocalCabin(CabinContentVariant.Default, CabinHumanBody.XBot,
                     useConceptDemoWorld: true);
-            UiComposition.CycleDebug(page => page.ToString());
-            GodotClientPerformanceHud hud = UiComposition.DebugHost
-                .GetNode<GodotClientPerformanceHud>("DebugPerformance");
+            if (showPerformancePage)
+                UiComposition.CycleDebug(page => page.ToString());
             await WaitWallSeconds(scenario == "cold" ? 2 : 8);
             if (!GetWindow().HasFocus())
                 throw new InvalidOperationException("The client window is not focused after warmup.");
-            UiComposition.DebugHost.GetNode<Button>(
-                "DebugPerformance/PerformanceBody/PerformanceActions/ResetPerformance")
-                .EmitSignal(Button.SignalName.Pressed);
+            if (showPerformancePage)
+                UiComposition.DebugHost.GetNode<Button>(
+                    "DebugPerformance/PerformanceBody/PerformanceActions/ResetPerformance")
+                    .EmitSignal(Button.SignalName.Pressed);
+            else
+                ResetClientFrameIntervalsForDiagnostic();
             // Reset discards the previous timestamp. Re-arm it before a synchronous cold entry,
             // otherwise the first post-entry interval (the one that includes startup) is lost.
             if (scenario == "cold")
@@ -97,6 +102,12 @@ public abstract partial class LocalPlayClientRoot
             string framesPath = Path.Combine(directory, $"{scenario}.frames.json");
             double frameCaptureStartedMilliseconds = clock.Elapsed.TotalMilliseconds;
             stage = "frame snapshot";
+            // Construct the export-only HUD after measurement for hidden-page controls.
+            // Its initial Refresh and file serialization cannot perturb the measured window.
+            if (!showPerformancePage)
+                UiComposition.CycleDebug(page => page.ToString());
+            GodotClientPerformanceHud hud = UiComposition.DebugHost
+                .GetNode<GodotClientPerformanceHud>("DebugPerformance");
             int frames = hud.SaveDiagnosticSnapshot(framesPath);
             using JsonDocument frameFile = JsonDocument.Parse(File.ReadAllText(framesPath));
             double eligibleMs = frameFile.RootElement.GetProperty("Summary")
@@ -116,6 +127,7 @@ public abstract partial class LocalPlayClientRoot
                 FrameCaptureStartedMilliseconds = frameCaptureStartedMilliseconds,
                 EligibleMilliseconds = eligibleMs,
                 Frames = frames,
+                PerformancePageVisibleDuringMeasurement = showPerformancePage,
                 VegetationEnabled = frameFile.RootElement.GetProperty("Context")
                     .GetProperty("VegetationEnabled").GetBoolean(),
                 ProcessCpuMilliseconds = (cpuAfter - cpuBefore).TotalMilliseconds,
