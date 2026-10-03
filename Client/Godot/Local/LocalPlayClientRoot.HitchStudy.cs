@@ -34,7 +34,7 @@ public abstract partial class LocalPlayClientRoot
                 StartLocalCabin(CabinContentVariant.Default, CabinHumanBody.XBot,
                     useConceptDemoWorld: true);
             if (showPerformancePage)
-                UiComposition.CycleDebug(page => page.ToString());
+                ShowPerformancePageForStudy();
             await WaitWallSeconds(scenario == "cold" ? 2 : 8);
             if (!GetWindow().HasFocus())
                 throw new InvalidOperationException("The client window is not focused after warmup.");
@@ -105,7 +105,7 @@ public abstract partial class LocalPlayClientRoot
             // Construct the export-only HUD after measurement for hidden-page controls.
             // Its initial Refresh and file serialization cannot perturb the measured window.
             if (!showPerformancePage)
-                UiComposition.CycleDebug(page => page.ToString());
+                ShowPerformancePageForStudy();
             GodotClientPerformanceHud hud = UiComposition.DebugHost
                 .GetNode<GodotClientPerformanceHud>("DebugPerformance");
             int frames = hud.SaveDiagnosticSnapshot(framesPath);
@@ -175,6 +175,16 @@ public abstract partial class LocalPlayClientRoot
             var stopwatch = Stopwatch.StartNew();
             while (stopwatch.Elapsed < TimeSpan.FromSeconds(seconds))
                 await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        }
+
+        void ShowPerformancePageForStudy()
+        {
+            for (int attempt = 0;
+                attempt < 5 && UiComposition.DebugPage != GodotClientDebugPage.Performance;
+                attempt++)
+                UiComposition.CycleDebug(page => page.ToString());
+            if (UiComposition.DebugPage != GodotClientDebugPage.Performance)
+                throw new InvalidOperationException("The performance diagnostic page did not open.");
         }
     }
 }
