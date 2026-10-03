@@ -97,6 +97,7 @@ public abstract partial class LocalPlayClientRoot
                 gameplayAccepted = true;
             }
             bool retryReady = false;
+            bool repeatedReady = false;
             if (expectsCancellation)
             {
                 stage = "retry after cancellation";
@@ -114,6 +115,32 @@ public abstract partial class LocalPlayClientRoot
                     retry.Actors.ActiveActors != 0;
                 if (!retryReady)
                     throw new InvalidOperationException("A cancelled entry poisoned the next admission.");
+            }
+            else if (terminal == ClientShellScreen.InSession)
+            {
+                stage = "repeat after clean retirement";
+                RetireCurrentSession();
+                ReturnToMainMenu("Entry control retired.");
+                GodotClientSessionBoundarySnapshot between = CaptureSessionBoundary();
+                if (between.WorldChildren != baseline.WorldChildren ||
+                    between.ContentCatalogChildren != baseline.ContentCatalogChildren ||
+                    between.OpenGumpWindows != 0 || between.Shell.SessionActive)
+                    throw new InvalidOperationException("The first ready world did not retire cleanly.");
+                StartLocalCabin(CabinContentVariant.Default, CabinHumanBody.XBot,
+                    useConceptDemoWorld: true,
+                    primitiveOnlyPresentation: scenario == "primitive", stagedEntry: true);
+                for (int frame = 0; frame < 1800 &&
+                     ShellSnapshot().Screen == ClientShellScreen.Loading; frame++)
+                {
+                    await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                    if (frame == 1799) throw new TimeoutException("Repeated entry did not terminate.");
+                }
+                LocalCabinPresentationSnapshot repeated = _cabin?.GetPresentationSnapshot() ?? default;
+                repeatedReady = ShellSnapshot().Screen == ClientShellScreen.InSession &&
+                    repeated.IsInitialized && repeated.RenderedChunks != 0 &&
+                    repeated.Actors.ActiveActors != 0;
+                if (!repeatedReady)
+                    throw new InvalidOperationException("A retired ready world poisoned the next admission.");
             }
             if (_cabin is not null)
             {
@@ -143,6 +170,7 @@ public abstract partial class LocalPlayClientRoot
                     frames.Over100Milliseconds,
                     TerminalScreen = terminal.ToString(),
                     RetryReady = retryReady,
+                    RepeatedReady = repeatedReady,
                     GameplayAccepted = gameplayAccepted,
                     Stages = observed,
                     Ready = new { session.IsInitialized, session.RenderedChunks,
