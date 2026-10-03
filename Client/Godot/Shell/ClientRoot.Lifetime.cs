@@ -31,6 +31,9 @@ public abstract partial class ClientRoot
     /// <summary>Opt-in diagnostic reset without constructing a visible debug page.</summary>
     protected void ResetClientFrameIntervalsForDiagnostic() => _frameIntervals.Reset();
 
+    protected UltraSim.Client.Core.ClientFrameIntervalSummary
+        CaptureClientFrameIntervalsForDiagnostic() => _frameIntervals.Summarize();
+
     protected void BeginApplicationStartup()
     {
         GetTree().AutoAcceptQuit = false;

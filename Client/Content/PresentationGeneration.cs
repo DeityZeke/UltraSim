@@ -70,7 +70,7 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
     private readonly SelectedTexture[] _textures = [];
     private readonly SelectedMaterial[] _materials = [];
     private readonly CatalogSelection[] _worldMeshes = [];
-    private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
+    private readonly int _ownerThreadId;
     private int _references = 1;
     private int _ownerRetired;
 
@@ -79,8 +79,13 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
         ContentCatalogLease? realm,
         ContentCatalogLease? local,
         ContentCatalogLease? realmResources,
-        ContentCatalogLease? localResources)
+        ContentCatalogLease? localResources,
+        int publicationOwnerThreadId = 0)
     {
+        _ownerThreadId = publicationOwnerThreadId == 0
+            ? Environment.CurrentManagedThreadId : publicationOwnerThreadId;
+        if (_ownerThreadId <= 0)
+            throw new ArgumentOutOfRangeException(nameof(publicationOwnerThreadId));
         ValidateLayer(realm, local: false, nameof(realm));
         ValidateLayer(local, local: true, nameof(local));
         ValidateLayer(realmResources, local: false, nameof(realmResources));
@@ -282,6 +287,21 @@ public sealed class PresentationGeneration : IActorPresentationGenerationSource,
         ContentCatalogLease? realmResources,
         ContentCatalogLease? localResources) =>
         new(user, realmActors, localActors, realmResources, localResources);
+
+    /// <summary>
+    /// Constructs immutable, verified content on a worker while binding all later publication,
+    /// lookup and retirement to the explicit client owner thread. Inputs must remain exclusively
+    /// owned by this call until it completes; no Godot objects enter this method.
+    /// </summary>
+    public static PresentationGeneration PrepareWithResourcesForOwner(
+        UserResourcePackStackLease? user,
+        ContentCatalogLease? realmActors,
+        ContentCatalogLease? localActors,
+        ContentCatalogLease? realmResources,
+        ContentCatalogLease? localResources,
+        int publicationOwnerThreadId) =>
+        new(user, realmActors, localActors, realmResources, localResources,
+            publicationOwnerThreadId);
 
     public PresentationSourceKind GetSource(LogicalContentId id)
     {

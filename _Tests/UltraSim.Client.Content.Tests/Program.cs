@@ -50,6 +50,7 @@ var tests = new (string Name, Action Body)[]
     ("UserResourcePackStorePersistsOrderSharesCasAndFailsClosed", UserResourcePackStorePersistsOrderSharesCasAndFailsClosed),
     ("UserPresentationOverlayIsTransactionalOrderedAndLeaseSafe", UserPresentationOverlayIsTransactionalOrderedAndLeaseSafe),
     ("TextureMaterialPresentationUsesEffectiveUserLeafAndStableIdentity", TextureMaterialPresentationUsesEffectiveUserLeafAndStableIdentity),
+    ("WorkerPreparedPresentationGenerationBindsExplicitPublicationOwner", WorkerPreparedPresentationGenerationBindsExplicitPublicationOwner),
 };
 
 foreach ((string name, Action body) in tests)
@@ -58,6 +59,22 @@ foreach ((string name, Action body) in tests)
     Console.WriteLine($"PASS {name}");
 }
 Console.WriteLine($"All {tests.Length} Client Content tests passed.");
+
+static void WorkerPreparedPresentationGenerationBindsExplicitPublicationOwner()
+{
+    int owner = Environment.CurrentManagedThreadId;
+    PresentationGeneration generation = Task.Run(() =>
+        PresentationGeneration.PrepareWithResourcesForOwner(
+            null, null, null, null, null, owner)).GetAwaiter().GetResult();
+    True(generation.Generation.IsValid);
+    bool workerRejected = Task.Run(() =>
+    {
+        try { generation.Dispose(); return false; }
+        catch (InvalidOperationException) { return true; }
+    }).GetAwaiter().GetResult();
+    True(workerRejected, "Worker may prepare but not publish or retire the generation.");
+    generation.Dispose();
+}
 
 static void TypedContentScopeIdentityCannotConfuseLocalAndRealm()
 {

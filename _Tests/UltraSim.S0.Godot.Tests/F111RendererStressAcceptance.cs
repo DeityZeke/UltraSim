@@ -103,6 +103,28 @@ public partial class F111RendererStressAcceptance : Node3D
         Expect(pine.NativeInstance == IntPtr.Zero && roof.NativeInstance == IntPtr.Zero &&
             ground.NativeInstance == IntPtr.Zero,
             "P9 renderer-derived wrappers survived explicit owner retirement.");
+
+        // Staged world entry may be cancelled before or during optional mesh realization.
+        var partial = new GodotCatalogWorldAssetResolver(generation, derived,
+            deferOptionalWorldMeshes: true);
+        IGodotWorldAssetResolver partialResolver = partial;
+        Mesh partialRoof = partialResolver.ResolveStaticMesh(new WorldStaticRenderKey(
+            new(GameWorldStaticDefinitionIds.CabinRoof), 0,
+            WorldStaticFlags.Renderable)).Mesh!;
+        partial.PrepareOptionalWorldMeshMaterials(generation, derived);
+        partial.PrepareOptionalWorldMesh(generation, 0);
+        Mesh partialPine = partialResolver.ResolveStaticMesh(new WorldStaticRenderKey(
+            new(GameWorldStaticDefinitionIds.Tree), 0,
+            WorldStaticFlags.Renderable)).Mesh!;
+        Material partialGround = partial.ResolveTerrainMaterial(GameTerrainMaterialIds.Grass)!;
+        Expect(partial.OptionalWorldMeshCount == 1 &&
+            partialPine.NativeInstance != IntPtr.Zero,
+            "Staged world entry did not realize exactly one optional mesh.");
+        partial.Dispose();
+        Expect(partialRoof.NativeInstance == IntPtr.Zero &&
+            partialPine.NativeInstance == IntPtr.Zero &&
+            partialGround.NativeInstance == IntPtr.Zero,
+            "Cancelled staged entry left native mesh/material wrappers to finalization.");
     }
 
     private void Parity(ContentCache cache, CabinLocalPresentationContent local, CabinContentOracle oracle, string root)

@@ -288,6 +288,15 @@ public partial class LocalCabinClient : Node3D
     private bool _audioSwordPresent;
     private bool _audioSwordObserved;
     private string? _initializationError;
+    private bool _deferInitialEntry;
+    private ContentCatalogLease? _pendingActorCatalog;
+    private ContentCatalogLease? _pendingResourceCatalog;
+
+    public void DeferInitialEntry()
+    {
+        if (IsInsideTree()) throw new InvalidOperationException("Entry mode must be chosen before tree admission.");
+        _deferInitialEntry = true;
+    }
 
     public void Configure(
         CabinContentOracle contentOracle,
@@ -797,6 +806,11 @@ public partial class LocalCabinClient : Node3D
 
     public override void _Ready()
     {
+        if (_deferInitialEntry)
+        {
+            SetPhysicsProcess(false);
+            return;
+        }
         bool measureEntry = OS.GetCmdlineUserArgs().Contains("--client-hitch-study=cold");
         long entryPhase = measureEntry ? Stopwatch.GetTimestamp() : 0;
         try
@@ -849,6 +863,182 @@ public partial class LocalCabinClient : Node3D
             GD.Print($"CLIENT HITCH READY PHASE {name} ms=" +
                 Stopwatch.GetElapsedTime(entryPhase, now).TotalMilliseconds.ToString("0.000"));
             entryPhase = now;
+        }
+    }
+
+    /// <summary>
+    /// Product entry is paced on the Godot owner thread. Authority runs on its existing
+    /// dedicated thread; native resources and nodes never move to Task.Run.
+    /// </summary>
+    public async Task RunStagedEntryAsync(
+        Action<ClientWorldEntryProgress> publish, CancellationToken cancellation)
+    {
+        if (!_deferInitialEntry || _initialized)
+            throw new InvalidOperationException("This node was not admitted for staged entry.");
+        ArgumentNullException.ThrowIfNull(publish);
+        cancellation.ThrowIfCancellationRequested();
+        ApplyResolvedSettings();
+        CreateSceneFurniture();
+        await NextFrame();
+
+        Report(ClientWorldEntryStage.StartingAuthority, "Starting the local simulation…");
+        // WorldPack/Game composition contains no Godot objects. Its construction may take
+        // hundreds of milliseconds, so only this pure authority factory runs on a worker.
+        // We await the actual result even after cancellation and retire it exactly once.
+        Task<LocalPlayableSession> creation = Task.Run(CreateAuthoritySession);
+        while (!creation.IsCompleted)
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        LocalPlayableSession created = creation.GetAwaiter().GetResult();
+        if (cancellation.IsCancellationRequested)
+        {
+            created.Dispose();
+            throw new OperationCanceledException(cancellation);
+        }
+        _localSession = created;
+        await NextFrame();
+        var readyClock = Stopwatch.StartNew();
+        while (!_localSession!.GetSnapshot().IsReady)
+        {
+            LocalPlayableSessionSnapshot state = _localSession.GetSnapshot();
+            if (state.Fault is not null)
+                throw new InvalidOperationException(state.Fault);
+            if (readyClock.Elapsed > TimeSpan.FromSeconds(10))
+                throw new TimeoutException("The local authority did not become ready.");
+            await NextFrame();
+        }
+        if (!_localSession.TryGetLatestView(out LocalPlayableAuthorityView view))
+            throw new InvalidOperationException("The ready authority published no initial view.");
+        InitializeFreshSemantic(view);
+        await NextFrame();
+
+        Report(ClientWorldEntryStage.PreparingContent, "Acquiring authorized local presentation…");
+        InjectEntryFailure(ClientWorldEntryStage.PreparingContent);
+        if (OpenOptionalPresentationCache())
+        {
+            await NextFrame();
+            Report(ClientWorldEntryStage.PreparingContent, "Acquiring Official actor content…");
+            AcquireOptionalActorCatalog();
+            await NextFrame();
+            Report(ClientWorldEntryStage.PreparingContent, "Installing local world definitions…");
+            CabinLocalPresentationContent local = InstallCabinPresentationPackages();
+            await NextFrame();
+            Report(ClientWorldEntryStage.PreparingContent, "Publishing local content catalog…");
+            PublishCabinPresentationCatalog(local);
+            await NextFrame();
+            Report(ClientWorldEntryStage.PreparingContent, "Acquiring Official Cabin art…");
+            if (_resolvedContent!.Variant == CabinContentVariant.Default)
+            {
+                ContentCache store = _presentationCache!;
+                string? contentRoot = _officialContentRoot;
+                Task<(bool Acquired, ContentCatalogLease? Catalog)> acquisition = Task.Run(() =>
+                {
+                    bool acquired = OfficialCabinPresentation.TryOpenOrAcquire(
+                        store, contentRoot, out ContentCatalogLease? catalog);
+                    return (acquired, catalog);
+                });
+                while (!acquisition.IsCompleted)
+                    await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                (bool acquired, ContentCatalogLease? catalog) = acquisition.GetAwaiter().GetResult();
+                catalog?.Dispose();
+                cancellation.ThrowIfCancellationRequested();
+                if (acquired) PublishCombinedOfficialCabinCatalog(local);
+            }
+            await NextFrame();
+        }
+        Report(ClientWorldEntryStage.PreparingContent, "Resolving the selected presentation generation…");
+        await CreateOptionalPresentationGenerationStagedAsync(cancellation);
+        await NextFrame();
+
+        Report(ClientWorldEntryStage.PreparingMaterials, "Preparing renderer materials…");
+        CreateOptionalWorldAssetResolver(deferWorldMeshes: true);
+        await NextFrame();
+        if (_assetResolver is not null && _presentationGeneration is not null &&
+            _derivedResources is not null)
+        {
+            int meshUnits = _assetResolver.OptionalWorldMeshPreparationUnits;
+            if (meshUnits != 0)
+            {
+                Report(ClientWorldEntryStage.PreparingMeshes,
+                    "Preparing world-mesh materials…", 0, meshUnits);
+                InjectEntryFailure(ClientWorldEntryStage.PreparingMeshes);
+                _assetResolver.PrepareOptionalWorldMeshMaterials(
+                    _presentationGeneration, _derivedResources);
+                await NextFrame();
+                for (int index = 0; index < meshUnits - 1; index++)
+                {
+                    Report(ClientWorldEntryStage.PreparingMeshes,
+                        "Preparing world meshes…", index + 1, meshUnits);
+                    _assetResolver.PrepareOptionalWorldMesh(_presentationGeneration, index);
+                    await NextFrame();
+                }
+                Report(ClientWorldEntryStage.PreparingMeshes,
+                    "World meshes prepared.", meshUnits, meshUnits);
+            }
+        }
+
+        Report(ClientWorldEntryStage.BuildingWorld, "Binding initial structural world…");
+        InjectEntryFailure(ClientWorldEntryStage.BuildingWorld);
+        InitializeFreshNative(view, drainRenderer: false);
+        await NextFrame();
+        if (_renderer is null)
+            throw new InvalidOperationException("The initial renderer was not constructed.");
+        GodotWorldRendererSnapshot initial = _renderer.GetSnapshot();
+        int initialUnits = initial.PendingBuilds + initial.PendingRetirements;
+        for (int frame = 0; frame < 256; frame++)
+        {
+            GodotWorldRendererSnapshot current = _renderer.GetSnapshot();
+            if (current.PendingBuilds == 0 && current.PendingRetirements == 0) break;
+            Report(ClientWorldEntryStage.BuildingWorld, "Realizing nearby chunks…",
+                Math.Clamp(initialUnits - current.PendingBuilds - current.PendingRetirements,
+                    0, initialUnits), initialUnits > 0 ? initialUnits : null);
+            _renderer.ProcessFrame(new GodotWorldFrameBudget(2, 2));
+            await NextFrame();
+            if (frame == 255)
+                throw new TimeoutException("The initial native world did not converge.");
+        }
+
+        Report(ClientWorldEntryStage.WarmingPresentation,
+            "Warming actors and public presentation…");
+        for (int frame = 0; !InitialPresentationConverged(); frame++)
+        {
+            if (frame >= 600)
+                throw new TimeoutException("The initial playable presentation did not converge.");
+            PumpChat();
+            _ = _uiBridge?.Pump();
+            SynchronizeProjection();
+            UpdateChatPresentation();
+            if (_localSession.GetSnapshot().Fault is string fault)
+                throw new InvalidOperationException(fault);
+            await NextFrame();
+        }
+
+        Report(ClientWorldEntryStage.Finalizing, "Preparing Inventory and input profile…");
+        CreateInventoryConsumer();
+        RealizeAddedContent();
+        await NextFrame();
+        if (!InitialPresentationConverged() || _renderer.GetSnapshot().PendingBuilds != 0)
+            throw new InvalidOperationException("The playable working set regressed before admission.");
+        _lastOutcome = _useConceptDemoWorld
+            ? "Fresh Concept Demo island started" : "Fresh woods/cabin world started";
+        _initialized = true;
+        SetPhysicsProcess(true);
+        UpdateHud();
+        Report(ClientWorldEntryStage.Ready, "Initial playable world ready.", canCancel: false);
+
+        async Task NextFrame()
+        {
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            cancellation.ThrowIfCancellationRequested();
+        }
+
+        void Report(ClientWorldEntryStage stage, string detail,
+            int completed = 0, int? total = null, bool canCancel = true) =>
+            publish(new ClientWorldEntryProgress(stage, detail, completed, total, canCancel));
+
+        static void InjectEntryFailure(ClientWorldEntryStage stage)
+        {
+            if (OS.GetCmdlineUserArgs().Contains($"--client-entry-fail-stage={stage}"))
+                throw new InvalidDataException($"Injected {stage} entry failure.");
         }
     }
 
@@ -1069,6 +1259,10 @@ public partial class LocalCabinClient : Node3D
         _diagnosticEnvironment = null;
         _presentationGeneration?.Dispose();
         _presentationGeneration = null;
+        _pendingActorCatalog?.Dispose();
+        _pendingActorCatalog = null;
+        _pendingResourceCatalog?.Dispose();
+        _pendingResourceCatalog = null;
         _derivedResources?.Dispose();
         _derivedResources = null;
         _presentationCache?.Dispose();
@@ -1091,16 +1285,53 @@ public partial class LocalCabinClient : Node3D
     {
         bool measureEntry = OS.GetCmdlineUserArgs().Contains("--client-hitch-study=cold");
         long entryPhase = measureEntry ? Stopwatch.GetTimestamp() : 0;
+        CreateInitialAuthority();
+        _localSession!.WaitUntilReady(TimeSpan.FromSeconds(10));
+        if (measureEntry) RecordEntryPhase("authority create and ready");
+        if (!_localSession.TryGetLatestView(out LocalPlayableAuthorityView view))
+            throw new InvalidOperationException("The local authority did not publish its initial view.");
+        InitializeFreshSemantic(view);
+        if (measureEntry) RecordEntryPhase("semantic client setup");
+        PrepareOptionalActorPresentation();
+        if (measureEntry) RecordEntryPhase("optional art preparation");
+        InitializeFreshNative(view, drainRenderer: true);
+        if (measureEntry) RecordEntryPhase("native world projection");
+        DriveLocalUntil(InitialPresentationConverged);
+        if (measureEntry) RecordEntryPhase("initial presentation convergence");
+        _lastOutcome = _useConceptDemoWorld
+            ? "Fresh Concept Demo island started"
+            : "Fresh woods/cabin world started";
+
+        void RecordEntryPhase(string name)
+        {
+            long now = Stopwatch.GetTimestamp();
+            GD.Print($"CLIENT HITCH WORLD PHASE {name} ms=" +
+                Stopwatch.GetElapsedTime(entryPhase, now).TotalMilliseconds.ToString("0.000"));
+            entryPhase = now;
+        }
+    }
+
+    private void CreateInitialAuthority()
+    {
+        _localSession = CreateAuthoritySession();
+    }
+
+    private LocalPlayableSession CreateAuthoritySession()
+    {
         if (_saveRoot is null || _resolvedContent is null || _contentOracle is null)
             throw new InvalidOperationException("Cabin composition was not configured.");
-        _localSession = _useCabinVisualBenchmark
+        return _useCabinVisualBenchmark
             ? LocalPlayableSession.CreateCabinVisualBenchmark(_saveRoot, _guestAdmission)
             : _useConceptDemoWorld
                 ? LocalPlayableSession.CreateConceptDemo(
                     _saveRoot, _guestAdmission, serverExtensionFactory: _serverExtensionFactory)
                 : LocalPlayableSession.CreateCabin(_saveRoot, _guestAdmission);
-        _localSession.WaitUntilReady(TimeSpan.FromSeconds(10));
-        if (measureEntry) RecordEntryPhase("authority create and ready");
+    }
+
+    private void InitializeFreshSemantic(in LocalPlayableAuthorityView view)
+    {
+        if (_localSession is null || !view.IsReady)
+            throw new InvalidOperationException("The local authority did not publish its initial view.");
         // Command sequencing belongs to the application/control-session lineage. Presentation
         // rebuilds (render-distance changes and Game-generation replacement) must not reset it.
         _sequencer = new ClientWorldInputSequencer(_localSession.ControlSession);
@@ -1112,8 +1343,6 @@ public partial class LocalCabinClient : Node3D
         _chatState = new ClientChatState(
             _localSession.ApplicationSessionEpoch,
             new ClientChatLimits(64, 256, 128));
-        if (!_localSession.TryGetLatestView(out LocalPlayableAuthorityView view))
-            throw new InvalidOperationException("The local authority did not publish its initial view.");
         _humanBody = view.GuestIdentity.Body switch
         {
             GameGuestBody.HumanFemale => CabinHumanBody.XBot,
@@ -1130,9 +1359,10 @@ public partial class LocalCabinClient : Node3D
         SynchronizeColdPublicPresentationMetadata();
         _actorState = new ClientActorPresentationState(
             ClientActorDefinitionCatalog.ConceptDemo, 64);
-        if (measureEntry) RecordEntryPhase("semantic client setup");
-        PrepareOptionalActorPresentation();
-        if (measureEntry) RecordEntryPhase("optional art preparation");
+    }
+
+    private void InitializeFreshNative(in LocalPlayableAuthorityView view, bool drainRenderer)
+    {
         _actorPresenter = new GodotActorPresenter(
             this,
             ClientActorDefinitionCatalog.ConceptDemo,
@@ -1140,9 +1370,10 @@ public partial class LocalCabinClient : Node3D
             _actorVisuals);
         _actorPresenter.SetControlledActorPose(
             view.PublicActor, view.PlayerPosition, view.PlayerOrientation, Time.GetTicksMsec());
-        RebuildClientProjection(view);
-        if (measureEntry) RecordEntryPhase("native world projection");
-        DriveLocalUntil(() =>
+        RebuildClientProjection(view, drainInitialRenderer: drainRenderer);
+    }
+
+    private bool InitialPresentationConverged() =>
             CountPresentedCharacters() == 1 &&
             CountPresentedPrefab(GameWorldPublicPrefabIds.CabinDoor) == 1 &&
             CountPresentedPrefab(GameWorldPublicPrefabIds.WorldChest) == 1 &&
@@ -1150,20 +1381,7 @@ public partial class LocalCabinClient : Node3D
                 CountPresentedPrefab(GameWorldPublicPrefabIds.SkyTelepad) ==
                     (_serverExtensionFactory is null ? 2 : 1) &&
                 CountPresentedPrefab(GameWorldPublicPrefabIds.FarGate) == 1 &&
-                CountPresentedPrefab(GameWorldPublicPrefabIds.InformationalSign) == 2));
-        if (measureEntry) RecordEntryPhase("initial presentation convergence");
-        _lastOutcome = _useConceptDemoWorld
-            ? "Fresh Concept Demo island started"
-            : "Fresh woods/cabin world started";
-
-        void RecordEntryPhase(string name)
-        {
-            long now = Stopwatch.GetTimestamp();
-            GD.Print($"CLIENT HITCH WORLD PHASE {name} ms=" +
-                Stopwatch.GetElapsedTime(entryPhase, now).TotalMilliseconds.ToString("0.000"));
-            entryPhase = now;
-        }
-    }
+                CountPresentedPrefab(GameWorldPublicPrefabIds.InformationalSign) == 2);
 
     /// <summary>
     /// Permanent D0.3 canary for a real authoritative informational sign. Hover uses only
@@ -1882,7 +2100,8 @@ public partial class LocalCabinClient : Node3D
 
     private void RebuildClientProjection(
         in LocalPlayableAuthorityView view,
-        bool preserveSemanticCache = false)
+        bool preserveSemanticCache = false,
+        bool drainInitialRenderer = true)
     {
         if (_localSession is null || !view.IsReady)
             throw new InvalidOperationException("Authority is not ready.");
@@ -1959,7 +2178,7 @@ public partial class LocalCabinClient : Node3D
         _actorPresenter?.SetControlledActorPose(
             view.PublicActor, view.PlayerPosition, view.PlayerOrientation, Time.GetTicksMsec());
         TrackPresentation(reset: true);
-        DrainRenderer();
+        if (drainInitialRenderer) DrainRenderer();
         SynchronizeActorPresentation(in view);
     }
 
@@ -4601,99 +4820,27 @@ public partial class LocalCabinClient : Node3D
 
     private void PrepareOptionalActorPresentation()
     {
-        bool measureEntry = OS.GetCmdlineUserArgs().Contains("--client-hitch-study=cold");
+        PrepareOptionalActorPresentationCatalogs();
+        CreateOptionalPresentationGeneration();
+        CreateOptionalWorldAssetResolver(deferWorldMeshes: false);
+    }
+
+    private void PrepareOptionalActorPresentationCatalogs()
+    {
+        bool measureEntry = OS.GetCmdlineUserArgs().Contains("--client-hitch-study=cold") ||
+            OS.GetCmdlineUserArgs().Any(static argument =>
+                argument.StartsWith("--client-entry-study=", StringComparison.Ordinal));
         long entryPhase = measureEntry ? Stopwatch.GetTimestamp() : 0;
-        _officialPresentation = default;
-        if (_primitiveOnlyPresentation || string.IsNullOrWhiteSpace(_presentationCacheRoot))
-            return;
-        if (!ContentCache.TryOpen(
-                _presentationCacheRoot, out _presentationCache,
-                out ContentCacheError cacheError))
-        {
-            _officialPresentation = new OfficialLocalPresentationResult(
-                OfficialLocalPresentationStatus.CacheFailure, cacheError, default, default);
-            return;
-        }
+        if (!OpenOptionalPresentationCache()) return;
         if (measureEntry) RecordEntryPhase("cache open");
-        _ = OfficialLocalPresentation.TryOpenOrAcquire(
-                _presentationCache!, _officialContentRoot,
-                out ContentCatalogLease? localCatalog, out _officialPresentation);
+        AcquireOptionalActorCatalog();
         if (measureEntry) RecordEntryPhase("Official actor acquisition");
-        CabinLocalPresentationContent local =
-            _contentOracle!.CreateLocalPresentation(_resolvedContent!.Variant);
-        foreach (CabinLocalContentPackage package in local.Packages)
-        {
-            if (!_presentationCache!.TryInstallPackage(
-                    ContentScopeKey.Local, package.Manifest, package.Payloads,
-                    out _, out ContentCacheError installError))
-                throw new InvalidOperationException(
-                    $"The Cabin world.local presentation could not be installed: {installError}.");
-        }
+        CabinLocalPresentationContent local = InstallCabinPresentationPackages();
         if (measureEntry) RecordEntryPhase("local package install");
-        if (!_presentationCache!.TryPublishCatalog(
-                ContentBaseCatalog.Empty, local.Plan, persistentlyPinned: true,
-                out ContentCatalogLease? resourceCatalog, out ContentCacheError publishError))
-            throw new InvalidOperationException(
-                $"The Cabin world.local presentation could not be published: {publishError}.");
+        PublishCabinPresentationCatalog(local);
         if (measureEntry) RecordEntryPhase("local catalog publish");
-        _cabinPresentationKey = local.ActivationKey;
-        // Keep the accepted A0.1 resource definitions live as the lower layer. P9 adds
-        // world meshes/materials; it must not remove the legacy wall/wood override
-        // identities or change the deterministic oracle activation itself.
-        if (_resolvedContent.Variant == CabinContentVariant.Default &&
-            OfficialCabinPresentation.TryOpenOrAcquire(_presentationCache!,
-                _officialContentRoot, out ContentCatalogLease? paintedCatalog))
-        {
-            paintedCatalog!.Dispose();
-            if (ContentActivationPlan.TryCreate(ContentScopeKey.Local,
-                    // V2 follows the exact current P9 package activation. A warm cache may
-                    // retain the older combined A0.1/P9 candidate under the V1 identity.
-                    new ContentActivationId(0x5039_4341_4249_4E2DUL, 0x414F_312D_4152_5402UL),
-                    ContentBaseCatalog.Empty.Fingerprint,
-                    local.Plan.Packages.Concat(OfficialCabinPresentation.Plan.Packages),
-                    out ContentActivationPlan? combined, out _) &&
-                _presentationCache.TryPublishCatalog(ContentBaseCatalog.Empty,
-                    combined!, persistentlyPinned: true,
-                    out ContentCatalogLease? combinedCatalog, out _))
-            {
-                resourceCatalog!.Dispose();
-                resourceCatalog = combinedCatalog;
-                _cabinPresentationKey = new ContentScopeActivationKey(
-                    combined!.ScopeActivation, combined.PlanHash);
-            }
-        }
+        CombineOfficialCabinPresentationCatalog(local);
         if (measureEntry) RecordEntryPhase("Official Cabin catalog");
-        _derivedResources = new GodotDerivedResourceStore(
-            _presentationCacheRoot,
-            GodotDerivedResourcePolicy.ProductionStandalone(DerivedPlatformProfile()));
-        if (measureEntry) RecordEntryPhase("derived store open");
-        UserResourcePackStackLease? user = OpenUserResourcePacks();
-        if (measureEntry) RecordEntryPhase("user pack selection");
-        try
-        {
-            _presentationGeneration = PresentationGeneration.CreateWithResources(
-                user, null, localCatalog, null, resourceCatalog);
-            if (measureEntry) RecordEntryPhase("presentation generation");
-            _assetResolver = new GodotCatalogWorldAssetResolver(
-                _presentationGeneration, _derivedResources);
-            if (measureEntry) RecordEntryPhase("world asset resolver");
-        }
-        catch (InvalidDataException)
-        {
-            _assetResolver?.Dispose();
-            _assetResolver = null;
-            _presentationGeneration?.Dispose();
-            _presentationGeneration = PresentationGeneration.CreateWithResources(
-                null, null, OpenLocalPresentationCatalog(), null,
-                OpenCabinResourceCatalog());
-            _assetResolver = new GodotCatalogWorldAssetResolver(
-                _presentationGeneration, _derivedResources);
-        }
-        _presentationSelectionRevision = _presentationCache!.UserResourcePackSelectionRevision;
-        _uiRenderer?.RefreshInventoryPresentation();
-        if (measureEntry) RecordEntryPhase("inventory presentation refresh");
-        _actorVisuals = new GodotContentActorVisualResolver(_presentationGeneration);
-        if (measureEntry) RecordEntryPhase("actor visual resolver");
 
         void RecordEntryPhase(string name)
         {
@@ -4702,6 +4849,175 @@ public partial class LocalCabinClient : Node3D
                 Stopwatch.GetElapsedTime(entryPhase, now).TotalMilliseconds.ToString("0.000"));
             entryPhase = now;
         }
+    }
+
+    private bool OpenOptionalPresentationCache()
+    {
+        _officialPresentation = default;
+        if (_primitiveOnlyPresentation || string.IsNullOrWhiteSpace(_presentationCacheRoot))
+            return false;
+        if (ContentCache.TryOpen(_presentationCacheRoot, out _presentationCache,
+                out ContentCacheError cacheError)) return true;
+        _officialPresentation = new OfficialLocalPresentationResult(
+            OfficialLocalPresentationStatus.CacheFailure, cacheError, default, default);
+        return false;
+    }
+
+    private void AcquireOptionalActorCatalog() =>
+        _ = OfficialLocalPresentation.TryOpenOrAcquire(
+            _presentationCache!, _officialContentRoot,
+            out _pendingActorCatalog, out _officialPresentation);
+
+    private CabinLocalPresentationContent InstallCabinPresentationPackages()
+    {
+        CabinLocalPresentationContent local =
+            _contentOracle!.CreateLocalPresentation(_resolvedContent!.Variant);
+        foreach (CabinLocalContentPackage package in local.Packages)
+            if (!_presentationCache!.TryInstallPackage(
+                    ContentScopeKey.Local, package.Manifest, package.Payloads,
+                    out _, out ContentCacheError installError))
+                throw new InvalidOperationException(
+                    $"The Cabin world.local presentation could not be installed: {installError}.");
+        return local;
+    }
+
+    private void PublishCabinPresentationCatalog(CabinLocalPresentationContent local)
+    {
+        if (!_presentationCache!.TryPublishCatalog(
+                ContentBaseCatalog.Empty, local.Plan, persistentlyPinned: true,
+                out _pendingResourceCatalog, out ContentCacheError publishError))
+            throw new InvalidOperationException(
+                $"The Cabin world.local presentation could not be published: {publishError}.");
+        _cabinPresentationKey = local.ActivationKey;
+    }
+
+    private void CombineOfficialCabinPresentationCatalog(CabinLocalPresentationContent local)
+    {
+        ContentCache cache = _presentationCache ??
+            throw new InvalidOperationException("The local presentation store is unavailable.");
+        CabinResolvedContent resolved = _resolvedContent ??
+            throw new InvalidOperationException("The Cabin content was not resolved.");
+        // Keep the accepted A0.1 resource definitions live as the lower layer. P9 adds
+        // world meshes/materials; it must not remove the legacy wall/wood override
+        // identities or change the deterministic oracle activation itself.
+        if (resolved.Variant == CabinContentVariant.Default &&
+            OfficialCabinPresentation.TryOpenOrAcquire(cache,
+                _officialContentRoot, out ContentCatalogLease? paintedCatalog))
+        {
+            paintedCatalog!.Dispose();
+            PublishCombinedOfficialCabinCatalog(local);
+        }
+    }
+
+    private void PublishCombinedOfficialCabinCatalog(CabinLocalPresentationContent local)
+    {
+        ContentCache cache = _presentationCache ??
+            throw new InvalidOperationException("The local presentation store is unavailable.");
+        if (ContentActivationPlan.TryCreate(ContentScopeKey.Local,
+                    // V2 follows the exact current P9 package activation. A warm cache may
+                    // retain the older combined A0.1/P9 candidate under the V1 identity.
+                    new ContentActivationId(0x5039_4341_4249_4E2DUL, 0x414F_312D_4152_5402UL),
+                    ContentBaseCatalog.Empty.Fingerprint,
+                    local.Plan.Packages.Concat(OfficialCabinPresentation.Plan.Packages),
+                    out ContentActivationPlan? combined, out _) &&
+                cache.TryPublishCatalog(ContentBaseCatalog.Empty,
+                    combined!, persistentlyPinned: true,
+                    out ContentCatalogLease? combinedCatalog, out _))
+            {
+                _pendingResourceCatalog!.Dispose();
+                _pendingResourceCatalog = combinedCatalog;
+                _cabinPresentationKey = new ContentScopeActivationKey(
+                    combined!.ScopeActivation, combined.PlanHash);
+        }
+    }
+
+    private void CreateOptionalPresentationGeneration()
+    {
+        if (_presentationCache is null) return;
+        _derivedResources = new GodotDerivedResourceStore(
+            _presentationCacheRoot!,
+            GodotDerivedResourcePolicy.ProductionStandalone(DerivedPlatformProfile()));
+        UserResourcePackStackLease? user = OpenUserResourcePacks();
+        try
+        {
+            _presentationGeneration = PresentationGeneration.CreateWithResources(
+                user, null, _pendingActorCatalog, null, _pendingResourceCatalog);
+            _pendingActorCatalog = null;
+            _pendingResourceCatalog = null;
+        }
+        catch (InvalidDataException)
+        {
+            _presentationGeneration?.Dispose();
+            _pendingActorCatalog = null;
+            _pendingResourceCatalog = null;
+            _presentationGeneration = PresentationGeneration.CreateWithResources(
+                null, null, OpenLocalPresentationCatalog(), null,
+                OpenCabinResourceCatalog());
+        }
+    }
+
+    private async Task CreateOptionalPresentationGenerationStagedAsync(
+        CancellationToken cancellation)
+    {
+        if (_presentationCache is null) return;
+        _derivedResources = new GodotDerivedResourceStore(
+            _presentationCacheRoot!,
+            GodotDerivedResourcePolicy.ProductionStandalone(DerivedPlatformProfile()));
+        int ownerThread = System.Environment.CurrentManagedThreadId;
+        UserResourcePackStackLease? user = OpenUserResourcePacks();
+        ContentCatalogLease? actors = _pendingActorCatalog;
+        ContentCatalogLease? resources = _pendingResourceCatalog;
+        _pendingActorCatalog = null;
+        _pendingResourceCatalog = null;
+        Task<PresentationGeneration> preparation = Task.Run(() =>
+            PresentationGeneration.PrepareWithResourcesForOwner(
+                user, null, actors, null, resources, ownerThread));
+        while (!preparation.IsCompleted)
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        PresentationGeneration selected;
+        try { selected = preparation.GetAwaiter().GetResult(); }
+        catch (InvalidDataException)
+        {
+            // A malformed user override may not poison the accepted lower world layer.
+            ContentCatalogLease? lowerActors = OpenLocalPresentationCatalog();
+            ContentCatalogLease? lowerResources = OpenCabinResourceCatalog();
+            preparation = Task.Run(() =>
+                PresentationGeneration.PrepareWithResourcesForOwner(
+                    null, null, lowerActors, null, lowerResources, ownerThread));
+            while (!preparation.IsCompleted)
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            selected = preparation.GetAwaiter().GetResult();
+        }
+        if (cancellation.IsCancellationRequested)
+        {
+            selected.Dispose();
+            throw new OperationCanceledException(cancellation);
+        }
+        _presentationGeneration = selected;
+    }
+
+    private void CreateOptionalWorldAssetResolver(bool deferWorldMeshes)
+    {
+        if (_presentationGeneration is null || _derivedResources is null) return;
+        try
+        {
+            _assetResolver = new GodotCatalogWorldAssetResolver(
+                _presentationGeneration, _derivedResources, deferWorldMeshes);
+        }
+        catch (InvalidDataException)
+        {
+            _assetResolver?.Dispose();
+            _assetResolver = null;
+            _presentationGeneration.Dispose();
+            _presentationGeneration = PresentationGeneration.CreateWithResources(
+                null, null, OpenLocalPresentationCatalog(), null,
+                OpenCabinResourceCatalog());
+            _assetResolver = new GodotCatalogWorldAssetResolver(
+                _presentationGeneration, _derivedResources, deferWorldMeshes);
+        }
+        _presentationSelectionRevision = _presentationCache!.UserResourcePackSelectionRevision;
+        _uiRenderer?.RefreshInventoryPresentation();
+        _actorVisuals = new GodotContentActorVisualResolver(_presentationGeneration);
     }
 
     private UserResourcePackStackLease? OpenUserResourcePacks() =>

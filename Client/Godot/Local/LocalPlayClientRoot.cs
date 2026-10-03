@@ -26,6 +26,9 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
     private string _guestAdmissionName = string.Empty;
     private GameGuestBody _guestAdmissionBody = GameGuestBody.HumanFemale;
     private string? _guestAdmissionError;
+    private CancellationTokenSource? _entryCancellation;
+    private ClientWorldEntryCoordinator? _entryCoordinator;
+    private ClientWorldEntryProgress _lastEntryProgress;
     private GodotClientSessionBoundarySnapshot _f13PrimitiveBaseline;
     private GodotClientSessionBoundarySnapshot _f19DisplayBaseline;
 
@@ -96,6 +99,11 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         if (ReadLocalArgument("--client-hitch-study=") is { Length: > 0 } hitchScenario)
         {
             RunClientHitchStudy(hitchScenario);
+            return;
+        }
+        if (ReadLocalArgument("--client-entry-study=") is { Length: > 0 } entryScenario)
+        {
+            RunClientEntryStudy(entryScenario);
             return;
         }
         if (arguments.Contains("--p9-two-room-benchmark", StringComparer.Ordinal))
@@ -798,6 +806,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
 
     protected override void RetireCurrentSession()
     {
+        _entryCancellation?.Cancel();
         if (_cabin is not null)
         {
             _cabin.Shutdown();
@@ -867,7 +876,8 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         string? guestDisplayName = null,
         ILocalPlayableServerExtensionFactory? serverExtensionFactory = null,
         bool primitiveOnlyPresentation = false,
-        bool useCabinVisualBenchmark = false)
+        bool useCabinVisualBenchmark = false,
+        bool stagedEntry = false)
     {
         bool measureEntry = ReadLocalArgument("--client-hitch-study=") == "cold";
         long entryPhase = measureEntry ? Stopwatch.GetTimestamp() : 0;
@@ -875,7 +885,9 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             throw new InvalidOperationException("A local Cabin session is already active.");
         if (useCabinVisualBenchmark && useConceptDemoWorld)
             throw new ArgumentException("The visual benchmark and Concept Demo are distinct world roots.");
-        BeginSessionLoading("Starting local Cabin authority…");
+        BeginSessionLoading(useCabinVisualBenchmark ? "Cabin Visual Benchmark" :
+            useConceptDemoWorld ? "Concept Demo Island" : "Classic Cabin");
+        _lastEntryProgress = default;
         CabinContentOracle oracle = CabinContentOracle.Create();
         if (measureEntry) RecordEntryPhase("shell and content oracle");
         CabinResolvedContent resolved = variant switch
@@ -889,6 +901,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         ContentCatalogRoot.AddChild(_catalogMarker);
 
         var cabin = new LocalCabinClient { Name = "LocalCabinSession", ExitRequested = RequestApplicationExit };
+        if (stagedEntry) cabin.DeferInitialEntry();
         GodotSessionUiLease sessionUi = BeginSessionUi("LocalCabinSession");
 #if ULTRASIM_COMPLETE
         ILocalPlayableServerExtensionFactory? extensionFactory = serverExtensionFactory ??
@@ -922,6 +935,14 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         if (measureEntry) RecordEntryPhase("configure local session");
         _cabin = cabin;
         WorldRoot.AddChild(cabin);
+        if (stagedEntry)
+        {
+            _entryCancellation = new CancellationTokenSource();
+            _entryCoordinator = new ClientWorldEntryCoordinator();
+            _ = CompleteStagedLocalEntryAsync(cabin, human, useConceptDemoWorld,
+                useCabinVisualBenchmark, variant, _entryCancellation);
+            return;
+        }
         if (measureEntry) RecordEntryPhase("native child Ready");
         LocalCabinPresentationSnapshot snapshot = cabin.GetPresentationSnapshot();
         if (!snapshot.IsInitialized)
@@ -940,6 +961,97 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             GD.Print($"CLIENT HITCH ENTRY PHASE {name} ms=" +
                 Stopwatch.GetElapsedTime(entryPhase, now).TotalMilliseconds.ToString("0.000"));
             entryPhase = now;
+        }
+    }
+
+    protected override void CancelSessionLoading()
+    {
+        if (_entryCancellation is not null)
+        {
+            _entryCancellation.Cancel();
+            return;
+        }
+        base.CancelSessionLoading();
+    }
+
+    private async Task CompleteStagedLocalEntryAsync(LocalCabinClient cabin,
+        CabinHumanBody human, bool useConceptDemoWorld,
+        bool useCabinVisualBenchmark, CabinContentVariant variant,
+        CancellationTokenSource cancellation)
+    {
+        var clock = Stopwatch.StartNew();
+        ClientWorldEntryStage previous = ClientWorldEntryStage.None;
+        long stageStarted = Stopwatch.GetTimestamp();
+        try
+        {
+            Publish(new ClientWorldEntryProgress(ClientWorldEntryStage.Resolving,
+                "Resolving selected world and settings…"));
+            // The shell must receive an actual presentation frame before entry work begins.
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            cancellation.Token.ThrowIfCancellationRequested();
+            await cabin.RunStagedEntryAsync(Publish, cancellation.Token);
+            cancellation.Token.ThrowIfCancellationRequested();
+            if (!ReferenceEquals(_cabin, cabin) || !CanStartApplicationWork)
+                throw new OperationCanceledException();
+            LocalCabinPresentationSnapshot snapshot = cabin.GetPresentationSnapshot();
+            if (!snapshot.IsInitialized || snapshot.RenderedChunks == 0 ||
+                snapshot.Actors.ActiveActors == 0 || snapshot.SemanticResidentChunks == 0)
+                throw new InvalidOperationException(
+                    "The initial playable working set was incomplete at admission.");
+            CommitSession(useCabinVisualBenchmark
+                ? $"Cabin Visual Benchmark v1 — {snapshot.DisplayName} — {human}"
+                : useConceptDemoWorld
+                    ? $"Concept Demo — {snapshot.DisplayName} — {human}"
+                    : $"Cabin — {variant} — {human}");
+            GD.Print($"CLIENT WORLD ENTRY READY wall_ms={clock.Elapsed.TotalMilliseconds:0.000} " +
+                $"chunks={snapshot.RenderedChunks} actors={snapshot.Actors.ActiveActors} " +
+                $"space={snapshot.PlayerPosition.Chunk}");
+        }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                RetireCurrentSession();
+                if (CanStartApplicationWork)
+                    ReturnToMainMenu("World entry cancelled.");
+            }
+            catch (Exception cleanup)
+            {
+                GD.PushError($"Cancelled world-entry retirement failed: {cleanup}");
+                FailSession($"World-entry cancellation cleanup failed: {cleanup.Message}");
+            }
+        }
+        catch (Exception error)
+        {
+            GD.PushError($"Local world entry failed: {error}");
+            try { RetireCurrentSession(); }
+            catch (Exception cleanup) { GD.PushError($"World-entry retirement failed: {cleanup}"); }
+            FailSession(error.Message);
+        }
+        finally
+        {
+            if (ReferenceEquals(_entryCancellation, cancellation))
+            {
+                _entryCancellation = null;
+                _entryCoordinator = null;
+            }
+            cancellation.Dispose();
+        }
+
+        void Publish(ClientWorldEntryProgress progress)
+        {
+            _entryCoordinator!.Publish(progress);
+            _lastEntryProgress = progress;
+            if (progress.Stage != previous)
+            {
+                long now = Stopwatch.GetTimestamp();
+                if (previous != ClientWorldEntryStage.None)
+                    GD.Print($"CLIENT WORLD ENTRY STAGE {previous} ms=" +
+                        Stopwatch.GetElapsedTime(stageStarted, now).TotalMilliseconds.ToString("0.000"));
+                previous = progress.Stage;
+                stageStarted = now;
+            }
+            PublishSessionLoading(progress);
         }
     }
 
@@ -965,7 +1077,8 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
                     ? CabinHumanBody.XBot
                     : CabinHumanBody.YBot,
                 useConceptDemoWorld: true,
-                identity.DisplayName);
+                identity.DisplayName,
+                stagedEntry: true);
         }
         catch (Exception exception)
         {
@@ -997,8 +1110,18 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             OptionButton body = RequireNode<OptionButton>("GuestBody");
             body.Select(1);
             RequireNode<Button>("GuestJoin").EmitSignal(BaseButton.SignalName.Pressed);
-            for (int frame = 0; frame < 3; frame++)
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (ShellSnapshot().Screen != ClientShellScreen.Loading ||
+                ShellSnapshot().Focus.GameplayInputAllowed || _cabin is null ||
+                _cabin.GetPresentationSnapshot().IsInitialized)
+                throw new InvalidOperationException(
+                    "Accepted guest did not enter a non-interactive staged loading surface.");
+            for (int frame = 0; frame < 1800 &&
+                 ShellSnapshot().Screen == ClientShellScreen.Loading; frame++)
+            {
                 await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                if (frame == 1799) throw new TimeoutException("Guest world entry did not finish.");
+            }
             if (ShellSnapshot().Screen != ClientShellScreen.InSession || _cabin is null)
                 throw new InvalidOperationException("A valid guest did not enter the local world.");
             LocalCabinPresentationSnapshot evidence = _cabin.RunD05Acceptance(

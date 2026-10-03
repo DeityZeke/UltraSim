@@ -249,7 +249,26 @@ public abstract partial class ClientRoot : Control
     protected void BeginSessionLoading(string status)
     {
         if (!CanStartApplicationWork) throw new InvalidOperationException("Application is stopping.");
+        _entryProgress = null;
         _shell.BeginLoading(status);
+        RenderCurrentSurface();
+    }
+
+    private ClientWorldEntryProgress? _entryProgress;
+
+    protected void PublishSessionLoading(ClientWorldEntryProgress progress)
+    {
+        if (!CanStartApplicationWork) return;
+        progress.Validate();
+        if (_shell.Snapshot().Screen != ClientShellScreen.Loading) return;
+        _entryProgress = progress;
+        RenderCurrentSurface();
+    }
+
+    protected virtual void CancelSessionLoading()
+    {
+        RetireCurrentSession();
+        _shell.ReturnToMainMenu();
         RenderCurrentSurface();
     }
 
@@ -634,12 +653,7 @@ public abstract partial class ClientRoot : Control
                 BuildCapabilityAdmissionSurface(snapshot);
                 break;
             case ClientShellScreen.Loading:
-                BuildMessageSurface("Loading", snapshot.Status ?? "Preparing client session…", "Back", () =>
-                {
-                    RetireCurrentSession();
-                    _shell.ReturnToMainMenu();
-                    RenderCurrentSurface();
-                });
+                BuildLoadingSurface(snapshot);
                 break;
             case ClientShellScreen.InSessionOptions:
                 BuildInSessionOptions();
@@ -1107,6 +1121,29 @@ public abstract partial class ClientRoot : Control
         ConnectDeferred(button, pressed);
         column.AddChild(button);
         button.GrabFocus();
+    }
+
+    private void BuildLoadingSurface(in ClientShellSnapshot snapshot)
+    {
+        VBoxContainer column = CreateCenteredColumn(520);
+        column.AddChild(Title("Loading world…"));
+        column.AddChild(CenteredLabel(snapshot.Status ?? "Preparing client session…"));
+        if (_entryProgress is ClientWorldEntryProgress progress)
+        {
+            column.AddChild(CenteredLabel(progress.Stage.ToString()));
+            column.AddChild(CenteredLabel(progress.Detail));
+            if (progress.TotalUnits is int total)
+                column.AddChild(CenteredLabel($"{progress.CompletedUnits} / {total}"));
+            else if (!progress.IsTerminal)
+                column.AddChild(CenteredLabel("Working…"));
+        }
+        if (_entryProgress?.CanCancel != false)
+        {
+            Button back = MenuButton("Cancel");
+            ConnectDeferred(back, CancelSessionLoading);
+            column.AddChild(back);
+            back.GrabFocus();
+        }
     }
 
     private void ValidateShellSmoke()

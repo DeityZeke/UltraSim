@@ -42,14 +42,22 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
     private readonly Dictionary<LogicalContentId, Mesh> _worldMeshes = new();
     private GodotDerivedMaterialLease? _currentWall;
     private GodotDerivedMaterialLease? _currentWood;
+    private Material[]? _optionalWorldMaterials;
+    private readonly bool _hasOptionalWorldMeshes;
+    private static readonly string[] OptionalWorldMeshStems =
+        ["pine", "rock-a", "rock-b", "wall-8m", "wall-6m", "wall-3m",
+         "roof", "door", "shelf", "book", "chest"];
     private bool _disposed;
 
     public GodotCatalogWorldAssetResolver(
         IWorldPresentationGenerationSource generation,
-        GodotDerivedResourceStore derived)
+        GodotDerivedResourceStore derived,
+        bool deferOptionalWorldMeshes = false)
     {
         try
         {
+            _hasOptionalWorldMeshes = generation.GetSource(
+                OfficialCabinPresentation.Material("wood")) != PresentationSourceKind.Primitive;
             _terrain[GameTerrainMaterialIds.Water] = Material(new Color(0.08f, 0.28f, 0.5f));
             _terrain[GameTerrainMaterialIds.Sand] = Material(new Color(0.62f, 0.55f, 0.34f));
             _terrain[GameTerrainMaterialIds.Grass] = Material(new Color(0.16f, 0.38f, 0.14f));
@@ -97,7 +105,12 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
             _fallbackStructure = GroundedBox(new Vector3(1f, 2f, 0.35f), wall);
             _door = GroundedBox(new Vector3(1.6f, 2.1f, 0.22f), wood);
             _chest = GroundedBox(new Vector3(1.2f, 0.8f, 0.8f), wood);
-            PrepareOptionalWorldMeshes(generation, derived);
+            if (!deferOptionalWorldMeshes)
+            {
+                PrepareOptionalWorldMeshMaterials(generation, derived);
+                for (int index = 0; index < OptionalWorldMeshStems.Length; index++)
+                    PrepareOptionalWorldMesh(generation, index);
+            }
             if (generation.GetSource(ClientWorldPresentationProfile.BlueGlowMaterial) !=
                 PresentationSourceKind.Primitive)
                 AddedMaterial = AcquireMaterial(
@@ -116,6 +129,8 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
     public GodotDerivedResourceKey WallDerivedKey { get; private set; }
     public StandardMaterial3D? AddedMaterial { get; }
     public bool HasOptionalWorldMeshes => _worldMeshes.Count != 0;
+    public int OptionalWorldMeshPreparationUnits =>
+        _hasOptionalWorldMeshes ? OptionalWorldMeshStems.Length + 1 : 0;
     public int OptionalWorldMeshCount => _worldMeshes.Count;
     internal StandardMaterial3D? DiagnosticRoofMaterial => _roofMaterial;
     public GodotCatalogWorldAssetResolverSnapshot GetSnapshot() => _disposed ? default :
@@ -326,11 +341,10 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
     private Mesh WindowWallMesh() => _windowSix ??= _owned.Own(
         GodotMeshGeometry.CreateGroundedWindowWall(_currentWall!.Material));
 
-    private void PrepareOptionalWorldMeshes(
+    public void PrepareOptionalWorldMeshMaterials(
         IWorldPresentationGenerationSource generation, GodotDerivedResourceStore derived)
     {
-        if (generation.GetSource(OfficialCabinPresentation.Material("wood")) ==
-            PresentationSourceKind.Primitive)
+        if (!_hasOptionalWorldMeshes || _optionalWorldMaterials is not null)
             return;
         string[] families = ["wood", "pine", "stone", "roof", "glass"];
         var materials = new Material[families.Length];
@@ -351,15 +365,23 @@ public sealed class GodotCatalogWorldAssetResolver : IGodotWorldAssetResolver, I
             OfficialCabinPresentation.Material("ground"), out _, out _);
         _terrain[GameTerrainMaterialIds.Grass] =
             _owned.Own((StandardMaterial3D)groundLease.Material.Duplicate());
-        foreach (string stem in new[] { "pine", "rock-a", "rock-b", "wall-8m", "wall-6m",
-                     "wall-3m", "roof", "door", "shelf", "book", "chest" })
-        {
-            LogicalContentId id = OfficialCabinPresentation.Mesh(stem);
-            if (!generation.TryReadWorldMeshPresentation(id, out byte[]? bytes,
-                    out _, out _) || bytes is null) continue;
-            var mesh = _owned.Own(GodotMeshGeometry.CreateWorldPresentationMesh(bytes, materials));
-            _worldMeshes.Add(id, mesh);
-        }
+        _optionalWorldMaterials = materials;
+    }
+
+    /// <summary>One bounded owner-thread mesh realization unit during staged entry.</summary>
+    public void PrepareOptionalWorldMesh(IWorldPresentationGenerationSource generation, int index)
+    {
+        if (!_hasOptionalWorldMeshes) return;
+        if (_disposed || _optionalWorldMaterials is null ||
+            (uint)index >= (uint)OptionalWorldMeshStems.Length)
+            throw new InvalidOperationException("Optional mesh preparation was not initialized.");
+        LogicalContentId id = OfficialCabinPresentation.Mesh(OptionalWorldMeshStems[index]);
+        if (_worldMeshes.ContainsKey(id) ||
+            !generation.TryReadWorldMeshPresentation(id, out byte[]? bytes,
+                out _, out _) || bytes is null) return;
+        var mesh = _owned.Own(GodotMeshGeometry.CreateWorldPresentationMesh(
+            bytes, _optionalWorldMaterials));
+        _worldMeshes.Add(id, mesh);
     }
 
 }
