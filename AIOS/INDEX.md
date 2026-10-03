@@ -55,6 +55,7 @@ Start here. This file is intentionally small.
 - [Framework Runtime Packages / Services / Object Extensions / ECS boundary](topics/framework-runtime-packages-services-extensions.md)
 - [Framework Persistence / Control Plane publication](topics/framework-persistence-and-control-plane.md)
 - [Godot / .NET native shutdown lifetime assurance](topics/godot-dotnet-native-shutdown-lifetime.md)
+- [Client performance / GC allocation debt / staged world entry](topics/client-performance-gc-and-world-entry.md) — wall-frame tooling, repaired hover allocator, residual managed-allocation debt, cold-entry discontinuity, and exploratory loading/warm-up UX.
 - [Definition / presentation / asset independence](topics/definition-presentation-asset-independence.md)
 - [Inventory viewer profiles / cached derived portraits](topics/inventory-viewer-profiles-and-derived-portraits.md)
 - [Shared Inventory presentation world / impostor hybrid](topics/inventory-shared-presentation-world.md)
