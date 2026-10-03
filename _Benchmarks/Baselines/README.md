@@ -26,6 +26,10 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `client-hitch-characterization-2026-10-02.json` — actual exported Single Player
+  idle/vegetation/real-input movement/cold-entry controls with raw frame intervals and
+  GC timelines; identifies synchronous Official art/authority entry and recurring GC-linked
+  idle tails without claiming an optimization or the exact source of an earlier screenshot;
 - `client-f1.0-pre-rework-baseline-2026-09-19.json` — coordinated Complete-product
   Local/cold-Remote/warm-reconnect/mixed-lifecycle ownership census; maintained semantic,
   renderer-node/resource/batch, actor, UI, content-cache/pin, profile, and exact retirement

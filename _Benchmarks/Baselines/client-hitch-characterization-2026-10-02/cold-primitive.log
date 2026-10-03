@@ -1,0 +1,21 @@
+Godot Engine v4.7.1.stable.mono.official.a13da4feb - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 615.71.09 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce RTX 4070 Ti SUPER
+
+ULTRASIM CLIENT READY edition=Single Player capabilities=SinglePlayer,Settings,Exit screen=MainMenu settings=Loaded
+CLIENT HITCH ENTRY PHASE shell and content oracle ms=11.227
+CLIENT HITCH ENTRY PHASE configure local session ms=7.233
+CLIENT HITCH READY PHASE resolved settings ms=0.219
+CLIENT HITCH READY PHASE scene furniture ms=12.569
+CLIENT HITCH WORLD PHASE authority create and ready ms=633.018
+CLIENT HITCH WORLD PHASE semantic client setup ms=4.478
+CLIENT HITCH WORLD PHASE optional art preparation ms=0.709
+CLIENT HITCH WORLD PHASE native world projection ms=260.009
+CLIENT HITCH WORLD PHASE initial presentation convergence ms=73.955
+CLIENT HITCH READY PHASE fresh world ms=972.885
+CLIENT HITCH READY PHASE inventory UI ms=11.030
+CLIENT HITCH READY PHASE added content ms=0.102
+CLIENT HITCH READY PHASE initial HUD ms=1.994
+T0.10 PLAYABLE CLIENT READY chunks=49 player=Chunk(0,0)+(15500,1000,7000)mm profile=OrbitCommand
+CLIENT HITCH ENTRY PHASE native child Ready ms=999.299
+CLIENT HITCH ENTRY PHASE commit shell session ms=3.927
+CLIENT HITCH STUDY PASS scenario=cold frames=2854 eligible_ms=21032 cpu_ms=5710 gc=4/3/2 dir=/mnt/data/mega/Godot Projects/UltraSim/_Benchmarks/Baselines/client-hitch-characterization-2026-10-02/cold-primitive

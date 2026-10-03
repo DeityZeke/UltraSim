@@ -495,7 +495,15 @@ in Single Player, Online and Complete exports; `--client-performance-smoke` chec
 open/retirement path without entering a world. `--client-performance-layout-capture=<absolute.png>`
 on an exported Single Player client captures the Local demo at 1920×1080 with Performance,
 then a companion `.help.png` with Help open. These measurements are player-visible frame
-intervals, not CPU/GPU decomposition or a claim about vegetation FPS. F1.8 originally retained the main 3D viewport and realized the shared
+intervals, not CPU/GPU decomposition or a claim about vegetation FPS.
+
+`--client-hitch-study=idle|cold|move --client-hitch-evidence=<absolute-directory>` is an
+opt-in exported Single Player diagnostic. It saves the same raw HUD frame intervals plus
+process/GC and renderer context; `cold` preserves the first world-entry interval after Reset.
+`move` requires real physical input and rejects a stationary actor. This is not a gameplay
+benchmark or an automatic map-travel driver. The initial characterization is recorded in the
+[client hitch evidence](../../_Benchmarks/Baselines/client-hitch-characterization-2026-10-02.md).
+F1.8 originally retained the main 3D viewport and realized the shared
 Core camera rig through `GodotGameplayCameraRig` in both Local and Remote. The selected Gameplay
 Frame aspect crops the 16:9 canonical view; F1.9A removes the temporary lens compensation because
 the camera now renders into the output viewport. Native rays and outside-
