@@ -469,8 +469,24 @@ transitional masks covered unused workspace. F1.9A replaces the temporary main-v
 realization with a real output viewport; the clipped World overlay host still follows the frame,
 and world pointer input outside the frame is rejected. Workspace, World, HUD, Menus, Debug, and
 Context/Tooltip have deterministic category order. Tooltips and the bounded Select/Interact/Cancel
-world context menu use Context; right-click no longer submits Orbit stop. F11 cycles
-Off/Client/Presentation/Content. F1.8 originally retained the main 3D viewport and realized the shared
+world context menu use Context; right-click no longer submits Orbit stop. F11 now cycles
+Off/Performance/Client/Presentation/Content. The Performance page is a client-local, bounded
+wall-frame interval trace; it is not GPU time or a Control Plane polling stream. Its graph
+preserves min/max per pixel column, with 8.33/16.67/33.33 ms guides. Statistics update at most
+4 Hz and use the latest 60 eligible seconds (30 for the graph). Unfocused/minimized intervals
+are omitted by re-priming the clock; real gameplay/content/map hitches remain eligible. Average
+FPS is frames divided by summed eligible interval time. The 1%/0.1% lows invert the mean of the
+slowest 1%/0.1% frame durations and warm until 100/1,000 samples. P95/P99/P99.9 use exact
+nearest-rank frame duration; P99.9 likewise warms until 1,000 samples.
+
+Performance offers Reset, Capture 30s, and Save snapshot. Save writes chronological raw
+microsecond intervals, summary, edition, Godot/OS/window/output and renderer/vegetation census
+to `user://diagnostics/client-performance-*.json`. A complete capture excludes unfocused time;
+Save before completion exports the recent available window. To stamp a precise build revision,
+launch with `ULTRASIM_COMMIT=<sha>`; otherwise the JSON says `unrecorded`. The live HUD is present
+in Single Player, Online and Complete exports; `--client-performance-smoke` checks its bounded
+open/retirement path without entering a world. These measurements are player-visible frame
+intervals, not CPU/GPU decomposition or a claim about vegetation FPS. F1.8 originally retained the main 3D viewport and realized the shared
 Core camera rig through `GodotGameplayCameraRig` in both Local and Remote. The selected Gameplay
 Frame aspect crops the 16:9 canonical view; F1.9A removes the temporary lens compensation because
 the camera now renders into the output viewport. Native rays and outside-

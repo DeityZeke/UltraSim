@@ -902,6 +902,12 @@ the Remote Inventory/Server Monitor journey, and the mixed Local/Remote retireme
 the behavior. The immutable closure evidence is
 `_Benchmarks/Baselines/client-f1.7-workspace-ui-gumps-2026-09-22.*`.
 
+The later client Performance diagnostic adds a first F11 page (Off → Performance → Client →
+Presentation → Content → Off). It samples bounded, allocation-free eligible wall-frame intervals
+locally, and refreshes its Godot graph/statistics at most 4 Hz; Control Plane remains cold.
+JSON export carries raw intervals and current renderer/vegetation context. This is an
+observability addition, not P9 vegetation performance evidence or a change to F1.7 semantics.
+
 ---
 
 # 12. F1.8 - Declarative camera/control rig profiles

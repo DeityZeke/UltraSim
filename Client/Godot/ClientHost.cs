@@ -54,6 +54,16 @@ public partial class ClientHost :
         return base.SessionPresentationDiagnostics();
     }
 
+    protected override GodotClientPerformanceContext CapturePerformanceContext()
+    {
+#if ULTRASIM_ONLINE || ULTRASIM_COMPLETE
+        if (_remotePlayable is not null)
+            return _remotePlayable.GetPerformanceContext(EffectiveDisplay.GameplayOutputResolution.Width,
+                EffectiveDisplay.GameplayOutputResolution.Height, EffectiveSettings.RenderDistanceChunks);
+#endif
+        return base.CapturePerformanceContext();
+    }
+
     public override void _EnterTree()
     {
         base._EnterTree();
@@ -75,6 +85,11 @@ public partial class ClientHost :
             base._Ready();
             CompleteApplicationStartup();
             if (!CanStartApplicationWork) return;
+            if (OS.GetCmdlineUserArgs().Contains("--client-performance-smoke", StringComparer.Ordinal))
+            {
+                Callable.From(RunClientPerformanceSmoke).CallDeferred();
+                return;
+            }
 #if ULTRASIM_COMPLETE
             if (OS.GetCmdlineUserArgs().Contains("--f0-7-smoke", StringComparer.Ordinal))
                 Callable.From(RunF07MixedSessionLifecycleSmoke).CallDeferred();
@@ -83,6 +98,29 @@ public partial class ClientHost :
         catch (Exception exception)
         {
             GD.PushError($"Client startup failed: {exception}");
+            RequestApplicationExit(1);
+        }
+    }
+
+    private void RunClientPerformanceSmoke()
+    {
+        try
+        {
+            UiComposition.CycleDebug(page => page.ToString());
+            if (UiComposition.DebugPage != GodotClientDebugPage.Performance ||
+                UiComposition.DebugHost.GetNodeOrNull<GodotClientPerformanceHud>("DebugPerformance") is null)
+                throw new InvalidOperationException("The exported Performance HUD did not open.");
+            for (int page = 0; page < 4; page++)
+                UiComposition.CycleDebug(current => current.ToString());
+            if (UiComposition.DebugPage != GodotClientDebugPage.Off ||
+                UiComposition.GetSnapshot().DebugHostChildren != 0)
+                throw new InvalidOperationException("The Performance HUD did not retire at Off.");
+            GD.Print($"CLIENT PERFORMANCE HUD PASS edition={CompiledEdition}");
+            RequestApplicationExit();
+        }
+        catch (Exception error)
+        {
+            GD.PushError($"CLIENT PERFORMANCE HUD FAIL: {error}");
             RequestApplicationExit(1);
         }
     }

@@ -1,4 +1,5 @@
 using Godot;
+using System.Diagnostics;
 using UltraSim.Client.Core;
 using UltraSim.Client.Sound;
 
@@ -85,6 +86,7 @@ public abstract partial class ClientRoot : Control
     private GodotClientAudioAdapter? _audioAdapter;
     private ClientShellScreen _lastSoundScreen;
     private bool _soundScreenObserved;
+    private readonly ClientFrameIntervalSampler _frameIntervals = new();
 
     protected GodotClientAudioAdapter? AudioAdapter => _audioAdapter;
 
@@ -504,6 +506,7 @@ public abstract partial class ClientRoot : Control
         _contentCatalogRoot = NamedNode("ContentCatalogs");
         _display = ClientDisplayResolver.Resolve(_settings.Display);
         _uiComposition = new GodotClientUiComposition(this, _display);
+        _uiComposition.ConfigurePerformance(_frameIntervals, CapturePerformanceContext, _composition.Edition);
         _uiComposition.Gumps.WindowChanged += OnGumpWindowChanged;
         ApplyNativeWindow(_display);
         _worldRoot = NamedNode("World");
@@ -1403,6 +1406,11 @@ public abstract partial class ClientRoot : Control
     };
 
     protected virtual string SessionPresentationDiagnostics() => "world renderer=inactive";
+
+    protected virtual GodotClientPerformanceContext CapturePerformanceContext() => new(
+        "none", _resolved.RenderDistanceChunks, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        _settings.ExperimentalVegetation,
+        _display.GameplayOutputResolution.Width, _display.GameplayOutputResolution.Height);
 
     private string BuildDebugPage(GodotClientDebugPage page)
     {

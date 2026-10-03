@@ -480,6 +480,20 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         };
     }
 
+    public GodotClientPerformanceContext GetPerformanceContext(int outputWidth, int outputHeight,
+        int renderRadius)
+    {
+        GodotWorldRendererSnapshot renderer = _renderer?.GetSnapshot() ?? default;
+        GodotActorPresenterSnapshot actors = _actorPresenter?.GetSnapshot() ?? default;
+        GodotVegetationSnapshot vegetation = _renderer?.GetVegetationSnapshot() ?? default;
+        return new(_session?.WorldCache.StructuralSpace.ToString() ?? "none", renderRadius,
+            renderer.ActiveRenderChunks, renderer.ActiveNodes, renderer.ActiveResources,
+            actors.DetailedActors, actors.BatchedPrimitiveActors,
+            vegetation.Patches, vegetation.LogicalBlades,
+            renderer.PendingBuilds, renderer.PendingRetirements, _vegetationForSession,
+            outputWidth, outputHeight);
+    }
+
     /// <summary>Bounded exported-product W7 journey; never enabled during ordinary play.</summary>
     public void BeginW7NativeJourney(string gateTriggerFile)
     {

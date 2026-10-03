@@ -542,6 +542,19 @@ public partial class LocalCabinClient : Node3D
             _assetResolver?.GetSnapshot() ?? default);
     }
 
+    public GodotClientPerformanceContext GetPerformanceContext(int outputWidth, int outputHeight)
+    {
+        GodotWorldRendererSnapshot renderer = _renderer?.GetSnapshot() ?? default;
+        GodotActorPresenterSnapshot actors = _actorPresenter?.GetSnapshot() ?? default;
+        GodotVegetationSnapshot vegetation = _renderer?.GetVegetationSnapshot() ?? default;
+        return new(_cache?.StructuralSpace.ToString() ?? "none", _effectiveRenderDistanceChunks,
+            renderer.ActiveRenderChunks, renderer.ActiveNodes, renderer.ActiveResources,
+            actors.DetailedActors, actors.BatchedPrimitiveActors,
+            vegetation.Patches, vegetation.LogicalBlades,
+            renderer.PendingBuilds, renderer.PendingRetirements, _vegetationForSession,
+            outputWidth, outputHeight);
+    }
+
     private LocalCabinUiOwnershipSnapshot GetUiOwnershipSnapshot() => new(
         _ownedWorldUiRoot?.GetChildCount() ?? 0,
         _ownedHudRoot?.GetChildCount() ?? 0,

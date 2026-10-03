@@ -1,4 +1,5 @@
 using Godot;
+using System.Diagnostics;
 
 namespace UltraSim.Client.Godot;
 
@@ -15,7 +16,13 @@ public abstract partial class ClientRoot
 
     public override void _Process(double delta)
     {
-        if (!CanStartApplicationWork || _audioAdapter is null) return;
+        if (!CanStartApplicationWork) return;
+        long timestamp = Stopwatch.GetTimestamp();
+        Window window = GetWindow();
+        bool eligible = window.HasFocus() && window.Mode != Window.ModeEnum.Minimized;
+        _frameIntervals.Observe(timestamp, eligible);
+        _uiComposition?.UpdatePerformanceHud(timestamp);
+        if (_audioAdapter is null) return;
         if (!_shell.Snapshot().SessionActive && _audioAdapter.GetSnapshot().SessionActive)
             _audioAdapter.EndSession();
         _audioAdapter.ProcessFrame();

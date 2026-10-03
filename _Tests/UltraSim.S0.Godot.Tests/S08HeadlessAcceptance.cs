@@ -1,4 +1,5 @@
 using Godot;
+using System.Text.Json;
 using UltraSim.Client.Core;
 using UltraSim.Client.Godot;
 using UltraSim.ECS;
@@ -434,6 +435,44 @@ public partial class S08HeadlessAcceptance : Control
         Expect(client.OpenViewCount == 0 && session.Gumps.GetSnapshot().OpenWindows == 0,
             "Closed gumps remained in the native manager.");
 
+        var intervals = new ClientFrameIntervalSampler(1_000_000);
+        intervals.Observe(0, true);
+        intervals.Observe(16_667, true);
+        composition.ConfigurePerformance(intervals,
+            () => default, "Test");
+        composition.CycleDebug(page => page.ToString());
+        GodotClientPerformanceHud? performance =
+            composition.DebugHost.GetNodeOrNull<GodotClientPerformanceHud>("DebugPerformance");
+        Expect(composition.DebugPage == GodotClientDebugPage.Performance &&
+            performance is not null &&
+            composition.DebugHost.GetChildCount() == 1,
+            "The bounded Performance page did not own one native HUD graph.");
+        Expect(composition.DebugHost.GetNodeOrNull<Control>(
+            "DebugPerformance/PerformanceBody/FrameIntervalGraph") is not null,
+            "The Performance HUD did not realize its one custom graph Control.");
+        Button captureButton = composition.DebugHost.GetNode<Button>(
+            "DebugPerformance/PerformanceBody/PerformanceActions/CapturePerformance30Seconds");
+        captureButton.EmitSignal(Button.SignalName.Pressed);
+        intervals.Observe(30_016_667, true);
+        composition.UpdatePerformanceHud(System.Diagnostics.Stopwatch.GetTimestamp());
+        string capturePath = Path.GetTempFileName();
+        try
+        {
+            Expect(performance!.SaveDiagnosticSnapshot(capturePath) == 1,
+                "The native Performance snapshot did not export the observed frame.");
+            using JsonDocument capture = JsonDocument.Parse(File.ReadAllText(capturePath));
+            Expect(capture.RootElement.GetProperty("Format").GetString() ==
+                    "UltraSimClientFrameInterval/v1" &&
+                capture.RootElement.GetProperty("Samples")[0].GetUInt32() == 30_000_000 &&
+                capture.RootElement.GetProperty("CaptureComplete").GetBoolean() &&
+                capture.RootElement.GetProperty("IntervalUnit").GetString() == "microseconds",
+                "The native Performance capture lost exact raw interval units/content.");
+        }
+        finally { File.Delete(capturePath); }
+        composition.DebugHost.GetNode<Button>(
+            "DebugPerformance/PerformanceBody/PerformanceActions/ResetPerformance")
+            .EmitSignal(Button.SignalName.Pressed);
+        Expect(intervals.Count == 0, "Reset did not clear the finite Performance sample ring.");
         composition.CycleDebug(page => page.ToString());
         composition.CycleDebug(page => page.ToString());
         composition.CycleDebug(page => page.ToString());

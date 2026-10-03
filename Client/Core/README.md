@@ -40,6 +40,12 @@ the prototype with an explicit next-world-entry label. The debug `--f1-11-vegeta
 force-enables it; otherwise Local and Remote capture the persisted preference at entry. Server
 profiles cannot set it. Radius changes do not change that session's frozen vegetation choice.
 
+`ClientFrameIntervalSampler` owns a fixed 16,384-entry eligible-frame ring (4-byte microseconds
+per interval), one preallocated sort scratch, and no hot-path managed allocation. It records
+monotonic wall intervals; a lost-focus/minimized observation resets the previous timestamp.
+Cold summary/graph operations are separate from the per-frame write and retain spikes through
+min/max column decimation. It owns no Game, Network, Godot, or authority state.
+
 `GameplayFrameLayout` is renderer-neutral: it supports full, max-fit and centered custom frames,
 half-open pointer admission and application→frame→output mapping. F1.8's `ClientCameraRig` and
 `ClientCanonicalViewProjection` still own finite camera meaning and the 16:9 canonical envelope.

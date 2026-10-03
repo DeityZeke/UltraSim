@@ -33,6 +33,11 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         ? base.SessionPresentationDiagnostics() : _cabin.GetPresentationSnapshot().Renderer.ToDiagnosticText() + "\n" +
             _cabin.GetPresentationSnapshot().Actors.ToDiagnosticText();
 
+    protected override GodotClientPerformanceContext CapturePerformanceContext() => _cabin is null
+        ? base.CapturePerformanceContext()
+        : _cabin.GetPerformanceContext(EffectiveDisplay.GameplayOutputResolution.Width,
+            EffectiveDisplay.GameplayOutputResolution.Height);
+
     public override void _Ready()
     {
         base._Ready();

@@ -378,7 +378,7 @@ public abstract partial class LocalPlayClientRoot
                 {
                     if (second % 4 == 0)
                     {
-                        for (int page = 0; page < 4; page++)
+                        for (int page = 0; page < 5; page++)
                             _UnhandledInput(new InputEventKey
                             { Keycode = Key.F11, PhysicalKeycode = Key.F11, Pressed = true });
                         if (CaptureSessionBoundary().DebugPage != GodotClientDebugPage.Off)

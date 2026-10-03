@@ -35,9 +35,10 @@ public readonly record struct GodotContextMenuSnapshot(
 public enum GodotClientDebugPage : byte
 {
     Off = 0,
-    Client = 1,
-    Presentation = 2,
-    Content = 3,
+    Performance = 1,
+    Client = 2,
+    Presentation = 3,
+    Content = 4,
 }
 
 public readonly record struct GodotClientUiCompositionSnapshot(
@@ -276,6 +277,12 @@ public sealed class GodotClientUiComposition : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         _debug.Cycle(content ?? throw new ArgumentNullException(nameof(content)));
     }
+
+    public void ConfigurePerformance(ClientFrameIntervalSampler sampler,
+        Func<GodotClientPerformanceContext> context, string edition) =>
+        _debug.ConfigurePerformance(sampler, context, edition);
+
+    public void UpdatePerformanceHud(long timestamp) => _debug.UpdatePerformanceHud(timestamp);
 
     public void ResetDebug() => _debug.Reset();
 
@@ -588,10 +595,24 @@ internal sealed class GodotClientDebugPresenter : IDisposable
 {
     private readonly Control _host;
     private PanelContainer? _panel;
+    private GodotClientPerformanceHud? _performance;
+    private ClientFrameIntervalSampler? _sampler;
+    private Func<GodotClientPerformanceContext>? _context;
+    private string _edition = string.Empty;
 
     internal GodotClientDebugPresenter(Control host) => _host = host;
 
     internal GodotClientDebugPage Page { get; private set; }
+
+    internal void ConfigurePerformance(ClientFrameIntervalSampler sampler,
+        Func<GodotClientPerformanceContext> context, string edition)
+    {
+        _sampler = sampler ?? throw new ArgumentNullException(nameof(sampler));
+        _context = context ?? throw new ArgumentNullException(nameof(context));
+        _edition = edition ?? throw new ArgumentNullException(nameof(edition));
+    }
+
+    internal void UpdatePerformanceHud(long timestamp) => _performance?.Update(timestamp);
 
     internal void Cycle(Func<GodotClientDebugPage, string> content)
     {
@@ -611,6 +632,12 @@ internal sealed class GodotClientDebugPresenter : IDisposable
 
     private void Replace(string? content)
     {
+        if (_performance is not null && GodotObject.IsInstanceValid(_performance))
+        {
+            _performance.GetParent()?.RemoveChild(_performance);
+            _performance.QueueFree();
+        }
+        _performance = null;
         if (_panel is not null && GodotObject.IsInstanceValid(_panel))
         {
             _panel.GetParent()?.RemoveChild(_panel);
@@ -618,6 +645,14 @@ internal sealed class GodotClientDebugPresenter : IDisposable
         }
         _panel = null;
         if (content is null) return;
+        if (Page == GodotClientDebugPage.Performance)
+        {
+            if (_sampler is null || _context is null)
+                throw new InvalidOperationException("The performance sampler has not been configured.");
+            _performance = new GodotClientPerformanceHud(_sampler, _context, _edition);
+            _host.AddChild(_performance);
+            return;
+        }
         _panel = new PanelContainer
         {
             Name = $"Debug{Page}",
