@@ -179,6 +179,8 @@ public readonly record struct GodotWorldRendererSnapshot(
     public long UploadScratchBytes { get; init; }
     /// <summary>Live public-layer roots, batch nodes and known-name labels; excludes structural nodes.</summary>
     public int ActivePublicNodes { get; init; }
+    public int PresentedPublicPrefabKinds { get; init; }
+    public int PresentedPublicInstances { get; init; }
     /// <summary>On-demand debug formatting, never called by the renderer hot path.</summary>
     public string ToDiagnosticText() =>
         $"world={InstanceBackend}/{InstanceUpload} chunks={ActiveRenderChunks} nodes={ActiveNodes}\n" +
@@ -234,6 +236,7 @@ public sealed class GodotWorldRenderer : IDisposable
     private bool _vegetationShadows;
     private readonly IGodotWorldPublicBatchFilter? _publicBatchFilter;
     private readonly RenderChunk?[] _renderChunks;
+    private readonly Dictionary<uint, int> _presentedPublicPrefabs = new();
     private readonly RenderAssociation[] _associations;
     private readonly int[] _freeRenderSlots;
     private readonly RenderWorkItem[] _buildQueue;
@@ -366,6 +369,25 @@ public sealed class GodotWorldRenderer : IDisposable
     public Node3D Root { get; }
     public GodotWorldRendererLimits Limits => _limits;
     public GodotWorldFallbackMaterialMode FallbackMaterialMode => _fallbackMaterialMode;
+
+    /// <summary>Committed public instances, including fallback and direct-RID groups.</summary>
+    public int GetPresentedPrefabCount(uint prefabId)
+    {
+        EnsureOwner();
+        ThrowIfDisposed();
+        return _presentedPublicPrefabs.TryGetValue(prefabId, out int count) ? count : 0;
+    }
+
+    /// <summary>Chunk-local committed count for a semantic record's exact presentation owner.</summary>
+    public int GetPresentedPrefabCount(ClientSemanticChunkHandle handle, uint prefabId)
+    {
+        EnsureOwner();
+        ThrowIfDisposed();
+        if (!TryFindRenderSlot(handle, out int slot)) return 0;
+        foreach (PresentedPrefabCount entry in _renderChunks[slot]!.PublicPrefabCounts)
+            if (entry.PrefabId == prefabId) return entry.Count;
+        return 0;
+    }
 
     /// <summary>
     /// Shows only generic world-object names retained by this renderer. Detailed item inspection
@@ -789,7 +811,17 @@ public sealed class GodotWorldRenderer : IDisposable
             GroupPreparationTicks = _groupPreparationTicks, GroupingTicks = _groupingTicks,
             UploadScratchBytes = (long)_uploadScratch.Length * sizeof(float),
             ActivePublicNodes = _activePublicNodes,
+            PresentedPublicPrefabKinds = _presentedPublicPrefabs.Count,
+            PresentedPublicInstances = SumPresentedPublicInstances(),
         };
+    }
+
+    private int SumPresentedPublicInstances()
+    {
+        int count = 0;
+        foreach (int instances in _presentedPublicPrefabs.Values)
+            count = checked(count + instances);
+        return count;
     }
 
     /// <summary>Native diagnostics by renderer-local group name, not semantic/native identity binding.</summary>
@@ -916,6 +948,7 @@ public sealed class GodotWorldRenderer : IDisposable
         _activePublicNodes = 0;
         _vegetation?.Dispose();
         _activeResources = 0;
+        _presentedPublicPrefabs.Clear();
         _disposed = true;
     }
 
@@ -959,6 +992,7 @@ public sealed class GodotWorldRenderer : IDisposable
         _activePublicBatchGroups += candidate.PublicResourceCount;
         _activeFallbackGroups += candidate.FallbackGroupCount;
         _activeInstances += candidate.InstanceCount;
+        AdjustPresentedPrefabCounts(candidate.PublicPrefabCounts, 1);
         _completedBuilds++;
         if (replacing) _rebuilds++;
         _lastResourceCommitTicks = Stopwatch.GetTimestamp() - commitStart;
@@ -987,6 +1021,7 @@ public sealed class GodotWorldRenderer : IDisposable
         _maximumMeshBuildTicks = Math.Max(_maximumMeshBuildTicks, _lastMeshBuildTicks);
 
         long commitStart = Stopwatch.GetTimestamp();
+        AdjustPresentedPrefabCounts(chunk.PublicPrefabCounts, -1);
         foreach (GodotWorldInstanceGroup group in chunk.PublicGroups) group.Dispose();
         if (GodotObject.IsInstanceValid(chunk.PublicRoot)) chunk.PublicRoot.Free();
         _activeInstances -= chunk.PublicInstanceCount;
@@ -1000,11 +1035,13 @@ public sealed class GodotWorldRenderer : IDisposable
         chunk.PublicResourceCount = candidate.ResourceCount;
         chunk.PublicFallbacks = candidate.Fallbacks;
         chunk.PublicGroups = candidate.Groups;
+        chunk.PublicPrefabCounts = candidate.PrefabCounts;
         chunk.FirstPublicLocalY = candidate.FirstLocalY;
         chunk.SemanticHash = semantic.Info.SemanticHash;
         chunk.Root.AddChild(candidate.Root);
         SynchronizeDirectGroups(chunk);
         _activeInstances += chunk.PublicInstanceCount;
+        AdjustPresentedPrefabCounts(chunk.PublicPrefabCounts, 1);
         _activeNodes += candidate.NodeCount;
         _activePublicNodes += candidate.NodeCount;
         _activeResources += candidate.ResourceCount;
@@ -1106,7 +1143,8 @@ public sealed class GodotWorldRenderer : IDisposable
                 firstAdditionalTerrainY,
                 structuralFallbacks,
                 preparedPublic.NodeCount, preparedPublic.ResourceCount, preparedPublic.Fallbacks,
-                nativeGroups.ToArray(), preparedPublic.Groups, vegetation, terrainResources);
+                nativeGroups.ToArray(), preparedPublic.Groups, preparedPublic.PrefabCounts,
+                vegetation, terrainResources);
         }
         catch
         {
@@ -1188,6 +1226,11 @@ public sealed class GodotWorldRenderer : IDisposable
                         ? transforms.Fallback : transforms.Resolved,
                     presentation.MaterialOverride));
             }
+            var prefabCounts = new PresentedPrefabCount[groups.Count];
+            int prefabIndex = 0;
+            foreach (uint prefab in groups.Keys)
+                prefabCounts[prefabIndex] = new PresentedPrefabCount(
+                    prefab, nativeGroups[prefabIndex++].Count);
             if (names is not null) root.AddChild(names);
             return new RenderLayer(
                 root,
@@ -1195,7 +1238,7 @@ public sealed class GodotWorldRenderer : IDisposable
                     (names is null ? 0 : 1 + nameCount),
                 groups.Count,
                 firstY,
-                fallbacks, nativeGroups.ToArray());
+                fallbacks, nativeGroups.ToArray(), prefabCounts);
         }
         catch
         {
@@ -1652,6 +1695,7 @@ public sealed class GodotWorldRenderer : IDisposable
         _activePublicBatchGroups -= chunk.PublicResourceCount;
         _activeFallbackGroups -= chunk.FallbackGroupCount;
         _activeInstances -= chunk.InstanceCount;
+        AdjustPresentedPrefabCounts(chunk.PublicPrefabCounts, -1);
         foreach (GodotWorldInstanceGroup group in chunk.StructuralGroups) group.Dispose();
         foreach (GodotWorldInstanceGroup group in chunk.PublicGroups) group.Dispose();
         chunk.Vegetation?.Dispose();
@@ -1663,6 +1707,20 @@ public sealed class GodotWorldRenderer : IDisposable
             _associations[semanticIndex].RenderSlotPlusOne == renderSlot + 1)
             _associations[semanticIndex] = default;
         if (releaseSlot) _freeRenderSlots[_freeRenderSlotCount++] = renderSlot;
+    }
+
+    private void AdjustPresentedPrefabCounts(
+        ReadOnlySpan<PresentedPrefabCount> counts, int direction)
+    {
+        foreach (PresentedPrefabCount entry in counts)
+        {
+            int previous = _presentedPublicPrefabs.TryGetValue(entry.PrefabId, out int count)
+                ? count : 0;
+            int next = checked(previous + direction * entry.Count);
+            if (next < 0) throw new InvalidOperationException("Public presentation census underflow.");
+            if (next == 0) _presentedPublicPrefabs.Remove(entry.PrefabId);
+            else _presentedPublicPrefabs[entry.PrefabId] = next;
+        }
     }
 
     private void SetVisible(RenderChunk chunk, bool visible)
@@ -1851,13 +1909,16 @@ public sealed class GodotWorldRenderer : IDisposable
     private static int FallbackGroupCount(in FallbackCounts counts) =>
         counts.Model + counts.Texture + counts.ModelAndTexture;
 
+    private readonly record struct PresentedPrefabCount(uint PrefabId, int Count);
+
     private readonly record struct RenderLayer(
         Node3D Root,
         int NodeCount,
         int ResourceCount,
         float FirstLocalY,
         FallbackCounts Fallbacks,
-        GodotWorldInstanceGroup[] Groups);
+        GodotWorldInstanceGroup[] Groups,
+        PresentedPrefabCount[] PrefabCounts);
 
     private sealed class RenderChunk
     {
@@ -1874,7 +1935,8 @@ public sealed class GodotWorldRenderer : IDisposable
             int publicNodeCount, int publicResourceCount,
             FallbackCounts publicFallbacks,
             GodotWorldInstanceGroup[] structuralGroups,
-            GodotWorldInstanceGroup[] publicGroups, GodotVegetationChunk? vegetation,
+            GodotWorldInstanceGroup[] publicGroups, PresentedPrefabCount[] publicPrefabCounts,
+            GodotVegetationChunk? vegetation,
             GodotOwnedResources terrainResources)
         {
             Handle = handle;
@@ -1902,6 +1964,7 @@ public sealed class GodotWorldRenderer : IDisposable
             PublicFallbacks = publicFallbacks;
             StructuralGroups = structuralGroups;
             PublicGroups = publicGroups;
+            PublicPrefabCounts = publicPrefabCounts;
             Vegetation = vegetation;
         }
 
@@ -1939,6 +2002,7 @@ public sealed class GodotWorldRenderer : IDisposable
         internal int ResourceCount => StructuralResourceCount + PublicResourceCount;
         internal GodotWorldInstanceGroup[] StructuralGroups { get; }
         internal GodotWorldInstanceGroup[] PublicGroups { get; set; }
+        internal PresentedPrefabCount[] PublicPrefabCounts { get; set; }
         internal int PublicInstanceCount => PublicGroups.Sum(static group => group.Count);
         internal int InstanceCount => StructuralGroups.Sum(static group => group.Count) + PublicInstanceCount;
     }

@@ -18,6 +18,17 @@ using UltraSim.Spatial;
 
 public partial class T010PlayableWorldAcceptance : Node3D
 {
+    private sealed class MissingWorldAssetResolver : IGodotWorldAssetResolver
+    {
+        public GodotWorldMeshResolution ResolveStaticMesh(WorldStaticRenderKey key) =>
+            GodotWorldMeshResolution.MissingModelAndTexture();
+
+        public GodotWorldMeshResolution ResolvePublicMesh(uint prefabId) =>
+            GodotWorldMeshResolution.MissingModelAndTexture();
+
+        public Material? ResolveTerrainMaterial(ushort materialId) => null;
+    }
+
     public override void _Ready()
     {
         try
@@ -1612,6 +1623,20 @@ public partial class T010PlayableWorldAcceptance : Node3D
         ValidateGodotTerrainFrontFaces(renderer.Root);
         Expect(initialRender.ActivePublicNodes == CountPublicLayerNodes(renderer.Root),
             "Public-layer node diagnostic drifted from native ownership.");
+        Expect(renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.IronSword) == 1 &&
+            renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.CabinDoor) == 1 &&
+            renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.WorldChest) == 1 &&
+            renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.InformationalSign) == 0 &&
+            initialRender.PresentedPublicInstances > 0,
+            "Initial presented-prefab census did not match committed native public groups.");
+        _ = renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.IronSword);
+        long lookupBefore = GC.GetAllocatedBytesForCurrentThread();
+        int lookupTotal = 0;
+        for (int lookup = 0; lookup < 10_000; lookup++)
+            lookupTotal += renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.IronSword);
+        long lookupBytes = GC.GetAllocatedBytesForCurrentThread() - lookupBefore;
+        Expect(lookupTotal == 10_000 && lookupBytes == 0,
+            $"The presented-prefab hot lookup allocated {lookupBytes} bytes.");
         Expect(initialRender.ActiveNodes < 9 * TerrainChunkFormat.MaterialCellCount,
             "The playable renderer created cell-shaped scene-tree identity.");
         var swordPrimitive = FindNamedDescendant(renderer.Root,
@@ -1674,6 +1699,30 @@ public partial class T010PlayableWorldAcceptance : Node3D
         Expect(afterRefresh.PublicRefreshes == beforeRefresh.PublicRefreshes + 1 &&
             afterRefresh.CompletedBuilds == beforeRefresh.CompletedBuilds,
             "Opening the door rebuilt immutable cabin presentation.");
+        Expect(renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.CabinDoor) == 1,
+            "Public refresh double-counted or lost the door presentation.");
+        foreach (bool visible in new[] { false, true })
+        {
+            ulong revision = visible ? 4UL : 3UL;
+            var changedDoor = Public(2, revision, GameWorldPublicPrefabIds.CabinDoor,
+                GamePlayableWorld.DoorPosition, WorldYaw.QuarterTurn, revision,
+                visible ? WorldPublicStateFlags.Visible : 0);
+            var visibilityDelta = new WorldPublicDeltaRecord(
+                WorldPublicOperation.Present, WorldPublicFieldMask.StateFlags,
+                changedDoor.Id, revision, changedDoor);
+            var visibilityBatch = new ChunkPublicationBatch(
+                ChunkPublicationReadStatus.Delta, doorKey,
+                new ChunkPublicationCursor(epoch, doorKey, new ChunkPublicationRevision(revision)),
+                new ChunkPublicationRevision(revision - 1), 1, 1);
+            Expect(cache.TryApplyDelta(doorHandle, visibilityBatch, [visibilityDelta], out _) &&
+                renderer.TryQueuePublicRefresh(doorHandle, out _),
+                "The public visibility census control did not queue.");
+            renderer.ProcessFrame(new GodotWorldFrameBudget(1, 0));
+            Expect(renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.CabinDoor) ==
+                (visible ? 1 : 0) &&
+                renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.WorldChest) == 1,
+                "Visibility refresh left a stale or double-counted prefab instance.");
+        }
 
         Expect(window.TryTrackPlayer(
             crossed, changes, out ClientPresentationWindowTransition sameCenter,
@@ -1682,11 +1731,33 @@ public partial class T010PlayableWorldAcceptance : Node3D
         Expect(sameCenter.Entered == 0 && sameCenter.Exited == 0,
             "Same-center movement changed native membership.");
 
+        // Changing native realization must not change whether a public instance exists.
+        renderer.RefreshAssets(new MissingWorldAssetResolver());
+        Expect(renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.CabinDoor) == 1 &&
+            renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.WorldChest) == 1,
+            "Fallback asset refresh changed the committed prefab census.");
+        renderer.RefreshAssets(null);
+        Expect(renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.CabinDoor) == 1,
+            "Primitive asset refresh double-counted public presentation.");
+        Expect(renderer.TryQueueRetire(doorHandle, out _),
+            "The census retirement control could not queue the door chunk.");
+        renderer.ProcessFrame(new GodotWorldFrameBudget(0, 1));
+        Expect(renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.CabinDoor) == 0 &&
+            renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.WorldChest) == 0,
+            "Retiring the last native public group left stale prefab counts.");
+        Expect(renderer.TryEnterPresentation(doorHandle, true, out _),
+            "The census rebuild control could not re-enter the door chunk.");
+        renderer.ProcessFrame(new GodotWorldFrameBudget(1, 0));
+        Expect(renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.CabinDoor) == 1 &&
+            renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.WorldChest) == 1,
+            "Re-entering the window did not restore exact prefab counts.");
+
         double peakResources = Performance.GetMonitor(Performance.Monitor.ObjectResourceCount);
         double peakBuffers = Performance.GetMonitor(Performance.Monitor.RenderBufferMemUsed);
         renderer.Dispose();
-        Expect(renderer.GetSnapshot().ActivePublicNodes == 0,
-            "Retired renderer retained public-layer node ownership.");
+        Expect(renderer.GetSnapshot() is
+            { ActivePublicNodes: 0, PresentedPublicPrefabKinds: 0, PresentedPublicInstances: 0 },
+            "Retired renderer retained public-layer node or prefab census ownership.");
         GC.Collect();
         GC.WaitForPendingFinalizers();
         GC.Collect();
@@ -1694,6 +1765,19 @@ public partial class T010PlayableWorldAcceptance : Node3D
         double buffersAfter = Performance.GetMonitor(Performance.Monitor.RenderBufferMemUsed);
         Expect(resourcesAfter <= peakResources && buffersAfter <= peakBuffers,
             "Native resource pressure continued growing after playable renderer disposal.");
+
+        using (var direct = new GodotWorldRenderer(this, cache,
+            new GodotWorldRendererLimits(1, 16),
+            instanceBackend: GodotWorldInstanceBackend.DirectRid))
+        {
+            Expect(direct.TryEnterPresentation(doorHandle, true, out _),
+                "Direct-RID prefab census control could not queue the door chunk.");
+            direct.ProcessFrame(new GodotWorldFrameBudget(1, 0));
+            Expect(direct.GetPresentedPrefabCount(GameWorldPublicPrefabIds.CabinDoor) == 1 &&
+                direct.GetPresentedPrefabCount(GameWorldPublicPrefabIds.WorldChest) == 1 &&
+                direct.GetSnapshot().DirectRidGroups > 0,
+                "Direct-RID presentation was incorrectly treated as absent without scene nodes.");
+        }
 
         GD.Print(
             $"T0.10 METRICS pack_bytes={pack.Length} identity_index_bytes={bound!.StructuralIdentityIndexReservedBytes} " +

@@ -1185,6 +1185,37 @@ public partial class LocalCabinClient : Node3D
         UpdateWorldHover();
         if (!_hoverTooltip.Visible || _hoverTooltip.Title != "Sign")
             throw new InvalidOperationException("Known sign presentation did not produce its local hover label.");
+        if (!TrySetPointerWorldPoint(
+                GamePlayableWorld.PlayerStart.GlobalXMillimeters,
+                GamePlayableWorld.PlayerStart.GlobalZMillimeters))
+            throw new InvalidOperationException("The outside-sign hover control could not position its pointer.");
+        UpdateWorldHover();
+        if (_hoverTooltip.Visible)
+            throw new InvalidOperationException("A distant point retained the sign hover label.");
+        if (!TrySetPointerWorldPoint(
+                GamePlayableWorld.WelcomeSignPosition.GlobalXMillimeters,
+                GamePlayableWorld.WelcomeSignPosition.GlobalZMillimeters))
+            throw new InvalidOperationException("The sign hover control could not restore its pointer.");
+        UpdateWorldHover();
+        if (!_hoverTooltip.Visible || _hoverTooltip.Title != "Sign")
+            throw new InvalidOperationException("The presented sign hover did not recover after leaving its radius.");
+        SpatialChunkKey signChunk = GamePlayableWorld.WelcomeSignPosition.ToChunkKey(
+            _cache!.StructuralSpace);
+        if (!_cache.TryGetResidentHandle(signChunk, out ClientSemanticChunkHandle signHandle) ||
+            !_renderer!.TryQueueRetire(signHandle, out _))
+            throw new InvalidOperationException("The sign presentation retirement control could not queue.");
+        DrainRenderer();
+        UpdateWorldHover();
+        Select(_pointerPoint);
+        if (_hoverTooltip.Visible || _selection == SelectionKind.InformationalSign)
+            throw new InvalidOperationException(
+                "A semantically resident but retired sign still hovered or selected.");
+        if (!_renderer.TryEnterPresentation(signHandle, true, out _))
+            throw new InvalidOperationException("The sign presentation could not re-enter.");
+        DrainRenderer();
+        UpdateWorldHover();
+        if (!_hoverTooltip.Visible || _hoverTooltip.Title != "Sign")
+            throw new InvalidOperationException("The returning sign lost its hover presentation.");
         _hoverTooltip.Show("Sign", null, Vector2.Zero, new Vector2(1_920, 1_080));
         Vector2 signTooltipSize = _hoverTooltip.PanelSize;
         ulong signLayoutGeneration = _hoverTooltip.LayoutGeneration;
@@ -2666,7 +2697,8 @@ public partial class LocalCabinClient : Node3D
         in ClientControlWorldPoint point,
         long radius)
     {
-        if (_cache is null || CountPresentedPrefab(prefabId) == 0 ||
+        if (_cache is null || _renderer is null ||
+            _renderer.GetPresentedPrefabCount(prefabId) == 0 ||
             !_cache.TryCopyResidentInfo(_chatChunkInfo, out int count, out _))
             return false;
         Int128 radiusSquared = (Int128)radius * radius;
@@ -2677,11 +2709,13 @@ public partial class LocalCabinClient : Node3D
                 continue;
             foreach (ref readonly WorldPublicRecord record in view.PublicRecords)
             {
-                if (record.PrefabId != prefabId)
+                if (record.PrefabId != prefabId ||
+                    (record.StateFlags & WorldPublicStateFlags.Visible) == 0)
                     continue;
                 Int128 dx = (Int128)point.XMillimeters - record.Position.GlobalXMillimeters;
                 Int128 dz = (Int128)point.ZMillimeters - record.Position.GlobalZMillimeters;
-                if (dx * dx + dz * dz <= radiusSquared)
+                if (dx * dx + dz * dz <= radiusSquared &&
+                    _renderer.GetPresentedPrefabCount(_chatChunkInfo[chunk].Handle, prefabId) > 0)
                     return true;
             }
         }
@@ -3981,19 +4015,7 @@ public partial class LocalCabinClient : Node3D
                 if (_actorRows[index].PrefabId == prefabId) matched++;
             return matched;
         }
-        if (_renderer is null) return 0;
-        string expectedName = $"Public_{prefabId}";
-        int count = 0;
-        Count(_renderer.Root);
-        return count;
-
-        void Count(Node node)
-        {
-            if (node is MultiMeshInstance3D instance && instance.Name == expectedName &&
-                instance.Multimesh is not null)
-                count += instance.Multimesh.InstanceCount;
-            foreach (Node child in node.GetChildren()) Count(child);
-        }
+        return _renderer?.GetPresentedPrefabCount(prefabId) ?? 0;
     }
 
     private int CountPresentedCharacters() =>
