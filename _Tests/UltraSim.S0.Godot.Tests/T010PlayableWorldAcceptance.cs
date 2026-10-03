@@ -1637,6 +1637,17 @@ public partial class T010PlayableWorldAcceptance : Node3D
         long lookupBytes = GC.GetAllocatedBytesForCurrentThread() - lookupBefore;
         Expect(lookupTotal == 10_000 && lookupBytes == 0,
             $"The presented-prefab hot lookup allocated {lookupBytes} bytes.");
+        SpatialChunkKey initiallyVisibleDoorKey = GamePlayableWorld.DoorPosition.ToChunkKey(
+            GameWorldState.DefaultSpace);
+        Expect(cache.TryGetResidentHandle(initiallyVisibleDoorKey,
+                out ClientSemanticChunkHandle initiallyVisibleDoorHandle) &&
+            renderer.TrySetVisible(initiallyVisibleDoorHandle, false) &&
+            renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.CabinDoor) == 0 &&
+            renderer.GetPresentedPrefabCount(initiallyVisibleDoorHandle,
+                GameWorldPublicPrefabIds.CabinDoor) == 0 &&
+            renderer.TrySetVisible(initiallyVisibleDoorHandle, true) &&
+            renderer.GetPresentedPrefabCount(GameWorldPublicPrefabIds.CabinDoor) == 1,
+            "Hiding and revealing the committed door chunk did not update presented counts.");
         Expect(initialRender.ActiveNodes < 9 * TerrainChunkFormat.MaterialCellCount,
             "The playable renderer created cell-shaped scene-tree identity.");
         var swordPrimitive = FindNamedDescendant(renderer.Root,

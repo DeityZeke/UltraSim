@@ -370,7 +370,7 @@ public sealed class GodotWorldRenderer : IDisposable
     public GodotWorldRendererLimits Limits => _limits;
     public GodotWorldFallbackMaterialMode FallbackMaterialMode => _fallbackMaterialMode;
 
-    /// <summary>Committed public instances, including fallback and direct-RID groups.</summary>
+    /// <summary>Visible committed public instances, including fallback and direct-RID groups.</summary>
     public int GetPresentedPrefabCount(uint prefabId)
     {
         EnsureOwner();
@@ -384,7 +384,9 @@ public sealed class GodotWorldRenderer : IDisposable
         EnsureOwner();
         ThrowIfDisposed();
         if (!TryFindRenderSlot(handle, out int slot)) return 0;
-        foreach (PresentedPrefabCount entry in _renderChunks[slot]!.PublicPrefabCounts)
+        RenderChunk chunk = _renderChunks[slot]!;
+        if (!chunk.Root.Visible) return 0;
+        foreach (PresentedPrefabCount entry in chunk.PublicPrefabCounts)
             if (entry.PrefabId == prefabId) return entry.Count;
         return 0;
     }
@@ -992,7 +994,7 @@ public sealed class GodotWorldRenderer : IDisposable
         _activePublicBatchGroups += candidate.PublicResourceCount;
         _activeFallbackGroups += candidate.FallbackGroupCount;
         _activeInstances += candidate.InstanceCount;
-        AdjustPresentedPrefabCounts(candidate.PublicPrefabCounts, 1);
+        if (candidate.Root.Visible) AdjustPresentedPrefabCounts(candidate.PublicPrefabCounts, 1);
         _completedBuilds++;
         if (replacing) _rebuilds++;
         _lastResourceCommitTicks = Stopwatch.GetTimestamp() - commitStart;
@@ -1021,7 +1023,7 @@ public sealed class GodotWorldRenderer : IDisposable
         _maximumMeshBuildTicks = Math.Max(_maximumMeshBuildTicks, _lastMeshBuildTicks);
 
         long commitStart = Stopwatch.GetTimestamp();
-        AdjustPresentedPrefabCounts(chunk.PublicPrefabCounts, -1);
+        if (chunk.Root.Visible) AdjustPresentedPrefabCounts(chunk.PublicPrefabCounts, -1);
         foreach (GodotWorldInstanceGroup group in chunk.PublicGroups) group.Dispose();
         if (GodotObject.IsInstanceValid(chunk.PublicRoot)) chunk.PublicRoot.Free();
         _activeInstances -= chunk.PublicInstanceCount;
@@ -1041,7 +1043,7 @@ public sealed class GodotWorldRenderer : IDisposable
         chunk.Root.AddChild(candidate.Root);
         SynchronizeDirectGroups(chunk);
         _activeInstances += chunk.PublicInstanceCount;
-        AdjustPresentedPrefabCounts(chunk.PublicPrefabCounts, 1);
+        if (chunk.Root.Visible) AdjustPresentedPrefabCounts(chunk.PublicPrefabCounts, 1);
         _activeNodes += candidate.NodeCount;
         _activePublicNodes += candidate.NodeCount;
         _activeResources += candidate.ResourceCount;
@@ -1695,7 +1697,7 @@ public sealed class GodotWorldRenderer : IDisposable
         _activePublicBatchGroups -= chunk.PublicResourceCount;
         _activeFallbackGroups -= chunk.FallbackGroupCount;
         _activeInstances -= chunk.InstanceCount;
-        AdjustPresentedPrefabCounts(chunk.PublicPrefabCounts, -1);
+        if (chunk.Root.Visible) AdjustPresentedPrefabCounts(chunk.PublicPrefabCounts, -1);
         foreach (GodotWorldInstanceGroup group in chunk.StructuralGroups) group.Dispose();
         foreach (GodotWorldInstanceGroup group in chunk.PublicGroups) group.Dispose();
         chunk.Vegetation?.Dispose();
@@ -1726,6 +1728,7 @@ public sealed class GodotWorldRenderer : IDisposable
     private void SetVisible(RenderChunk chunk, bool visible)
     {
         if (chunk.Root.Visible == visible) return;
+        AdjustPresentedPrefabCounts(chunk.PublicPrefabCounts, visible ? 1 : -1);
         chunk.Root.Visible = visible;
         SynchronizeDirectGroups(chunk);
         _visibleChunks += visible ? 1 : -1;
