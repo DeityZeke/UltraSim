@@ -1,0 +1,363 @@
+{
+  "Format": "UltraSimClientHitchStudy/v1",
+  "Scenario": "idle",
+  "MeasurementWindowSeconds": 10,
+  "SourceHead": "b3a1e28fcfa96a0c31bd1d533325dd621b017897",
+  "StartedUtc": "2026-10-04T10:40:15.8452024+00:00",
+  "EndedUtc": "2026-10-04T10:40:25.8465968+00:00",
+  "WallMilliseconds": 10001.393,
+  "ColdEntryMilliseconds": 0,
+  "FrameCaptureStartedMilliseconds": 10001.393,
+  "EligibleMilliseconds": 9999.912,
+  "Frames": 12563,
+  "PerformancePageVisibleDuringMeasurement": false,
+  "ExplicitVSyncDisableRequested": false,
+  "PacingAtStart": {
+    "DisplayServerName": "X11",
+    "VSyncMode": "Disabled",
+    "DisplayRefreshRateHz": 143.8300018310547,
+    "EngineFpsCap": 0,
+    "RenderingMethod": "gl_compatibility",
+    "RenderingDriver": "opengl3",
+    "VideoAdapterName": "NVIDIA GeForce RTX 4070 Ti SUPER",
+    "XdgSessionType": "wayland",
+    "XdgCurrentDesktop": "KDE",
+    "DesktopSession": "/usr/share/wayland-sessions/plasma.desktop"
+  },
+  "PacingAtEnd": {
+    "DisplayServerName": "X11",
+    "VSyncMode": "Disabled",
+    "DisplayRefreshRateHz": 143.8300018310547,
+    "EngineFpsCap": 0,
+    "RenderingMethod": "gl_compatibility",
+    "RenderingDriver": "opengl3",
+    "VideoAdapterName": "NVIDIA GeForce RTX 4070 Ti SUPER",
+    "XdgSessionType": "wayland",
+    "XdgCurrentDesktop": "KDE",
+    "DesktopSession": "/usr/share/wayland-sessions/plasma.desktop"
+  },
+  "VegetationEnabled": false,
+  "ProcessCpuMilliseconds": 10320,
+  "GcPauseMilliseconds": 7.675,
+  "AllocatedBytes": 6138960,
+  "Gen0": 1,
+  "Gen1": 0,
+  "Gen2": 0,
+  "GcTimeline": [
+    {
+      "Milliseconds": 252.1985,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 502.2065,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 752.3549,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 1002.3885,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 1251.4659,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 1501.6304,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 1751.7847,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 2001.864,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 2252.018,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 2502.192,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 2752.3799,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 3001.4564,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 3251.5973,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 3501.7479,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 3751.8915,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 4001.9616,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 4252.1231,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 4502.2855,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 4752.3952,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 5001.4659,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 5251.6043,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 5501.7571,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 5751.9117,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 6001.9846,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 6252.1298,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 6502.2799,
+      "PauseMilliseconds": 0,
+      "Gen0": 0,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 6752.436,
+      "PauseMilliseconds": 7.675,
+      "Gen0": 1,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 7001.5154,
+      "PauseMilliseconds": 7.675,
+      "Gen0": 1,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 7251.6577,
+      "PauseMilliseconds": 7.675,
+      "Gen0": 1,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 7501.8033,
+      "PauseMilliseconds": 7.675,
+      "Gen0": 1,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 7751.9648,
+      "PauseMilliseconds": 7.675,
+      "Gen0": 1,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 8002.0193,
+      "PauseMilliseconds": 7.675,
+      "Gen0": 1,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 8252.1753,
+      "PauseMilliseconds": 7.675,
+      "Gen0": 1,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 8502.3288,
+      "PauseMilliseconds": 7.675,
+      "Gen0": 1,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 8751.4652,
+      "PauseMilliseconds": 7.675,
+      "Gen0": 1,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 9001.4926,
+      "PauseMilliseconds": 7.675,
+      "Gen0": 1,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 9251.6354,
+      "PauseMilliseconds": 7.675,
+      "Gen0": 1,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 9501.7907,
+      "PauseMilliseconds": 7.675,
+      "Gen0": 1,
+      "Gen1": 0,
+      "Gen2": 0
+    },
+    {
+      "Milliseconds": 9751.942,
+      "PauseMilliseconds": 7.675,
+      "Gen0": 1,
+      "Gen1": 0,
+      "Gen2": 0
+    }
+  ],
+  "Before": {
+    "AuthorityTicks": 593,
+    "PlayerPosition": {
+      "Chunk": {
+        "X": 0,
+        "Z": 0
+      },
+      "Local": {
+        "XMillimeters": 15500,
+        "ZMillimeters": 7000,
+        "YMillimeters": 1000
+      },
+      "GlobalXMillimeters": 15500,
+      "GlobalZMillimeters": 7000,
+      "YMillimeters": 1000
+    },
+    "RenderedChunks": 49,
+    "SemanticResidentChunks": 81,
+    "ActiveNodes": 293,
+    "ActiveResources": 143
+  },
+  "After": {
+    "AuthorityTicks": 1195,
+    "PlayerPosition": {
+      "Chunk": {
+        "X": 0,
+        "Z": 0
+      },
+      "Local": {
+        "XMillimeters": 15500,
+        "ZMillimeters": 7000,
+        "YMillimeters": 1000
+      },
+      "GlobalXMillimeters": 15500,
+      "GlobalZMillimeters": 7000,
+      "YMillimeters": 1000
+    },
+    "RenderedChunks": 49,
+    "SemanticResidentChunks": 81,
+    "ActiveNodes": 293,
+    "ActiveResources": 143
+  }
+}

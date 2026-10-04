@@ -515,7 +515,11 @@ in Single Player, Online and Complete exports; `--client-performance-smoke` chec
 open/retirement path without entering a world. `--client-performance-layout-capture=<absolute.png>`
 on an exported Single Player client captures the Local demo at 1920×1080 with Performance,
 then a companion `.help.png` with Help open. These measurements are player-visible frame
-intervals, not CPU/GPU decomposition or a claim about vegetation FPS.
+intervals, not CPU/GPU decomposition or a claim about vegetation FPS. The Performance page and
+saved JSON also expose effective VSync mode, `Engine.MaxFps`, reported display refresh, display
+server, rendering method/driver and display adapter. These are presentation-state diagnostics,
+not GPU timing. The exported [VSync pacing control](../../_Benchmarks/Baselines/client-vsync-pacing-2026-10-04.md)
+records default and Godot `--disable-vsync` behavior without changing the product default.
 
 `--client-hitch-study=idle|cold|move --client-hitch-evidence=<absolute-directory>` is an
 opt-in exported Single Player diagnostic. It saves the same raw HUD frame intervals plus
@@ -526,6 +530,10 @@ benchmark or an automatic map-travel driver. The initial characterization is rec
 `--client-hitch-hide-debug` keeps the F11 Performance page closed throughout measurement while
 retaining the same frame sampler and end-of-window capture. The diagnostic page is constructed
 only after the measured window, so visible/hidden controls can identify observer effect.
+For an idle control only, `--client-hitch-window-seconds=5..31` selects a shorter focused window;
+this permits an uncapped high-FPS run to fit the fixed 16,384-frame capture ring. The opt-in
+`--client-hitch-force-vsync-disabled` setter is a diagnostic fallback if the Godot CLI switch
+does not disable effective VSync; it does not change the project setting.
 Local sign hover's presentation-existence gate uses the World renderer's retained, committed
 per-prefab census rather than enumerating Godot children on every physics service. The nearby
 record still comes from resident semantic data and must belong to a currently presented chunk;

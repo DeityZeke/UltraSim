@@ -7,6 +7,7 @@ Primary references:
 - [Profiler attribution](../../_Benchmarks/Baselines/client-hitch-profiler-attribution-2026-10-03.md)
 - [Local hover census repair](../../_Benchmarks/Baselines/client-hover-census-repair-2026-10-03.md)
 - [Staged Local world-entry evidence](../../_Benchmarks/Baselines/client-staged-world-entry-2026-10-03.md)
+- [Exported-client VSync pacing characterization](../../_Benchmarks/Baselines/client-vsync-pacing-2026-10-04.md)
 - [Godot client](../../Client/Godot/README.md)
 
 Related topics:
@@ -17,6 +18,8 @@ Related topics:
 ## Current understanding
 
 UltraSim now has an exported-client wall-frame performance HUD and raw frame capture path. Frametime is the primary pacing metric; FPS is derived. The tooling retains real gameplay/content/render hitches and excludes focus/minimized gaps.
+
+The exported HUD and JSON now also report effective Godot VSync mode, `Engine.MaxFps`, screen refresh, display server, rendering method/driver, and display adapter. A matched Official-art, vegetation-Off, warmed-idle Single Player control on 2026-10-04 found default VSync **Enabled** at 144.02 average FPS against a 143.83 Hz reported display. The same exported binary with Godot `--disable-vsync` reported **Disabled** and 1,256.31 average FPS, with CPU time rising from 2.10 to 10.32 seconds per ten-second wall window. Thus the ~144 FPS observation on this host was Godot presentation pacing, not a measured client throughput ceiling or an externally enforced 144 FPS cap. The host was KDE Wayland with Godot using X11/Xwayland and NVIDIA OpenGL Compatibility. This does not measure GPU time or display-delivered frames. No product default, OS setting, or sampler semantics changed; no setter fallback was needed. The linked report retains raw controls and the rejected initial over-capacity capture.
 
 A warmed-idle investigation found a concrete managed-allocation/GC defect in Local sign hover. Physics-service hover repeatedly called `CountPresentedPrefab`, recursively traversing the Godot scene tree through `Node.GetChildren()`. Two hidden-HUD allocation traces attributed 89.7% and 91.5% of sampled allocation bytes to that path.
 
