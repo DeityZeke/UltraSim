@@ -32,6 +32,16 @@ public abstract partial class LocalPlayClientRoot
             if (forceDisabled)
                 DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Disabled);
 
+            int measurementSeconds = scenario == "cold" ? 20 : 31;
+            string? requestedWindow = ReadLocalArgument("--client-hitch-window-seconds=");
+            if (requestedWindow is not null)
+            {
+                if (scenario != "idle" || !int.TryParse(requestedWindow, out measurementSeconds) ||
+                    measurementSeconds is < 5 or > 31)
+                    throw new ArgumentException(
+                        "--client-hitch-window-seconds accepts 5..31 for idle controls only.");
+            }
+
             bool showPerformancePage = !OS.GetCmdlineUserArgs().Contains(
                 "--client-hitch-hide-debug", StringComparer.Ordinal);
 
@@ -89,7 +99,7 @@ public abstract partial class LocalPlayClientRoot
                 GD.Print("CLIENT HITCH STUDY MOVEMENT WINDOW: provide real physical movement input now");
             stage = "measurement";
             // Keep the cold first frame inside the 30-second ring even when startup blocks it.
-            await WaitWallSeconds(scenario == "cold" ? 20 : 31);
+            await WaitWallSeconds(measurementSeconds);
             clock.Stop();
             stage = "window complete";
             DateTimeOffset endedUtc = DateTimeOffset.UtcNow;
@@ -124,13 +134,14 @@ public abstract partial class LocalPlayClientRoot
             using JsonDocument frameFile = JsonDocument.Parse(File.ReadAllText(framesPath));
             double eligibleMs = frameFile.RootElement.GetProperty("Summary")
                 .GetProperty("EligibleMilliseconds").GetDouble();
-            if (eligibleMs < (scenario == "cold" ? 18_000 : 29_000) || frames < 1000)
+            if (eligibleMs < (measurementSeconds - 2) * 1000 || frames < 1000)
                 throw new InvalidOperationException(
                     $"The focused sample is incomplete: {frames} frames, {eligibleMs:0} ms.");
             var evidence = new
             {
                 Format = "UltraSimClientHitchStudy/v1",
                 Scenario = scenario,
+                MeasurementWindowSeconds = measurementSeconds,
                 SourceHead = System.Environment.GetEnvironmentVariable("ULTRASIM_COMMIT") ?? "unrecorded",
                 StartedUtc = startedUtc,
                 EndedUtc = endedUtc,
