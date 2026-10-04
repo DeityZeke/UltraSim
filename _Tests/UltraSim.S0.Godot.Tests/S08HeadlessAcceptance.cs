@@ -457,6 +457,15 @@ public partial class S08HeadlessAcceptance : Control
             composition.DebugHost.GetNodeOrNull<Label>(
                 "DebugPerformance/PerformanceBody/PerformanceDragHandle") is not null,
             "The Performance page lost its opaque, taller, draggable presentation surface.");
+        Expect(performance.DiagnosticContextText.Contains(
+                $"VSync {DisplayServer.WindowGetVsyncMode()}", StringComparison.Ordinal) &&
+            performance.DiagnosticContextText.Contains(
+                $"FPS cap {Engine.MaxFps}", StringComparison.Ordinal) &&
+            performance.DiagnosticContextText.Contains(DisplayServer.GetName(),
+                StringComparison.Ordinal) &&
+            performance.DiagnosticContextText.Contains(
+                RenderingServer.GetCurrentRenderingMethod(), StringComparison.Ordinal),
+            "The Performance page did not expose effective runtime presentation pacing.");
         StyleBoxFlat retainedPerformanceBackground = performance.DiagnosticBackground;
         performance.DragForAcceptance(new Vector2(-10_000, -10_000));
         Expect(performance.Position.X >= 12 && performance.Position.Y >= 12,
@@ -476,7 +485,17 @@ public partial class S08HeadlessAcceptance : Control
                     "UltraSimClientFrameInterval/v1" &&
                 capture.RootElement.GetProperty("Samples")[0].GetUInt32() == 30_000_000 &&
                 capture.RootElement.GetProperty("CaptureComplete").GetBoolean() &&
-                capture.RootElement.GetProperty("IntervalUnit").GetString() == "microseconds",
+                capture.RootElement.GetProperty("IntervalUnit").GetString() == "microseconds" &&
+                capture.RootElement.GetProperty("PresentationPacing")
+                    .GetProperty("VSyncMode").GetString() ==
+                        DisplayServer.WindowGetVsyncMode().ToString() &&
+                capture.RootElement.GetProperty("PresentationPacing")
+                    .GetProperty("EngineFpsCap").GetInt32() == Engine.MaxFps &&
+                capture.RootElement.GetProperty("PresentationPacing")
+                    .GetProperty("DisplayServerName").GetString() == DisplayServer.GetName() &&
+                capture.RootElement.GetProperty("PresentationPacing")
+                    .GetProperty("RenderingMethod").GetString() ==
+                        RenderingServer.GetCurrentRenderingMethod(),
                 "The native Performance capture lost exact raw interval units/content.");
         }
         finally { File.Delete(capturePath); }

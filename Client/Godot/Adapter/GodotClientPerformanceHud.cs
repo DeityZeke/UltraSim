@@ -12,6 +12,29 @@ public readonly record struct GodotClientPerformanceContext(
     int VegetationPatches, int VegetationBlades, int PendingBuilds,
     int PendingRetirements, bool VegetationEnabled, int OutputWidth, int OutputHeight);
 
+/// <summary>Cold, reported runtime presentation state; not a CPU/GPU throughput measurement.</summary>
+internal readonly record struct GodotClientPresentationPacingSnapshot(
+    string DisplayServerName, string VSyncMode, double? DisplayRefreshRateHz,
+    int EngineFpsCap, string RenderingMethod, string RenderingDriver,
+    string VideoAdapterName, string? XdgSessionType, string? XdgCurrentDesktop,
+    string? DesktopSession)
+{
+    internal static GodotClientPresentationPacingSnapshot Capture()
+    {
+        double refresh = DisplayServer.ScreenGetRefreshRate(
+            DisplayServer.WindowGetCurrentScreen());
+        return new GodotClientPresentationPacingSnapshot(
+            DisplayServer.GetName(), DisplayServer.WindowGetVsyncMode().ToString(),
+            double.IsFinite(refresh) && refresh > 0 ? refresh : null,
+            Engine.MaxFps, RenderingServer.GetCurrentRenderingMethod(),
+            RenderingServer.GetCurrentRenderingDriverName(),
+            RenderingServer.GetVideoAdapterName(),
+            System.Environment.GetEnvironmentVariable("XDG_SESSION_TYPE"),
+            System.Environment.GetEnvironmentVariable("XDG_CURRENT_DESKTOP"),
+            System.Environment.GetEnvironmentVariable("DESKTOP_SESSION"));
+    }
+}
+
 /// <summary>Developer-only local trace. Control Plane receives no frame-rate traffic.</summary>
 public sealed partial class GodotClientPerformanceHud : PanelContainer
 {
@@ -118,6 +141,8 @@ public sealed partial class GodotClientPerformanceHud : PanelContainer
     {
         _latestSummary = _sampler.Summarize();
         _latestContext = _context();
+        GodotClientPresentationPacingSnapshot pacing =
+            GodotClientPresentationPacingSnapshot.Capture();
         _sampler.FillGraphColumns(_columns);
         _graph.QueueRedraw();
         using Process process = Process.GetCurrentProcess();
@@ -135,6 +160,10 @@ public sealed partial class GodotClientPerformanceHud : PanelContainer
             $"{stats.Samples:N0} frames / {stats.EligibleMilliseconds / 1000:0.0}s eligible";
         _contextLabel.Text = $"Space {_latestContext.SpatialSpace}  Radius {_latestContext.RenderRadius}  " +
             $"Output {_latestContext.OutputWidth}×{_latestContext.OutputHeight}\n" +
+            $"Pacing  VSync {pacing.VSyncMode}  FPS cap {pacing.EngineFpsCap}  " +
+            $"Display {((pacing.DisplayRefreshRateHz is double hz) ? $"{hz:0.00} Hz" : "unknown")}\n" +
+            $"Backend  {pacing.DisplayServerName}  " +
+            $"{pacing.RenderingMethod}/{pacing.RenderingDriver}\n" +
             $"Chunks {_latestContext.RenderedChunks}  Nodes {_latestContext.RenderNodes}  " +
             $"Resources {_latestContext.RenderResources}  Actors detailed/batched " +
             $"{_latestContext.DetailedActors}/{_latestContext.BatchedActors}\n" +
@@ -214,6 +243,7 @@ public sealed partial class GodotClientPerformanceHud : PanelContainer
             Window = new { GetWindow().Size.X, GetWindow().Size.Y, GetWindow().Mode },
             Vsync = DisplayServer.WindowGetVsyncMode().ToString(),
             FrameCap = Engine.MaxFps,
+            PresentationPacing = GodotClientPresentationPacingSnapshot.Capture(),
             Context = context,
             ProcessWorkingSetBytes = process.WorkingSet64,
             ManagedHeapBytes = GC.GetTotalMemory(false),
@@ -248,6 +278,7 @@ public sealed partial class GodotClientPerformanceHud : PanelContainer
     }
 
     internal void DragForAcceptance(Vector2 requested) => Place(requested);
+    internal string DiagnosticContextText => _contextLabel.Text;
 
     private void Place(Vector2 requested)
     {

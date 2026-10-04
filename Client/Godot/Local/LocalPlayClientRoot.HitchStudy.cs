@@ -27,6 +27,11 @@ public abstract partial class LocalPlayClientRoot
             if (DisplayServer.GetName() == "headless")
                 throw new InvalidOperationException("The hitch study requires actual native rendering.");
 
+            bool forceDisabled = OS.GetCmdlineUserArgs().Contains(
+                "--client-hitch-force-vsync-disabled", StringComparer.Ordinal);
+            if (forceDisabled)
+                DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Disabled);
+
             bool showPerformancePage = !OS.GetCmdlineUserArgs().Contains(
                 "--client-hitch-hide-debug", StringComparer.Ordinal);
 
@@ -52,6 +57,8 @@ public abstract partial class LocalPlayClientRoot
                 await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
             }
             LocalCabinPresentationSnapshot before = _cabin?.GetPresentationSnapshot() ?? default;
+            GodotClientPresentationPacingSnapshot pacingAtStart =
+                GodotClientPresentationPacingSnapshot.Capture();
             using Process process = Process.GetCurrentProcess();
             TimeSpan cpuBefore = process.TotalProcessorTime;
             TimeSpan gcPauseBefore = GC.GetTotalPauseDuration();
@@ -91,6 +98,11 @@ public abstract partial class LocalPlayClientRoot
             catch (OperationCanceledException) { }
             if (!GetWindow().HasFocus())
                 throw new InvalidOperationException("The client lost focus during the measurement window.");
+            GodotClientPresentationPacingSnapshot pacingAtEnd =
+                GodotClientPresentationPacingSnapshot.Capture();
+            if (pacingAtEnd != pacingAtStart)
+                throw new InvalidOperationException(
+                    $"Presentation pacing changed during measurement: {pacingAtStart} -> {pacingAtEnd}.");
             TimeSpan cpuAfter = process.TotalProcessorTime;
             TimeSpan gcPauseAfter = GC.GetTotalPauseDuration();
             long allocatedAfter = GC.GetTotalAllocatedBytes(false);
@@ -128,6 +140,9 @@ public abstract partial class LocalPlayClientRoot
                 EligibleMilliseconds = eligibleMs,
                 Frames = frames,
                 PerformancePageVisibleDuringMeasurement = showPerformancePage,
+                ExplicitVSyncDisableRequested = forceDisabled,
+                PacingAtStart = pacingAtStart,
+                PacingAtEnd = pacingAtEnd,
                 VegetationEnabled = frameFile.RootElement.GetProperty("Context")
                     .GetProperty("VegetationEnabled").GetBoolean(),
                 ProcessCpuMilliseconds = (cpuAfter - cpuBefore).TotalMilliseconds,
